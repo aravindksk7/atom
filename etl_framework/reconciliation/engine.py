@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import dataclasses
+import logging
+import time
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+
+from etl_framework.exceptions import SchemaValidationError
+from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.reconciliation.normalizer import TypeNormalizer
+from etl_framework.runner.state import TestStatus
+
+logger = logging.getLogger("etl_framework.reconciliation.engine")
+
+
+class ReconciliationEngine:
+    def __init__(
+        self,
+        source_engine,
+        target_engine,
+        key_columns: list[str],
+        exclude_columns: list[str] | None = None,
+        float_tolerance: float = 1e-9,
+        mismatch_row_limit: int = 1000,
+        schema_mismatch_policy: str = "warn",   # "warn" | "error"
+        null_equals_null: bool = True,           # Task 7
+        chunk_size: int = 0,                     # Task 9
+        use_hash_precheck: bool = True,          # Task 9
+    ):
+        self._source_engine = source_engine
+        self._target_engine = target_engine
+        self._key_columns = key_columns
+        self._exclude_columns = set(exclude_columns or [])
+        self._float_tolerance = float_tolerance
+        self._mismatch_row_limit = mismatch_row_limit
+        self._schema_mismatch_policy = schema_mismatch_policy
+        self._null_equals_null = null_equals_null
+        self._chunk_size = chunk_size
+        self._use_hash_precheck = use_hash_precheck
+        self._normalizer = TypeNormalizer()
+
+    def reconcile(
+        self,
+        query: str,
+        query_name: str,
+        params: dict | None = None,
+        max_duration_seconds: float | None = None,
+    ) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now()
+
+        df_source = self._normalizer.normalize(
+            self._source_engine.execute_query(query, params)
+        )
+        df_target = self._normalizer.normalize(
+            self._target_engine.execute_query(query, params)
+        )
+
+        schema_diff = self._validate_schemas(df_source, df_target, query_name)
+        df_source, df_target = self._align_columns(df_source, df_target, schema_diff)
+
+        duration = time.monotonic() - t0
+        result = self._compare(df_source, df_target, query_name, executed_at,
+                               duration, schema_diff)
+        return self._apply_slo(result, max_duration_seconds)
+
+    # ------------------------------------------------------------------
+    # Schema helpers
+    # ------------------------------------------------------------------
+
+    def _validate_schemas(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+        query_name: str,
+    ) -> dict[str, list[str]] | None:
+        src_cols = set(df_source.columns) - self._exclude_columns
+        tgt_cols = set(df_target.columns) - self._exclude_columns
+        missing_in_target = sorted(src_cols - tgt_cols)
+        extra_in_target = sorted(tgt_cols - src_cols)
+
+        if not missing_in_target and not extra_in_target:
+            return None
+
+        diff = {
+            "missing_in_target": missing_in_target,
+            "extra_in_target": extra_in_target,
+        }
+
+        if self._schema_mismatch_policy == "error":
+            raise SchemaValidationError(query_name, missing_in_target, extra_in_target)
+
+        logger.warning(
+            "Schema mismatch in '%s': missing_in_target=%s, extra_in_target=%s. "
+            "Comparing on common columns only.",
+            query_name, missing_in_target, extra_in_target,
+        )
+        return diff
+
+    def _align_columns(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+        schema_diff: dict | None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        if schema_diff:
+            common = [
+                c for c in df_source.columns
+                if c in df_target.columns and c not in self._exclude_columns
+            ]
+            df_source = df_source[common]
+            df_target = df_target[common]
+        else:
+            drop_src = [c for c in self._exclude_columns if c in df_source.columns]
+            drop_tgt = [c for c in self._exclude_columns if c in df_target.columns]
+            df_source = df_source.drop(columns=drop_src)
+            df_target = df_target.drop(columns=drop_tgt)
+        return df_source, df_target
+
+    # ------------------------------------------------------------------
+    # Comparison core
+    # ------------------------------------------------------------------
+
+    def _compare(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+        query_name: str,
+        executed_at: datetime,
+        duration: float,
+        schema_diff: dict | None,
+    ) -> ReconciliationResult:
+        src_count = len(df_source)
+        tgt_count = len(df_target)
+
+        merged = pd.merge(
+            df_source,
+            df_target,
+            on=self._key_columns,
+            how="outer",
+            indicator=True,
+            suffixes=("_src", "_tgt"),
+        )
+
+        missing_in_target = merged[merged["_merge"] == "left_only"]
+        missing_in_source = merged[merged["_merge"] == "right_only"]
+        both = merged[merged["_merge"] == "both"]
+
+        mit_count = len(missing_in_target)
+        mis_count = len(missing_in_source)
+
+        mit_records = self._rows_to_mismatch_records(
+            missing_in_target, "missing_in_target"
+        )
+        mis_records = self._rows_to_mismatch_records(
+            missing_in_source, "missing_in_source"
+        )
+        value_records, value_count = self._find_value_mismatches(both, df_source)
+
+        all_mismatches = (mit_records + mis_records + value_records)[: self._mismatch_row_limit]
+        total_issues = mit_count + mis_count + value_count
+
+        status = TestStatus.PASSED if total_issues == 0 else TestStatus.FAILED
+
+        logger.info(
+            "Reconciliation '%s': src=%d tgt=%d matched=%d mit=%d mis=%d vmc=%d",
+            query_name, src_count, tgt_count, len(both),
+            mit_count, mis_count, value_count,
+        )
+
+        return ReconciliationResult(
+            query_name=query_name,
+            source_env=self._source_engine._env.name,
+            target_env=self._target_engine._env.name,
+            source_row_count=src_count,
+            target_row_count=tgt_count,
+            matched_count=len(both),
+            missing_in_target_count=mit_count,
+            missing_in_source_count=mis_count,
+            value_mismatch_count=value_count,
+            mismatches=all_mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration,
+            schema_diff=schema_diff,
+        )
+
+    def _rows_to_mismatch_records(
+        self,
+        df: pd.DataFrame,
+        mismatch_type: str,
+    ) -> list[MismatchRecord]:
+        records = []
+        for _, row in df.iterrows():
+            key_values = {k: row.get(k) for k in self._key_columns}
+            records.append(MismatchRecord(
+                key_values=key_values,
+                column_name="<row>",
+                source_value=None,
+                target_value=None,
+                mismatch_type=mismatch_type,
+            ))
+        return records
+
+    def _find_value_mismatches(
+        self,
+        both: pd.DataFrame,
+        df_source: pd.DataFrame,
+    ) -> tuple[list[MismatchRecord], int]:
+        records: list[MismatchRecord] = []
+        count = 0
+
+        compare_cols = [
+            c for c in df_source.columns
+            if c not in self._key_columns and c not in self._exclude_columns
+        ]
+
+        for col in compare_cols:
+            src_col = f"{col}_src" if f"{col}_src" in both.columns else col
+            tgt_col = f"{col}_tgt" if f"{col}_tgt" in both.columns else col
+
+            if src_col not in both.columns or tgt_col not in both.columns:
+                continue
+
+            is_float = pd.api.types.is_float_dtype(df_source[col])
+
+            for _, row in both.iterrows():
+                a = row[src_col]
+                b = row[tgt_col]
+                if not self._values_match(a, b, is_float):
+                    count += 1
+                    key_values = {k: row.get(k) for k in self._key_columns}
+                    records.append(MismatchRecord(
+                        key_values=key_values,
+                        column_name=col,
+                        source_value=a,
+                        target_value=b,
+                        mismatch_type="value_diff",
+                    ))
+
+        return records, count
+
+    def _values_match(self, a: object, b: object, is_float: bool) -> bool:
+        a_na = _is_na(a)
+        b_na = _is_na(b)
+        if a_na and b_na:
+            return self._null_equals_null
+        if a_na or b_na:
+            return False
+        if is_float:
+            return bool(np.isclose(float(a), float(b), atol=self._float_tolerance))
+        return a == b
+
+    def _apply_slo(
+        self,
+        result: ReconciliationResult,
+        max_duration_seconds: float | None,
+    ) -> ReconciliationResult:
+        if max_duration_seconds and result.duration_seconds > max_duration_seconds:
+            result = dataclasses.replace(result, status=TestStatus.SLOW)
+            logger.warning(
+                "Reconciliation '%s' took %.1fs, exceeding SLO of %.1fs",
+                result.query_name, result.duration_seconds, max_duration_seconds,
+            )
+        return result
+
+
+def _is_na(val: object) -> bool:
+    if val is None:
+        return True
+    try:
+        return bool(pd.isna(val))
+    except (TypeError, ValueError):
+        return False
