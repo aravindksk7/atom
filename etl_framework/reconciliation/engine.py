@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from etl_framework.exceptions import SchemaValidationError
+from etl_framework.reconciliation.chunker import build_chunk_query, build_hash_query, hashes_match
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.reconciliation.normalizer import TypeNormalizer
 from etl_framework.runner.state import TestStatus
@@ -52,12 +53,70 @@ class ReconciliationEngine:
         t0 = time.monotonic()
         executed_at = datetime.now()
 
-        df_source = self._normalizer.normalize(
-            self._source_engine.execute_query(query, params)
-        )
-        df_target = self._normalizer.normalize(
-            self._target_engine.execute_query(query, params)
-        )
+        if self._chunk_size > 0:
+            # Hash pre-check: if enabled, run a lightweight hash query first;
+            # if hashes match, return an early PASSED result.
+            if self._use_hash_precheck:
+                hash_q_src = build_hash_query(query, self._key_columns)
+                hash_q_tgt = build_hash_query(query, self._key_columns)
+                hash_src = self._normalizer.normalize(
+                    self._source_engine.execute_query(hash_q_src, params)
+                )
+                hash_tgt = self._normalizer.normalize(
+                    self._target_engine.execute_query(hash_q_tgt, params)
+                )
+                if hashes_match(hash_src, hash_tgt):
+                    row_count = len(hash_src)
+                    logger.info(
+                        "Reconciliation '%s': hash pre-check matched — skipping full compare.",
+                        query_name,
+                    )
+                    early_result = ReconciliationResult(
+                        query_name=query_name,
+                        source_env=self._source_engine._env.name,
+                        target_env=self._target_engine._env.name,
+                        source_row_count=row_count,
+                        target_row_count=row_count,
+                        matched_count=row_count,
+                        missing_in_target_count=0,
+                        missing_in_source_count=0,
+                        value_mismatch_count=0,
+                        mismatches=[],
+                        status=TestStatus.PASSED,
+                        executed_at=executed_at,
+                        duration_seconds=time.monotonic() - t0,
+                        schema_diff=None,
+                    )
+                    return self._apply_slo(early_result, max_duration_seconds)
+
+            # Chunked loading: paginate through source and target in chunks.
+            chunks_src, chunks_tgt = [], []
+            offset = 0
+            while True:
+                q_src = build_chunk_query(query, self._key_columns, offset, self._chunk_size)
+                q_tgt = build_chunk_query(query, self._key_columns, offset, self._chunk_size)
+                chunk_src = self._normalizer.normalize(
+                    self._source_engine.execute_query(q_src, params)
+                )
+                chunk_tgt = self._normalizer.normalize(
+                    self._target_engine.execute_query(q_tgt, params)
+                )
+                if chunk_src.empty and chunk_tgt.empty:
+                    break
+                chunks_src.append(chunk_src)
+                chunks_tgt.append(chunk_tgt)
+                offset += self._chunk_size
+                if len(chunk_src) < self._chunk_size and len(chunk_tgt) < self._chunk_size:
+                    break
+            df_source = pd.concat(chunks_src, ignore_index=True) if chunks_src else pd.DataFrame()
+            df_target = pd.concat(chunks_tgt, ignore_index=True) if chunks_tgt else pd.DataFrame()
+        else:
+            df_source = self._normalizer.normalize(
+                self._source_engine.execute_query(query, params)
+            )
+            df_target = self._normalizer.normalize(
+                self._target_engine.execute_query(query, params)
+            )
 
         schema_diff = self._validate_schemas(df_source, df_target, query_name)
         df_source, df_target = self._align_columns(df_source, df_target, schema_diff)

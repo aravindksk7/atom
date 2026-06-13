@@ -10,7 +10,10 @@ from etl_framework.runner.state import TestStatus
 from etl_framework.exceptions import SchemaValidationError
 
 
-def _make_engine(source_df, target_df, key_columns=None, **kwargs):
+def _make_engine(source_df, target_df, key_columns=None, exclude_columns=None,
+                 float_tolerance=1e-9, mismatch_row_limit=1000,
+                 schema_mismatch_policy="warn", null_equals_null=True,
+                 chunk_size=0, **kwargs):
     source_db = MagicMock()
     target_db = MagicMock()
     source_db.execute_query.return_value = source_df
@@ -22,6 +25,12 @@ def _make_engine(source_df, target_df, key_columns=None, **kwargs):
         source_engine=source_db,
         target_engine=target_db,
         key_columns=key_columns or ["id"],
+        exclude_columns=exclude_columns,
+        float_tolerance=float_tolerance,
+        mismatch_row_limit=mismatch_row_limit,
+        schema_mismatch_policy=schema_mismatch_policy,
+        null_equals_null=null_equals_null,
+        chunk_size=chunk_size,
         **kwargs,
     )
 
@@ -238,3 +247,54 @@ def test_slo_none_never_triggers_slow():
     # max_duration_seconds defaults to None — should never produce SLOW
     result = engine.reconcile("SELECT 1", "no_slo")
     assert result.status != TestStatus.SLOW
+
+
+# --- Chunked reconciliation tests (Task 9) ---
+
+def _make_paginating_engine(source_df, target_df, chunk_size, key_columns=None):
+    """Build an engine whose execute_query simulates real SQL pagination by
+    slicing the DataFrame according to OFFSET/FETCH values in the query string."""
+    import re
+
+    def _paginate(df):
+        def side_effect(query, params=None):
+            m = re.search(r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY", query, re.IGNORECASE)
+            if m:
+                offset, size = int(m.group(1)), int(m.group(2))
+                return df.iloc[offset: offset + size].reset_index(drop=True)
+            # Hash query or plain query — return full df
+            return df
+        return side_effect
+
+    source_db = MagicMock()
+    target_db = MagicMock()
+    source_db.execute_query.side_effect = _paginate(source_df)
+    target_db.execute_query.side_effect = _paginate(target_df)
+    source_db._env = MagicMock(); source_db._env.name = "dev"
+    target_db._env = MagicMock(); target_db._env.name = "qa"
+    return ReconciliationEngine(
+        source_engine=source_db,
+        target_engine=target_db,
+        key_columns=key_columns or ["id"],
+        chunk_size=chunk_size,
+        use_hash_precheck=False,  # disable hash pre-check for these tests
+    )
+
+
+def test_chunk_size_zero_uses_full_load():
+    """chunk_size=0 (default) must NOT use chunked path — full DataFrame."""
+    source = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    engine = _make_engine(source, target, chunk_size=0)
+    result = engine.reconcile("SELECT 1", "full_load")
+    assert result.status == TestStatus.PASSED
+    assert result.source_row_count == 3
+
+
+def test_chunk_size_nonzero_reconciles_correctly():
+    """chunk_size > 0 must still return correct reconciliation result."""
+    source = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "x"]})  # mismatch on row 3
+    engine = _make_paginating_engine(source, target, chunk_size=2)
+    result = engine.reconcile("SELECT 1", "chunked_mismatch")
+    assert result.value_mismatch_count >= 1
