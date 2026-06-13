@@ -38,7 +38,19 @@ def configure_logging(
         log_file, maxBytes=10 * 1024 * 1024, backupCount=5
     )
     file_handler.addFilter(context_filter)
-    file_handler.setFormatter(text_formatter)
+    if log_format == "json":
+        try:
+            from pythonjsonlogger import jsonlogger
+            json_formatter = jsonlogger.JsonFormatter(
+                fmt="%(asctime)s %(levelname)s %(name)s %(run_id)s %(message)s",
+                datefmt="%Y-%m-%dT%H:%M:%SZ",
+                rename_fields={"levelname": "level", "asctime": "timestamp"},
+            )
+            file_handler.setFormatter(json_formatter)
+        except ImportError:
+            file_handler.setFormatter(text_formatter)
+    else:
+        file_handler.setFormatter(text_formatter)
     root.addHandler(file_handler)
 
 
