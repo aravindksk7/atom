@@ -18,10 +18,13 @@ dependencies = [
     "numpy>=1.24",
     "tabulate>=0.9",
     "pydantic>=2.0",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
 ]
 
 [project.optional-dependencies]
 json-logging = ["python-json-logger>=2.0"]
+api = ["fastapi>=0.111", "uvicorn[standard]>=0.29"]
 polars = ["polars>=0.20"]
 tracing = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp>=1.20"]
 metrics = ["prometheus_client>=0.17"]
