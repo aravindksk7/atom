@@ -1,0 +1,78 @@
+from __future__ import annotations
+from datetime import datetime, timezone
+from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text
+from sqlalchemy.orm import relationship
+from etl_framework.repository.database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class SavedConfig(Base):
+    __tablename__ = "saved_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    env_name = Column(String(100), nullable=False)
+    config_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class TestRun(Base):
+    __tablename__ = "test_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(36), nullable=False, unique=True, index=True)
+    status = Column(String(20), nullable=False, default="PENDING")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    source_env = Column(String(100), nullable=True)
+    target_env = Column(String(100), nullable=True)
+    config_snapshot = Column(JSON, nullable=True)
+    total_tests = Column(Integer, default=0, nullable=False)
+    passed = Column(Integer, default=0, nullable=False)
+    failed = Column(Integer, default=0, nullable=False)
+    slow = Column(Integer, default=0, nullable=False)
+    error = Column(Integer, default=0, nullable=False)
+
+    results = relationship("TestResult", back_populates="run",
+                           cascade="all, delete-orphan", lazy="select")
+
+
+class TestResult(Base):
+    __tablename__ = "test_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(36), ForeignKey("test_runs.run_id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    query_name = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False)
+    duration_seconds = Column(Float, default=0.0, nullable=False)
+    source_row_count = Column(Integer, default=0, nullable=False)
+    target_row_count = Column(Integer, default=0, nullable=False)
+    value_mismatch_count = Column(Integer, default=0, nullable=False)
+    missing_in_target_count = Column(Integer, default=0, nullable=False)
+    missing_in_source_count = Column(Integer, default=0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+
+    run = relationship("TestRun", back_populates="results")
+    mismatches = relationship("MismatchDetail", back_populates="test_result",
+                              cascade="all, delete-orphan", lazy="select")
+
+
+class MismatchDetail(Base):
+    __tablename__ = "mismatch_details"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_result_id = Column(Integer, ForeignKey("test_results.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    key_values = Column(JSON, nullable=True)
+    column_name = Column(String(255), nullable=True)
+    source_value = Column(Text, nullable=True)
+    target_value = Column(Text, nullable=True)
+    mismatch_type = Column(String(50), nullable=True)
+
+    test_result = relationship("TestResult", back_populates="mismatches")
