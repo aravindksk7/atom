@@ -127,13 +127,23 @@ class PairSummaryOut(BaseModel):
 
 class ReconFileCompareRequest(BaseModel):
     """Compare a production HTML reconciliation report against a stored run."""
-    stored_run_id: str | None = None      # compare against this run from DB
-    file_b_path: str | None = None        # or compare against another file
-    file_b_content_b64: str | None = None
-    file_a_path: str | None = None        # source A as file (if not using stored run)
-    file_a_content_b64: str | None = None
+    stored_run_id: str | None = None      # source A: run from DB
+    file_a_path: str | None = None        # source A: file path (if not using stored run)
+    file_a_content_b64: str | None = None # source A: uploaded bytes
+    file_b_path: str | None = None        # source B: file path
+    file_b_content_b64: str | None = None # source B: uploaded bytes
     label_a: str = "Run / File A"
     label_b: str = "Production Report"
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "ReconFileCompareRequest":
+        has_a = bool(self.stored_run_id or self.file_a_path or self.file_a_content_b64)
+        has_b = bool(self.file_b_path or self.file_b_content_b64)
+        if not has_a:
+            raise ValueError("Source A must be a stored_run_id, file_a_path, or file_a_content_b64")
+        if not has_b:
+            raise ValueError("Source B must be a file_b_path or file_b_content_b64")
+        return self
 
 class MismatchAcceptRequest(BaseModel):
     note: str = Field(min_length=1)
@@ -295,7 +305,7 @@ Compare tab
 - `submitAccept(runId, resultId, mismatchId)` calls `PATCH …/accept`, updates the mismatch row in `expandedMismatches` in-place, shows toast.
 - If `result_status_updated` is true in the response: update `selectedRun.results` status and counters locally.
 - "✓ Accept" button hidden once `mismatch.accepted == true`; shows ✓ check + note instead.
-- "✓ Mark as PASSED" banner appears when `expandedMismatches[result_id].every(m => m.accepted)`.
+- Informational banner "All mismatches accepted — this test is now PASSED" appears when `expandedMismatches[result_id].every(m => m.accepted)`. No manual confirmation required — status flips automatically on the last acceptance (see §6).
 
 ### 8d. New Alpine.js state variables (`frontend/app.js`)
 
