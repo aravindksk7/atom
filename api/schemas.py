@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Any
-from pydantic import BaseModel
+from typing import Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ConfigCreate(BaseModel):
@@ -27,12 +27,64 @@ class ConfigOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FrameworkErrorOut(BaseModel):
+    error_type: str
+    message: str
+    field_name: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConfigValidationRequest(BaseModel):
+    env_name: str
+    config_data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConfigValidationOut(BaseModel):
+    ok: bool
+    env_name: str
+    config_data: dict[str, Any] | None = None
+    errors: list[FrameworkErrorOut] = Field(default_factory=list)
+
+
+class ConfigImportYamlRequest(BaseModel):
+    yaml_content: str = Field(min_length=1)
+
+
+class RunSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    use_live_connections: bool = False
+    execution_mode: Literal["parallel", "sequential"] = "parallel"
+    max_workers: int = Field(default=4, ge=1)
+    max_duration_seconds: float = Field(default=0, ge=0)
+    float_tolerance: float = Field(default=1e-9, gt=0)
+    schema_mismatch_policy: Literal["warn", "error"] = "warn"
+    null_equals_null: bool = True
+    chunk_size: int = Field(default=0, ge=0)
+    use_hash_precheck: bool = True
+    comparison_backend: Literal["pandas", "polars"] = "pandas"
+    mismatch_row_limit: int = Field(default=1000, ge=1)
+    exclude_columns: list[str] = Field(default_factory=list)
+    key_columns: list[str] = Field(default_factory=list)
+    health_check: bool = False
+    metrics_enabled: bool = True
+    notes: str = ""
+
+
 class RunTrigger(BaseModel):
     source_env: str
     target_env: str
-    job_names: list[str] = []
+    job_names: list[str] = Field(default_factory=list)
+    job_sequence: list[str] = Field(default_factory=list)
     config_id: int | None = None
-    config_data: dict[str, Any] = {}
+    config_data: dict[str, Any] = Field(default_factory=dict)
+    run_settings: RunSettings = Field(default_factory=RunSettings)
+
+    @model_validator(mode="after")
+    def normalize_legacy_job_names(self) -> "RunTrigger":
+        if not self.job_sequence and self.job_names:
+            self.job_sequence = list(self.job_names)
+        return self
 
 
 class RunStatusOut(BaseModel):
@@ -47,6 +99,32 @@ class RunStatusOut(BaseModel):
     error: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class ExecutionProgressOut(BaseModel):
+    run_id: str
+    status: str
+    total_tests: int = 0
+    completed_tests: int = 0
+    current_job: str | None = None
+    percent_complete: int = Field(default=0, ge=0, le=100)
+
+
+class GeneratedArtifactOut(BaseModel):
+    name: str
+    artifact_type: Literal["metrics", "log", "report", "other"] = "other"
+    path: str
+    created_at: datetime | None = None
+
+
+class HealthCheckOut(BaseModel):
+    component: str
+    healthy: bool
+    message: str
+
+
+class HealthCheckRequest(BaseModel):
+    environments: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class TestResultOut(BaseModel):
@@ -87,3 +165,95 @@ class JobOut(BaseModel):
     name: str
     description: str = ""
     tags: list[str] = []
+
+
+class JobDefinition(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    job_type: Literal["reconciliation", "health_check", "bo_report", "automic_job"] = "reconciliation"
+    query: str = ""
+    key_columns: list[str] = Field(default_factory=list)
+    exclude_columns: list[str] = Field(default_factory=list)
+    source_env: str | None = None
+    target_env: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_reconciliation_contract(self) -> "JobDefinition":
+        if self.job_type == "bo_report":
+            if not self.params.get("report_id"):
+                raise ValueError("bo_report jobs require 'report_id' in params")
+        elif self.job_type == "automic_job":
+            if not self.params.get("job_name") and not self.params.get("run_id"):
+                raise ValueError("automic_job jobs require 'job_name' or 'run_id' in params")
+        elif self.job_type == "reconciliation":
+            if not self.query.strip():
+                raise ValueError("reconciliation jobs require a query")
+            if not self.key_columns:
+                raise ValueError("reconciliation jobs require key_columns")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Adapter / SAP BO / Automic schemas
+# ---------------------------------------------------------------------------
+
+class RunProgressOut(BaseModel):
+    run_id: str
+    status: str
+    total_tests: int = 0
+    completed_tests: int = 0
+    current_job: str | None = None
+    percent_complete: int = Field(default=0, ge=0, le=100)
+
+
+class BODocOut(BaseModel):
+    id: str
+    name: str
+    folder: str = ""
+
+
+class BOReportOut(BaseModel):
+    id: str
+    name: str
+    report_index: int = 0
+
+
+class AdapterTestOut(BaseModel):
+    ok: bool
+    message: str
+    latency_ms: int = 0
+
+
+class AutomicJobStatusOut(BaseModel):
+    identifier: str
+    identifier_type: str
+    status: str
+    environment: str
+    checked_at: datetime
+
+
+class BOTestRequest(BaseModel):
+    config_id: int
+
+
+class AutomicLookupRequest(BaseModel):
+    config_id: int
+    identifier: str
+    id_type: Literal["run_id", "job_name"] = "job_name"
+
+
+class BOJobCreateRequest(BaseModel):
+    name: str
+    title: str
+    doc_id: str
+    report_id: str
+    key_columns: list[str]
+    format: str = "xlsx"
+
+
+class AutomicJobCreateRequest(BaseModel):
+    name: str
+    job_name: str
