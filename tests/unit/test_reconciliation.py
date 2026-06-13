@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pytest
+import time
 from datetime import datetime
 from unittest.mock import MagicMock
 from etl_framework.reconciliation.engine import ReconciliationEngine
@@ -194,3 +195,46 @@ def test_null_equals_null_default_is_true():
     engine = _make_engine(source, target)  # no null_equals_null arg
     result = engine.reconcile("SELECT 1", "null_default")
     assert result.value_mismatch_count == 0
+
+
+# --- Duration SLO tests (Task 8) ---
+
+def test_duration_slo_not_exceeded_keeps_passed_status():
+    source = pd.DataFrame({"id": [1], "val": ["x"]})
+    target = pd.DataFrame({"id": [1], "val": ["x"]})
+    engine = _make_engine(source, target)
+    result = engine.reconcile("SELECT 1", "fast", max_duration_seconds=9999.0)
+    assert result.status == TestStatus.PASSED
+
+
+def test_duration_slo_exceeded_sets_slow_status():
+    import unittest.mock as mock
+    source = pd.DataFrame({"id": [1], "val": ["x"]})
+    target = pd.DataFrame({"id": [1], "val": ["x"]})
+    engine = _make_engine(source, target)
+
+    # Simulate slow execution: monotonic returns increasing large values
+    call_count = [0]
+    base = [None]
+
+    real_monotonic = time.monotonic
+
+    def fake_monotonic():
+        call_count[0] += 1
+        if base[0] is None:
+            base[0] = real_monotonic()
+        return base[0] + call_count[0] * 100.0  # 100s per call
+
+    with mock.patch("etl_framework.reconciliation.engine.time.monotonic", fake_monotonic):
+        result = engine.reconcile("SELECT 1", "slow", max_duration_seconds=5.0)
+
+    assert result.status == TestStatus.SLOW
+
+
+def test_slo_none_never_triggers_slow():
+    source = pd.DataFrame({"id": [1], "val": ["x"]})
+    target = pd.DataFrame({"id": [1], "val": ["x"]})
+    engine = _make_engine(source, target)
+    # max_duration_seconds defaults to None — should never produce SLOW
+    result = engine.reconcile("SELECT 1", "no_slo")
+    assert result.status != TestStatus.SLOW
