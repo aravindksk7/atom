@@ -6,6 +6,7 @@ from typing import Callable
 
 from etl_framework.runner.state import TestCaseState, TestStatus
 from etl_framework.utils.logging import get_logger
+from etl_framework.utils.tracing import span as _span
 
 logger = get_logger("runner.test_runner")
 
@@ -39,25 +40,26 @@ class TestRunner:
         return results
 
     def _run_single(self, name: str, fn: Callable) -> TestCaseState:
-        started_at = datetime.now(timezone.utc)
-        try:
-            result = fn()
-            status = getattr(result, "status", TestStatus.PASSED)
-            return TestCaseState(
-                name=name,
-                test_type="reconciliation",
-                status=status,
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-                result=result,
-            )
-        except Exception as exc:
-            logger.exception("Test case %r raised an exception", name)
-            return TestCaseState(
-                name=name,
-                test_type="reconciliation",
-                status=TestStatus.ERROR,
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-                error_message=str(exc),
-            )
+        with _span("test_runner.run_single", attributes={"test_name": name}):
+            started_at = datetime.now(timezone.utc)
+            try:
+                result = fn()
+                status = getattr(result, "status", TestStatus.PASSED)
+                return TestCaseState(
+                    name=name,
+                    test_type="reconciliation",
+                    status=status,
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    result=result,
+                )
+            except Exception as exc:
+                logger.exception("Test case %r raised an exception", name)
+                return TestCaseState(
+                    name=name,
+                    test_type="reconciliation",
+                    status=TestStatus.ERROR,
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    error_message=str(exc),
+                )
