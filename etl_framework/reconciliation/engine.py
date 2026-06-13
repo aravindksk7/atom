@@ -62,9 +62,9 @@ class ReconciliationEngine:
         schema_diff = self._validate_schemas(df_source, df_target, query_name)
         df_source, df_target = self._align_columns(df_source, df_target, schema_diff)
 
-        duration = time.monotonic() - t0
         result = self._compare(df_source, df_target, query_name, executed_at,
-                               duration, schema_diff)
+                               schema_diff)
+        result = dataclasses.replace(result, duration_seconds=time.monotonic() - t0)
         return self._apply_slo(result, max_duration_seconds)
 
     # ------------------------------------------------------------------
@@ -130,9 +130,23 @@ class ReconciliationEngine:
         df_target: pd.DataFrame,
         query_name: str,
         executed_at: datetime,
-        duration: float,
         schema_diff: dict | None,
     ) -> ReconciliationResult:
+        src_dups = df_source.duplicated(subset=self._key_columns).sum()
+        tgt_dups = df_target.duplicated(subset=self._key_columns).sum()
+        if src_dups > 0:
+            logger.warning(
+                "Query '%s': source DataFrame has %d duplicate key rows — "
+                "merge counts will be inflated. Deduplicate the query.",
+                query_name, src_dups,
+            )
+        if tgt_dups > 0:
+            logger.warning(
+                "Query '%s': target DataFrame has %d duplicate key rows — "
+                "merge counts will be inflated. Deduplicate the query.",
+                query_name, tgt_dups,
+            )
+
         src_count = len(df_source)
         tgt_count = len(df_target)
 
@@ -184,7 +198,7 @@ class ReconciliationEngine:
             mismatches=all_mismatches,
             status=status,
             executed_at=executed_at,
-            duration_seconds=duration,
+            duration_seconds=0.0,
             schema_diff=schema_diff,
         )
 
@@ -251,7 +265,7 @@ class ReconciliationEngine:
         if a_na or b_na:
             return False
         if is_float:
-            return bool(np.isclose(float(a), float(b), atol=self._float_tolerance))
+            return bool(np.isclose(float(a), float(b), rtol=0, atol=self._float_tolerance))
         return a == b
 
     def _apply_slo(

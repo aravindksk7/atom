@@ -144,3 +144,15 @@ def test_type_normalizer_invoked_before_comparison():
     engine = _make_engine(source, target)
     result = engine.reconcile("SELECT 1", "q")
     assert result.total_issues == 0
+
+
+def test_float_tolerance_is_absolute_not_relative():
+    """rtol=0 must be used so float_tolerance is a pure absolute tolerance."""
+    # Difference = 1e-5; with rtol=1e-5 this would be EQUAL (bug); with rtol=0 it's a MISMATCH
+    source = pd.DataFrame({"id": [1], "amount": [1.00001]})
+    target = pd.DataFrame({"id": [1], "amount": [1.0]})
+    engine = _make_engine(source, target, float_tolerance=1e-9)  # tight tolerance
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.value_mismatch_count == 1, (
+        "Values differing by 1e-5 should be a mismatch when float_tolerance=1e-9"
+    )
