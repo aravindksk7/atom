@@ -60,3 +60,17 @@ class EnvironmentConfig(BaseModel):
         if v <= 0:
             raise ValueError(f"must be > 0, got {v}")
         return v
+
+    @field_validator("automic_timeout", "db_connect_timeout", "db_pool_timeout")
+    @classmethod
+    def validate_positive_timeout(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"must be > 0, got {v}")
+        return v
+
+    @field_validator("db_pool_recycle")
+    @classmethod
+    def validate_pool_recycle(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"must be >= 0, got {v}")
+        return v

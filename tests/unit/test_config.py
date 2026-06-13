@@ -1,5 +1,5 @@
 import pytest
-from etl_framework.config.exceptions import ConfigurationError
+from etl_framework.exceptions import ConfigurationError
 from etl_framework.config.loader import ConfigLoader
 
 
@@ -74,7 +74,14 @@ environments:
     db_name: mydb
     db_user: user
 """)
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ConfigurationError, match="db_password"):
+        ConfigLoader().load(str(cfg))
+
+
+def test_malformed_yaml_top_level_raises_configuration_error(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("- item1\n- item2\n")  # YAML list, not mapping
+    with pytest.raises(ConfigurationError, match="must be a YAML mapping"):
         ConfigLoader().load(str(cfg))
 
 

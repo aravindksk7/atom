@@ -15,6 +15,12 @@ class ConfigLoader:
             )
         with open(config_path) as f:
             raw = yaml.safe_load(f)
+        if not isinstance(raw, dict):
+            raise ConfigurationError(
+                f"Config file '{config_path}' must be a YAML mapping at the top level, "
+                f"got {type(raw).__name__}",
+                file_path=config_path,
+            )
         envs = {}
         for env_name, env_raw in (raw.get("environments") or {}).items():
             resolved = {k: self._resolve_env_vars(str(v)) if isinstance(v, str) else v
@@ -23,7 +29,7 @@ class ConfigLoader:
                 env_config = EnvironmentConfig.model_validate({"name": env_name, **resolved})
             except ValidationError as exc:
                 first_error = exc.errors()[0]
-                field = ".".join(str(l) for l in first_error["loc"])
+                field = ".".join(str(loc_part) for loc_part in first_error["loc"])
                 msg = first_error["msg"]
                 raise ConfigurationError(
                     f"Invalid value for field '{field}' in environment '{env_name}': {msg}",
