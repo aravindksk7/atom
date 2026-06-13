@@ -1,12 +1,12 @@
 import os
 import re
 import yaml
+from pydantic import ValidationError
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import ConfigurationError
 
 
 class ConfigLoader:
-    REQUIRED_DB_FIELDS = ["db_host", "db_name", "db_user", "db_password"]
 
     def load(self, config_path: str) -> dict[str, EnvironmentConfig]:
         if not os.path.exists(config_path):
@@ -19,8 +19,17 @@ class ConfigLoader:
         for env_name, env_raw in (raw.get("environments") or {}).items():
             resolved = {k: self._resolve_env_vars(str(v)) if isinstance(v, str) else v
                         for k, v in env_raw.items()}
-            self._validate_env_config(env_name, resolved)
-            envs[env_name] = EnvironmentConfig(name=env_name, **resolved)
+            try:
+                env_config = EnvironmentConfig.model_validate({"name": env_name, **resolved})
+            except ValidationError as exc:
+                first_error = exc.errors()[0]
+                field = ".".join(str(l) for l in first_error["loc"])
+                msg = first_error["msg"]
+                raise ConfigurationError(
+                    f"Invalid value for field '{field}' in environment '{env_name}': {msg}",
+                    field_name=field,
+                ) from exc
+            envs[env_name] = env_config
         return envs
 
     def _resolve_env_vars(self, value: str) -> str:
@@ -34,11 +43,3 @@ class ConfigLoader:
                 )
             return val
         return re.sub(r'\$\{(\w+)\}', resolver, value)
-
-    def _validate_env_config(self, name: str, raw: dict) -> None:
-        for field in self.REQUIRED_DB_FIELDS:
-            if field not in raw:
-                raise ConfigurationError(
-                    f"Missing required field '{field}' in environment '{name}'",
-                    field_name=field,
-                )
