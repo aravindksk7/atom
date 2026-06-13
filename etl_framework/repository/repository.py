@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
-from etl_framework.repository.models import SavedConfig, TestRun, TestResult, MismatchDetail
+from etl_framework.repository.models import SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail
 
 
 class ConfigRepository:
@@ -45,6 +45,51 @@ class ConfigRepository:
         if cfg is None:
             return False
         self._db.delete(cfg)
+        self._db.commit()
+        return True
+
+
+class JobRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create(self, job_data: dict) -> SavedJob:
+        job = SavedJob(**job_data)
+        self._db.add(job)
+        self._db.commit()
+        self._db.refresh(job)
+        return job
+
+    def get(self, name: str) -> SavedJob | None:
+        return self._db.query(SavedJob).filter(SavedJob.name == name).first()
+
+    def list(self) -> list[SavedJob]:
+        return self._db.query(SavedJob).order_by(SavedJob.name).all()
+
+    def update(self, name: str, job_data: dict) -> SavedJob | None:
+        job = self.get(name)
+        if job is None:
+            return None
+        for key, value in job_data.items():
+            setattr(job, key, value)
+        job.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(job)
+        return job
+
+    def upsert(self, job_data: dict) -> SavedJob:
+        existing = self.get(job_data["name"])
+        if existing is None:
+            return self.create(job_data)
+        updated = self.update(existing.name, job_data)
+        assert updated is not None
+        return updated
+
+    def delete(self, name: str) -> bool:
+        job = self.get(name)
+        if job is None:
+            return False
+        self._db.delete(job)
         self._db.commit()
         return True
 
@@ -130,3 +175,34 @@ class RunRepository:
             )
             self._db.add(detail)
         self._db.commit()
+
+    def count_completed_results(self, run_id: str) -> int:
+        return (
+            self._db.query(TestResult)
+            .filter(
+                TestResult.run_id == run_id,
+                TestResult.status.notin_(["PENDING", "RUNNING"]),
+            )
+            .count()
+        )
+
+    def get_current_job(self, run_id: str) -> str | None:
+        result = (
+            self._db.query(TestResult.query_name)
+            .filter(TestResult.run_id == run_id, TestResult.status == "RUNNING")
+            .order_by(TestResult.id.desc())
+            .first()
+        )
+        return result[0] if result else None
+
+    def list_mismatches(
+        self, result_id: int, limit: int = 100, offset: int = 0
+    ) -> list[MismatchDetail]:
+        return (
+            self._db.query(MismatchDetail)
+            .filter(MismatchDetail.test_result_id == result_id)
+            .order_by(MismatchDetail.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
