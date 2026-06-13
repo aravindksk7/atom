@@ -156,3 +156,41 @@ def test_float_tolerance_is_absolute_not_relative():
     assert result.value_mismatch_count == 1, (
         "Values differing by 1e-5 should be a mismatch when float_tolerance=1e-9"
     )
+
+
+# --- NULL semantics tests (Task 7) ---
+
+def test_null_equals_null_true_no_mismatch():
+    """NaN == NaN → no mismatch when null_equals_null=True (default)."""
+    source = pd.DataFrame({"id": [1], "val": [float("nan")]})
+    target = pd.DataFrame({"id": [1], "val": [float("nan")]})
+    engine = _make_engine(source, target, null_equals_null=True)
+    result = engine.reconcile("SELECT 1", "null_test_true")
+    assert result.value_mismatch_count == 0
+
+
+def test_null_equals_null_false_records_mismatch():
+    """NaN == NaN → mismatch when null_equals_null=False (ANSI NULL semantics)."""
+    source = pd.DataFrame({"id": [1], "val": [float("nan")]})
+    target = pd.DataFrame({"id": [1], "val": [float("nan")]})
+    engine = _make_engine(source, target, null_equals_null=False)
+    result = engine.reconcile("SELECT 1", "null_test_false")
+    assert result.value_mismatch_count == 1
+
+
+def test_null_in_source_not_null_in_target_always_mismatch():
+    """NaN vs non-NaN is always a mismatch regardless of null_equals_null."""
+    source = pd.DataFrame({"id": [1], "val": [float("nan")]})
+    target = pd.DataFrame({"id": [1], "val": [42.0]})
+    engine = _make_engine(source, target, null_equals_null=True)
+    result = engine.reconcile("SELECT 1", "null_vs_value")
+    assert result.value_mismatch_count == 1
+
+
+def test_null_equals_null_default_is_true():
+    """Default constructor behaviour: NaN==NaN is a match."""
+    source = pd.DataFrame({"id": [1], "val": [None]})
+    target = pd.DataFrame({"id": [1], "val": [None]})
+    engine = _make_engine(source, target)  # no null_equals_null arg
+    result = engine.reconcile("SELECT 1", "null_default")
+    assert result.value_mismatch_count == 0
