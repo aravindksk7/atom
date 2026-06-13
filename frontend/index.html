@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ETL Test Framework</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#6366f1', dark: '#4f46e5' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-50 min-h-screen" x-data="app()" x-init="init()">
+
+  <!-- Nav -->
+  <nav class="bg-white border-b border-gray-200 sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-14">
+        <span class="text-lg font-bold text-brand">&#9889; ETL Framework</span>
+        <div class="flex gap-1">
+          <template x-for="tab in tabs" :key="tab.id">
+            <button
+              @click="currentView = tab.id"
+              :class="currentView === tab.id
+                ? 'bg-brand text-white'
+                : 'text-gray-600 hover:bg-gray-100'"
+              class="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+              x-text="tab.label">
+            </button>
+          </template>
+        </div>
+        <span class="text-xs text-gray-400" x-text="apiStatus"></span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ==================== FEATURE A: Config Editor ==================== -->
+    <div x-show="currentView === 'config'" x-cloak>
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Configuration Editor</h1>
+        <button @click="openNewConfigModal()" class="btn-primary">+ New Config</button>
+      </div>
+
+      <!-- Config list -->
+      <div class="grid gap-4">
+        <template x-if="configs.length === 0">
+          <div class="card text-center py-12 text-gray-400">
+            No configurations yet. Click "New Config" to create one.
+          </div>
+        </template>
+        <template x-for="cfg in configs" :key="cfg.id">
+          <div class="card flex items-center justify-between">
+            <div>
+              <div class="font-semibold text-gray-800" x-text="cfg.name"></div>
+              <div class="text-sm text-gray-500">
+                <span class="badge badge-blue" x-text="cfg.env_name"></span>
+                <span class="ml-2 text-xs" x-text="'Updated ' + fmtDate(cfg.updated_at)"></span>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button @click="editConfig(cfg)" class="btn-secondary text-sm">Edit</button>
+              <button @click="deleteConfig(cfg.id)" class="btn-danger text-sm">Delete</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Config Modal -->
+      <div x-show="showConfigModal" x-cloak class="modal-backdrop" @click.self="showConfigModal = false">
+        <div class="modal-box w-full max-w-2xl">
+          <h2 class="text-xl font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="field-label">Config Name *</label>
+                <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-reconciliation" />
+              </div>
+              <div>
+                <label class="field-label">Environment</label>
+                <select x-model="configModal.env_name" class="field-input">
+                  <option value="dev">Dev</option>
+                  <option value="qa">QA</option>
+                  <option value="staging">Staging</option>
+                  <option value="prod">Prod</option>
+                </select>
+              </div>
+            </div>
+            <!-- Dynamic config fields -->
+            <div class="border-t pt-4">
+              <div class="flex items-center justify-between mb-3">
+                <label class="field-label">Configuration Fields</label>
+                <button @click="addConfigField()" class="text-xs text-brand hover:underline">+ Add Field</button>
+              </div>
+              <div class="space-y-2">
+                <div class="grid grid-cols-12 gap-2 text-xs text-gray-400 font-medium px-1">
+                  <span class="col-span-5">Key</span>
+                  <span class="col-span-6">Value</span>
+                </div>
+                <template x-for="(field, idx) in configModal.fields" :key="idx">
+                  <div class="grid grid-cols-12 gap-2">
+                    <input x-model="field.key" class="field-input col-span-5 text-sm" placeholder="db_host" />
+                    <input x-model="field.value" class="field-input col-span-6 text-sm" placeholder="localhost" />
+                    <button @click="configModal.fields.splice(idx, 1)" class="col-span-1 text-red-400 hover:text-red-600">&#10005;</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <!-- Standard fields -->
+            <div class="border-t pt-4 grid grid-cols-2 gap-4">
+              <div>
+                <label class="field-label">DB Host</label>
+                <input x-model="configModal.db_host" class="field-input" placeholder="localhost" />
+              </div>
+              <div>
+                <label class="field-label">DB Port</label>
+                <input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" />
+              </div>
+              <div>
+                <label class="field-label">DB Name</label>
+                <input x-model="configModal.db_name" class="field-input" placeholder="mydb" />
+              </div>
+              <div>
+                <label class="field-label">DB User</label>
+                <input x-model="configModal.db_user" class="field-input" placeholder="sa" />
+              </div>
+              <div>
+                <label class="field-label">Timeout (s)</label>
+                <input x-model="configModal.timeout" type="number" class="field-input" placeholder="30" />
+              </div>
+              <div>
+                <label class="field-label">Max Retries</label>
+                <input x-model="configModal.retries" type="number" class="field-input" placeholder="3" />
+              </div>
+              <div>
+                <label class="field-label">Max Workers</label>
+                <input x-model="configModal.max_workers" type="number" class="field-input" placeholder="4" />
+              </div>
+              <div>
+                <label class="field-label">Float Tolerance</label>
+                <input x-model="configModal.float_tolerance" class="field-input" placeholder="1e-9" />
+              </div>
+            </div>
+          </div>
+          <div class="flex justify-end gap-3 mt-6">
+            <button @click="showConfigModal = false" class="btn-secondary">Cancel</button>
+            <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name">Save Configuration</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== FEATURE B: Job Launcher ==================== -->
+    <div x-show="currentView === 'jobs'" x-cloak>
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Job Launcher</h1>
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox" class="rounded" x-model="selectAll" @change="toggleSelectAll()" />
+            Select All
+          </label>
+        </div>
+      </div>
+
+      <!-- Launch settings -->
+      <div class="card mb-6">
+        <h3 class="font-semibold text-gray-700 mb-3">Launch Settings</h3>
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="field-label">Source Environment</label>
+            <select x-model="launchSettings.source_env" class="field-input">
+              <option value="dev">Dev</option>
+              <option value="qa">QA</option>
+              <option value="staging">Staging</option>
+              <option value="prod">Prod</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Target Environment</label>
+            <select x-model="launchSettings.target_env" class="field-input">
+              <option value="dev">Dev</option>
+              <option value="qa">QA</option>
+              <option value="staging">Staging</option>
+              <option value="prod">Prod</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Saved Config (optional)</label>
+            <select x-model="launchSettings.config_id" class="field-input">
+              <option value="">&#8212; None &#8212;</option>
+              <template x-for="cfg in configs" :key="cfg.id">
+                <option :value="cfg.id" x-text="cfg.name"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Job list -->
+      <div class="card mb-6">
+        <div class="space-y-2">
+          <template x-if="jobs.length === 0">
+            <div class="text-gray-400 text-center py-8">Loading jobs&#8230;</div>
+          </template>
+          <template x-for="job in jobs" :key="job.name">
+            <label class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent hover:border-gray-200 transition-colors">
+              <input type="checkbox" class="rounded text-brand" :value="job.name" x-model="selectedJobs" />
+              <div class="flex-1">
+                <div class="font-medium text-gray-800" x-text="job.name"></div>
+                <div class="text-sm text-gray-500" x-text="job.description"></div>
+              </div>
+              <div class="flex gap-1">
+                <template x-for="tag in job.tags" :key="tag">
+                  <span class="badge badge-gray" x-text="tag"></span>
+                </template>
+              </div>
+            </label>
+          </template>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-gray-500" x-text="selectedJobs.length + ' job(s) selected'"></span>
+        <button
+          @click="runTests()"
+          :disabled="selectedJobs.length === 0 || isLaunching"
+          class="btn-primary px-8 py-3 text-base"
+          :class="{'opacity-50 cursor-not-allowed': selectedJobs.length === 0 || isLaunching}">
+          <span x-show="!isLaunching">&#9654; Run Tests</span>
+          <span x-show="isLaunching">Launching&#8230;</span>
+        </button>
+      </div>
+
+      <!-- Launch toast -->
+      <div x-show="launchToast" x-cloak x-transition
+           class="fixed bottom-6 right-6 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg">
+        &#10003; Run started! <button @click="currentView = 'monitor'" class="underline ml-2">Monitor &#8594;</button>
+      </div>
+    </div>
+
+    <!-- ==================== FEATURE C: Monitor ==================== -->
+    <div x-show="currentView === 'monitor'" x-cloak>
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Execution Monitor</h1>
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-gray-400">Polling every 5s</span>
+          <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+        </div>
+      </div>
+
+      <template x-if="activeRuns.length === 0">
+        <div class="card text-center py-16 text-gray-400">
+          No active runs. <button @click="currentView = 'jobs'" class="text-brand hover:underline">Launch a test &#8594;</button>
+        </div>
+      </template>
+
+      <div class="space-y-4">
+        <template x-for="run in activeRuns" :key="run.run_id">
+          <div class="card">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-sm text-gray-500" x-text="run.run_id.substring(0,8) + '&#8230;'"></span>
+                  <span :class="statusBadgeClass(run.status)" x-text="run.status"></span>
+                </div>
+                <div class="text-sm text-gray-500 mt-1">
+                  <span x-text="run.source_env || '?'"></span> &#8594;
+                  <span x-text="run.target_env || '?'"></span>
+                  <span class="ml-2" x-text="run.started_at ? 'Started ' + fmtDate(run.started_at) : 'Pending&#8230;'"></span>
+                </div>
+              </div>
+              <div class="text-right text-sm">
+                <div class="text-2xl font-bold" x-text="run.total_tests"></div>
+                <div class="text-gray-400">tests</div>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="w-full bg-gray-100 rounded-full h-2 mb-3">
+              <div class="h-2 rounded-full transition-all duration-500"
+                   :class="run.status === 'FAILED' ? 'bg-red-500' : run.status === 'PASSED' ? 'bg-green-500' : 'bg-brand'"
+                   :style="`width: ${runProgress(run)}%`">
+              </div>
+            </div>
+
+            <!-- Status counters -->
+            <div class="grid grid-cols-4 gap-3 text-center text-sm">
+              <div class="bg-green-50 rounded-lg p-2">
+                <div class="font-bold text-green-700 text-xl" x-text="run.passed"></div>
+                <div class="text-green-600">Passed</div>
+              </div>
+              <div class="bg-red-50 rounded-lg p-2">
+                <div class="font-bold text-red-700 text-xl" x-text="run.failed"></div>
+                <div class="text-red-600">Failed</div>
+              </div>
+              <div class="bg-amber-50 rounded-lg p-2">
+                <div class="font-bold text-amber-700 text-xl" x-text="run.slow"></div>
+                <div class="text-amber-600">Slow</div>
+              </div>
+              <div class="bg-gray-50 rounded-lg p-2">
+                <div class="font-bold text-gray-700 text-xl" x-text="run.error"></div>
+                <div class="text-gray-600">Error</div>
+              </div>
+            </div>
+
+            <!-- Elapsed time -->
+            <div class="mt-3 text-xs text-gray-400 text-right">
+              <span x-text="run.completed_at ? 'Completed ' + fmtDate(run.completed_at) : 'Running&#8230;'"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ==================== FEATURE D: History ==================== -->
+    <div x-show="currentView === 'history'" x-cloak>
+
+      <!-- Detail panel -->
+      <template x-if="selectedRun">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <button @click="selectedRun = null" class="btn-secondary text-sm">&#8592; Back</button>
+            <h1 class="text-2xl font-bold text-gray-900">Run Detail</h1>
+            <span :class="statusBadgeClass(selectedRun.status)" x-text="selectedRun.status"></span>
+          </div>
+
+          <!-- Summary cards -->
+          <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="card text-center">
+              <div class="text-3xl font-bold text-gray-800" x-text="selectedRun.total_tests"></div>
+              <div class="text-sm text-gray-400">Total Tests</div>
+            </div>
+            <div class="card text-center">
+              <div class="text-3xl font-bold text-green-600" x-text="selectedRun.passed"></div>
+              <div class="text-sm text-gray-400">Passed</div>
+            </div>
+            <div class="card text-center">
+              <div class="text-3xl font-bold text-red-600" x-text="selectedRun.failed"></div>
+              <div class="text-sm text-gray-400">Failed</div>
+            </div>
+            <div class="card text-center">
+              <div class="text-3xl font-bold text-amber-500" x-text="selectedRun.slow"></div>
+              <div class="text-sm text-gray-400">Slow</div>
+            </div>
+          </div>
+
+          <!-- Chart + meta -->
+          <div class="grid grid-cols-3 gap-6 mb-6">
+            <div class="card flex items-center justify-center">
+              <canvas id="runChart" width="160" height="160"></canvas>
+            </div>
+            <div class="card col-span-2 space-y-2 text-sm">
+              <div><span class="text-gray-400">Run ID:</span> <span class="font-mono text-xs" x-text="selectedRun.run_id"></span></div>
+              <div><span class="text-gray-400">Source &#8594; Target:</span> <span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
+              <div><span class="text-gray-400">Started:</span> <span x-text="fmtDate(selectedRun.started_at)"></span></div>
+              <div><span class="text-gray-400">Completed:</span> <span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+            </div>
+          </div>
+
+          <!-- Per-test breakdown table -->
+          <div class="card overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-left">
+                <tr>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Test Name</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Status</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Duration</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Src Rows</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Tgt Rows</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Mismatches</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <template x-for="r in selectedRun.results" :key="r.id">
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3 font-mono text-xs text-gray-700" x-text="r.query_name"></td>
+                    <td class="px-4 py-3"><span :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                    <td class="px-4 py-3 text-gray-600" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '—'"></td>
+                    <td class="px-4 py-3 text-gray-600" x-text="r.source_row_count != null ? r.source_row_count : '—'"></td>
+                    <td class="px-4 py-3 text-gray-600" x-text="r.target_row_count != null ? r.target_row_count : '—'"></td>
+                    <td class="px-4 py-3">
+                      <span x-text="(r.value_mismatch_count || 0) + (r.missing_in_target_count || 0) + (r.missing_in_source_count || 0)"
+                            :class="((r.value_mismatch_count || 0) + (r.missing_in_target_count || 0) + (r.missing_in_source_count || 0)) > 0 ? 'text-red-600 font-semibold' : 'text-gray-600'"></span>
+                    </td>
+                  </tr>
+                  <template x-if="r.error_message">
+                    <tr>
+                      <td colspan="6" class="px-4 py-2 bg-red-50 text-red-700 text-xs font-mono" x-text="r.error_message"></td>
+                    </tr>
+                  </template>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+
+      <!-- History list -->
+      <template x-if="!selectedRun">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 mb-6">Run History</h1>
+          <template x-if="runs.length === 0">
+            <div class="card text-center py-16 text-gray-400">No test runs yet.</div>
+          </template>
+          <div class="card overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-left">
+                <tr>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Run ID</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Status</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Environments</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Started</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Pass/Fail/Slow</th>
+                  <th class="px-4 py-3 text-gray-500 font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <template x-for="run in runs" :key="run.run_id">
+                  <tr class="hover:bg-gray-50 cursor-pointer" @click="viewRunDetail(run.run_id)">
+                    <td class="px-4 py-3 font-mono text-xs text-gray-500" x-text="run.run_id.substring(0,8) + '&#8230;'"></td>
+                    <td class="px-4 py-3"><span :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
+                    <td class="px-4 py-3 text-gray-600" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
+                    <td class="px-4 py-3 text-gray-500 text-xs" x-text="fmtDate(run.started_at)"></td>
+                    <td class="px-4 py-3">
+                      <span class="text-green-600 font-semibold" x-text="run.passed"></span> /
+                      <span class="text-red-600 font-semibold" x-text="run.failed"></span> /
+                      <span class="text-amber-500 font-semibold" x-text="run.slow"></span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <button @click.stop="viewRunDetail(run.run_id)" class="text-brand hover:underline text-xs">View &#8594;</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
