@@ -3,12 +3,13 @@ from __future__ import annotations
 import dataclasses
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
 from etl_framework.exceptions import SchemaValidationError
+from etl_framework.reconciliation.backends.base import ComparisonBackend
 from etl_framework.reconciliation.chunker import build_chunk_query, build_hash_query, hashes_match
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.reconciliation.normalizer import TypeNormalizer
@@ -31,6 +32,7 @@ class ReconciliationEngine:
         null_equals_null: bool = True,           # Task 7
         chunk_size: int = 0,                     # Task 9
         use_hash_precheck: bool = True,          # Task 9
+        backend: ComparisonBackend | None = None,  # Task 14
     ):
         self._source_engine = source_engine
         self._target_engine = target_engine
@@ -42,6 +44,7 @@ class ReconciliationEngine:
         self._null_equals_null = null_equals_null
         self._chunk_size = chunk_size
         self._use_hash_precheck = use_hash_precheck
+        self._backend = backend
         self._normalizer = TypeNormalizer()
 
     def reconcile(
@@ -124,10 +127,37 @@ class ReconciliationEngine:
                 )
 
             schema_diff = self._validate_schemas(df_source, df_target, query_name)
-            df_source, df_target = self._align_columns(df_source, df_target, schema_diff)
+            df_source_norm, df_target_norm = self._align_columns(df_source, df_target, schema_diff)
 
-            result = self._compare(df_source, df_target, query_name, executed_at,
-                                   schema_diff)
+            if self._backend is not None:
+                mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
+                result = ReconciliationResult(
+                    query_name=query_name,
+                    source_env=getattr(getattr(self._source_engine, "_env", None), "name", "source"),
+                    target_env=getattr(getattr(self._target_engine, "_env", None), "name", "target"),
+                    source_row_count=len(df_source),
+                    target_row_count=len(df_target),
+                    matched_count=len(df_source) - sum(
+                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
+                    ),
+                    missing_in_target_count=sum(
+                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
+                    ),
+                    missing_in_source_count=sum(
+                        1 for m in mismatch_list if m.mismatch_type == "missing_in_source"
+                    ),
+                    value_mismatch_count=sum(
+                        1 for m in mismatch_list if m.mismatch_type == "value_mismatch"
+                    ),
+                    mismatches=mismatch_list,
+                    status=TestStatus.PASSED if not mismatch_list else TestStatus.FAILED,
+                    executed_at=executed_at,
+                    duration_seconds=0.0,
+                    schema_diff=schema_diff,
+                )
+            else:
+                result = self._compare(df_source_norm, df_target_norm, query_name, executed_at,
+                                       schema_diff)
             result = dataclasses.replace(result, duration_seconds=time.monotonic() - t0)
             return self._apply_slo(result, max_duration_seconds)
 
