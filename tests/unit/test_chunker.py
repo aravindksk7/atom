@@ -43,3 +43,29 @@ def test_hashes_match_different_row_count():
     df1 = pd.DataFrame({"id": [1, 2, 3], "hash_value": [10, 20, 30]})
     df2 = pd.DataFrame({"id": [1, 2], "hash_value": [10, 20]})
     assert hashes_match(df1, df2) is False
+
+
+def test_build_hash_query_raises_on_empty_key_columns():
+    with pytest.raises(ValueError, match="key_columns"):
+        build_hash_query("SELECT id FROM t", key_columns=[])
+
+
+def test_build_chunk_query_raises_on_empty_key_columns():
+    with pytest.raises(ValueError, match="key_columns"):
+        build_chunk_query("SELECT id FROM t", key_columns=[], offset=0, chunk_size=10)
+
+
+def test_hashes_match_both_empty_returns_true():
+    df_empty = pd.DataFrame({"id": [], "hash_value": []})
+    assert hashes_match(df_empty, df_empty) is True
+
+
+def test_hashes_match_empty_vs_nonempty_returns_false():
+    df_empty = pd.DataFrame({"id": [], "hash_value": []})
+    df_nonempty = pd.DataFrame({"id": [1], "hash_value": [42]})
+    assert hashes_match(df_empty, df_nonempty) is False
+
+
+def test_hashes_match_copy_not_identity():
+    df = pd.DataFrame({"id": [1, 2], "hash_value": [10, 20]})
+    assert hashes_match(df, df.copy()) is True

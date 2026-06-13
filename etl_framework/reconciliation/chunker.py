@@ -2,6 +2,8 @@ import pandas as pd
 
 
 def build_hash_query(base_query: str, key_columns: list[str]) -> str:
+    if not key_columns:
+        raise ValueError("key_columns must not be empty")
     key_list = ", ".join(key_columns)
     return (
         f"SELECT {key_list}, "
@@ -16,6 +18,8 @@ def build_chunk_query(
     offset: int,
     chunk_size: int,
 ) -> str:
+    if not key_columns:
+        raise ValueError("key_columns must not be empty")
     order_cols = ", ".join(key_columns)
     return (
         f"SELECT * FROM ({base_query}) AS _base "

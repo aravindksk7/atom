@@ -56,7 +56,7 @@
         <td>{{ r.source_row_count }}</td>
         <td>{{ r.target_row_count }}</td>
         <td>{{ r.total_issues }}</td>
-        <td>{{ "%.2f" | format(r.duration_seconds) }}</td>
+        <td>{{ "%.2f" | format(r.duration_seconds | default(0.0)) }}</td>
         <td>{{ status_badge(r.status) }}</td>
       </tr>
       {% if r.schema_diff %}

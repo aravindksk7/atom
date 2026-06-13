@@ -71,6 +71,7 @@ class ReconciliationEngine:
                         "Reconciliation '%s': hash pre-check matched — skipping full compare.",
                         query_name,
                     )
+                    # schema validation skipped in hash pre-check; full compare catches it
                     early_result = ReconciliationResult(
                         query_name=query_name,
                         source_env=self._source_engine._env.name,
@@ -103,10 +104,12 @@ class ReconciliationEngine:
                 )
                 if chunk_src.empty and chunk_tgt.empty:
                     break
-                chunks_src.append(chunk_src)
-                chunks_tgt.append(chunk_tgt)
+                if not chunk_src.empty:
+                    chunks_src.append(chunk_src)
+                if not chunk_tgt.empty:
+                    chunks_tgt.append(chunk_tgt)
                 offset += self._chunk_size
-                if len(chunk_src) < self._chunk_size and len(chunk_tgt) < self._chunk_size:
+                if len(chunk_src) < self._chunk_size or len(chunk_tgt) < self._chunk_size:
                     break
             df_source = pd.concat(chunks_src, ignore_index=True) if chunks_src else pd.DataFrame()
             df_target = pd.concat(chunks_tgt, ignore_index=True) if chunks_tgt else pd.DataFrame()

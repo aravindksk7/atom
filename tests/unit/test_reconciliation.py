@@ -298,3 +298,13 @@ def test_chunk_size_nonzero_reconciles_correctly():
     engine = _make_paginating_engine(source, target, chunk_size=2)
     result = engine.reconcile("SELECT 1", "chunked_mismatch")
     assert result.value_mismatch_count >= 1
+
+
+def test_chunk_size_nonzero_unequal_row_counts_no_infinite_loop():
+    """When source has fewer rows than target in chunked mode, engine must terminate."""
+    source = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    engine = _make_paginating_engine(source, target, chunk_size=2)
+    result = engine.reconcile("SELECT 1", "unequal_rows")
+    # Must terminate and report missing_in_source_count
+    assert result.missing_in_source_count == 1
