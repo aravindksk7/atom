@@ -63,3 +63,30 @@ class ReportOutputError(ETLFrameworkError):
         self.target_path = target_path
         self.original_os_error = original_os_error
         super().__init__(f"Cannot write report to '{target_path}': {original_os_error}")
+
+
+class SchemaValidationError(ETLFrameworkError):
+    def __init__(
+        self,
+        query_name: str,
+        missing_in_target: list[str],
+        extra_in_target: list[str],
+    ) -> None:
+        self.query_name = query_name
+        self.missing_in_target = missing_in_target
+        self.extra_in_target = extra_in_target
+        super().__init__(
+            f"Schema mismatch in '{query_name}': "
+            f"missing_in_target={missing_in_target}, "
+            f"extra_in_target={extra_in_target}"
+        )
+
+
+class RepositoryError(ETLFrameworkError):
+    def __init__(self, backend: str, operation: str, original_error: Exception) -> None:
+        self.backend = backend
+        self.operation = operation
+        self.original_error = original_error
+        super().__init__(
+            f"Repository error [{backend}] during '{operation}': {original_error}"
+        )

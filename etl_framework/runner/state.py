@@ -12,6 +12,7 @@ class TestStatus(str, Enum):
     FAILED = "FAILED"
     ERROR = "ERROR"
     SKIPPED = "SKIPPED"
+    SLOW = "SLOW"
 
 
 @dataclass
