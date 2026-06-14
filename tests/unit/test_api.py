@@ -4,13 +4,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from api.schemas import JobDefinition, RunTrigger
+from api.routes import runs as runs_module
 from etl_framework.repository.database import Base, get_db
 import etl_framework.repository.models  # noqa: F401 — registers ORM models with Base
 from api.main import app
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -22,6 +24,7 @@ def client():
         with Session(engine) as session:
             yield session
 
+    monkeypatch.setattr(runs_module, "_execute_run", lambda *args, **kwargs: None)
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as c:
         yield c
@@ -75,6 +78,70 @@ def test_delete_config(client):
     assert resp3.status_code == 404
 
 
+def test_validate_config_accepts_valid_environment(client):
+    resp = client.post(
+        "/api/configs/validate",
+        json={
+            "env_name": "dev",
+            "config_data": {
+                "db_host": "localhost",
+                "db_port": 1433,
+                "db_pool_size": 5,
+                "db_password": "secret",
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["config_data"]["db_port"] == 1433
+
+
+def test_validate_config_returns_field_errors(client):
+    resp = client.post(
+        "/api/configs/validate",
+        json={
+            "env_name": "dev",
+            "config_data": {"db_host": "localhost", "db_port": 99999},
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["errors"][0]["field_name"] == "db_port"
+
+
+def test_import_yaml_config_saves_environments(client):
+    yaml_content = """
+environments:
+  dev:
+    db_host: localhost
+    db_port: 1433
+    db_password: secret
+  qa:
+    db_host: qa-host
+    db_port: 1433
+    db_password: secret
+"""
+    resp = client.post("/api/configs/import-yaml", json={"yaml_content": yaml_content})
+    assert resp.status_code == 201
+    data = resp.json()
+    assert [cfg["name"] for cfg in data] == ["dev", "qa"]
+    assert data[0]["config_data"]["db_host"] == "localhost"
+
+
+def test_import_yaml_config_returns_clear_error(client):
+    yaml_content = """
+environments:
+  dev:
+    db_host: localhost
+    db_port: 99999
+"""
+    resp = client.post("/api/configs/import-yaml", json={"yaml_content": yaml_content})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["field_name"] == "db_port"
+
+
 # --- Runs endpoints ---
 
 def test_list_runs_empty(client):
@@ -90,6 +157,87 @@ def test_trigger_run(client):
     data = resp.json()
     assert "run_id" in data
     assert data["status"] == "PENDING"
+
+
+def test_trigger_run_stores_sequence_and_settings(client, monkeypatch):
+    payload = {
+        "source_env": "dev",
+        "target_env": "prod",
+        "job_names": ["orders_query", "customers_query"],
+        "job_sequence": ["customers_query", "orders_query"],
+        "config_data": {"db_host": "localhost"},
+        "run_settings": {
+            "execution_mode": "sequential",
+            "max_workers": 1,
+            "schema_mismatch_policy": "warn",
+            "chunk_size": 0,
+            "metrics_enabled": True,
+        },
+    }
+    resp = client.post("/api/runs", json=payload)
+    assert resp.status_code == 202
+
+    detail = client.get(f"/api/runs/{resp.json()['run_id']}")
+    assert detail.status_code == 200
+    snapshot = detail.json()["config_snapshot"]
+    assert snapshot["db_host"] == "localhost"
+    assert snapshot["job_sequence"] == ["customers_query", "orders_query"]
+    assert snapshot["run_settings"]["execution_mode"] == "sequential"
+    assert snapshot["run_settings"]["schema_mismatch_policy"] == "warn"
+    assert snapshot["run_settings"]["comparison_backend"] == "pandas"
+
+
+def test_trigger_run_rejects_invalid_backend(client):
+    resp = client.post(
+        "/api/runs",
+        json={
+            "source_env": "dev",
+            "target_env": "prod",
+            "job_sequence": ["orders_query"],
+            "run_settings": {"comparison_backend": "duckdb"},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_trigger_run_rejects_negative_worker_count(client):
+    resp = client.post(
+        "/api/runs",
+        json={
+            "source_env": "dev",
+            "target_env": "prod",
+            "job_sequence": ["orders_query"],
+            "run_settings": {"max_workers": 0},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_trigger_run_rejects_removed_metadata_only_settings(client):
+    resp = client.post(
+        "/api/runs",
+        json={
+            "source_env": "dev",
+            "target_env": "prod",
+            "job_sequence": ["orders_query"],
+            "run_settings": {"dry_run": True},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_run_trigger_translates_legacy_job_names_to_sequence():
+    trigger = RunTrigger(
+        source_env="dev",
+        target_env="prod",
+        job_names=["first", "second"],
+    )
+    assert trigger.job_sequence == ["first", "second"]
+
+
+def test_job_definition_requires_key_columns_for_reconciliation():
+    with pytest.raises(ValueError, match="key_columns"):
+        JobDefinition(name="orders", job_type="reconciliation", query="select * from orders")
 
 
 def test_get_run_status(client):
@@ -110,6 +258,14 @@ def test_get_run_detail(client):
     assert "results" in data
 
 
+def test_get_run_metrics_missing_returns_404(client):
+    resp = client.post("/api/runs", json={"source_env": "dev", "target_env": "prod", "job_names": []})
+    run_id = resp.json()["run_id"]
+    metrics = client.get(f"/api/runs/{run_id}/metrics")
+    assert metrics.status_code == 404
+    assert metrics.json()["detail"] == "Metrics not found"
+
+
 def test_get_run_not_found(client):
     resp = client.get("/api/runs/nonexistent-run-id")
     assert resp.status_code == 404
@@ -120,10 +276,144 @@ def test_get_run_not_found(client):
 def test_list_jobs(client):
     resp = client.get("/api/jobs")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    data = resp.json()
+    assert isinstance(data, list)
+    assert data[0]["query"]
+    assert data[0]["key_columns"]
+
+
+def test_create_update_delete_job(client):
+    payload = {
+        "name": "custom_orders",
+        "description": "Custom orders reconciliation",
+        "tags": ["custom"],
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM custom_orders",
+        "key_columns": ["id"],
+        "exclude_columns": ["updated_at"],
+        "params": {},
+        "enabled": True,
+    }
+    create = client.post("/api/jobs", json=payload)
+    assert create.status_code == 201
+    assert create.json()["name"] == "custom_orders"
+
+    list_resp = client.get("/api/jobs")
+    assert [job["name"] for job in list_resp.json()] == ["custom_orders"]
+
+    payload["description"] = "Updated"
+    update = client.put("/api/jobs/custom_orders", json=payload)
+    assert update.status_code == 200
+    assert update.json()["description"] == "Updated"
+
+    delete = client.delete("/api/jobs/custom_orders")
+    assert delete.status_code == 204
+
+
+def test_import_jobs_upserts_definitions(client):
+    payload = [
+        {
+            "name": "imported_orders",
+            "description": "Imported",
+            "tags": ["import"],
+            "job_type": "reconciliation",
+            "query": "SELECT * FROM imported_orders",
+            "key_columns": ["id"],
+            "enabled": True,
+        }
+    ]
+    first = client.post("/api/jobs/import", json=payload)
+    assert first.status_code == 201
+    payload[0]["description"] = "Imported updated"
+    second = client.post("/api/jobs/import", json=payload)
+    assert second.status_code == 201
+    assert second.json()[0]["description"] == "Imported updated"
+
+
+def test_create_job_rejects_missing_key_columns(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_job",
+            "job_type": "reconciliation",
+            "query": "SELECT * FROM bad_job",
+            "key_columns": [],
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_job_rejects_unimplemented_external_job_types(client):
+    for job_type in ("bo_report", "automic_job"):
+        resp = client.post(
+            "/api/jobs",
+            json={
+                "name": f"bad_{job_type}",
+                "job_type": job_type,
+                "query": "",
+                "key_columns": [],
+            },
+        )
+        assert resp.status_code == 422
 
 
 def test_health_endpoint(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+def test_health_checks_accept_valid_config(client):
+    resp = client.post(
+        "/api/health/checks",
+        json={
+            "environments": {
+                "dev": {
+                    "db_host": "localhost",
+                    "db_port": 1433,
+                    "db_password": "secret",
+                }
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json() == [{"component": "dev", "healthy": True, "message": "OK"}]
+
+
+def test_health_checks_report_invalid_config(client):
+    resp = client.post(
+        "/api/health/checks",
+        json={
+            "environments": {
+                "dev": {
+                    "db_host": "localhost",
+                    "db_port": 99999,
+                    "db_password": "secret",
+                }
+            }
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["component"] == "dev"
+    assert data[0]["healthy"] is False
+    assert "db_port" in data[0]["message"]
+
+
+def test_testrun_has_run_type_and_pair_id_columns(client):
+    resp = client.post("/api/configs", json={"name": "m1", "env_name": "dev", "config_data": {}})
+    assert resp.status_code == 201
+    # Trigger a run so TestRun row is created
+    resp2 = client.post("/api/runs", json={
+        "source_env": "dev", "target_env": "prod",
+        "job_names": [], "config_data": {}
+    })
+    assert resp2.status_code == 202
+    run_id = resp2.json()["run_id"]
+    resp3 = client.get(f"/api/runs/{run_id}")
+    assert resp3.status_code == 200
+    data = resp3.json()
+    assert "run_type" in data
+    assert data["run_type"] == "reconciliation"
+    assert "pair_id" in data
+    assert data["pair_id"] is None

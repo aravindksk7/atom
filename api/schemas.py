@@ -97,6 +97,8 @@ class RunStatusOut(BaseModel):
     failed: int = 0
     slow: int = 0
     error: int = 0
+    run_type: str = "reconciliation"
+    pair_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -257,3 +259,22 @@ class BOJobCreateRequest(BaseModel):
 class AutomicJobCreateRequest(BaseModel):
     name: str
     job_name: str
+
+
+class TestCompareOut(BaseModel):
+    test_name: str
+    status_a: str | None = None
+    status_b: str | None = None
+    duration_a: float | None = None
+    duration_b: float | None = None
+    mismatches_a: int | None = None
+    mismatches_b: int | None = None
+    result_id_a: int | None = None
+    result_id_b: int | None = None
+
+
+class RunCompareOut(BaseModel):
+    run_a: RunStatusOut
+    run_b: RunStatusOut
+    tests: list[TestCompareOut]
+    summary: dict[str, int]

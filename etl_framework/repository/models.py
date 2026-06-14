@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from etl_framework.repository.database import Base
 
@@ -16,6 +16,25 @@ class SavedConfig(Base):
     name = Column(String(255), nullable=False, unique=True, index=True)
     env_name = Column(String(100), nullable=False)
     config_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class SavedJob(Base):
+    __tablename__ = "saved_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=False, default="")
+    tags = Column(JSON, nullable=False, default=list)
+    job_type = Column(String(50), nullable=False, default="reconciliation")
+    query = Column(Text, nullable=False, default="")
+    key_columns = Column(JSON, nullable=False, default=list)
+    exclude_columns = Column(JSON, nullable=False, default=list)
+    source_env = Column(String(100), nullable=True)
+    target_env = Column(String(100), nullable=True)
+    params = Column(JSON, nullable=False, default=dict)
+    enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -36,6 +55,8 @@ class TestRun(Base):
     failed = Column(Integer, default=0, nullable=False)
     slow = Column(Integer, default=0, nullable=False)
     error = Column(Integer, default=0, nullable=False)
+    run_type = Column(String(50), nullable=False, default="reconciliation")
+    pair_id  = Column(String(36), nullable=True, index=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
@@ -74,5 +95,9 @@ class MismatchDetail(Base):
     source_value = Column(Text, nullable=True)
     target_value = Column(Text, nullable=True)
     mismatch_type = Column(String(50), nullable=True)
+    accepted      = Column(Boolean, nullable=False, default=False)
+    accepted_note = Column(Text, nullable=True)
+    accepted_at   = Column(DateTime(timezone=True), nullable=True)
+    accepted_by   = Column(String(255), nullable=True)
 
     test_result = relationship("TestResult", back_populates="mismatches")
