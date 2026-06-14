@@ -107,3 +107,40 @@ def test_list_pairs_returns_unique_pair_ids(repo):
     _make_run(repo, run_id="r4", pair_id="p2")
     pairs = repo.list_pairs()
     assert set(pairs) == {"p1", "p2"}
+
+
+@pytest.fixture
+def api_client(monkeypatch):
+    from api.routes import runs as runs_module
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    monkeypatch.setattr(runs_module, "_execute_run", lambda *a, **kw: None)
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def test_accept_mismatch_endpoint_404_on_unknown(api_client):
+    resp = api_client.patch(
+        "/api/runs/no-run/results/999/mismatches/999/accept",
+        json={"note": "x"},
+    )
+    assert resp.status_code == 404
+
+
+def test_accept_mismatch_note_required(api_client):
+    resp = api_client.patch(
+        "/api/runs/no-run/results/1/mismatches/1/accept",
+        json={"note": ""},
+    )
+    assert resp.status_code == 422

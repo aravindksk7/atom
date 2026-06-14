@@ -93,6 +93,10 @@ def _make_mismatch(id_: int):
     m.source_value = "A"
     m.target_value = "B"
     m.mismatch_type = "value"
+    m.accepted = False
+    m.accepted_note = None
+    m.accepted_at = None
+    m.accepted_by = None
     return m
 
 

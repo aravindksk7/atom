@@ -13,11 +13,15 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_session
 from api.schemas import (
     GeneratedArtifactOut,
+    MismatchAcceptOut,
+    MismatchAcceptRequest,
     MismatchOut,
+    RunCompareOut,
     RunDetailOut,
     RunProgressOut,
     RunStatusOut,
     RunTrigger,
+    TestCompareOut,
     TestResultOut,
 )
 from api.services.run_executor import RunExecutor
@@ -193,7 +197,7 @@ def get_run_logs(run_id: str, db: Session = Depends(get_session)):
 def get_run_report(run_id: str, db: Session = Depends(get_session)):
     service = ArtifactService(repository=RunRepository(db))
     report_path = service.generate_html_report(run_id)
-    return FileResponse(report_path, filename=f"report_{run_id}.html", media_type="text/html")
+    return FileResponse(report_path, media_type="text/html")
 
 
 @router.get("/{run_id}/progress", response_model=RunProgressOut)
@@ -235,9 +239,107 @@ def list_result_mismatches(
             source_value=m.source_value,
             target_value=m.target_value,
             mismatch_type=m.mismatch_type,
+            accepted=m.accepted,
+            accepted_note=m.accepted_note,
+            accepted_at=m.accepted_at,
+            accepted_by=m.accepted_by,
         )
         for m in rows
     ]
+
+
+@router.patch(
+    "/{run_id}/results/{result_id}/mismatches/{mismatch_id}/accept",
+    response_model=MismatchAcceptOut,
+)
+def accept_mismatch(
+    run_id: str,
+    result_id: int,
+    mismatch_id: int,
+    body: MismatchAcceptRequest,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import MismatchDetail
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    md = db.get(MismatchDetail, mismatch_id)
+    if md is None or md.test_result_id != result_id:
+        raise HTTPException(status_code=404, detail="Mismatch not found")
+    updated, status_changed = repo.accept_mismatch(mismatch_id, body.note, body.accepted_by)
+    return MismatchAcceptOut(
+        id=updated.id,
+        accepted=updated.accepted,
+        accepted_note=updated.accepted_note,
+        accepted_at=updated.accepted_at,
+        accepted_by=updated.accepted_by,
+        result_status_updated=status_changed,
+    )
+
+
+@router.get("/compare", response_model=RunCompareOut)
+def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    ra = repo.get_run(run_a)
+    rb = repo.get_run(run_b)
+    if ra is None or rb is None:
+        raise HTTPException(status_code=404, detail="One or both runs not found")
+
+    def _status_out(r: object) -> RunStatusOut:
+        return RunStatusOut(
+            run_id=r.run_id, status=r.status,
+            started_at=r.started_at, completed_at=r.completed_at,
+            total_tests=r.total_tests, passed=r.passed,
+            failed=r.failed, slow=r.slow, error=r.error,
+        )
+
+    tests_a = {r.query_name: r for r in ra.results}
+    tests_b = {r.query_name: r for r in rb.results}
+    all_names = sorted(set(tests_a) | set(tests_b))
+
+    improved = regressed = unchanged = only_a = only_b = 0
+    tests: list[TestCompareOut] = []
+    for name in all_names:
+        a = tests_a.get(name)
+        b = tests_b.get(name)
+        sa = a.status if a else None
+        sb = b.status if b else None
+
+        if a and b:
+            if sa == "PASSED" and sb != "PASSED":
+                regressed += 1
+            elif sa != "PASSED" and sb == "PASSED":
+                improved += 1
+            else:
+                unchanged += 1
+        elif a:
+            only_a += 1
+        else:
+            only_b += 1
+
+        def _mm(r: object) -> int:
+            return (r.value_mismatch_count or 0) + (r.missing_in_target_count or 0) + (r.missing_in_source_count or 0)
+
+        tests.append(TestCompareOut(
+            test_name=name,
+            status_a=sa,
+            status_b=sb,
+            duration_a=a.duration_seconds if a else None,
+            duration_b=b.duration_seconds if b else None,
+            mismatches_a=_mm(a) if a else None,
+            mismatches_b=_mm(b) if b else None,
+            result_id_a=a.id if a else None,
+            result_id_b=b.id if b else None,
+        ))
+
+    return RunCompareOut(
+        run_a=_status_out(ra),
+        run_b=_status_out(rb),
+        tests=tests,
+        summary={"improved": improved, "regressed": regressed, "unchanged": unchanged,
+                 "only_in_a": only_a, "only_in_b": only_b},
+    )
 
 
 @router.get("/{run_id}", response_model=RunDetailOut)
