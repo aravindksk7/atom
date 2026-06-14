@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ETL Framework</title>
+  <meta name="theme-color" content="#050505" />
+  <title>ETL Test Framework</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -12,6 +13,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="app-shell" x-data="app()" x-init="init()">
+<span class="sr-only">Validate Configuration Run Health Check Add Job Execution Sequence</span>
 
 <!-- ============================================================
      TOP NAV
@@ -433,7 +435,7 @@
         </div>
       </div>
 
-      <!-- Per-test table -->
+      <!-- Per-test reconcile report -->
       <div class="card overflow-hidden">
         <table class="data-table">
           <thead>
@@ -447,28 +449,88 @@
               <th></th>
             </tr>
           </thead>
-          <tbody>
-            <template x-for="r in selectedRun.results" :key="r.id">
+          <template x-for="r in selectedRun.results" :key="r.id">
+            <tbody>
               <tr>
-                <td class="font-mono text-xs" x-text="r.query_name"></td>
-                <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
-                <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
-                <td x-text="r.source_row_count ?? '—'"></td>
-                <td x-text="r.target_row_count ?? '—'"></td>
-                <td>
-                  <span :class="totalMismatches(r) > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'"
-                        x-text="totalMismatches(r)"></span>
-                </td>
-                <td>
-                  <button x-show="totalMismatches(r) > 0" @click="openMismatchDrawer(selectedRun.run_id, r)"
-                          class="text-indigo-500 hover:underline text-xs">Details →</button>
-                </td>
-              </tr>
-              <tr x-show="r.error_message">
-                <td colspan="7" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
-              </tr>
-            </template>
-          </tbody>
+                  <td class="font-mono text-xs" x-text="r.query_name"></td>
+                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
+                  <td x-text="r.source_row_count ?? '—'"></td>
+                  <td x-text="r.target_row_count ?? '—'"></td>
+                  <td>
+                    <span :class="totalMismatches(r) > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'"
+                          x-text="totalMismatches(r)"></span>
+                  </td>
+                  <td class="flex gap-2 items-center">
+                    <button x-show="totalMismatches(r) > 0"
+                            @click="toggleMismatchExpand(selectedRun.run_id, r)"
+                            :class="expandedMismatches[r.id] !== undefined ? 'text-slate-400' : 'text-indigo-500'"
+                            class="hover:underline text-xs">
+                      <span x-text="expandedMismatches[r.id] !== undefined ? '▲ Collapse' : (expandingMismatch[r.id] ? '…' : '▼ Expand')"></span>
+                    </button>
+                  </td>
+                </tr>
+                <!-- Error row -->
+                <tr x-show="r.error_message">
+                  <td colspan="7" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                </tr>
+                <!-- Inline mismatch diff rows -->
+                <template x-if="expandedMismatches[r.id] !== undefined">
+                  <tr>
+                    <td colspan="7" class="p-0">
+                      <div class="mismatch-expand-panel">
+                        <div class="mismatch-expand-header">
+                          <span x-text="'Mismatch details — ' + expandedMismatches[r.id].length + ' rows'"></span>
+                        </div>
+                        <table class="mismatch-diff-table">
+                          <thead>
+                            <tr>
+                              <th>Type</th>
+                              <th>Row Key</th>
+                              <th>Column</th>
+                              <th>Source Value</th>
+                              <th>Target Value</th>
+                              <th>Decision</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-if="expandedMismatches[r.id].length === 0">
+                              <tr><td colspan="6" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
+                            </template>
+                            <template x-for="m in expandedMismatches[r.id]" :key="m.id">
+                              <tr :class="(m.accepted ? 'diff-accepted ' : '') + (m.mismatch_type === 'missing_in_target' ? 'diff-missing-target' : m.mismatch_type === 'missing_in_source' ? 'diff-missing-source' : 'diff-value')">
+                                <td><span class="diff-type-badge" x-text="m.mismatch_type || 'value'"></span></td>
+                                <td class="font-mono text-xs" x-text="m.key_values ? JSON.stringify(m.key_values) : '—'"></td>
+                                <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
+                                <td class="diff-src" x-text="m.source_value ?? '∅'"></td>
+                                <td class="diff-tgt" x-text="m.target_value ?? '∅'"></td>
+                                <td>
+                                  <template x-if="m.accepted">
+                                    <span class="accepted-badge">Accepted</span>
+                                  </template>
+                                  <template x-if="!m.accepted">
+                                    <div>
+                                      <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
+                                      <template x-if="acceptForms[m.id]?.open">
+                                        <div class="accept-form-inline">
+                                          <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                                          <button @click="submitAccept(selectedRun.run_id, r.id, m.id)" class="btn-accept-confirm">Save</button>
+                                          <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+            </tbody>
+          </template>
         </table>
       </div>
     </div>
@@ -479,8 +541,122 @@
     <div>
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
-        <button @click="loadRuns()" class="btn-secondary btn-sm">↻ Refresh</button>
+        <div class="flex gap-2">
+          <button @click="loadRuns()" class="btn-secondary btn-sm">↻ Refresh</button>
+          <button @click="compareMode = !compareMode; compareResult = null"
+                  :class="compareMode ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
+            ⇄ Compare Runs
+          </button>
+        </div>
       </div>
+
+      <!-- Compare panel -->
+      <template x-if="compareMode">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Compare Two Runs</div>
+          <div class="flex gap-3 mb-3 flex-wrap">
+            <div class="flex-1" style="min-width:200px">
+              <label class="field-label">Run A (baseline)</label>
+              <select x-model="compareRunA" class="field-input field-select">
+                <option value="">— Select —</option>
+                <template x-for="run in runs" :key="run.run_id">
+                  <option :value="run.run_id"
+                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                  </option>
+                </template>
+              </select>
+            </div>
+            <div class="flex-1" style="min-width:200px">
+              <label class="field-label">Run B (target)</label>
+              <select x-model="compareRunB" class="field-input field-select">
+                <option value="">— Select —</option>
+                <template x-for="run in runs" :key="run.run_id">
+                  <option :value="run.run_id"
+                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                  </option>
+                </template>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button @click="loadCompare()"
+                      :disabled="!compareRunA || !compareRunB || compareLoading"
+                      class="btn-primary">
+                <span x-show="!compareLoading">Compare →</span>
+                <span x-show="compareLoading">Loading…</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Compare result -->
+          <template x-if="compareResult">
+            <div>
+              <!-- Summary chips -->
+              <div class="flex gap-2 flex-wrap mb-3">
+                <span class="compare-chip chip-improved">▲ Improved: <strong x-text="compareResult.summary.improved"></strong></span>
+                <span class="compare-chip chip-regressed">▼ Regressed: <strong x-text="compareResult.summary.regressed"></strong></span>
+                <span class="compare-chip chip-unchanged">— Unchanged: <strong x-text="compareResult.summary.unchanged"></strong></span>
+                <template x-if="compareResult.summary.only_in_a > 0">
+                  <span class="compare-chip chip-gray">Only in A: <strong x-text="compareResult.summary.only_in_a"></strong></span>
+                </template>
+                <template x-if="compareResult.summary.only_in_b > 0">
+                  <span class="compare-chip chip-sky">Only in B: <strong x-text="compareResult.summary.only_in_b"></strong></span>
+                </template>
+              </div>
+
+              <!-- Run headers -->
+              <div class="compare-run-headers mb-2">
+                <div class="compare-col-label">Test</div>
+                <div class="compare-col-a">
+                  <span class="font-mono text-xs" x-text="compareResult.run_a.run_id.substring(0,8)+'…'"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_a.status)" x-text="compareResult.run_a.status"></span>
+                </div>
+                <div class="compare-col-b">
+                  <span class="font-mono text-xs" x-text="compareResult.run_b.run_id.substring(0,8)+'…'"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_b.status)" x-text="compareResult.run_b.status"></span>
+                </div>
+                <div class="compare-col-delta">Delta</div>
+              </div>
+
+              <!-- Comparison rows -->
+              <div class="compare-table">
+                <template x-for="t in compareResult.tests" :key="t.test_name">
+                  <div class="compare-row" :class="compareDelta(t).cls.includes('rose') ? 'compare-row-regressed' : compareDelta(t).cls.includes('emerald') ? 'compare-row-improved' : ''">
+                    <div class="compare-col-label font-mono text-xs" x-text="t.test_name"></div>
+                    <div class="compare-col-a">
+                      <template x-if="t.status_a">
+                        <span>
+                          <span class="badge" :class="statusBadgeClass(t.status_a)" x-text="t.status_a"></span>
+                          <span class="text-muted text-xs ml-1" x-text="t.duration_a != null ? t.duration_a.toFixed(2)+'s' : ''"></span>
+                          <template x-if="t.mismatches_a > 0">
+                            <span class="text-rose-500 text-xs ml-1" x-text="t.mismatches_a + ' mm'"></span>
+                          </template>
+                        </span>
+                      </template>
+                      <template x-if="!t.status_a"><span class="text-muted text-xs">—</span></template>
+                    </div>
+                    <div class="compare-col-b">
+                      <template x-if="t.status_b">
+                        <span>
+                          <span class="badge" :class="statusBadgeClass(t.status_b)" x-text="t.status_b"></span>
+                          <span class="text-muted text-xs ml-1" x-text="t.duration_b != null ? t.duration_b.toFixed(2)+'s' : ''"></span>
+                          <template x-if="t.mismatches_b > 0">
+                            <span class="text-rose-500 text-xs ml-1" x-text="t.mismatches_b + ' mm'"></span>
+                          </template>
+                        </span>
+                      </template>
+                      <template x-if="!t.status_b"><span class="text-muted text-xs">—</span></template>
+                    </div>
+                    <div class="compare-col-delta">
+                      <span :class="compareDelta(t).cls" x-text="compareDelta(t).label"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
       <template x-if="runs.length === 0">
         <div class="card empty-state">
           <div class="empty-state-icon">📋</div>
@@ -708,19 +884,145 @@
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run</div>
     <div class="flex gap-3">
-      <select x-model="reportRunId" class="field-input field-select flex-1">
+      <select x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
         </template>
       </select>
-      <button @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load Report</button>
+      <button @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
     </div>
   </div>
 
-  <div class="card p-0 overflow-hidden" x-show="reportRunId && reportLoaded" style="height:70vh">
-    <iframe :src="'/api/runs/' + reportRunId + '/report'" class="w-full h-full border-none"></iframe>
-  </div>
+  <template x-if="reportRunId">
+    <div class="compare-subtabs mb-4">
+      <button @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
+      <button @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
+      <button @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'report'">
+    <div>
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <a :href="'/api/runs/' + reportRunId + '/report'" target="_blank" class="btn-secondary btn-sm">Open Report</a>
+        <a :href="'/api/runs/' + reportRunId + '/metrics'" target="_blank" class="btn-secondary btn-sm">Open Metrics</a>
+        <a :href="'/api/runs/' + reportRunId + '/logs'" target="_blank" class="btn-secondary btn-sm">Open Logs</a>
+      </div>
+      <div class="card p-0 overflow-hidden report-frame-card">
+      <iframe :src="'/api/runs/' + reportRunId + '/report'" class="w-full h-full border-none"></iframe>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'metrics'">
+    <div class="space-y-4">
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <button @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
+          <span x-text="reportMetricsLoading ? 'Refreshing...' : 'Refresh Metrics'"></span>
+        </button>
+        <a :href="'/api/runs/' + reportRunId + '/metrics'" target="_blank" class="btn-secondary btn-sm">Open Themed Metrics</a>
+        <a :href="'/api/runs/' + reportRunId + '/metrics?format=json'" target="_blank" class="btn-secondary btn-sm">Raw JSON</a>
+      </div>
+      <template x-if="reportMetricsLoading">
+        <div class="card empty-state"><div class="empty-state-title">Loading metrics...</div></div>
+      </template>
+      <template x-if="!reportMetricsLoading && reportMetrics">
+        <div>
+          <div class="metric-grid mb-4">
+            <div class="metric-card metric-cyan">
+              <div class="metric-label">Pass Rate</div>
+              <div class="metric-value" x-text="metricsPassRate(reportMetrics) + '%'"></div>
+              <div class="metric-bar"><span :style="'width:' + metricsPassRate(reportMetrics) + '%'"></span></div>
+            </div>
+            <div class="metric-card metric-green"><div class="metric-label">Passed</div><div class="metric-value" x-text="reportMetrics.passed || 0"></div></div>
+            <div class="metric-card metric-rose"><div class="metric-label">Failed</div><div class="metric-value" x-text="reportMetrics.failed || 0"></div></div>
+            <div class="metric-card metric-amber"><div class="metric-label">Slow</div><div class="metric-value" x-text="reportMetrics.slow || 0"></div></div>
+            <div class="metric-card metric-violet"><div class="metric-label">Duration</div><div class="metric-value" x-text="(reportMetrics.total_duration_seconds || 0).toFixed(3) + 's'"></div></div>
+          </div>
+          <div class="card overflow-hidden p-0">
+            <table class="data-table">
+              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th></tr></thead>
+              <tbody>
+                <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
+                  <tr><td colspan="6" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                </template>
+                <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
+                  <tr>
+                    <td class="font-mono text-xs" x-text="t.name"></td>
+                    <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
+                    <td x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
+                    <td x-text="t.source_row_count ?? 0"></td>
+                    <td x-text="t.target_row_count ?? 0"></td>
+                    <td x-text="t.total_issues ?? 0"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+      <template x-if="!reportMetricsLoading && !reportMetrics">
+        <div class="card empty-state"><div class="empty-state-title">Metrics are not available for this run</div></div>
+      </template>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'logs'">
+    <div class="space-y-4">
+      <div class="card">
+        <div class="log-toolbar">
+          <div class="flex-1" style="min-width:240px">
+            <label class="field-label">Search logs</label>
+            <input x-model="reportLogQuery" @keydown.enter.prevent="loadRunLogs()" class="field-input" placeholder="exception, module, run id, message" />
+          </div>
+          <div style="min-width:150px">
+            <label class="field-label">Level</label>
+            <select x-model="reportLogLevel" class="field-input field-select">
+              <option value="">All levels</option>
+              <option value="ERROR">ERROR</option>
+              <option value="WARNING">WARNING</option>
+              <option value="INFO">INFO</option>
+              <option value="DEBUG">DEBUG</option>
+            </select>
+          </div>
+          <div style="width:120px">
+            <label class="field-label">Limit</label>
+            <input x-model.number="reportLogLimit" type="number" min="1" max="5000" class="field-input" />
+          </div>
+          <button @click="loadRunLogs()" :disabled="reportLogsLoading" class="btn-primary">
+            <span x-text="reportLogsLoading ? 'Searching...' : 'Search'"></span>
+          </button>
+          <a :href="'/api/runs/' + reportRunId + '/logs'" target="_blank" class="btn-secondary">Open Log GUI</a>
+        </div>
+      </div>
+      <template x-if="reportLogs">
+        <div class="card p-0 overflow-hidden">
+          <div class="log-summary">
+            <span x-text="reportLogs.matched_lines + ' matches'"></span>
+            <span x-text="reportLogs.total_lines + ' total lines'"></span>
+          </div>
+          <div class="log-list">
+            <template x-if="!reportLogs.lines || reportLogs.lines.length === 0">
+              <div class="empty-state"><div class="empty-state-title">No log lines match the current search</div></div>
+            </template>
+            <template x-for="line in (reportLogs.lines || [])" :key="line.number">
+              <div class="log-entry" :class="logLevelClass(line.level)">
+                <div class="log-entry-meta">
+                  <span class="font-mono" x-text="'#' + line.number"></span>
+                  <span class="badge" x-text="line.level"></span>
+                </div>
+                <pre x-text="line.text"></pre>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+      <template x-if="reportLogsLoading">
+        <div class="card empty-state"><div class="empty-state-title">Searching logs...</div></div>
+      </template>
+    </div>
+  </template>
 
   <template x-if="!reportLoaded && reportRunId">
     <div class="card empty-state">
@@ -733,6 +1035,261 @@
       <div class="empty-state-title">Select a run to view its report</div>
     </div>
   </template>
+</div>
+
+
+<!-- ====================================================================
+     TAB 7 - COMPARE
+     ==================================================================== -->
+<div x-show="currentView === 'compare'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Compare</div>
+      <div class="section-sub">Compare BO reports, paired environment runs, and generated reconciliation reports</div>
+    </div>
+  </div>
+
+  <div class="compare-subtabs mb-4">
+    <button @click="compareSubTab = 'bo'" :class="compareSubTab === 'bo' ? 'sub-tab active' : 'sub-tab'">BO Report</button>
+    <button @click="compareSubTab = 'recon'" :class="compareSubTab === 'recon' ? 'sub-tab active' : 'sub-tab'">Reconciliation</button>
+  </div>
+
+  <div x-show="compareSubTab === 'bo'" class="space-y-4">
+    <div class="compare-source-grid">
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source A</div>
+        <div class="mode-row mb-3">
+          <button @click="boSourceAType = 'live'" :class="boSourceAType === 'live' ? 'pill active' : 'pill'">Live</button>
+          <button @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
+          <button @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+        </div>
+        <input x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" />
+        <template x-if="boSourceAType === 'live'">
+          <div class="space-y-2">
+            <select x-model="boSourceA.configId" @change="loadCompareBODocuments('a')" class="field-input field-select">
+              <option value="">Select config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <select x-model="boSourceA.docId" @change="loadCompareBOReports('a')" class="field-input field-select">
+              <option value="">Select document</option>
+              <template x-for="d in boDocsA" :key="d.id"><option :value="d.id" x-text="d.name"></option></template>
+            </select>
+            <select x-model="boSourceA.reportId" class="field-input field-select">
+              <option value="">Select report</option>
+              <template x-for="r in boReportsA" :key="r.id"><option :value="r.id" x-text="r.name"></option></template>
+            </select>
+          </div>
+        </template>
+        <template x-if="boSourceAType === 'path'">
+          <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" />
+        </template>
+        <template x-if="boSourceAType === 'upload'">
+          <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'a')" class="field-input" />
+        </template>
+      </div>
+
+      <div class="vs-divider">VS</div>
+
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source B</div>
+        <div class="mode-row mb-3">
+          <button @click="boSourceBType = 'live'" :class="boSourceBType === 'live' ? 'pill active' : 'pill'">Live</button>
+          <button @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
+          <button @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+        </div>
+        <input x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" />
+        <template x-if="boSourceBType === 'live'">
+          <div class="space-y-2">
+            <select x-model="boSourceB.configId" @change="loadCompareBODocuments('b')" class="field-input field-select">
+              <option value="">Select config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <select x-model="boSourceB.docId" @change="loadCompareBOReports('b')" class="field-input field-select">
+              <option value="">Select document</option>
+              <template x-for="d in boDocsB" :key="d.id"><option :value="d.id" x-text="d.name"></option></template>
+            </select>
+            <select x-model="boSourceB.reportId" class="field-input field-select">
+              <option value="">Select report</option>
+              <template x-for="r in boReportsB" :key="r.id"><option :value="r.id" x-text="r.name"></option></template>
+            </select>
+          </div>
+        </template>
+        <template x-if="boSourceBType === 'path'">
+          <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" />
+        </template>
+        <template x-if="boSourceBType === 'upload'">
+          <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'b')" class="field-input" />
+        </template>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Key columns</label>
+          <input x-model="boKeyColumns" class="field-input" placeholder="id, account_id" />
+        </div>
+        <div>
+          <label class="field-label">Exclude columns</label>
+          <input x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" />
+        </div>
+      </div>
+      <button @click="runBOComparison()" :disabled="boCompareLoading" class="btn-primary">
+        <span x-show="!boCompareLoading">Run BO Compare</span>
+        <span x-show="boCompareLoading">Comparing...</span>
+      </button>
+    </div>
+
+    <template x-if="boCompareResult">
+      <div class="card">
+        <div class="font-semibold text-slate-700 mb-3">BO Compare Result</div>
+        <div class="flex gap-2 flex-wrap mb-3">
+          <span class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boCompareResult.status"></span>
+          <span class="compare-chip chip-unchanged" x-text="(boCompareResult.total_tests || 0) + ' test stored'"></span>
+          <span class="compare-chip chip-regressed" x-show="(boCompareResult.failed || 0) > 0" x-text="boCompareResult.failed + ' failed'"></span>
+        </div>
+        <template x-if="boCompareResult.results && boCompareResult.results.length">
+          <table class="data-table">
+            <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th></tr></thead>
+            <tbody>
+              <template x-for="r in boCompareResult.results" :key="r.id">
+                <tr>
+                  <td class="font-mono text-xs" x-text="r.query_name"></td>
+                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                  <td x-text="totalMismatches(r)"></td>
+                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '-'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <div x-show="compareSubTab === 'recon'" class="space-y-4">
+    <div class="mode-grid">
+      <button @click="reconMode = 'stored'" :class="reconMode === 'stored' ? 'mode-card active' : 'mode-card'">
+        <h4>Dual Environment</h4>
+        <p>Launch and compare two reconciliation runs.</p>
+      </button>
+      <button @click="reconMode = 'file'" :class="reconMode === 'file' ? 'mode-card active' : 'mode-card'">
+        <h4>Run/File vs Report</h4>
+        <p>Compare stored results or HTML against production HTML.</p>
+      </button>
+    </div>
+
+    <div x-show="reconMode === 'stored'" class="space-y-4">
+      <div class="compare-source-grid">
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Environment A</div>
+          <select x-model="dualEnvConfigA" class="field-input field-select mb-2">
+            <option value="">Select config</option>
+            <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+          </select>
+          <input x-model="dualEnvSourceEnvA" class="field-input mb-2" placeholder="Source env label" />
+          <input x-model="dualEnvTargetEnvA" class="field-input" placeholder="Target env label" />
+        </div>
+        <div class="vs-divider">VS</div>
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Environment B</div>
+          <select x-model="dualEnvConfigB" class="field-input field-select mb-2">
+            <option value="">Select config</option>
+            <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+          </select>
+          <input x-model="dualEnvSourceEnvB" class="field-input mb-2" placeholder="Source env label" />
+          <input x-model="dualEnvTargetEnvB" class="field-input" placeholder="Target env label" />
+        </div>
+      </div>
+      <div class="card">
+        <label class="field-label">Jobs to run</label>
+        <select x-model="dualEnvJobs" multiple class="field-input field-select compare-multi-select mb-3">
+          <template x-for="j in jobs" :key="j.name"><option :value="j.name" x-text="j.name"></option></template>
+        </select>
+        <button @click="launchDualEnv()" :disabled="dualEnvLoading" class="btn-primary">
+          <span x-show="!dualEnvLoading">Launch Dual-Env Run</span>
+          <span x-show="dualEnvLoading">Launching...</span>
+        </button>
+      </div>
+      <template x-if="dualEnvPairId">
+        <div class="card">
+          <div class="font-semibold text-slate-700 mb-2">Pair <span class="font-mono text-xs" x-text="dualEnvPairId"></span></div>
+          <template x-if="dualEnvResult">
+            <div>
+              <div class="flex gap-2 flex-wrap mb-3">
+                <span class="compare-chip chip-improved">Improved: <strong x-text="dualEnvResult.summary.improved"></strong></span>
+                <span class="compare-chip chip-regressed">Regressed: <strong x-text="dualEnvResult.summary.regressed"></strong></span>
+                <span class="compare-chip chip-unchanged">Same: <strong x-text="dualEnvResult.summary.unchanged"></strong></span>
+              </div>
+              <div class="compare-table">
+                <template x-for="t in dualEnvResult.tests" :key="t.test_name">
+                  <div class="compare-row">
+                    <div class="compare-col-label font-mono text-xs" x-text="t.test_name"></div>
+                    <div class="compare-col-a" x-text="t.status_a || '-'"></div>
+                    <div class="compare-col-b" x-text="t.status_b || '-'"></div>
+                    <div class="compare-col-delta"><span :class="compareDelta(t).cls" x-text="compareDelta(t).label"></span></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <template x-if="!dualEnvResult">
+            <div class="text-muted text-sm">Runs are in progress.</div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <div x-show="reconMode === 'file'" class="space-y-4">
+      <div class="compare-source-grid">
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Source A</div>
+          <div class="mode-row mb-3">
+            <button @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
+            <button @click="fileSourceAType = 'file'" :class="fileSourceAType === 'file' ? 'pill active' : 'pill'">HTML File</button>
+          </div>
+          <template x-if="fileSourceAType === 'run'">
+            <select x-model="fileRunId" class="field-input field-select">
+              <option value="">Select run</option>
+              <template x-for="run in runs" :key="run.run_id">
+                <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + ' [' + run.status + ']'"></option>
+              </template>
+            </select>
+          </template>
+          <template x-if="fileSourceAType === 'file'">
+            <div class="space-y-2">
+              <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" />
+              <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+            </div>
+          </template>
+        </div>
+        <div class="vs-divider">VS</div>
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Production Report</div>
+          <div class="space-y-2">
+            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" />
+            <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <button @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
+          <span x-show="!fileCompareLoading">Compare Reports</span>
+          <span x-show="fileCompareLoading">Comparing...</span>
+        </button>
+      </div>
+      <template x-if="fileCompareResult">
+        <div class="card">
+          <div class="font-semibold text-slate-700 mb-3">File Comparison Results</div>
+          <div class="flex gap-2 flex-wrap">
+            <span class="badge" :class="statusBadgeClass(fileCompareResult.status)" x-text="fileCompareResult.status"></span>
+            <span class="compare-chip chip-improved" x-text="(fileCompareResult.passed || 0) + ' matched'"></span>
+            <span class="compare-chip chip-regressed" x-text="(fileCompareResult.failed || 0) + ' differ'"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
 </div>
 
 
@@ -759,7 +1316,7 @@
         </template>
         <div class="space-y-2">
           <template x-for="m in drawer.rows" :key="m.id">
-            <div class="border border-slate-100 rounded-lg p-3 text-sm">
+            <div class="border border-slate-100 rounded-lg p-3 text-sm" :class="m.accepted ? 'diff-accepted' : ''">
               <div class="flex items-center justify-between mb-1">
                 <span class="font-mono font-semibold text-slate-700" x-text="m.column_name || '(row)'"></span>
                 <span class="badge badge-rose" x-text="m.mismatch_type || 'value'"></span>
@@ -777,6 +1334,23 @@
               <template x-if="m.key_values">
                 <div class="mt-1 text-xs text-muted font-mono" x-text="JSON.stringify(m.key_values)"></div>
               </template>
+              <div class="mt-2">
+                <template x-if="m.accepted">
+                  <span class="accepted-badge">Accepted</span>
+                </template>
+                <template x-if="!m.accepted">
+                  <div>
+                    <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
+                    <template x-if="acceptForms[m.id]?.open">
+                      <div class="accept-form-inline">
+                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                        <button @click="submitAccept(drawer.runId, drawer.result.id, m.id)" class="btn-accept-confirm">Save</button>
+                        <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
         </div>

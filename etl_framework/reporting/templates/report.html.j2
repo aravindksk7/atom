@@ -4,40 +4,71 @@
   <meta charset="utf-8">
   <title>ETL Test Report - {{ suite.started_at }}</title>
   <style>
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-      color: #333; 
-      background: #f9fafb; 
-      margin: 0; 
-      padding: 20px; 
+    :root {
+      --bg: #050505;
+      --panel: #0d0f12;
+      --panel-2: #141922;
+      --line: rgba(255,255,255,0.12);
+      --text: #f4f7fb;
+      --soft: #c7d0dc;
+      --muted: #8491a3;
+      --cyan: #22d3ee;
+      --blue: #3b82f6;
+      --violet: #8b5cf6;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
     }
-    .container { 
-      max-width: 1200px; 
-      margin: 0 auto; 
-      background: #fff; 
-      padding: 30px; 
-      border-radius: 8px; 
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+    * { box-sizing: border-box; }
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(34,211,238,0.12), transparent 28rem),
+        radial-gradient(circle at 82% 4%, rgba(232,121,249,0.11), transparent 26rem),
+        linear-gradient(180deg, #050505, #080a0d 48%, #050505);
+      margin: 0;
+      padding: 28px;
     }
-    h1, h2, h3 { color: #111; }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: linear-gradient(180deg, rgba(18,22,27,0.98), rgba(10,12,15,0.98));
+      padding: 28px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+    }
+    h1, h2, h3 { color: var(--text); letter-spacing: 0; }
+    h1 {
+      margin-top: 0;
+      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    p { color: var(--soft); }
+    hr { border: none; height: 1px; background: var(--line); margin: 18px 0; }
     .badge { 
-      display: inline-block; 
+      display: inline-flex;
+      align-items: center;
       padding: 0.35em 0.65em; 
       font-size: 75%; 
       font-weight: 700; 
-      border-radius: 0.25rem; 
+      border-radius: 999px;
+      border: 1px solid currentColor;
     }
-    .badge-pass  { background-color: #28a745; color: white; }
-    .badge-fail  { background-color: #dc3545; color: white; }
-    .badge-amber { background-color: #ffc107; color: black; }
-    .badge-gray  { background-color: #6c757d; color: white; }
+    .badge-pass  { background: rgba(52,211,153,0.16); color: #86efac; }
+    .badge-fail  { background: rgba(251,113,133,0.16); color: #fda4af; }
+    .badge-amber { background: rgba(251,191,36,0.16); color: #fcd34d; }
+    .badge-gray  { background: rgba(148,163,184,0.14); color: #cbd5e1; }
     
     .warning-banner { 
-      background-color: #fff3cd; 
-      color: #856404; 
-      border-left: 4px solid #ffeeba; 
+      background: rgba(251,191,36,0.12);
+      color: #fcd34d;
+      border-left: 4px solid var(--amber);
       padding: 12px; 
-      margin-top: -1px; /* Pull up to touch the row above */
+      margin-top: -1px;
       font-size: 0.9em; 
     }
     
@@ -48,30 +79,45 @@
       font-size: 0.9em; 
     }
     th, td { 
-      border: 1px solid #dee2e6; 
+      border: 1px solid rgba(255,255,255,0.08);
       padding: 10px; 
       text-align: left; 
     }
-    th { background-color: #f8f9fa; font-weight: 600; }
+    th {
+      background: rgba(255,255,255,0.055);
+      color: var(--muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.78em;
+    }
+    td { color: var(--soft); }
+    tr:hover td { background: rgba(34,211,238,0.055); }
     
     details {
       margin-bottom: 15px;
-      border: 1px solid #dee2e6;
-      padding: 10px;
-      border-radius: 4px;
-      background-color: #fafafa;
+      border: 1px solid var(--line);
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
     }
     summary {
       font-weight: bold;
       cursor: pointer;
       outline: none;
       padding: 5px 0;
+      color: var(--text);
     }
     .accepted-note {
-      background: #d4edda;
-      color: #155724;
+      background: rgba(52,211,153,0.16);
+      color: #86efac;
       font-size: 0.85em;
       padding: 4px 10px;
+    }
+    @media (max-width: 760px) {
+      body { padding: 16px; }
+      .container { padding: 18px; }
+      table { display: block; overflow-x: auto; }
     }
   </style>
 </head>
@@ -103,8 +149,8 @@
       <h2>Summary</h2>
       <p>
         <strong>Total Tests:</strong> {{ suite.test_cases | length }} &nbsp;|&nbsp;
-        <strong>Passed:</strong> <span style="color: green; font-weight: bold;">{{ suite.total_passed }}</span> &nbsp;|&nbsp;
-        <strong>Failed/Error:</strong> <span style="color: red; font-weight: bold;">{{ suite.total_failed }}</span> &nbsp;|&nbsp;
+        <strong>Passed:</strong> <span style="color: #86efac; font-weight: bold;">{{ suite.total_passed }}</span> &nbsp;|&nbsp;
+        <strong>Failed/Error:</strong> <span style="color: #fda4af; font-weight: bold;">{{ suite.total_failed }}</span> &nbsp;|&nbsp;
         <strong>Skipped:</strong> {{ suite.total_skipped }}
       </p>
     </div>
@@ -130,7 +176,7 @@
             <td>{{ "%.2f"|format(result.duration_seconds) if result.duration_seconds else "N/A" }}s</td>
             <td>{{ result.source_row_count }}</td>
             <td>{{ result.target_row_count }}</td>
-            <td style="{% if result.total_issues > 0 %}color: red; font-weight: bold;{% endif %}">{{ result.total_issues }}</td>
+            <td style="{% if result.total_issues > 0 %}color: #fda4af; font-weight: bold;{% endif %}">{{ result.total_issues }}</td>
           </tr>
           {% if result.schema_diff %}
           <tr>
@@ -175,11 +221,11 @@
                   <td><span class="badge badge-gray">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
                   <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values }}</td>
-                  <td style="color: #d97706;">{{ mm.source_value }}</td>
-                  <td style="color: #2563eb;">{{ mm.target_value }}</td>
+                  <td style="color: #fda4af;">{{ mm.source_value }}</td>
+                  <td style="color: #86efac;">{{ mm.target_value }}</td>
                 </tr>
                 {% if mm.accepted %}
-                <tr style="background: #d4edda;">
+                <tr style="background: rgba(52,211,153,0.12);">
                   <td colspan="5" class="accepted-note">
                     ✓ Accepted{% if mm.accepted_by %} by {{ mm.accepted_by }}{% endif %}{% if mm.accepted_at %} on {{ mm.accepted_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% if mm.accepted_note %} — {{ mm.accepted_note }}{% endif %}
                   </td>

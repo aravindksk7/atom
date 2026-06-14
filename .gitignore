@@ -1,0 +1,32 @@
+# Added by code-review-graph
+.code-review-graph/
+
+# Local AI/editor/tooling state
+.claude/
+.claude-flow/
+.cursor/
+.kiro/
+.superpower/
+.superpowers/
+.cursorrules
+.windsurfrules
+.mcp.json
+.opencode.json
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# Generated/runtime artifacts
+logs/
+reports/
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.py[cod]
+
+# Local-only validation and planning material
+tests/
+docs/
+test_*.py
+upgrade.md

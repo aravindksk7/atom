@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -37,6 +38,37 @@ def _status_out(r) -> RunStatusOut:
         run_type=r.run_type,
         pair_id=r.pair_id,
     )
+
+
+def _snapshot_for_config(
+    cfg: SavedConfig,
+    source_env: str,
+    target_env: str,
+    job_names: list[str],
+    run_settings,
+) -> dict[str, Any]:
+    config_data = dict(cfg.config_json or {})
+    snapshot: dict[str, Any] = {
+        "config_id": cfg.id,
+        "config_name": cfg.name,
+        "env_name": cfg.env_name,
+        "config_data": config_data,
+        "job_sequence": list(job_names),
+        "run_settings": run_settings.model_dump(),
+    }
+    if "source_credentials" in config_data or "target_credentials" in config_data:
+        if "source_credentials" in config_data:
+            snapshot["source_credentials"] = config_data["source_credentials"]
+        if "target_credentials" in config_data:
+            snapshot["target_credentials"] = config_data["target_credentials"]
+    else:
+        snapshot["source_credentials"] = {"name": source_env, **config_data}
+        snapshot["target_credentials"] = {"name": target_env, **config_data}
+    if "bo_credentials" in config_data:
+        snapshot["bo_credentials"] = config_data["bo_credentials"]
+    if "automic_credentials" in config_data:
+        snapshot["automic_credentials"] = config_data["automic_credentials"]
+    return snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -74,10 +106,20 @@ def _run_recon_file_bg(req: ReconFileCompareRequest, run_id: str) -> None:
 def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest) -> None:
     from etl_framework.repository.database import SessionLocal
 
-    def _run_single(run_id: str, source_env: str, target_env: str) -> None:
+    def _run_single(run_id: str, source_env: str, target_env: str, config_id: int) -> None:
         db = SessionLocal()
         try:
             from api.services.run_executor import RunExecutor
+            cfg = db.get(SavedConfig, config_id)
+            if cfg is None:
+                raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
+            config_snapshot = _snapshot_for_config(
+                cfg,
+                source_env=source_env,
+                target_env=target_env,
+                job_names=req.job_names,
+                run_settings=req.run_settings,
+            )
             RunExecutor(
                 db=db,
                 run_id=run_id,
@@ -85,7 +127,7 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
                 target_env=target_env,
                 job_sequence=req.job_names,
                 run_settings=req.run_settings,
-                config_snapshot={"job_sequence": req.job_names},
+                config_snapshot=config_snapshot,
             ).execute()
         except ImportError:
             logger.warning(
@@ -97,8 +139,8 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
             db.close()
 
     with ThreadPoolExecutor(max_workers=2) as ex:
-        fa = ex.submit(_run_single, run_id_a, req.source_env_a, req.target_env_a)
-        fb = ex.submit(_run_single, run_id_b, req.source_env_b, req.target_env_b)
+        fa = ex.submit(_run_single, run_id_a, req.source_env_a, req.target_env_a, req.config_id_a)
+        fb = ex.submit(_run_single, run_id_b, req.source_env_b, req.target_env_b, req.config_id_b)
         for f in (fa, fb):
             try:
                 f.result()
@@ -136,9 +178,11 @@ def launch_dual_env(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> DualEnvLaunchOut:
-    if db.get(SavedConfig, body.config_id_a) is None:
+    cfg_a = db.get(SavedConfig, body.config_id_a)
+    if cfg_a is None:
         raise HTTPException(status_code=404, detail="Config A not found")
-    if db.get(SavedConfig, body.config_id_b) is None:
+    cfg_b = db.get(SavedConfig, body.config_id_b)
+    if cfg_b is None:
         raise HTTPException(status_code=404, detail="Config B not found")
 
     repo = RunRepository(db)
@@ -150,6 +194,13 @@ def launch_dual_env(
         run_id=run_id_a,
         source_env=body.source_env_a,
         target_env=body.target_env_a,
+        config_snapshot=_snapshot_for_config(
+            cfg_a,
+            source_env=body.source_env_a,
+            target_env=body.target_env_a,
+            job_names=body.job_names,
+            run_settings=body.run_settings,
+        ),
         run_type="dual_env",
         pair_id=pair_id,
     )
@@ -157,6 +208,13 @@ def launch_dual_env(
         run_id=run_id_b,
         source_env=body.source_env_b,
         target_env=body.target_env_b,
+        config_snapshot=_snapshot_for_config(
+            cfg_b,
+            source_env=body.source_env_b,
+            target_env=body.target_env_b,
+            job_names=body.job_names,
+            run_settings=body.run_settings,
+        ),
         run_type="dual_env",
         pair_id=pair_id,
     )

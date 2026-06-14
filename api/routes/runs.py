@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -27,8 +28,73 @@ from api.schemas import (
 from api.services.run_executor import RunExecutor
 from etl_framework.repository.repository import RunRepository
 from api.services.artifact_service import ArtifactService
+from api.services.artifact_views import render_logs_html, render_metrics_html
 
 router = APIRouter(tags=["runs"])
+
+
+_TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED"}
+
+
+def _wants_html(request: Request, fmt: str | None) -> bool:
+    if fmt:
+        return fmt.lower() == "html"
+    user_agent = request.headers.get("user-agent", "").lower()
+    if "testclient" in user_agent:
+        return False
+    return "text/html" in request.headers.get("accept", "").lower()
+
+
+def _detect_log_level(line: str) -> str:
+    for level in ("ERROR", "WARNING", "WARN", "INFO", "DEBUG"):
+        if f"| {level}" in line or line.startswith(level) or f" {level} " in line:
+            return level
+    return ""
+
+
+def _parse_log_events(text: str) -> list[dict]:
+    events: list[dict] = []
+    current: dict | None = None
+    for idx, line in enumerate(text.splitlines(), start=1):
+        detected = _detect_log_level(line)
+        starts_event = bool(detected or re.match(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", line))
+        if starts_event:
+            if current is not None:
+                current["text"] = "\n".join(current.pop("lines"))
+                events.append(current)
+            current = {"number": idx, "level": detected or "TRACE", "lines": [line]}
+        elif current is not None:
+            current["lines"].append(line)
+        else:
+            current = {"number": idx, "level": "TRACE", "lines": [line]}
+    if current is not None:
+        current["text"] = "\n".join(current.pop("lines"))
+        events.append(current)
+    return events
+
+
+def _filter_log_events(
+    text: str,
+    run_id: str = "",
+    query: str = "",
+    level: str = "",
+    limit: int = 500,
+) -> list[dict]:
+    query_l = query.lower().strip()
+    level_u = level.upper().strip()
+    run_l = run_id.lower().strip()
+    matches: list[dict] = []
+    for event in _parse_log_events(text):
+        body_l = event["text"].lower()
+        detected = event["level"]
+        if run_l and run_l not in body_l:
+            continue
+        if query_l and query_l not in body_l:
+            continue
+        if level_u and detected != level_u and not (level_u == "WARN" and detected == "WARNING"):
+            continue
+        matches.append(event)
+    return matches[-max(1, min(limit, 5000)):]
 
 
 def _execute_run(
@@ -174,23 +240,76 @@ def list_run_artifacts(run_id: str, db: Session = Depends(get_session)):
 
 
 @router.get("/{run_id}/metrics")
-def get_run_metrics(run_id: str, db: Session = Depends(get_session)):
+def get_run_metrics(
+    run_id: str,
+    request: Request,
+    format: str | None = None,
+    db: Session = Depends(get_session),
+):
     if RunRepository(db).get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     metrics_path = Path("logs") / f"metrics_{run_id}.json"
     if not metrics_path.exists():
         raise HTTPException(status_code=404, detail="Metrics not found")
-    return json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    if _wants_html(request, format):
+        return HTMLResponse(render_metrics_html(metrics))
+    return metrics
 
 
-@router.get("/{run_id}/logs", response_class=PlainTextResponse)
-def get_run_logs(run_id: str, db: Session = Depends(get_session)):
+@router.get("/{run_id}/logs")
+def get_run_logs(
+    run_id: str,
+    request: Request,
+    q: str = "",
+    level: str = "",
+    limit: int = 500,
+    scope: str = "run",
+    format: str | None = None,
+    db: Session = Depends(get_session),
+):
     if RunRepository(db).get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     log_path = Path("logs") / "etl_framework.log"
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log not found")
-    return log_path.read_text(encoding="utf-8")
+    text = log_path.read_text(encoding="utf-8")
+    scope_l = scope.lower().strip() or "run"
+    if scope_l not in {"run", "all"}:
+        raise HTTPException(status_code=400, detail="scope must be 'run' or 'all'")
+    total_events = len(_parse_log_events(text))
+    lines = _filter_log_events(
+        text,
+        run_id=run_id if scope_l == "run" else "",
+        query=q,
+        level=level,
+        limit=limit,
+    )
+    fmt = (format or "").lower()
+    if fmt == "json":
+        return {
+            "run_id": run_id,
+            "query": q,
+            "level": level,
+            "scope": scope_l,
+            "total_lines": len(text.splitlines()),
+            "total_events": total_events,
+            "matched_lines": len(lines),
+            "lines": lines,
+        }
+    if _wants_html(request, format):
+        return HTMLResponse(render_logs_html(
+            run_id=run_id,
+            lines=lines,
+            query=q,
+            level=level.upper().strip(),
+            total_lines=len(text.splitlines()),
+            total_events=total_events,
+            scope=scope_l,
+        ))
+    if q or level or scope_l == "run":
+        return PlainTextResponse("\n".join(row["text"] for row in lines))
+    return PlainTextResponse(text)
 
 
 @router.get("/{run_id}/report", response_class=FileResponse)
@@ -259,11 +378,14 @@ def accept_mismatch(
     body: MismatchAcceptRequest,
     db: Session = Depends(get_session),
 ):
-    from etl_framework.repository.models import MismatchDetail
+    from etl_framework.repository.models import MismatchDetail, TestResult
 
     repo = RunRepository(db)
     if repo.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    tr = db.get(TestResult, result_id)
+    if tr is None or tr.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Result not found")
     md = db.get(MismatchDetail, mismatch_id)
     if md is None or md.test_result_id != result_id:
         raise HTTPException(status_code=404, detail="Mismatch not found")

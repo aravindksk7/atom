@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import base64
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -74,8 +75,15 @@ class CompareService:
             )
             raise
 
-    def _load_bo_source(self, src, doc_id, report_id):
+    def _load_bo_source(self, src, fallback_doc_id: str | None, fallback_report_id: str | None):
         if src.source_type == "live":
+            doc_id = src.doc_id or fallback_doc_id
+            report_id = src.report_id or fallback_report_id
+            if not doc_id or not report_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail="doc_id and report_id are required for live BO sources",
+                )
             cfg = self._config_repo.get(src.config_id)
             if cfg is None:
                 raise HTTPException(status_code=404, detail="Config not found")
@@ -84,7 +92,11 @@ class CompareService:
             from etl_framework.sap_bo.client import BORestClient
             client = BORestClient(env)
             try:
-                return client.fetch_report_data(doc_id or report_id or "")
+                raw = client.download_report(doc_id, report_id, src.format)
+                return read_tabular(
+                    content_b64=base64.b64encode(raw).decode("ascii"),
+                    file_name=f"bo_report_{doc_id}_{report_id}.{src.format}",
+                )
             finally:
                 client.logout()
         return read_tabular(

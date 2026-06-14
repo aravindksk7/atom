@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import contextvars
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -20,10 +21,11 @@ class TestRunner:
             return []
         results: list[TestCaseState] = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {
-                executor.submit(self._run_single, name, fn): name
-                for name, fn in cases
-            }
+            futures = {}
+            for name, fn in cases:
+                ctx = contextvars.copy_context()
+                futures[executor.submit(ctx.run, self._run_single, name, fn)] = name
+                
             for future in as_completed(futures):
                 case_name = futures[future]
                 try:

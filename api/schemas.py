@@ -291,6 +291,9 @@ class RunCompareOut(BaseModel):
 class SourceConfig(BaseModel):
     source_type: Literal["live", "path", "upload"]
     config_id: int | None = None
+    doc_id: str | None = None
+    report_id: str | None = None
+    format: Literal["csv", "xlsx", "xls"] = "xlsx"
     file_path: str | None = None
     file_content_b64: str | None = None
     file_name: str | None = None

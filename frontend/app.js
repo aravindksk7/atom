@@ -42,6 +42,7 @@ function app() {
       { id: 'history',  label: '📋 History' },
       { id: 'adapters', label: '🔌 Adapters' },
       { id: 'reports',  label: '📊 Reports' },
+      { id: 'compare',  label: '\u21c4 Compare' },
     ],
     apiOk: false,
 
@@ -119,6 +120,14 @@ function app() {
     // -----------------------------------------------------------
     reportRunId: '',
     reportLoaded: false,
+    reportView: 'report',
+    reportMetrics: null,
+    reportMetricsLoading: false,
+    reportLogs: null,
+    reportLogsLoading: false,
+    reportLogQuery: '',
+    reportLogLevel: '',
+    reportLogLimit: 500,
 
     // -----------------------------------------------------------
     // Mismatch drawer
@@ -131,6 +140,65 @@ function app() {
       rows: [],
       offset: 0,
     },
+
+    // -----------------------------------------------------------
+    // Inline mismatch expand (History detail)
+    // -----------------------------------------------------------
+    expandedMismatches: {},   // result_id → rows[]
+    expandingMismatch: {},    // result_id → bool
+
+    // -----------------------------------------------------------
+    // Compare runs
+    // -----------------------------------------------------------
+    compareMode: false,
+    compareRunA: '',
+    compareRunB: '',
+    compareLoading: false,
+    compareResult: null,
+
+    // -----------------------------------------------------------
+    // Compare tab
+    // -----------------------------------------------------------
+    compareSubTab: 'bo',
+    reconMode: 'stored',
+
+    boSourceAType: 'live',
+    boSourceBType: 'upload',
+    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A' },
+    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B' },
+    boDocsA: [],
+    boDocsB: [],
+    boReportsA: [],
+    boReportsB: [],
+    boKeyColumns: '',
+    boExcludeColumns: '',
+    boCompareLoading: false,
+    boCompareRunId: null,
+    boCompareResult: null,
+    boComparePollInterval: null,
+
+    dualEnvConfigA: '',
+    dualEnvConfigB: '',
+    dualEnvSourceEnvA: '',
+    dualEnvTargetEnvA: '',
+    dualEnvSourceEnvB: '',
+    dualEnvTargetEnvB: '',
+    dualEnvJobs: [],
+    dualEnvLoading: false,
+    dualEnvPairId: null,
+    dualEnvPollInterval: null,
+    dualEnvResult: null,
+
+    fileSourceAType: 'run',
+    fileRunId: '',
+    filePathA: '',
+    fileB64A: '',
+    filePathB: '',
+    fileB64B: '',
+    fileCompareLoading: false,
+    fileCompareResult: null,
+
+    acceptForms: {},
 
     // -----------------------------------------------------------
     // Toast
@@ -394,13 +462,23 @@ function app() {
           labels: ['Passed', 'Failed', 'Slow', 'Error'],
           datasets: [{
             data: [r.passed || 0, r.failed || 0, r.slow || 0, r.error || 0],
-            backgroundColor: ['#10b981', '#f43f5e', '#f59e0b', '#6366f1'],
-            borderWidth: 0,
+            backgroundColor: ['#34d399', '#fb7185', '#fbbf24', '#38bdf8'],
+            borderColor: '#0d0f12',
+            borderWidth: 2,
           }],
         },
         options: {
           cutout: '72%',
-          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                boxWidth: 10,
+                color: '#c7d0dc',
+                font: { size: 11 },
+              },
+            },
+          },
         },
       });
     },
@@ -429,6 +507,319 @@ function app() {
       this.drawer.offset += 100;
       this.drawer.loading = true;
       await this._fetchMismatches();
+    },
+
+    // ===========================================================
+    // INLINE MISMATCH EXPAND
+    // ===========================================================
+    async toggleMismatchExpand(runId, result) {
+      if (this.expandedMismatches[result.id] !== undefined) {
+        const copy = { ...this.expandedMismatches };
+        delete copy[result.id];
+        this.expandedMismatches = copy;
+        return;
+      }
+      this.expandingMismatch = { ...this.expandingMismatch, [result.id]: true };
+      try {
+        const rows = await api('GET',
+          `/api/runs/${runId}/results/${result.id}/mismatches?limit=50&offset=0`);
+        this.expandedMismatches = { ...this.expandedMismatches, [result.id]: rows };
+      } catch (e) {
+        this.toast('error', 'Load mismatches failed', e.message);
+      } finally {
+        const copy = { ...this.expandingMismatch };
+        delete copy[result.id];
+        this.expandingMismatch = copy;
+      }
+    },
+
+    // ===========================================================
+    // COMPARE RUNS
+    // ===========================================================
+    async loadCompare() {
+      if (!this.compareRunA || !this.compareRunB) return;
+      if (this.compareRunA === this.compareRunB) {
+        this.toast('warn', 'Same run', 'Select two different runs to compare');
+        return;
+      }
+      this.compareLoading = true;
+      this.compareResult = null;
+      try {
+        this.compareResult = await api('GET',
+          `/api/runs/compare?run_a=${this.compareRunA}&run_b=${this.compareRunB}`);
+      } catch (e) {
+        this.toast('error', 'Compare failed', e.message);
+      } finally {
+        this.compareLoading = false;
+      }
+    },
+
+    compareDelta(test) {
+      const a = test.status_a, b = test.status_b;
+      if (!a) return { label: 'New in B', cls: 'badge-sky' };
+      if (!b) return { label: 'Removed', cls: 'badge-gray' };
+      if (a === 'PASSED' && b !== 'PASSED') return { label: '▼ Regressed', cls: 'badge-rose' };
+      if (a !== 'PASSED' && b === 'PASSED') return { label: '▲ Improved', cls: 'badge-green' };
+      if (a === b) return { label: '— Same', cls: 'badge-gray' };
+      return { label: '~ Changed', cls: 'badge-amber' };
+    },
+
+    // ===========================================================
+    // COMPARE TAB
+    // ===========================================================
+    _isTerminalStatus(status) {
+      return ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED'].includes(status);
+    },
+
+    async loadCompareBODocuments(side) {
+      const src = side === 'a' ? this.boSourceA : this.boSourceB;
+      if (!src.configId) return;
+      try {
+        const docs = await api('GET', `/api/adapters/sap-bo/documents?config_id=${src.configId}`);
+        if (side === 'a') {
+          this.boDocsA = docs;
+          this.boReportsA = [];
+        } else {
+          this.boDocsB = docs;
+          this.boReportsB = [];
+        }
+      } catch (e) {
+        this.toast('error', 'Load documents failed', e.message);
+      }
+    },
+
+    async loadCompareBOReports(side) {
+      const src = side === 'a' ? this.boSourceA : this.boSourceB;
+      if (!src.configId || !src.docId) return;
+      try {
+        const reports = await api('GET',
+          `/api/adapters/sap-bo/documents/${encodeURIComponent(src.docId)}/reports?config_id=${src.configId}`);
+        if (side === 'a') this.boReportsA = reports;
+        else this.boReportsB = reports;
+      } catch (e) {
+        this.toast('error', 'Load reports failed', e.message);
+      }
+    },
+
+    handleBOFileUpload(event, side) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const bytes = new Uint8Array(e.target.result);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        const src = side === 'a' ? this.boSourceA : this.boSourceB;
+        src.fileB64 = btoa(binary);
+        src.fileName = file.name;
+      };
+      reader.readAsArrayBuffer(file);
+    },
+
+    handleReconFileUpload(event, side) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const b64 = btoa(unescape(encodeURIComponent(e.target.result || '')));
+        if (side === 'a') this.fileB64A = b64;
+        else this.fileB64B = b64;
+      };
+      reader.readAsText(file);
+    },
+
+    _buildBOSource(type, src) {
+      if (type === 'live') {
+        return {
+          source_type: 'live',
+          config_id: Number(src.configId),
+          doc_id: src.docId || null,
+          report_id: src.reportId || null,
+          format: 'xlsx',
+        };
+      }
+      if (type === 'path') return { source_type: 'path', file_path: src.filePath };
+      return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
+    },
+
+    async runBOComparison() {
+      this.boCompareLoading = true;
+      this.boCompareResult = null;
+      if (this.boComparePollInterval) clearInterval(this.boComparePollInterval);
+      try {
+        const payload = {
+          source_a: this._buildBOSource(this.boSourceAType, this.boSourceA),
+          source_b: this._buildBOSource(this.boSourceBType, this.boSourceB),
+          key_columns: this.boKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
+          exclude_columns: this.boExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
+          label_a: this.boSourceA.label || 'Source A',
+          label_b: this.boSourceB.label || 'Source B',
+        };
+        const run = await api('POST', '/api/compare/bo-report', payload);
+        this.boCompareRunId = run.run_id;
+        this.boComparePollInterval = setInterval(() => this._pollBOCompare(), 3000);
+        await this._pollBOCompare();
+        await this.loadRuns();
+      } catch (e) {
+        this.toast('error', 'BO comparison failed', e.message);
+        this.boCompareLoading = false;
+      }
+    },
+
+    async _pollBOCompare() {
+      if (!this.boCompareRunId) return;
+      try {
+        const status = await api('GET', `/api/runs/${this.boCompareRunId}/status`);
+        if (this._isTerminalStatus(status.status)) {
+          clearInterval(this.boComparePollInterval);
+          this.boComparePollInterval = null;
+          this.boCompareResult = await api('GET', `/api/runs/${this.boCompareRunId}`);
+          this.boCompareLoading = false;
+          await this.loadRuns();
+        }
+      } catch (e) {
+        clearInterval(this.boComparePollInterval);
+        this.boComparePollInterval = null;
+        this.boCompareLoading = false;
+      }
+    },
+
+    async launchDualEnv() {
+      if (!this.dualEnvConfigA || !this.dualEnvConfigB) {
+        this.toast('warn', 'Missing config', 'Select configs for both environments');
+        return;
+      }
+      this.dualEnvLoading = true;
+      this.dualEnvResult = null;
+      this.dualEnvPairId = null;
+      if (this.dualEnvPollInterval) clearInterval(this.dualEnvPollInterval);
+      try {
+        const payload = {
+          config_id_a: Number(this.dualEnvConfigA),
+          config_id_b: Number(this.dualEnvConfigB),
+          source_env_a: this.dualEnvSourceEnvA,
+          target_env_a: this.dualEnvTargetEnvA,
+          source_env_b: this.dualEnvSourceEnvB,
+          target_env_b: this.dualEnvTargetEnvB,
+          job_names: this.dualEnvJobs,
+        };
+        const launch = await api('POST', '/api/compare/dual-env', payload);
+        this.dualEnvPairId = launch.pair_id;
+        this.dualEnvPollInterval = setInterval(
+          () => this._pollDualEnv(launch.run_id_a, launch.run_id_b),
+          3000
+        );
+        await this._pollDualEnv(launch.run_id_a, launch.run_id_b);
+        await this.loadRuns();
+      } catch (e) {
+        this.toast('error', 'Launch failed', e.message);
+        this.dualEnvLoading = false;
+      }
+    },
+
+    async _pollDualEnv(runIdA, runIdB) {
+      if (!this.dualEnvPairId) return;
+      try {
+        const pair = await api('GET', `/api/compare/pairs/${this.dualEnvPairId}`);
+        if (this._isTerminalStatus(pair.run_a.status) && this._isTerminalStatus(pair.run_b.status)) {
+          clearInterval(this.dualEnvPollInterval);
+          this.dualEnvPollInterval = null;
+          this.dualEnvResult = await api('GET', `/api/runs/compare?run_a=${runIdA}&run_b=${runIdB}`);
+          this.dualEnvLoading = false;
+          await this.loadRuns();
+        }
+      } catch (e) {
+        clearInterval(this.dualEnvPollInterval);
+        this.dualEnvPollInterval = null;
+        this.dualEnvLoading = false;
+      }
+    },
+
+    async runFileCompare() {
+      this.fileCompareLoading = true;
+      this.fileCompareResult = null;
+      try {
+        const payload = {
+          label_a: 'Source A',
+          label_b: 'Production Report',
+          file_b_path: this.filePathB || null,
+          file_b_content_b64: this.fileB64B || null,
+        };
+        if (this.fileSourceAType === 'run') {
+          payload.stored_run_id = this.fileRunId;
+        } else {
+          payload.file_a_path = this.filePathA || null;
+          payload.file_a_content_b64 = this.fileB64A || null;
+        }
+        const run = await api('POST', '/api/compare/recon-file', payload);
+        const poll = setInterval(async () => {
+          try {
+            const st = await api('GET', `/api/runs/${run.run_id}/status`);
+            if (this._isTerminalStatus(st.status)) {
+              clearInterval(poll);
+              this.fileCompareResult = await api('GET', `/api/runs/${run.run_id}`);
+              this.fileCompareLoading = false;
+              await this.loadRuns();
+            }
+          } catch (e) {
+            clearInterval(poll);
+            this.fileCompareLoading = false;
+          }
+        }, 3000);
+      } catch (e) {
+        this.toast('error', 'File compare failed', e.message);
+        this.fileCompareLoading = false;
+      }
+    },
+
+    toggleAcceptForm(mismatchId) {
+      if (this.acceptForms[mismatchId]?.open) {
+        const copy = { ...this.acceptForms };
+        delete copy[mismatchId];
+        this.acceptForms = copy;
+        return;
+      }
+      this.acceptForms = { ...this.acceptForms, [mismatchId]: { open: true, note: '' } };
+    },
+
+    async submitAccept(runId, resultId, mismatchId) {
+      const form = this.acceptForms[mismatchId];
+      if (!form || !form.note) return;
+      try {
+        const result = await api('PATCH',
+          `/api/runs/${runId}/results/${resultId}/mismatches/${mismatchId}/accept`,
+          { note: form.note });
+
+        const patchRow = (m) => m.id === mismatchId
+          ? { ...m, accepted: result.accepted, accepted_note: result.accepted_note, accepted_at: result.accepted_at, accepted_by: result.accepted_by }
+          : m;
+        if (this.expandedMismatches[resultId]) {
+          this.expandedMismatches = {
+            ...this.expandedMismatches,
+            [resultId]: this.expandedMismatches[resultId].map(patchRow),
+          };
+        }
+        if (this.drawer.result && this.drawer.result.id === resultId) {
+          this.drawer.rows = this.drawer.rows.map(patchRow);
+        }
+
+        const copy = { ...this.acceptForms };
+        delete copy[mismatchId];
+        this.acceptForms = copy;
+        if (result.result_status_updated) {
+          this.toast('success', 'Test passed', 'All mismatches accepted');
+          if (this.selectedRun && this.selectedRun.run_id === runId) {
+            await this.viewRunDetail(runId);
+          }
+          await this.loadRuns();
+        } else {
+          this.toast('success', 'Accepted', 'Mismatch accepted');
+        }
+      } catch (e) {
+        this.toast('error', 'Accept failed', e.message);
+      }
     },
 
     // ===========================================================
@@ -573,9 +964,70 @@ function app() {
     // ===========================================================
     // REPORTS TAB
     // ===========================================================
+    resetReportArtifacts() {
+      this.reportLoaded = false;
+      this.reportMetrics = null;
+      this.reportLogs = null;
+    },
+
+    async switchReportView(view) {
+      this.reportView = view;
+      if (!this.reportRunId || !this.reportLoaded) return;
+      if (view === 'metrics') await this.loadRunMetrics();
+      if (view === 'logs') await this.loadRunLogs();
+    },
+
     loadReport() {
       if (!this.reportRunId) return;
       this.reportLoaded = true;
+      if (this.reportView === 'metrics') this.loadRunMetrics();
+      if (this.reportView === 'logs') this.loadRunLogs();
+    },
+
+    async loadRunMetrics() {
+      if (!this.reportRunId) return;
+      this.reportMetricsLoading = true;
+      try {
+        this.reportMetrics = await api('GET', `/api/runs/${this.reportRunId}/metrics?format=json`);
+      } catch (e) {
+        this.reportMetrics = null;
+        this.toast('error', 'Metrics unavailable', e.message);
+      } finally {
+        this.reportMetricsLoading = false;
+      }
+    },
+
+    async loadRunLogs() {
+      if (!this.reportRunId) return;
+      this.reportLogsLoading = true;
+      const params = new URLSearchParams({
+        format: 'json',
+        limit: String(this.reportLogLimit || 500),
+      });
+      if (this.reportLogQuery) params.set('q', this.reportLogQuery);
+      if (this.reportLogLevel) params.set('level', this.reportLogLevel);
+      try {
+        this.reportLogs = await api('GET', `/api/runs/${this.reportRunId}/logs?${params.toString()}`);
+      } catch (e) {
+        this.reportLogs = null;
+        this.toast('error', 'Logs unavailable', e.message);
+      } finally {
+        this.reportLogsLoading = false;
+      }
+    },
+
+    metricsPassRate(metrics) {
+      const total = metrics?.total_tests || 0;
+      return total ? Math.round(((metrics.passed || 0) / total) * 1000) / 10 : 0;
+    },
+
+    logLevelClass(level) {
+      const value = (level || '').toUpperCase();
+      if (value === 'ERROR') return 'log-level-error';
+      if (value === 'WARNING' || value === 'WARN') return 'log-level-warn';
+      if (value === 'INFO') return 'log-level-info';
+      if (value === 'DEBUG') return 'log-level-debug';
+      return 'log-level-trace';
     },
 
     // ===========================================================
