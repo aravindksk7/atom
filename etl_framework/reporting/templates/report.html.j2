@@ -2,98 +2,196 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ETL Test Report - {{ suite.started_at if suite is defined else "N/A" }}</title>
+  <title>ETL Test Report - {{ suite.started_at }}</title>
   <style>
-    body { font-family: sans-serif; margin: 2rem; }
-    .badge { padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.85em; }
-    .badge-pass  { background: #28a745; }
-    .badge-fail  { background: #dc3545; }
-    .badge-amber { background: #ffc107; color: black; }
-    .badge-error { background: #6c757d; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #dee2e6; padding: 8px 12px; text-align: left; }
-    th { background: #f8f9fa; }
-    details { margin: 4px 0; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+      color: #333; 
+      background: #f9fafb; 
+      margin: 0; 
+      padding: 20px; 
+    }
+    .container { 
+      max-width: 1200px; 
+      margin: 0 auto; 
+      background: #fff; 
+      padding: 30px; 
+      border-radius: 8px; 
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+    }
+    h1, h2, h3 { color: #111; }
+    .badge { 
+      display: inline-block; 
+      padding: 0.35em 0.65em; 
+      font-size: 75%; 
+      font-weight: 700; 
+      border-radius: 0.25rem; 
+    }
+    .badge-pass  { background-color: #28a745; color: white; }
+    .badge-fail  { background-color: #dc3545; color: white; }
+    .badge-amber { background-color: #ffc107; color: black; }
+    .badge-gray  { background-color: #6c757d; color: white; }
+    
+    .warning-banner { 
+      background-color: #fff3cd; 
+      color: #856404; 
+      border-left: 4px solid #ffeeba; 
+      padding: 12px; 
+      margin-top: -1px; /* Pull up to touch the row above */
+      font-size: 0.9em; 
+    }
+    
+    table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin-bottom: 20px; 
+      font-size: 0.9em; 
+    }
+    th, td { 
+      border: 1px solid #dee2e6; 
+      padding: 10px; 
+      text-align: left; 
+    }
+    th { background-color: #f8f9fa; font-weight: 600; }
+    
+    details {
+      margin-bottom: 15px;
+      border: 1px solid #dee2e6;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #fafafa;
+    }
+    summary {
+      font-weight: bold;
+      cursor: pointer;
+      outline: none;
+      padding: 5px 0;
+    }
+    .accepted-note {
+      background: #d4edda;
+      color: #155724;
+      font-size: 0.85em;
+      padding: 4px 10px;
+    }
   </style>
 </head>
 <body>
-  <h1>ETL Test Report</h1>
-
-  {% macro status_badge(status) %}
-    {% if status == "PASSED" %}
-      <span class="badge badge-pass">PASSED</span>
-    {% elif status == "FAILED" %}
-      <span class="badge badge-fail">FAILED</span>
-    {% elif status == "SLOW" %}
-      <span class="badge badge-amber">SLOW</span>
-    {% elif status in ("RUNNING", "SKIPPED", "PENDING") %}
-      <span class="badge badge-amber">{{ status }}</span>
-    {% else %}
-      <span class="badge badge-error">{{ status }}</span>
-    {% endif %}
-  {% endmacro %}
-
-  {% if suite is defined %}
-  <div class="header">
-    <p><strong>Run ID:</strong> {{ suite.run_id }}</p>
-    <p><strong>Started:</strong> {{ suite.started_at }}</p>
-    <p><strong>Source:</strong> {{ suite.source_env }} → <strong>Target:</strong> {{ suite.target_env }}</p>
-    <p><strong>Version:</strong> {{ suite.framework_version }}</p>
-  </div>
-
-  <h2>Summary</h2>
-  <p>Total: {{ suite.test_cases | length }} | Passed: {{ suite.total_passed }} | Failed: {{ suite.total_failed }} | Skipped: {{ suite.total_skipped }}</p>
-
-  <h2>Reconciliation Results</h2>
-  <table>
-    <thead>
-      <tr><th>Name</th><th>Source Rows</th><th>Target Rows</th><th>Mismatches</th><th>Duration (s)</th><th>Status</th></tr>
-    </thead>
-    <tbody>
-      {% for r in suite.reconciliation_results %}
-      <tr>
-        <td>{{ r.query_name }}</td>
-        <td>{{ r.source_row_count }}</td>
-        <td>{{ r.target_row_count }}</td>
-        <td>{{ r.total_issues }}</td>
-        <td>{{ "%.2f" | format(r.duration_seconds | default(0.0)) }}</td>
-        <td>{{ status_badge(r.status) }}</td>
-      </tr>
-      {% if r.schema_diff %}
-      <tr>
-        <td colspan="6">
-          <strong>Schema diff:</strong>
-          missing_in_target={{ r.schema_diff.missing_in_target }},
-          extra_in_target={{ r.schema_diff.extra_in_target }}
-        </td>
-      </tr>
+  <div class="container">
+    {% macro status_badge(status) %}
+      {% if status == "PASSED" %}
+        <span class="badge badge-pass">PASSED</span>
+      {% elif status == "FAILED" or status == "ERROR" %}
+        <span class="badge badge-fail">{{ status }}</span>
+      {% elif status == "SLOW" %}
+        <span class="badge badge-amber">SLOW</span>
+      {% elif status in ("RUNNING", "SKIPPED") %}
+        <span class="badge badge-amber">{{ status }}</span>
+      {% else %}
+        <span class="badge badge-gray">{{ status }}</span>
       {% endif %}
-      {% if r.mismatches %}
-      <tr>
-        <td colspan="6">
+    {% endmacro %}
+
+    <div id="header">
+      <h1>ETL Framework Execution Report</h1>
+      <p><strong>Run ID:</strong> <span style="font-family: monospace;">{{ suite.run_id }}</span></p>
+      <p><strong>Started:</strong> {{ suite.started_at }}</p>
+      <p><strong>Environments:</strong> {{ suite.source_env }} &rarr; {{ suite.target_env }}</p>
+      <hr>
+    </div>
+
+    <div id="summary">
+      <h2>Summary</h2>
+      <p>
+        <strong>Total Tests:</strong> {{ suite.test_cases | length }} &nbsp;|&nbsp;
+        <strong>Passed:</strong> <span style="color: green; font-weight: bold;">{{ suite.total_passed }}</span> &nbsp;|&nbsp;
+        <strong>Failed/Error:</strong> <span style="color: red; font-weight: bold;">{{ suite.total_failed }}</span> &nbsp;|&nbsp;
+        <strong>Skipped:</strong> {{ suite.total_skipped }}
+      </p>
+    </div>
+
+    <div id="recon">
+      <h2>Reconciliation Results</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Test Name</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Source Rows</th>
+            <th>Target Rows</th>
+            <th>Mismatches</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for result in suite.reconciliation_results %}
+          <tr>
+            <td style="font-family: monospace;">{{ result.query_name }}</td>
+            <td>{{ status_badge(result.status) }}</td>
+            <td>{{ "%.2f"|format(result.duration_seconds) if result.duration_seconds else "N/A" }}s</td>
+            <td>{{ result.source_row_count }}</td>
+            <td>{{ result.target_row_count }}</td>
+            <td style="{% if result.total_issues > 0 %}color: red; font-weight: bold;{% endif %}">{{ result.total_issues }}</td>
+          </tr>
+          {% if result.schema_diff %}
+          <tr>
+            <td colspan="6" style="padding: 0; border: none;">
+              <div class="warning-banner">
+                <strong>⚠️ Schema Mismatch Warning</strong>
+                <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                  {% if result.schema_diff.missing_in_target %}
+                  <li><strong>Missing in Target:</strong> {{ result.schema_diff.missing_in_target | join(', ') }}</li>
+                  {% endif %}
+                  {% if result.schema_diff.extra_in_target %}
+                  <li><strong>Extra in Target:</strong> {{ result.schema_diff.extra_in_target | join(', ') }}</li>
+                  {% endif %}
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="mismatches">
+      {% for result in suite.reconciliation_results %}
+        {% if result.mismatches %}
           <details>
-            <summary>{{ r.mismatches | length }} mismatch record(s)</summary>
+            <summary>{{ result.query_name }} Mismatches (Showing first {{ result.mismatches|length }})</summary>
             <table>
-              <thead><tr><th>Keys</th><th>Column</th><th>Source</th><th>Target</th><th>Type</th></tr></thead>
-              <tbody>
-                {% for m in r.mismatches %}
+              <thead>
                 <tr>
-                  <td>{{ m.key_values }}</td>
-                  <td>{{ m.column_name }}</td>
-                  <td>{{ m.source_value }}</td>
-                  <td>{{ m.target_value }}</td>
-                  <td>{{ m.mismatch_type }}</td>
+                  <th>Mismatch Type</th>
+                  <th>Column</th>
+                  <th>Row Key Values</th>
+                  <th>Source Value</th>
+                  <th>Target Value</th>
                 </tr>
+              </thead>
+              <tbody>
+                {% for mm in result.mismatches %}
+                <tr>
+                  <td><span class="badge badge-gray">{{ mm.mismatch_type }}</span></td>
+                  <td>{{ mm.column_name }}</td>
+                  <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values }}</td>
+                  <td style="color: #d97706;">{{ mm.source_value }}</td>
+                  <td style="color: #2563eb;">{{ mm.target_value }}</td>
+                </tr>
+                {% if mm.accepted %}
+                <tr style="background: #d4edda;">
+                  <td colspan="5" class="accepted-note">
+                    ✓ Accepted{% if mm.accepted_by %} by {{ mm.accepted_by }}{% endif %}{% if mm.accepted_at %} on {{ mm.accepted_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% if mm.accepted_note %} — {{ mm.accepted_note }}{% endif %}
+                  </td>
+                </tr>
+                {% endif %}
                 {% endfor %}
               </tbody>
             </table>
           </details>
-        </td>
-      </tr>
-      {% endif %}
+        {% endif %}
       {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+    </div>
+  </div>
 </body>
 </html>
