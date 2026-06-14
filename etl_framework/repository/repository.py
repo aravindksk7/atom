@@ -104,6 +104,8 @@ class RunRepository:
         source_env: str,
         target_env: str,
         config_snapshot: dict | None = None,
+        run_type: str = "reconciliation",
+        pair_id: str | None = None,
     ) -> TestRun:
         run = TestRun(
             run_id=run_id,
@@ -111,6 +113,8 @@ class RunRepository:
             source_env=source_env,
             target_env=target_env,
             config_snapshot=config_snapshot,
+            run_type=run_type,
+            pair_id=pair_id,
         )
         self._db.add(run)
         self._db.commit()
@@ -206,3 +210,66 @@ class RunRepository:
             .limit(limit)
             .all()
         )
+
+    def accept_mismatch(
+        self,
+        mismatch_id: int,
+        note: str,
+        accepted_by: str | None,
+    ) -> tuple[MismatchDetail, bool]:
+        md = self._db.get(MismatchDetail, mismatch_id)
+        if md is None:
+            raise ValueError(f"MismatchDetail {mismatch_id} not found")
+        md.accepted = True
+        md.accepted_note = note
+        md.accepted_at = datetime.now(timezone.utc)
+        md.accepted_by = accepted_by
+        self._db.commit()
+        self._db.refresh(md)
+
+        unaccepted = (
+            self._db.query(MismatchDetail)
+            .filter(
+                MismatchDetail.test_result_id == md.test_result_id,
+                MismatchDetail.accepted == False,  # noqa: E712
+            )
+            .count()
+        )
+        status_changed = False
+        if unaccepted == 0:
+            tr = self._db.get(TestResult, md.test_result_id)
+            if tr and tr.status != "PASSED":
+                tr.status = "PASSED"
+                run = self.get_run(tr.run_id)
+                if run:
+                    run.passed = max(0, (run.passed or 0) + 1)
+                    run.failed = max(0, (run.failed or 0) - 1)
+                self._db.commit()
+                status_changed = True
+        return md, status_changed
+
+    def count_unaccepted_mismatches(self, result_id: int) -> int:
+        return (
+            self._db.query(MismatchDetail)
+            .filter(
+                MismatchDetail.test_result_id == result_id,
+                MismatchDetail.accepted == False,  # noqa: E712
+            )
+            .count()
+        )
+
+    def get_pair_runs(self, pair_id: str) -> list[TestRun]:
+        return (
+            self._db.query(TestRun)
+            .filter(TestRun.pair_id == pair_id)
+            .all()
+        )
+
+    def list_pairs(self) -> list[str]:
+        rows = (
+            self._db.query(TestRun.pair_id)
+            .filter(TestRun.pair_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        return [r[0] for r in rows]
