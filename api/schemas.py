@@ -152,6 +152,10 @@ class MismatchOut(BaseModel):
     source_value: str | None = None
     target_value: str | None = None
     mismatch_type: str | None = None
+    accepted: bool = False
+    accepted_note: str | None = None
+    accepted_at: datetime | None = None
+    accepted_by: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -278,3 +282,93 @@ class RunCompareOut(BaseModel):
     run_b: RunStatusOut
     tests: list[TestCompareOut]
     summary: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
+# Compare tab schemas
+# ---------------------------------------------------------------------------
+
+class SourceConfig(BaseModel):
+    source_type: Literal["live", "path", "upload"]
+    config_id: int | None = None
+    file_path: str | None = None
+    file_content_b64: str | None = None
+    file_name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "SourceConfig":
+        if self.source_type == "live" and self.config_id is None:
+            raise ValueError("config_id required for live source")
+        if self.source_type == "path" and not self.file_path:
+            raise ValueError("file_path required for path source")
+        if self.source_type == "upload" and not self.file_content_b64:
+            raise ValueError("file_content_b64 required for upload source")
+        return self
+
+
+class BOCompareRequest(BaseModel):
+    source_a: SourceConfig
+    source_b: SourceConfig
+    doc_id: str | None = None
+    report_id: str | None = None
+    key_columns: list[str] = Field(default_factory=list)
+    exclude_columns: list[str] = Field(default_factory=list)
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+
+
+class DualEnvLaunchRequest(BaseModel):
+    config_id_a: int
+    config_id_b: int
+    source_env_a: str
+    target_env_a: str
+    source_env_b: str
+    target_env_b: str
+    job_names: list[str] = Field(default_factory=list)
+    run_settings: RunSettings = Field(default_factory=RunSettings)
+
+
+class DualEnvLaunchOut(BaseModel):
+    pair_id: str
+    run_id_a: str
+    run_id_b: str
+
+
+class PairSummaryOut(BaseModel):
+    pair_id: str
+    run_a: RunStatusOut
+    run_b: RunStatusOut
+
+
+class ReconFileCompareRequest(BaseModel):
+    stored_run_id: str | None = None
+    file_a_path: str | None = None
+    file_a_content_b64: str | None = None
+    file_b_path: str | None = None
+    file_b_content_b64: str | None = None
+    label_a: str = "Run / File A"
+    label_b: str = "Production Report"
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "ReconFileCompareRequest":
+        has_a = bool(self.stored_run_id or self.file_a_path or self.file_a_content_b64)
+        has_b = bool(self.file_b_path or self.file_b_content_b64)
+        if not has_a:
+            raise ValueError("Source A must be stored_run_id, file_a_path, or file_a_content_b64")
+        if not has_b:
+            raise ValueError("Source B must be file_b_path or file_b_content_b64")
+        return self
+
+
+class MismatchAcceptRequest(BaseModel):
+    note: str = Field(min_length=1)
+    accepted_by: str | None = None
+
+
+class MismatchAcceptOut(BaseModel):
+    id: int
+    accepted: bool
+    accepted_note: str | None = None
+    accepted_at: datetime | None = None
+    accepted_by: str | None = None
+    result_status_updated: bool = False
