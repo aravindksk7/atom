@@ -124,14 +124,19 @@ class RunRepository:
     def get_run(self, run_id: str) -> TestRun | None:
         return self._db.query(TestRun).filter(TestRun.run_id == run_id).first()
 
-    def list_runs(self, limit: int = 50, offset: int = 0) -> list[TestRun]:
-        return (
-            self._db.query(TestRun)
-            .order_by(TestRun.id.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+    def list_runs(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str | None = None,
+        run_type: str | None = None,
+    ) -> list[TestRun]:
+        q = self._db.query(TestRun)
+        if status:
+            q = q.filter(TestRun.status == status)
+        if run_type:
+            q = q.filter(TestRun.run_type == run_type)
+        return q.order_by(TestRun.id.desc()).offset(offset).limit(limit).all()
 
     def update_run_status(self, run_id: str, status: str, **kwargs) -> TestRun | None:
         run = self.get_run(run_id)
@@ -264,6 +269,14 @@ class RunRepository:
             .filter(TestRun.pair_id == pair_id)
             .all()
         )
+
+    def delete_run(self, run_id: str) -> bool:
+        run = self.get_run(run_id)
+        if run is None:
+            return False
+        self._db.delete(run)
+        self._db.commit()
+        return True
 
     def list_pairs(self) -> list[str]:
         rows = (

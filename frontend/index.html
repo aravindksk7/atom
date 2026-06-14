@@ -84,6 +84,26 @@
     </template>
   </div>
 
+  <!-- YAML Import card -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="yamlImportOpen = !yamlImportOpen">
+      <div class="font-semibold text-slate-700">Import YAML</div>
+      <span class="text-muted text-sm" x-text="yamlImportOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="yamlImportOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Paste a YAML block defining one or more named environments. Each top-level key becomes a saved config.</p>
+        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405"></textarea>
+        <div class="flex justify-end">
+          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()">
+            <span x-show="!yamlImporting">Import</span>
+            <span x-show="yamlImporting">Importing…</span>
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
   <!-- Config Modal -->
   <div x-show="showConfigModal" x-cloak class="modal-backdrop" @click.self="showConfigModal = false">
     <div class="modal-box w-full max-w-2xl">
@@ -240,29 +260,78 @@
   <div class="card mb-4">
     <div class="flex items-center justify-between mb-3">
       <div class="font-semibold text-slate-700">Job Catalog</div>
-      <span class="text-muted" x-text="jobs.length + ' jobs'"></span>
+      <div class="flex items-center gap-3">
+        <span class="text-muted" x-text="jobs.length + ' jobs'"></span>
+        <button @click="openNewJobModal()" class="btn-primary btn-sm">+ New Job</button>
+      </div>
     </div>
     <template x-if="jobs.length === 0">
-      <div class="empty-state"><div class="empty-state-title">No jobs. Go to Adapters to add SAP BO or Automic jobs.</div></div>
+      <div class="empty-state"><div class="empty-state-title">No jobs yet. Create one or add from the Adapters tab.</div></div>
     </template>
     <div class="space-y-1">
       <template x-for="job in jobs" :key="job.name">
-        <label class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200 transition-colors">
-          <input type="checkbox" class="rounded" :checked="isJobSelected(job.name)" @change="toggleJobSelection(job)" />
-          <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors">
+          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @change="toggleJobSelection(job)" />
+          <label class="flex-1 min-w-0 cursor-pointer" @click="toggleJobSelection(job)">
             <div class="flex items-center gap-2">
               <span class="font-medium text-slate-800 truncate" x-text="job.name"></span>
               <span class="badge text-xs" :class="'jtype-' + (job.job_type || 'reconciliation')" x-text="job.job_type || 'reconciliation'"></span>
             </div>
             <div class="text-muted truncate" x-text="job.description"></div>
-          </div>
+          </label>
           <div class="flex gap-1 flex-shrink-0">
             <template x-for="tag in (job.tags||[]).slice(0,2)" :key="tag">
               <span class="badge badge-gray text-xs" x-text="tag"></span>
             </template>
+            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs">Edit</button>
+            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs">Del</button>
           </div>
-        </label>
+        </div>
       </template>
+    </div>
+  </div>
+
+  <!-- Job Modal -->
+  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false">
+    <div class="modal-box w-full max-w-lg">
+      <h2 class="text-lg font-bold mb-4" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Job Name *</label>
+          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" />
+        </div>
+        <div>
+          <label class="field-label">Description</label>
+          <input x-model="jobModal.description" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Job Type</label>
+          <select x-model="jobModal.job_type" class="field-input field-select">
+            <option value="reconciliation">reconciliation</option>
+            <option value="sap_bo">sap_bo</option>
+            <option value="automic">automic</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">SQL Query</label>
+          <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs" placeholder="SELECT * FROM orders WHERE date = :run_date"></textarea>
+        </div>
+        <div>
+          <label class="field-label">Key Columns (comma-separated)</label>
+          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" />
+        </div>
+        <div>
+          <label class="field-label">Tags (comma-separated)</label>
+          <input x-model="jobModal.tags_raw" class="field-input" placeholder="daily, finance" />
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" class="rounded" x-model="jobModal.enabled" /> Enabled
+        </label>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showJobModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveJob()" class="btn-primary" :disabled="!jobModal.name">Save</button>
+      </div>
     </div>
   </div>
 
@@ -427,10 +496,11 @@
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
-          <div class="flex gap-3 pt-2">
+          <div class="flex gap-3 pt-2 flex-wrap">
             <a :href="'/api/runs/' + selectedRun.run_id + '/report'" target="_blank" class="text-indigo-500 hover:underline text-xs">Report</a>
             <a :href="'/api/runs/' + selectedRun.run_id + '/metrics'" target="_blank" class="text-indigo-500 hover:underline text-xs">Metrics</a>
             <a :href="'/api/runs/' + selectedRun.run_id + '/logs'" target="_blank" class="text-indigo-500 hover:underline text-xs">Logs</a>
+            <button @click="downloadRunCsv(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Export CSV</button>
           </div>
         </div>
       </div>
@@ -525,6 +595,16 @@
                             </template>
                           </tbody>
                         </table>
+                        <template x-if="expandedMismatches[r.id] && expandedMismatches[r.id].length > 0 && expandedMismatches[r.id].length % 50 === 0">
+                          <div class="flex justify-center mt-2">
+                            <button @click="loadMoreInlineMismatches(selectedRun.run_id, r)"
+                                    :disabled="expandingMismatch[r.id]"
+                                    class="btn-secondary btn-sm text-xs">
+                              <span x-show="!expandingMismatch[r.id]">Load More</span>
+                              <span x-show="expandingMismatch[r.id]">Loading…</span>
+                            </button>
+                          </div>
+                        </template>
                       </div>
                     </td>
                   </tr>
@@ -541,7 +621,21 @@
     <div>
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2 items-center">
+          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+            <option value="">All statuses</option>
+            <option value="PENDING">PENDING</option>
+            <option value="RUNNING">RUNNING</option>
+            <option value="COMPLETED">COMPLETED</option>
+            <option value="FAILED">FAILED</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+            <option value="">All types</option>
+            <option value="reconciliation">reconciliation</option>
+            <option value="bo_comparison">bo_comparison</option>
+          </select>
+          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm">Clear</button>
           <button @click="loadRuns()" class="btn-secondary btn-sm">↻ Refresh</button>
           <button @click="compareMode = !compareMode; compareResult = null"
                   :class="compareMode ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
@@ -646,8 +740,20 @@
                       </template>
                       <template x-if="!t.status_b"><span class="text-muted text-xs">—</span></template>
                     </div>
-                    <div class="compare-col-delta">
+                    <div class="compare-col-delta flex items-center gap-2">
                       <span :class="compareDelta(t).cls" x-text="compareDelta(t).label"></span>
+                      <template x-if="t.result_id_b && t.mismatches_b > 0">
+                        <button class="text-indigo-500 hover:underline text-xs"
+                          @click="openMismatchDrawer(compareResult.run_b.run_id, { id: t.result_id_b, query_name: t.test_name })">
+                          View →
+                        </button>
+                      </template>
+                      <template x-if="t.result_id_a && !t.result_id_b && t.mismatches_a > 0">
+                        <button class="text-indigo-500 hover:underline text-xs"
+                          @click="openMismatchDrawer(compareResult.run_a.run_id, { id: t.result_id_a, query_name: t.test_name })">
+                          View →
+                        </button>
+                      </template>
                     </div>
                   </div>
                 </template>
@@ -687,7 +793,10 @@
                   <span class="text-rose-600 font-semibold" x-text="run.failed"></span> /
                   <span class="text-amber-500 font-semibold" x-text="run.slow"></span>
                 </td>
-                <td><button @click.stop="viewRunDetail(run.run_id)" class="text-indigo-500 hover:underline text-xs">View →</button></td>
+                <td class="flex gap-2">
+                  <button @click.stop="viewRunDetail(run.run_id)" class="text-indigo-500 hover:underline text-xs">View →</button>
+                  <button @click.stop="deleteRun(run.run_id)" class="text-rose-500 hover:underline text-xs">Delete</button>
+                </td>
               </tr>
             </template>
           </tbody>

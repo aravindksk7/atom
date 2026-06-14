@@ -382,7 +382,7 @@ Startup calls `init_db()`, creates missing tables, and applies lightweight SQLit
 
 ## Using The Web UI
 
-The web UI has seven tabs.
+The web UI has seven tabs. Recent changes are tracked in [fix.md](fix.md).
 
 ### Config
 
@@ -392,11 +392,12 @@ Use this tab to:
 - Edit connection details.
 - Validate config values.
 - Store SAP BO and Automic credentials for adapter workflows.
+- **Import YAML** — expand the "Import YAML" card, paste a YAML block defining one or more named environments, and click Import to create all configs in one step.
 
 Typical workflow:
 
 1. Open Config.
-2. Select New Config.
+2. Select New Config or paste a YAML block into Import YAML.
 3. Enter environment name and connection details.
 4. Save.
 5. Use the saved config in Launch, Adapters, or Compare.
@@ -409,6 +410,7 @@ Use this tab to:
 - Choose a saved config.
 - Pick run settings.
 - Select jobs from the catalog.
+- **Create, edit, or delete jobs directly** — use the "+ New Job" button in the Job Catalog card to define a reconciliation job without going through the Adapters tab.
 - Order jobs in the execution sequence.
 - Start a run.
 
@@ -435,12 +437,14 @@ Use this tab to:
 
 Use this tab to:
 
-- Browse previous runs.
+- Browse previous runs with **status** and **run type** filters.
 - Open run details.
 - Review per-test results.
-- Expand stored mismatch details.
+- Expand stored mismatch details with **Load More** paging (50 rows per page).
 - Accept a mismatch with a note.
-- Compare two stored runs from the History compare panel.
+- Compare two stored runs from the History compare panel; click **View →** on any regressed or failed row to open the mismatch drawer for that result.
+- **Export CSV** — download all test results for a run as a CSV file from the run detail view.
+- **Delete** a run from the run list.
 
 Mismatch acceptance changes the mismatch row to accepted. If all mismatches for a failed test result are accepted, the result can be marked passed and run counters are adjusted.
 
@@ -745,6 +749,27 @@ Invoke-RestMethod `
 
 ```powershell
 Invoke-RestMethod "http://127.0.0.1:8000/api/runs/compare?run_a=<run_a>&run_b=<run_b>"
+```
+
+### Filter Runs
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/runs?status=FAILED&run_type=bo_comparison"
+```
+
+Supported `status` values: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `ERROR`.
+Supported `run_type` values: `reconciliation`, `bo_comparison`.
+
+### Export Run Results As CSV
+
+```powershell
+Invoke-WebRequest "http://127.0.0.1:8000/api/runs/<run_id>/export" -OutFile "results.csv"
+```
+
+### Delete A Run
+
+```powershell
+Invoke-RestMethod -Method Delete "http://127.0.0.1:8000/api/runs/<run_id>"
 ```
 
 ## Testing

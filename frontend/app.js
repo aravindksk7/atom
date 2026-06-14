@@ -55,10 +55,20 @@ function app() {
     configValidation: null,
 
     // -----------------------------------------------------------
+    // Config – YAML import
+    // -----------------------------------------------------------
+    yamlImportOpen: false,
+    yamlImportText: '',
+    yamlImporting: false,
+
+    // -----------------------------------------------------------
     // Jobs / Launch
     // -----------------------------------------------------------
     jobs: [],
     selectedJobs: [],
+    showJobModal: false,
+    jobModal: {},
+    jobModalEditing: false,
     launchSettings: {
       source_env: 'dev',
       target_env: 'prod',
@@ -91,6 +101,8 @@ function app() {
     runs: [],
     selectedRun: null,
     chartInstance: null,
+    historyFilterStatus: '',
+    historyFilterRunType: '',
 
     // -----------------------------------------------------------
     // Adapters – SAP BO
@@ -144,8 +156,9 @@ function app() {
     // -----------------------------------------------------------
     // Inline mismatch expand (History detail)
     // -----------------------------------------------------------
-    expandedMismatches: {},   // result_id → rows[]
-    expandingMismatch: {},    // result_id → bool
+    expandedMismatches: {},      // result_id → rows[]
+    expandingMismatch: {},       // result_id → bool
+    expandedMismatchOffset: {},  // result_id → current offset
 
     // -----------------------------------------------------------
     // Compare runs
@@ -334,6 +347,21 @@ function app() {
       }
     },
 
+    async importYaml() {
+      this.yamlImporting = true;
+      try {
+        const r = await api('POST', '/api/configs/import-yaml', { yaml_content: this.yamlImportText });
+        this.yamlImportText = '';
+        this.yamlImportOpen = false;
+        await this.loadConfigs();
+        this.toast('success', 'YAML imported', `${r.environments?.length || 0} environment(s)`);
+      } catch (e) {
+        this.toast('error', 'Import failed', e.message);
+      } finally {
+        this.yamlImporting = false;
+      }
+    },
+
     // ===========================================================
     // JOBS / LAUNCH
     // ===========================================================
@@ -349,6 +377,58 @@ function app() {
       const idx = this.selectedJobs.indexOf(job.name);
       if (idx >= 0) this.selectedJobs.splice(idx, 1);
       else this.selectedJobs.push(job.name);
+    },
+
+    openNewJobModal() {
+      this.jobModal = { name: '', description: '', job_type: 'reconciliation', query: '', key_columns_raw: 'id', tags_raw: '', enabled: true };
+      this.jobModalEditing = false;
+      this.showJobModal = true;
+    },
+
+    openEditJobModal(job) {
+      this.jobModal = {
+        name: job.name, description: job.description || '',
+        job_type: job.job_type || 'reconciliation',
+        query: job.query || '', key_columns_raw: (job.key_columns || ['id']).join(', '),
+        tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
+      };
+      this.jobModalEditing = true;
+      this.showJobModal = true;
+    },
+
+    async saveJob() {
+      const m = this.jobModal;
+      const body = {
+        name: m.name, description: m.description,
+        job_type: m.job_type, query: m.query,
+        key_columns: m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean),
+        tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
+        enabled: m.enabled,
+      };
+      try {
+        if (this.jobModalEditing) {
+          await api('PUT', `/api/jobs/${encodeURIComponent(m.name)}`, body);
+        } else {
+          await api('POST', '/api/jobs', body);
+        }
+        await this.loadJobs();
+        this.showJobModal = false;
+        this.toast('success', this.jobModalEditing ? 'Job updated' : 'Job created', m.name);
+      } catch (e) {
+        this.toast('error', 'Save failed', e.message);
+      }
+    },
+
+    async deleteJob(name) {
+      if (!confirm(`Delete job "${name}"?`)) return;
+      try {
+        await api('DELETE', `/api/jobs/${encodeURIComponent(name)}`);
+        this.jobs = this.jobs.filter(j => j.name !== name);
+        this.selectedJobs = this.selectedJobs.filter(n => n !== name);
+        this.toast('success', 'Job deleted', name);
+      } catch (e) {
+        this.toast('error', 'Delete failed', e.message);
+      }
     },
 
     _runSettingsPayload() {
@@ -441,7 +521,11 @@ function app() {
     // HISTORY
     // ===========================================================
     async loadRuns() {
-      try { this.runs = await api('GET', '/api/runs'); } catch {}
+      const params = new URLSearchParams();
+      if (this.historyFilterStatus) params.set('status', this.historyFilterStatus);
+      if (this.historyFilterRunType) params.set('run_type', this.historyFilterRunType);
+      const qs = params.toString() ? '?' + params.toString() : '';
+      try { this.runs = await api('GET', '/api/runs' + qs); } catch {}
     },
 
     async viewRunDetail(runId) {
@@ -450,6 +534,28 @@ function app() {
         this.$nextTick(() => this.renderChart());
       } catch (e) {
         this.toast('error', 'Load failed', e.message);
+      }
+    },
+
+    async downloadRunCsv(runId) {
+      try {
+        const { blob, disposition } = await apiBlob(`/api/runs/${runId}/export`);
+        const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || `run_${runId.substring(0,8)}_results.csv`;
+        triggerDownload(blob, filename);
+      } catch (e) {
+        this.toast('error', 'Export failed', e.message);
+      }
+    },
+
+    async deleteRun(runId) {
+      if (!confirm(`Delete run ${runId.substring(0, 8)}…? This cannot be undone.`)) return;
+      try {
+        await api('DELETE', `/api/runs/${runId}`);
+        this.runs = this.runs.filter(r => r.run_id !== runId);
+        if (this.selectedRun?.run_id === runId) this.selectedRun = null;
+        this.toast('success', 'Run deleted');
+      } catch (e) {
+        this.toast('error', 'Delete failed', e.message);
       }
     },
 
@@ -523,6 +629,9 @@ function app() {
         const copy = { ...this.expandedMismatches };
         delete copy[result.id];
         this.expandedMismatches = copy;
+        const offCopy = { ...this.expandedMismatchOffset };
+        delete offCopy[result.id];
+        this.expandedMismatchOffset = offCopy;
         return;
       }
       this.expandingMismatch = { ...this.expandingMismatch, [result.id]: true };
@@ -530,6 +639,27 @@ function app() {
         const rows = await api('GET',
           `/api/runs/${runId}/results/${result.id}/mismatches?limit=50&offset=0`);
         this.expandedMismatches = { ...this.expandedMismatches, [result.id]: rows };
+        this.expandedMismatchOffset = { ...this.expandedMismatchOffset, [result.id]: 0 };
+      } catch (e) {
+        this.toast('error', 'Load mismatches failed', e.message);
+      } finally {
+        const copy = { ...this.expandingMismatch };
+        delete copy[result.id];
+        this.expandingMismatch = copy;
+      }
+    },
+
+    async loadMoreInlineMismatches(runId, result) {
+      const nextOffset = (this.expandedMismatchOffset[result.id] || 0) + 50;
+      this.expandingMismatch = { ...this.expandingMismatch, [result.id]: true };
+      try {
+        const rows = await api('GET',
+          `/api/runs/${runId}/results/${result.id}/mismatches?limit=50&offset=${nextOffset}`);
+        this.expandedMismatches = {
+          ...this.expandedMismatches,
+          [result.id]: [...(this.expandedMismatches[result.id] || []), ...rows],
+        };
+        this.expandedMismatchOffset = { ...this.expandedMismatchOffset, [result.id]: nextOffset };
       } catch (e) {
         this.toast('error', 'Load mismatches failed', e.message);
       } finally {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import uuid
@@ -8,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse
+from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -162,9 +164,15 @@ def _execute_run(
 
 
 @router.get("", response_model=list[RunStatusOut])
-def list_runs(limit: int = 50, offset: int = 0, db: Session = Depends(get_session)):
+def list_runs(
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    run_type: str | None = None,
+    db: Session = Depends(get_session),
+):
     repo = RunRepository(db)
-    runs = repo.list_runs(limit=limit, offset=offset)
+    runs = repo.list_runs(limit=limit, offset=offset, status=status, run_type=run_type)
     return [
         RunStatusOut(
             run_id=r.run_id,
@@ -547,3 +555,43 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
         config_snapshot=run.config_snapshot,
         results=results,
     )
+
+
+@router.get("/{run_id}/export")
+def export_run_csv(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "run_id", "query_name", "status", "duration_seconds",
+        "source_row_count", "target_row_count",
+        "value_mismatch_count", "missing_in_target_count", "missing_in_source_count",
+        "executed_at",
+    ])
+    for r in run.results:
+        writer.writerow([
+            run_id, r.query_name, r.status,
+            r.duration_seconds, r.source_row_count, r.target_row_count,
+            r.value_mismatch_count or 0,
+            r.missing_in_target_count or 0,
+            r.missing_in_source_count or 0,
+            r.executed_at,
+        ])
+    buf.seek(0)
+    filename = f"run_{run_id[:8]}_results.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/{run_id}", status_code=204)
+def delete_run(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    if not repo.delete_run(run_id):
+        raise HTTPException(status_code=404, detail="Run not found")
