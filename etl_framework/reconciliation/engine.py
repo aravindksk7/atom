@@ -147,7 +147,7 @@ class ReconciliationEngine:
                         1 for m in mismatch_list if m.mismatch_type == "missing_in_source"
                     ),
                     value_mismatch_count=sum(
-                        1 for m in mismatch_list if m.mismatch_type == "value_mismatch"
+                        1 for m in mismatch_list if m.mismatch_type == "value_diff"
                     ),
                     mismatches=mismatch_list,
                     status=TestStatus.PASSED if not mismatch_list else TestStatus.FAILED,

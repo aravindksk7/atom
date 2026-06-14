@@ -85,7 +85,7 @@ def test_mismatch_detail_foreign_key_to_result(engine_and_db):
                             key_values={"id": 42},
                             column_name="amount",
                             source_value="100.00", target_value="99.99",
-                            mismatch_type="value_mismatch")
+                            mismatch_type="value_diff")
     db.add(detail)
     db.commit()
     assert detail.id is not None

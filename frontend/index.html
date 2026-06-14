@@ -1142,7 +1142,10 @@
 
     <template x-if="boCompareResult">
       <div class="card">
-        <div class="font-semibold text-slate-700 mb-3">BO Compare Result</div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-slate-700">BO Compare Result</div>
+          <button @click="reportRunId = boCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+        </div>
         <div class="flex gap-2 flex-wrap mb-3">
           <span class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boCompareResult.status"></span>
           <span class="compare-chip chip-unchanged" x-text="(boCompareResult.total_tests || 0) + ' test stored'"></span>
@@ -1150,7 +1153,7 @@
         </div>
         <template x-if="boCompareResult.results && boCompareResult.results.length">
           <table class="data-table">
-            <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th></tr></thead>
+            <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
             <tbody>
               <template x-for="r in boCompareResult.results" :key="r.id">
                 <tr>
@@ -1158,6 +1161,9 @@
                   <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
                   <td x-text="totalMismatches(r)"></td>
                   <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '-'"></td>
+                  <td>
+                    <button x-show="totalMismatches(r) > 0" @click="openMismatchDrawer(boCompareResult.run_id, r)" class="btn-secondary btn-sm">View</button>
+                  </td>
                 </tr>
               </template>
             </tbody>
@@ -1238,12 +1244,58 @@
           </template>
         </div>
       </template>
+
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-slate-700">Past Dual-Env Pairs</div>
+          <button @click="loadPastPairs()" :disabled="pastPairsLoading" class="btn-secondary btn-sm">
+            <span x-show="!pastPairsLoading">Refresh</span>
+            <span x-show="pastPairsLoading">Loading…</span>
+          </button>
+        </div>
+        <template x-if="pastPairs.length === 0 && !pastPairsLoading">
+          <div class="text-muted text-sm">No past pairs found. Click Refresh to load.</div>
+        </template>
+        <template x-if="pastPairs.length > 0">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Pair ID</th>
+                <th>Run A</th>
+                <th>Status A</th>
+                <th>Run B</th>
+                <th>Status B</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="pair in pastPairs" :key="pair.pair_id">
+                <tr>
+                  <td class="font-mono text-xs" x-text="pair.pair_id.substring(0, 8) + '…'"></td>
+                  <td class="font-mono text-xs" x-text="pair.run_a.run_id.substring(0, 8) + '…'"></td>
+                  <td><span class="badge" :class="statusBadgeClass(pair.run_a.status)" x-text="pair.run_a.status"></span></td>
+                  <td class="font-mono text-xs" x-text="pair.run_b.run_id.substring(0, 8) + '…'"></td>
+                  <td><span class="badge" :class="statusBadgeClass(pair.run_b.status)" x-text="pair.run_b.status"></span></td>
+                  <td>
+                    <button
+                      @click="dualEnvPairId = pair.pair_id; dualEnvLoading = false; api('GET', '/api/runs/compare?run_a=' + pair.run_a.run_id + '&run_b=' + pair.run_b.run_id).then(r => dualEnvResult = r).catch(() => {})"
+                      class="btn-secondary btn-sm">
+                      Load
+                    </button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
+      </div>
     </div>
 
     <div x-show="reconMode === 'file'" class="space-y-4">
       <div class="compare-source-grid">
         <div class="card compare-source-card">
           <div class="compare-card-title">Source A</div>
+          <input x-model="fileLabelA" class="field-input mb-2" placeholder="Source A label" />
           <div class="mode-row mb-3">
             <button @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
             <button @click="fileSourceAType = 'file'" :class="fileSourceAType === 'file' ? 'pill active' : 'pill'">HTML File</button>
@@ -1265,11 +1317,18 @@
         </div>
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
-          <div class="compare-card-title">Production Report</div>
-          <div class="space-y-2">
-            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" />
-            <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+          <div class="compare-card-title">Source B</div>
+          <input x-model="fileLabelB" class="field-input mb-2" placeholder="Source B label" />
+          <div class="mode-row mb-3">
+            <button @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
+            <button @click="fileSourceBType = 'upload'" :class="fileSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           </div>
+          <template x-if="fileSourceBType === 'path'">
+            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" />
+          </template>
+          <template x-if="fileSourceBType === 'upload'">
+            <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+          </template>
         </div>
       </div>
       <div class="card">
@@ -1280,12 +1339,30 @@
       </div>
       <template x-if="fileCompareResult">
         <div class="card">
-          <div class="font-semibold text-slate-700 mb-3">File Comparison Results</div>
-          <div class="flex gap-2 flex-wrap">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-semibold text-slate-700">File Comparison Results</div>
+            <button @click="reportRunId = fileCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+          </div>
+          <div class="flex gap-2 flex-wrap mb-3">
             <span class="badge" :class="statusBadgeClass(fileCompareResult.status)" x-text="fileCompareResult.status"></span>
             <span class="compare-chip chip-improved" x-text="(fileCompareResult.passed || 0) + ' matched'"></span>
             <span class="compare-chip chip-regressed" x-text="(fileCompareResult.failed || 0) + ' differ'"></span>
           </div>
+          <template x-if="fileCompareResult.results && fileCompareResult.results.length">
+            <table class="data-table">
+              <thead><tr><th>Test</th><th>Rows A</th><th>Rows B</th><th>Match</th></tr></thead>
+              <tbody>
+                <template x-for="r in fileCompareResult.results" :key="r.id">
+                  <tr>
+                    <td class="font-mono text-xs" x-text="r.query_name"></td>
+                    <td x-text="r.source_row_count ?? '—'"></td>
+                    <td x-text="r.target_row_count ?? '—'"></td>
+                    <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
         </div>
       </template>
     </div>

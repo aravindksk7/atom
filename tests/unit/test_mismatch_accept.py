@@ -92,6 +92,38 @@ def test_accept_mismatch_not_last_no_status_change(db, repo):
     assert status_changed is False  # m2 still unaccepted
 
 
+def test_accept_mismatch_endpoint_rejects_result_from_other_run(db, repo):
+    from fastapi import HTTPException
+    from api.routes.runs import accept_mismatch
+    from api.schemas import MismatchAcceptRequest
+    from etl_framework.repository.models import TestResult, MismatchDetail
+
+    _make_run(repo, run_id="run-a")
+    _make_run(repo, run_id="run-b")
+    tr = TestResult(
+        run_id="run-b", query_name="q-cross", status="FAILED",
+        duration_seconds=1.0, source_row_count=1, target_row_count=1,
+        value_mismatch_count=1, missing_in_target_count=0, missing_in_source_count=0,
+    )
+    db.add(tr); db.commit(); db.refresh(tr)
+    md = MismatchDetail(
+        test_result_id=tr.id, column_name="amount",
+        source_value="100", target_value="99", mismatch_type="value_diff",
+    )
+    db.add(md); db.commit(); db.refresh(md)
+
+    with pytest.raises(HTTPException) as exc:
+        accept_mismatch(
+            "run-a",
+            tr.id,
+            md.id,
+            MismatchAcceptRequest(note="wrong run"),
+            db,
+        )
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Result not found"
+
+
 def test_get_pair_runs(repo):
     _make_run(repo, run_id="r-a", run_type="dual_env", pair_id="p1")
     _make_run(repo, run_id="r-b", run_type="dual_env", pair_id="p1")

@@ -77,6 +77,9 @@ def _snapshot_for_config(
 
 def _run_bo_bg(req: BOCompareRequest, run_id: str) -> None:
     from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
     db = SessionLocal()
     try:
         from api.services.compare_service import CompareService
@@ -86,11 +89,15 @@ def _run_bo_bg(req: BOCompareRequest, run_id: str) -> None:
     except Exception:
         logger.exception("BO comparison background task failed for run_id=%s", run_id)
     finally:
+        set_run_id("")
         db.close()
 
 
 def _run_recon_file_bg(req: ReconFileCompareRequest, run_id: str) -> None:
     from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
     db = SessionLocal()
     try:
         from api.services.compare_service import CompareService
@@ -100,6 +107,7 @@ def _run_recon_file_bg(req: ReconFileCompareRequest, run_id: str) -> None:
     except Exception:
         logger.exception("Recon-file comparison background task failed for run_id=%s", run_id)
     finally:
+        set_run_id("")
         db.close()
 
 
@@ -109,7 +117,9 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
     def _run_single(run_id: str, source_env: str, target_env: str, config_id: int) -> None:
         db = SessionLocal()
         try:
+            from etl_framework.utils.context import set_run_id
             from api.services.run_executor import RunExecutor
+            set_run_id(run_id)
             cfg = db.get(SavedConfig, config_id)
             if cfg is None:
                 raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
@@ -136,6 +146,7 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
         except Exception:
             logger.exception("Dual-env leg failed for run_id=%s", run_id)
         finally:
+            set_run_id("")
             db.close()
 
     with ThreadPoolExecutor(max_workers=2) as ex:

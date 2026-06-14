@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -264,6 +265,86 @@ def test_get_run_metrics_missing_returns_404(client):
     metrics = client.get(f"/api/runs/{run_id}/metrics")
     assert metrics.status_code == 404
     assert metrics.json()["detail"] == "Metrics not found"
+
+
+def test_get_run_logs_defaults_to_run_scope(client, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    run = client.post("/api/runs", json={"source_env": "dev", "target_env": "prod", "job_names": []})
+    run_id = run.json()["run_id"]
+    log_dir = Path("logs")
+    log_dir.mkdir()
+    log_dir.joinpath("etl_framework.log").write_text(
+        f"2026-06-14 18:00:15 | ERROR    | {run_id} | runner | current run failed\n"
+        "Traceback line for current run\n"
+        "2026-06-14 18:00:16 | ERROR    | other-run | runner | other run failed\n",
+        encoding="utf-8",
+    )
+
+    resp = client.get(f"/api/runs/{run_id}/logs?format=json")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["scope"] == "run"
+    assert data["matched_lines"] == 1
+    assert "current run failed" in data["lines"][0]["text"]
+    assert "other run failed" not in data["lines"][0]["text"]
+
+
+def test_get_run_logs_searches_traceback_context_with_level(client, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    run = client.post("/api/runs", json={"source_env": "dev", "target_env": "prod", "job_names": []})
+    run_id = run.json()["run_id"]
+    log_dir = Path("logs")
+    log_dir.mkdir()
+    log_dir.joinpath("etl_framework.log").write_text(
+        f"2026-06-14 18:00:15 | ERROR    | {run_id} | runner | Test case raised an exception\n"
+        "Traceback (most recent call last):\n"
+        "ImportError: missing driver\n",
+        encoding="utf-8",
+    )
+
+    resp = client.get(f"/api/runs/{run_id}/logs?format=json&q=ImportError&level=ERROR")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["matched_lines"] == 1
+    assert data["lines"][0]["level"] == "ERROR"
+    assert "ImportError: missing driver" in data["lines"][0]["text"]
+
+
+def test_get_run_logs_tolerates_non_utf8_bytes(client, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    run = client.post("/api/runs", json={"source_env": "dev", "target_env": "prod", "job_names": []})
+    run_id = run.json()["run_id"]
+    log_dir = Path("logs")
+    log_dir.mkdir()
+    log_dir.joinpath("etl_framework.log").write_bytes(
+        f"2026-06-14 18:00:15 | ERROR    | {run_id} | runner | bad byte ".encode()
+        + b"\x97\n"
+    )
+
+    resp = client.get(f"/api/runs/{run_id}/logs?format=json")
+    assert resp.status_code == 200
+    assert resp.json()["matched_lines"] == 1
+
+
+def test_metrics_payload_can_be_built_from_run_results():
+    from types import SimpleNamespace
+    from api.routes.runs import _metrics_from_run
+
+    result = SimpleNamespace(
+        query_name="Source A",
+        status="FAILED",
+        duration_seconds=0.25,
+        source_row_count=6,
+        target_row_count=6,
+        total_issues=1,
+    )
+    run = SimpleNamespace(run_id="run-db-metrics", results=[result])
+
+    metrics = _metrics_from_run(run)
+    assert metrics["source"] == "database"
+    assert metrics["total_tests"] == 1
+    assert metrics["failed"] == 1
+    assert metrics["tests"][0]["total_issues"] == 1
 
 
 def test_get_run_not_found(client):

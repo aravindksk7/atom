@@ -1,5 +1,7 @@
 from __future__ import annotations
 import pytest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -63,6 +65,54 @@ def test_bo_compare_upload_returns_202(client, monkeypatch, tmp_path):
     assert data["run_type"] == "bo_comparison"
 
 
+def test_bo_live_source_downloads_selected_doc_report():
+    from api.schemas import SourceConfig
+    from api.services.compare_service import CompareService
+
+    cfg_repo = MagicMock()
+    cfg_repo.get.return_value = SimpleNamespace(
+        env_name="bo-dev",
+        config_json={
+            "db_host": "localhost",
+            "db_password": "secret",
+            "bo_url": "http://bo.example",
+            "bo_user": "bo_user",
+            "bo_password": "bo_password",
+        },
+    )
+    src = SourceConfig(
+        source_type="live",
+        config_id=1,
+        doc_id="DOC-A",
+        report_id="RPT-1",
+        format="csv",
+    )
+    mock_client = MagicMock()
+    mock_client.download_report.return_value = b"id,value\n1,ok\n"
+
+    with patch("etl_framework.sap_bo.client.BORestClient", return_value=mock_client):
+        df = CompareService(MagicMock(), cfg_repo)._load_bo_source(src, "OLD-DOC", "OLD-RPT")
+
+    mock_client.download_report.assert_called_once_with("DOC-A", "RPT-1", "csv")
+    assert df.to_dict("records") == [{"id": 1, "value": "ok"}]
+
+
+def test_bo_compare_infers_employee_id_key_for_files():
+    import pandas as pd
+    from api.services.compare_service import CompareService
+
+    df_a = pd.DataFrame({
+        "Employee ID": ["EM1092", "EM1432"],
+        "Total Revenue": [7500, 2400],
+    })
+    df_b = pd.DataFrame({
+        "Employee ID": ["EM1092", "EM1432"],
+        "Department": ["IT", "IT"],
+    })
+
+    assert CompareService._infer_key_columns(df_a, df_b) == ["Employee ID"]
+
+
 def test_dual_env_launch_returns_pair(client, monkeypatch):
     import api.routes.compare as cmp_module
     monkeypatch.setattr(cmp_module, "_launch_dual_env_bg", lambda *a, **kw: None)
@@ -82,6 +132,11 @@ def test_dual_env_launch_returns_pair(client, monkeypatch):
     assert "pair_id" in data
     assert "run_id_a" in data
     assert "run_id_b" in data
+    detail_a = client.get(f"/api/runs/{data['run_id_a']}").json()
+    detail_b = client.get(f"/api/runs/{data['run_id_b']}").json()
+    assert detail_a["config_snapshot"]["config_id"] == cid_a
+    assert detail_b["config_snapshot"]["config_id"] == cid_b
+    assert detail_a["config_snapshot"]["job_sequence"] == []
 
 
 def test_get_pair_runs(client, monkeypatch):

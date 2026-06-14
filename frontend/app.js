@@ -190,6 +190,9 @@ function app() {
     dualEnvResult: null,
 
     fileSourceAType: 'run',
+    fileSourceBType: 'upload',
+    fileLabelA: 'Source A',
+    fileLabelB: 'Production Report',
     fileRunId: '',
     filePathA: '',
     fileB64A: '',
@@ -197,6 +200,9 @@ function app() {
     fileB64B: '',
     fileCompareLoading: false,
     fileCompareResult: null,
+
+    pastPairs: [],
+    pastPairsLoading: false,
 
     acceptForms: {},
 
@@ -704,6 +710,7 @@ function app() {
           source_env_b: this.dualEnvSourceEnvB,
           target_env_b: this.dualEnvTargetEnvB,
           job_names: this.dualEnvJobs,
+          run_settings: this._runSettingsPayload(),
         };
         const launch = await api('POST', '/api/compare/dual-env', payload);
         this.dualEnvPairId = launch.pair_id;
@@ -742,8 +749,8 @@ function app() {
       this.fileCompareResult = null;
       try {
         const payload = {
-          label_a: 'Source A',
-          label_b: 'Production Report',
+          label_a: this.fileLabelA || 'Source A',
+          label_b: this.fileLabelB || 'Production Report',
           file_b_path: this.filePathB || null,
           file_b_content_b64: this.fileB64B || null,
         };
@@ -819,6 +826,17 @@ function app() {
         }
       } catch (e) {
         this.toast('error', 'Accept failed', e.message);
+      }
+    },
+
+    async loadPastPairs() {
+      this.pastPairsLoading = true;
+      try {
+        this.pastPairs = await api('GET', '/api/compare/pairs');
+      } catch (e) {
+        this.toast('error', 'Load pairs failed', e.message);
+      } finally {
+        this.pastPairsLoading = false;
       }
     },
 

@@ -10,11 +10,23 @@ from api.schemas import BOCompareRequest, ReconFileCompareRequest
 from api.services.file_source import read_tabular
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.repository import ConfigRepository, RunRepository
+from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
 
 logger = logging.getLogger("api.services.compare_service")
 
 _SENTINEL_QUERY = "__file_source__"
+_KEY_CANDIDATES = (
+    "id",
+    "employee id",
+    "employee_id",
+    "order id",
+    "order_id",
+    "customer id",
+    "customer_id",
+    "account id",
+    "account_id",
+)
 
 
 class _FrameEngine:
@@ -45,12 +57,14 @@ class CompareService:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
             df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id)
             df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id)
+            key_columns = req.key_columns or self._infer_key_columns(df_a, df_b)
+            self._validate_key_columns(df_a, df_b, key_columns)
 
             engine_a = _FrameEngine(df_a, req.label_a)
             engine_b = _FrameEngine(df_b, req.label_b)
             reconciler = ReconciliationEngine(
                 engine_a, engine_b,
-                key_columns=req.key_columns or [],
+                key_columns=key_columns,
                 exclude_columns=req.exclude_columns or [],
             )
             result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
@@ -58,6 +72,7 @@ class CompareService:
             tr = self._repo.add_test_result(run_id, result)
             if result.mismatches:
                 self._repo.add_mismatch_details(tr.id, result.mismatches)
+            MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
 
             passed = 1 if result.status == TestStatus.PASSED else 0
             failed = 0 if passed else 1
@@ -105,6 +120,37 @@ class CompareService:
             file_name=src.file_name,
         )
 
+    @staticmethod
+    def _infer_key_columns(df_a, df_b) -> list[str]:
+        common_by_lower = {
+            str(col).strip().lower(): str(col)
+            for col in df_a.columns
+            if str(col).strip().lower() in {str(c).strip().lower() for c in df_b.columns}
+        }
+        for candidate in _KEY_CANDIDATES:
+            if candidate in common_by_lower:
+                return [common_by_lower[candidate]]
+        if len(common_by_lower) == 1:
+            return [next(iter(common_by_lower.values()))]
+        raise HTTPException(
+            status_code=422,
+            detail="key_columns are required when no unique common ID column can be inferred",
+        )
+
+    @staticmethod
+    def _validate_key_columns(df_a, df_b, key_columns: list[str]) -> None:
+        missing_a = [col for col in key_columns if col not in df_a.columns]
+        missing_b = [col for col in key_columns if col not in df_b.columns]
+        if missing_a or missing_b:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Selected key_columns must exist in both sources",
+                    "missing_in_source_a": missing_a,
+                    "missing_in_source_b": missing_b,
+                },
+            )
+
     # ------------------------------------------------------------------
     # Reconciliation file comparison
     # ------------------------------------------------------------------
@@ -118,6 +164,7 @@ class CompareService:
 
             all_names = sorted(set(stats_a) | set(stats_b))
             passed = failed = 0
+            results = []
             for name in all_names:
                 a = stats_a.get(name, {})
                 b = stats_b.get(name, {})
@@ -144,6 +191,7 @@ class CompareService:
                     duration_seconds=0.0,
                 )
                 self._repo.add_test_result(run_id, synthetic)
+                results.append(synthetic)
 
             overall = "PASSED" if failed == 0 else "FAILED"
             self._repo.update_run_status(
@@ -151,6 +199,7 @@ class CompareService:
                 completed_at=datetime.now(timezone.utc),
                 total_tests=len(all_names), passed=passed, failed=failed,
             )
+            MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, results)
         except Exception:
             logger.exception("Recon file compare failed for run %s", run_id)
             self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)

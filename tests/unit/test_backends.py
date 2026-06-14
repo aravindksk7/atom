@@ -36,7 +36,7 @@ def test_pandas_backend_detects_value_mismatch():
     mismatches = backend.compare(src, tgt)
     assert len(mismatches) == 1
     assert mismatches[0].column_name == "val"
-    assert mismatches[0].mismatch_type == "value_mismatch"
+    assert mismatches[0].mismatch_type == "value_diff"
 
 
 def test_pandas_backend_detects_missing_in_target():

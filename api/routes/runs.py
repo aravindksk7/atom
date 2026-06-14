@@ -97,6 +97,41 @@ def _filter_log_events(
     return matches[-max(1, min(limit, 5000)):]
 
 
+def _metrics_from_run(run) -> dict:
+    tests = []
+    total_duration = 0.0
+    passed = failed = slow = 0
+    for result in run.results:
+        duration = float(result.duration_seconds or 0)
+        total_duration += duration
+        status = result.status or "UNKNOWN"
+        if status == "PASSED":
+            passed += 1
+        elif status == "SLOW":
+            slow += 1
+        elif status in {"FAILED", "ERROR"}:
+            failed += 1
+        tests.append({
+            "name": result.query_name,
+            "status": status,
+            "duration_seconds": duration,
+            "source_row_count": result.source_row_count or 0,
+            "target_row_count": result.target_row_count or 0,
+            "total_issues": result.total_issues,
+        })
+    return {
+        "run_id": run.run_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_tests": len(tests),
+        "passed": passed,
+        "failed": failed,
+        "slow": slow,
+        "total_duration_seconds": round(total_duration, 6),
+        "tests": tests,
+        "source": "database",
+    }
+
+
 def _execute_run(
     run_id: str,
     job_sequence: list[str],
@@ -141,6 +176,8 @@ def list_runs(limit: int = 50, offset: int = 0, db: Session = Depends(get_sessio
             failed=r.failed,
             slow=r.slow,
             error=r.error,
+            run_type=r.run_type,
+            pair_id=r.pair_id,
         )
         for r in runs
     ]
@@ -194,6 +231,8 @@ def get_run_status(run_id: str, db: Session = Depends(get_session)):
         failed=run.failed,
         slow=run.slow,
         error=run.error,
+        run_type=run.run_type,
+        pair_id=run.pair_id,
     )
 
 
@@ -246,12 +285,16 @@ def get_run_metrics(
     format: str | None = None,
     db: Session = Depends(get_session),
 ):
-    if RunRepository(db).get_run(run_id) is None:
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     metrics_path = Path("logs") / f"metrics_{run_id}.json"
-    if not metrics_path.exists():
+    if metrics_path.exists():
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8", errors="replace"))
+    elif run.results:
+        metrics = _metrics_from_run(run)
+    else:
         raise HTTPException(status_code=404, detail="Metrics not found")
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     if _wants_html(request, format):
         return HTMLResponse(render_metrics_html(metrics))
     return metrics
@@ -273,7 +316,7 @@ def get_run_logs(
     log_path = Path("logs") / "etl_framework.log"
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log not found")
-    text = log_path.read_text(encoding="utf-8")
+    text = log_path.read_text(encoding="utf-8", errors="replace")
     scope_l = scope.lower().strip() or "run"
     if scope_l not in {"run", "all"}:
         raise HTTPException(status_code=400, detail="scope must be 'run' or 'all'")
@@ -414,6 +457,7 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_session)):
             started_at=r.started_at, completed_at=r.completed_at,
             total_tests=r.total_tests, passed=r.passed,
             failed=r.failed, slow=r.slow, error=r.error,
+            run_type=r.run_type, pair_id=r.pair_id,
         )
 
     tests_a = {r.query_name: r for r in ra.results}
@@ -496,6 +540,8 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
         failed=run.failed,
         slow=run.slow,
         error=run.error,
+        run_type=run.run_type,
+        pair_id=run.pair_id,
         source_env=run.source_env,
         target_env=run.target_env,
         config_snapshot=run.config_snapshot,

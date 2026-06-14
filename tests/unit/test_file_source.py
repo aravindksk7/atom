@@ -15,6 +15,23 @@ def test_read_tabular_from_csv_path(tmp_path):
     assert len(df) == 2
 
 
+def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path):
+    from api.services.file_source import read_tabular
+    f = tmp_path / "report.csv"
+    f.write_text(
+        "Report Name: Monthly Regional Sales Summary\n"
+        "Run Date: 2026-06-14\n"
+        "Universe Data Source: Sales_and_Operations_Cube\n"
+        "--------------------------------------------------\n"
+        "Region,Employee ID,Amount\n"
+        "North,EM1092,7500.00\n",
+        encoding="utf-8",
+    )
+    df = read_tabular(path=str(f))
+    assert list(df.columns) == ["Region", "Employee ID", "Amount"]
+    assert df.iloc[0]["Employee ID"] == "EM1092"
+
+
 def test_read_tabular_from_xlsx_upload():
     from api.services.file_source import read_tabular
     buf = io.BytesIO()

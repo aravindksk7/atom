@@ -1,10 +1,50 @@
 from __future__ import annotations
 import base64
+import csv
 import io
 from pathlib import Path
 
 import pandas as pd
+from pandas.errors import ParserError
 from fastapi import HTTPException
+
+
+def _read_csv_bytes(raw: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_csv(io.BytesIO(raw))
+    except ParserError:
+        text = raw.decode("utf-8-sig", errors="replace")
+        lines = text.splitlines()
+        start, delimiter = _find_csv_header(lines)
+        if start is None:
+            raise
+        return pd.read_csv(io.StringIO("\n".join(lines[start:])), sep=delimiter)
+
+
+def _find_csv_header(lines: list[str]) -> tuple[int | None, str]:
+    for delimiter in (",", "\t", ";", "|"):
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or set(stripped) <= {"-"} or delimiter not in line:
+                continue
+            expected_fields = len(next(csv.reader([line], delimiter=delimiter)))
+            if expected_fields < 2:
+                continue
+            next_line = _next_nonempty(lines, idx + 1)
+            if next_line is None:
+                continue
+            next_fields = len(next(csv.reader([next_line], delimiter=delimiter)))
+            if next_fields == expected_fields:
+                return idx, delimiter
+    return None, ","
+
+
+def _next_nonempty(lines: list[str], start: int) -> str | None:
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped and not set(stripped) <= {"-"}:
+            return line
+    return None
 
 
 def read_tabular(
@@ -21,7 +61,7 @@ def read_tabular(
         name = file_name or ""
         ext = Path(name).suffix.lower()
         if ext == ".csv":
-            return pd.read_csv(io.BytesIO(raw))
+            return _read_csv_bytes(raw)
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(io.BytesIO(raw))
         raise HTTPException(
@@ -33,7 +73,7 @@ def read_tabular(
     ext = p.suffix.lower()
     try:
         if ext == ".csv":
-            return pd.read_csv(p)
+            return _read_csv_bytes(p.read_bytes())
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(p)
     except FileNotFoundError:

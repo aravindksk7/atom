@@ -51,7 +51,7 @@ class PandasBackend:
                         mismatches.append(MismatchRecord(
                             key_values=key_vals, column_name=col,
                             source_value=a, target_value=b,
-                            mismatch_type="value_mismatch",
+                            mismatch_type="value_diff",
                         ))
                         if len(mismatches) >= self._mismatch_row_limit:
                             break

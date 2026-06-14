@@ -1,5 +1,12 @@
 import pytest
-from etl_framework.utils.tracing import span, is_tracing_enabled
+from etl_framework.utils.tracing import configure_tracing, span, is_tracing_enabled
+
+
+def test_configure_tracing_disabled_is_noop():
+    configure_tracing(enabled=False)
+    assert is_tracing_enabled() is False
+    with span("test.disabled") as s:
+        assert s is not None
 
 
 def test_span_is_context_manager():

@@ -117,7 +117,7 @@ def test_run_add_test_result(db):
         value_mismatch_count=1,
         mismatches=[MismatchRecord(key_values={"id": 1}, column_name="amount",
                                    source_value="10.0", target_value="9.0",
-                                   mismatch_type="value_mismatch")],
+                                   mismatch_type="value_diff")],
         status=TestStatus.FAILED,
         executed_at=datetime.now(timezone.utc),
         duration_seconds=1.5,

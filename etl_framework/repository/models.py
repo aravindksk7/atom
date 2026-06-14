@@ -61,6 +61,26 @@ class TestRun(Base):
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
 
+    @property
+    def test_cases(self):
+        return self.results
+
+    @property
+    def reconciliation_results(self):
+        return self.results
+
+    @property
+    def total_passed(self) -> int:
+        return self.passed or 0
+
+    @property
+    def total_failed(self) -> int:
+        return (self.failed or 0) + (self.error or 0)
+
+    @property
+    def total_skipped(self) -> int:
+        return 0
+
 
 class TestResult(Base):
     __tablename__ = "test_results"
@@ -82,6 +102,18 @@ class TestResult(Base):
     run = relationship("TestRun", back_populates="results")
     mismatches = relationship("MismatchDetail", back_populates="test_result",
                               cascade="all, delete-orphan", lazy="select")
+
+    @property
+    def total_issues(self) -> int:
+        return (
+            (self.value_mismatch_count or 0)
+            + (self.missing_in_target_count or 0)
+            + (self.missing_in_source_count or 0)
+        )
+
+    @property
+    def schema_diff(self):
+        return None
 
 
 class MismatchDetail(Base):
