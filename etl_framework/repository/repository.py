@@ -560,9 +560,10 @@ class AuditRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[AuditEvent]:
-        q = self._db.query(AuditEvent).order_by(AuditEvent.created_at.desc())
+        q = self._db.query(AuditEvent)
         if resource_type:
             q = q.filter(AuditEvent.resource_type == resource_type)
         if resource_id:
             q = q.filter(AuditEvent.resource_id == resource_id)
+        q = q.order_by(AuditEvent.created_at.desc())
         return q.offset(offset).limit(limit).all()
