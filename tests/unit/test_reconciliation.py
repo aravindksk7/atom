@@ -308,3 +308,80 @@ def test_chunk_size_nonzero_unequal_row_counts_no_infinite_loop():
     result = engine.reconcile("SELECT 1", "unequal_rows")
     # Must terminate and report missing_in_source_count
     assert result.missing_in_source_count == 1
+
+
+# --- Hash pre-check tests (Task 9, use_hash_precheck=True) ---
+
+def test_hash_precheck_identical_data_returns_early_pass():
+    """Identical data with hash precheck enabled should short-circuit to PASSED."""
+    df = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    engine = _make_engine(df, df.copy(), chunk_size=10, use_hash_precheck=True)
+    result = engine.reconcile("SELECT 1", "hash_precheck_match")
+    assert result.status == TestStatus.PASSED
+    assert result.mismatches == []
+
+
+def test_hash_precheck_differing_data_falls_through_to_full_compare():
+    """Differing data should NOT short-circuit — full compare must run and catch mismatches."""
+    source = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    target = pd.DataFrame({"id": [1, 2], "val": ["a", "X"]})
+    engine = _make_paginating_engine(source, target, chunk_size=10)
+    engine._use_hash_precheck = True
+    result = engine.reconcile("SELECT 1", "hash_precheck_diff")
+    assert result.value_mismatch_count >= 1
+
+
+def test_hash_precheck_disabled_does_not_short_circuit():
+    """use_hash_precheck=False must always run the full compare even on identical data."""
+    df = pd.DataFrame({"id": [1, 2], "val": ["x", "y"]})
+    engine = _make_engine(df, df.copy(), chunk_size=5, use_hash_precheck=False)
+    result = engine.reconcile("SELECT 1", "no_hash_precheck")
+    assert result.status == TestStatus.PASSED
+    assert result.source_row_count == 2
+
+
+# --- Custom backend integration tests ---
+
+def test_polars_backend_integration_value_mismatch():
+    """ReconciliationEngine with PolarsBackend detects value mismatches correctly."""
+    pytest.importorskip("polars")
+    from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
+
+    src = pd.DataFrame({"id": [1, 2], "val": ["x", "y"]})
+    tgt = pd.DataFrame({"id": [1, 2], "val": ["x", "z"]})
+    backend = PolarsBackend(key_columns=["id"])
+    engine = _make_engine(src, tgt, backend=backend)
+    result = engine.reconcile("SELECT 1", "polars_integration")
+    assert result.value_mismatch_count == 1
+
+
+def test_polars_backend_integration_no_mismatches():
+    pytest.importorskip("polars")
+    from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
+
+    df = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    backend = PolarsBackend(key_columns=["id"])
+    engine = _make_engine(df, df.copy(), backend=backend)
+    result = engine.reconcile("SELECT 1", "polars_clean")
+    assert result.status == TestStatus.PASSED
+
+
+# --- Composite key columns ---
+
+def test_composite_keys_value_mismatch_attributed_correctly():
+    src = pd.DataFrame({"a": [1, 1], "b": [1, 2], "val": ["x", "y"]})
+    tgt = pd.DataFrame({"a": [1, 1], "b": [1, 2], "val": ["x", "z"]})
+    engine = _make_engine(src, tgt, key_columns=["a", "b"])
+    result = engine.reconcile("SELECT 1", "composite_key_val")
+    assert result.value_mismatch_count == 1
+    assert result.mismatches[0].key_values == {"a": 1, "b": 2}
+
+
+def test_composite_keys_missing_row_detected():
+    src = pd.DataFrame({"a": [1, 1], "b": [1, 2], "val": ["x", "y"]})
+    tgt = pd.DataFrame({"a": [1], "b": [1], "val": ["x"]})
+    engine = _make_engine(src, tgt, key_columns=["a", "b"])
+    result = engine.reconcile("SELECT 1", "composite_key_missing")
+    assert result.missing_in_target_count == 1
+    missing = [m for m in result.mismatches if m.mismatch_type == "missing_in_target"]
+    assert missing[0].key_values == {"a": 1, "b": 2}

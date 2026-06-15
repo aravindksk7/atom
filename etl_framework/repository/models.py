@@ -57,6 +57,7 @@ class TestRun(Base):
     error = Column(Integer, default=0, nullable=False)
     run_type = Column(String(50), nullable=False, default="reconciliation")
     pair_id  = Column(String(36), nullable=True, index=True)
+    is_baseline = Column(Boolean, nullable=False, default=False, index=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
@@ -133,3 +134,69 @@ class MismatchDetail(Base):
     accepted_by   = Column(String(255), nullable=True)
 
     test_result = relationship("TestResult", back_populates="mismatches")
+
+
+# ---------------------------------------------------------------------------
+# P3 — Job Lineage
+# ---------------------------------------------------------------------------
+
+class JobLineageEdge(Base):
+    __tablename__ = "job_lineage_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    upstream_job = Column(String(255), nullable=False, index=True)
+    downstream_job = Column(String(255), nullable=False, index=True)
+    edge_type = Column(String(50), nullable=False, default="depends_on")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# P0 — Auth
+# ---------------------------------------------------------------------------
+
+class ApiToken(Base):
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+
+
+# ---------------------------------------------------------------------------
+# P0 — Alerting
+# ---------------------------------------------------------------------------
+
+class NotificationHook(Base):
+    __tablename__ = "notification_hooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    url = Column(Text, nullable=False)
+    events = Column(JSON, nullable=False, default=list)  # e.g. ["run.failed","run.error"]
+    enabled = Column(Boolean, nullable=False, default=True)
+    secret = Column(Text, nullable=True)                 # HMAC-SHA256 signing key
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# P0 — Scheduling
+# ---------------------------------------------------------------------------
+
+class ScheduledRun(Base):
+    __tablename__ = "scheduled_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    cron_expr = Column(String(100), nullable=False)
+    job_sequence = Column(JSON, nullable=False, default=list)
+    source_env = Column(String(100), nullable=False, default="")
+    target_env = Column(String(100), nullable=False, default="")
+    run_settings_json = Column(JSON, nullable=False, default=dict)
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

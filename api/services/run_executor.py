@@ -187,7 +187,31 @@ class RunExecutor:
     def _resolve_jobs(self) -> list[JobDefinition]:
         jobs_by_name = {job.name: self._job_to_definition(job) for job in self._job_repo.list()}
         jobs_by_name.update({job.name: job for job in _SEED_JOBS if job.name not in jobs_by_name})
-        return [jobs_by_name[name] for name in self._job_sequence if name in jobs_by_name]
+        requested = [jobs_by_name[n] for n in self._job_sequence if n in jobs_by_name]
+        return self._topo_sort(requested)
+
+    def _topo_sort(self, jobs: list[JobDefinition]) -> list[JobDefinition]:
+        name_set = {j.name for j in jobs}
+        by_name = {j.name: j for j in jobs}
+        in_degree: dict[str, int] = {j.name: 0 for j in jobs}
+        graph: dict[str, list[str]] = {j.name: [] for j in jobs}
+        for job in jobs:
+            for dep in job.depends_on:
+                if dep in name_set:
+                    graph[dep].append(job.name)
+                    in_degree[job.name] += 1
+        queue = [n for n, d in in_degree.items() if d == 0]
+        sorted_names: list[str] = []
+        while queue:
+            node = queue.pop(0)
+            sorted_names.append(node)
+            for child in graph[node]:
+                in_degree[child] -= 1
+                if in_degree[child] == 0:
+                    queue.append(child)
+        if len(sorted_names) != len(jobs):
+            raise ValueError("Cycle detected in job dependency graph")
+        return [by_name[n] for n in sorted_names]
 
     def _apply_health_gate(self) -> None:
         if not self._settings.health_check:
@@ -205,6 +229,7 @@ class RunExecutor:
                 raise RuntimeError(f"Health check failed: {messages}")
 
     def _job_to_definition(self, job) -> JobDefinition:
+        params = job.params or {}
         return JobDefinition(
             name=job.name,
             description=job.description,
@@ -215,8 +240,9 @@ class RunExecutor:
             exclude_columns=job.exclude_columns or [],
             source_env=job.source_env,
             target_env=job.target_env,
-            params=job.params or {},
+            params=params,
             enabled=job.enabled,
+            depends_on=params.get("depends_on", []),
         )
 
     def _build_case(self, job: JobDefinition):
@@ -241,14 +267,63 @@ class RunExecutor:
                 backend=self._build_backend(job),
             )
             max_duration = self._settings.max_duration_seconds or None
-            return engine.reconcile(
+            result = engine.reconcile(
                 query=job.query,
                 query_name=job.name,
                 params=job.params,
                 max_duration_seconds=max_duration,
             )
+            if job.rules:
+                result = self._apply_dq_rules(result, job, source_engine)
+            return result
 
-        return run_job
+        max_retries = self._settings.max_retries
+        retry_delay = self._settings.retry_delay_seconds
+
+        def run_with_retry() -> ReconciliationResult:
+            import time
+            for attempt in range(max_retries + 1):
+                try:
+                    return run_job()
+                except Exception:
+                    if attempt == max_retries:
+                        raise
+                    time.sleep(retry_delay * (2 ** attempt))
+            raise RuntimeError("unreachable")  # pragma: no cover
+
+        return run_with_retry
+
+    def _apply_dq_rules(
+        self, result: ReconciliationResult, job: JobDefinition, source_engine
+    ) -> ReconciliationResult:
+        from etl_framework.reconciliation.dq_engine import DQEngine, DQViolation
+        try:
+            source_df = source_engine.execute_query(job.query, job.params)
+        except Exception:
+            return result
+        violations = DQEngine().evaluate(source_df, job.rules)
+        if not violations:
+            return result
+        extra: list[MismatchRecord] = []
+        for v in violations:
+            extra.append(MismatchRecord(
+                key_values={"dq_rule": v.rule_type},
+                column_name=v.column or "",
+                source_value=str(v.actual_value) if v.actual_value is not None else "",
+                target_value="",
+                mismatch_type="dq_violation",
+            ))
+        from dataclasses import replace as _replace
+        from etl_framework.runner.state import TestStatus as _TS
+        has_error = any(v.severity == "error" for v in violations)
+        new_status = _TS.FAILED if has_error else result.status
+        new_mismatches = result.mismatches + extra
+        return _replace(
+            result,
+            mismatches=new_mismatches,
+            value_mismatch_count=result.value_mismatch_count + len(extra),
+            status=new_status,
+        )
 
     def _build_case_bo_report(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
@@ -422,3 +497,13 @@ class RunExecutor:
             slow=slow,
             error=error,
         )
+        self._fire_webhooks(final_status, passed=passed, failed=failed, error=error)
+
+    def _fire_webhooks(self, status: str, **extra) -> None:
+        try:
+            from etl_framework.repository.repository import NotificationRepository
+            from api.services.notifier import notify
+            hooks = NotificationRepository(self._db).list_enabled_for_event(status)
+            notify(self._run_id, status, extra=extra, hooks=hooks)
+        except Exception:
+            pass  # never let notifier failures affect the run

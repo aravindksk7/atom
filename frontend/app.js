@@ -3,7 +3,10 @@
 const API = window.ETL_API_BASE || '';
 
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const token = localStorage.getItem('etl_token');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const resp = await fetch(API + path, opts);
   if (resp.status === 204) return null;
@@ -15,7 +18,9 @@ async function api(method, path, body) {
 }
 
 async function apiBlob(path) {
-  const resp = await fetch(API + path);
+  const token = localStorage.getItem('etl_token');
+  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  const resp = await fetch(API + path, { headers });
   if (!resp.ok) throw new Error(resp.statusText);
   return { blob: await resp.blob(), disposition: resp.headers.get('content-disposition') || '' };
 }
@@ -86,8 +91,12 @@ function app() {
       metrics_enabled: true,
       use_live_connections: false,
       notes: '',
+      max_retries: 0,
+      retry_delay_seconds: 30,
     },
     isLaunching: false,
+    validateJobLoading: false,
+    validateJobResult: null,
 
     // -----------------------------------------------------------
     // Monitor
@@ -103,6 +112,28 @@ function app() {
     chartInstance: null,
     historyFilterStatus: '',
     historyFilterRunType: '',
+    historySubTab: 'runs',
+
+    // -----------------------------------------------------------
+    // Trends
+    // -----------------------------------------------------------
+    trendsJobName: '',
+    trendsMetric: 'mismatch_rate',
+    trendsWindow: 30,
+    trendsData: null,
+    trendsLoading: false,
+    trendsChartInstance: null,
+
+    // -----------------------------------------------------------
+    // Lineage
+    // -----------------------------------------------------------
+    lineageGraph: null,
+    lineageLoading: false,
+
+    // -----------------------------------------------------------
+    // Mismatch distribution
+    // -----------------------------------------------------------
+    mismatchDist: {},  // result_id → distribution array
 
     // -----------------------------------------------------------
     // Adapters – SAP BO
@@ -220,6 +251,33 @@ function app() {
     acceptForms: {},
 
     // -----------------------------------------------------------
+    // Security – API tokens
+    // -----------------------------------------------------------
+    tokens: [],
+    securityOpen: false,
+    showCreateToken: false,
+    newTokenName: '',
+    createdToken: null,
+
+    // -----------------------------------------------------------
+    // Notifications – webhook hooks
+    // -----------------------------------------------------------
+    hooks: [],
+    notifOpen: false,
+    showHookModal: false,
+    hookModal: { name: '', url: '', events: [], secret: '' },
+    hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed'],
+
+    // -----------------------------------------------------------
+    // Schedules
+    // -----------------------------------------------------------
+    schedules: [],
+    launchSubTab: 'jobs',
+    showScheduleModal: false,
+    scheduleModal: {},
+    scheduleModalEditing: false,
+
+    // -----------------------------------------------------------
     // Toast
     // -----------------------------------------------------------
     toasts: [],
@@ -230,6 +288,9 @@ function app() {
     // ===========================================================
     async init() {
       await Promise.all([this.loadConfigs(), this.loadJobs(), this.loadRuns()]);
+      this.loadTokens();
+      this.loadHooks();
+      this.loadSchedules();
       this.startPolling();
       try {
         await api('GET', '/api/health');
@@ -380,8 +441,13 @@ function app() {
     },
 
     openNewJobModal() {
-      this.jobModal = { name: '', description: '', job_type: 'reconciliation', query: '', key_columns_raw: 'id', tags_raw: '', enabled: true };
+      this.jobModal = {
+        name: '', description: '', job_type: 'reconciliation', query: '',
+        key_columns_raw: 'id', tags_raw: '', enabled: true,
+        depends_on_raw: '', rules: [],
+      };
       this.jobModalEditing = false;
+      this.validateJobResult = null;
       this.showJobModal = true;
     },
 
@@ -391,9 +457,39 @@ function app() {
         job_type: job.job_type || 'reconciliation',
         query: job.query || '', key_columns_raw: (job.key_columns || ['id']).join(', '),
         tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
+        depends_on_raw: (job.depends_on || []).join(', '),
+        rules: (job.rules || []).map(r => ({ ...r })),
       };
       this.jobModalEditing = true;
+      this.validateJobResult = null;
       this.showJobModal = true;
+    },
+
+    addDQRule() {
+      this.jobModal.rules.push({ type: 'not_null', column: '', severity: 'error', min_value: null, max_value: null, pattern: null });
+    },
+
+    removeDQRule(idx) {
+      this.jobModal.rules.splice(idx, 1);
+    },
+
+    async validateJob() {
+      const m = this.jobModal;
+      if (!m.name || !this.jobModalEditing) return;
+      this.validateJobLoading = true;
+      this.validateJobResult = null;
+      try {
+        const s = this.launchSettings;
+        this.validateJobResult = await api('POST', `/api/jobs/${encodeURIComponent(m.name)}/validate`, {
+          source_env: s.source_env,
+          target_env: s.target_env,
+          config_data: {},
+        });
+      } catch (e) {
+        this.validateJobResult = { source_ok: false, target_ok: false, errors: [e.message] };
+      } finally {
+        this.validateJobLoading = false;
+      }
     },
 
     async saveJob() {
@@ -404,6 +500,8 @@ function app() {
         key_columns: m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean),
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
+        depends_on: m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean),
+        rules: (m.rules || []).filter(r => r.type),
       };
       try {
         if (this.jobModalEditing) {
@@ -447,6 +545,8 @@ function app() {
         metrics_enabled: Boolean(s.metrics_enabled),
         use_live_connections: Boolean(s.use_live_connections),
         notes: s.notes,
+        max_retries: Number(s.max_retries) || 0,
+        retry_delay_seconds: Number(s.retry_delay_seconds) || 30,
       };
     },
 
@@ -1176,6 +1276,348 @@ function app() {
       if (value === 'INFO') return 'log-level-info';
       if (value === 'DEBUG') return 'log-level-debug';
       return 'log-level-trace';
+    },
+
+    // ===========================================================
+    // SECURITY – API TOKENS
+    // ===========================================================
+    async loadTokens() {
+      try { this.tokens = await api('GET', '/api/tokens'); } catch {}
+    },
+
+    async createToken() {
+      if (!this.newTokenName.trim()) return;
+      try {
+        const resp = await api('POST', '/api/tokens', { name: this.newTokenName.trim() });
+        this.createdToken = resp.raw_token;
+        localStorage.setItem('etl_token', resp.raw_token);
+        this.newTokenName = '';
+        this.showCreateToken = false;
+        await this.loadTokens();
+        this.toast('success', 'Token created', 'Saved to localStorage automatically');
+      } catch (e) {
+        this.toast('error', 'Create failed', e.message);
+      }
+    },
+
+    async revokeToken(id) {
+      if (!confirm('Revoke this token? Any sessions using it will stop working.')) return;
+      try {
+        await api('DELETE', `/api/tokens/${id}`);
+        await this.loadTokens();
+        this.toast('success', 'Token revoked');
+      } catch (e) {
+        this.toast('error', 'Revoke failed', e.message);
+      }
+    },
+
+    setStoredToken(raw) {
+      if (raw.trim()) {
+        localStorage.setItem('etl_token', raw.trim());
+        this.toast('success', 'Token saved', 'Will be used for all API calls');
+      } else {
+        localStorage.removeItem('etl_token');
+        this.toast('warn', 'Token cleared');
+      }
+    },
+
+    get storedToken() {
+      return localStorage.getItem('etl_token') || '';
+    },
+
+    // ===========================================================
+    // NOTIFICATIONS – WEBHOOK HOOKS
+    // ===========================================================
+    async loadHooks() {
+      try { this.hooks = await api('GET', '/api/notifications'); } catch {}
+    },
+
+    openNewHookModal() {
+      this.hookModal = { name: '', url: '', events: ['run.failed', 'run.error'], secret: '' };
+      this.showHookModal = true;
+    },
+
+    toggleHookEvent(event) {
+      const idx = this.hookModal.events.indexOf(event);
+      if (idx >= 0) this.hookModal.events.splice(idx, 1);
+      else this.hookModal.events.push(event);
+    },
+
+    async saveHook() {
+      const m = this.hookModal;
+      if (!m.name || !m.url || !m.events.length) return;
+      try {
+        await api('POST', '/api/notifications', {
+          name: m.name, url: m.url,
+          events: m.events,
+          secret: m.secret || null,
+        });
+        await this.loadHooks();
+        this.showHookModal = false;
+        this.toast('success', 'Webhook saved', m.name);
+      } catch (e) {
+        this.toast('error', 'Save failed', e.message);
+      }
+    },
+
+    async deleteHook(id) {
+      if (!confirm('Delete this webhook?')) return;
+      try {
+        await api('DELETE', `/api/notifications/${id}`);
+        await this.loadHooks();
+        this.toast('success', 'Webhook deleted');
+      } catch (e) {
+        this.toast('error', 'Delete failed', e.message);
+      }
+    },
+
+    async testHook(id) {
+      try {
+        await api('POST', `/api/notifications/${id}/test`);
+        this.toast('success', 'Test ping sent');
+      } catch (e) {
+        this.toast('error', 'Ping failed', e.message);
+      }
+    },
+
+    // ===========================================================
+    // SCHEDULES
+    // ===========================================================
+    async loadSchedules() {
+      try { this.schedules = await api('GET', '/api/schedules'); } catch {}
+    },
+
+    openNewScheduleModal() {
+      this.scheduleModal = {
+        name: '', cron_expr: '0 6 * * *',
+        source_env: 'dev', target_env: 'prod',
+        job_sequence_raw: '',
+        enabled: true,
+      };
+      this.scheduleModalEditing = false;
+      this.showScheduleModal = true;
+    },
+
+    openEditScheduleModal(sched) {
+      this.scheduleModal = {
+        id: sched.id,
+        name: sched.name,
+        cron_expr: sched.cron_expr,
+        source_env: sched.source_env,
+        target_env: sched.target_env,
+        job_sequence_raw: (sched.job_sequence || []).join(', '),
+        enabled: sched.enabled,
+      };
+      this.scheduleModalEditing = true;
+      this.showScheduleModal = true;
+    },
+
+    async saveSchedule() {
+      const m = this.scheduleModal;
+      const body = {
+        name: m.name,
+        cron_expr: m.cron_expr,
+        source_env: m.source_env,
+        target_env: m.target_env,
+        job_sequence: m.job_sequence_raw.split(',').map(s => s.trim()).filter(Boolean),
+        enabled: m.enabled,
+        run_settings_json: {},
+      };
+      try {
+        if (this.scheduleModalEditing) {
+          await api('PUT', `/api/schedules/${m.id}`, body);
+        } else {
+          await api('POST', '/api/schedules', body);
+        }
+        await this.loadSchedules();
+        this.showScheduleModal = false;
+        this.toast('success', this.scheduleModalEditing ? 'Schedule updated' : 'Schedule created', m.name);
+      } catch (e) {
+        this.toast('error', 'Save failed', e.message);
+      }
+    },
+
+    async deleteSchedule(id) {
+      if (!confirm('Delete this schedule?')) return;
+      try {
+        await api('DELETE', `/api/schedules/${id}`);
+        await this.loadSchedules();
+        this.toast('success', 'Schedule deleted');
+      } catch (e) {
+        this.toast('error', 'Delete failed', e.message);
+      }
+    },
+
+    async runScheduleNow(id) {
+      try {
+        await api('POST', `/api/schedules/${id}/run-now`);
+        this.toast('success', 'Run triggered');
+        setTimeout(() => this.loadRuns(), 1000);
+      } catch (e) {
+        this.toast('error', 'Trigger failed', e.message);
+      }
+    },
+
+    // ===========================================================
+    // BASELINE
+    // ===========================================================
+    async setBaseline(runId) {
+      try {
+        await api('POST', `/api/runs/${runId}/set-baseline`);
+        await this.loadRuns();
+        if (this.selectedRun?.run_id === runId) await this.viewRunDetail(runId);
+        this.toast('success', 'Baseline pinned', `Run ${runId.substring(0,8)}… is now the baseline`);
+      } catch (e) {
+        this.toast('error', 'Baseline failed', e.message);
+      }
+    },
+
+    badgeUrl(runId) {
+      return (window.location.origin + '/api/runs/' + runId + '/badge');
+    },
+
+    async copyBadgeUrl(runId) {
+      try {
+        await navigator.clipboard.writeText(this.badgeUrl(runId));
+        this.toast('success', 'Copied', 'Badge URL copied to clipboard');
+      } catch {
+        this.toast('warn', 'Copy failed', 'Use the URL field manually');
+      }
+    },
+
+    // ===========================================================
+    // TRENDS
+    // ===========================================================
+    async loadTrends() {
+      if (!this.trendsJobName) return;
+      this.trendsLoading = true;
+      this.trendsData = null;
+      try {
+        const qs = new URLSearchParams({
+          job_name: this.trendsJobName,
+          metric: this.trendsMetric,
+          window: String(this.trendsWindow),
+        });
+        this.trendsData = await api('GET', '/api/runs/trends?' + qs.toString());
+        this.$nextTick(() => this.renderTrendsChart());
+      } catch (e) {
+        this.toast('error', 'Trends load failed', e.message);
+      } finally {
+        this.trendsLoading = false;
+      }
+    },
+
+    renderTrendsChart() {
+      const canvas = document.getElementById('trendsChart');
+      if (!canvas || !this.trendsData?.points?.length) return;
+      if (this.trendsChartInstance) this.trendsChartInstance.destroy();
+      const pts = this.trendsData.points;
+      this.trendsChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: pts.map(p => p.date),
+          datasets: [{
+            label: this.trendsMetric,
+            data: pts.map(p => p.value),
+            borderColor: this.trendsData.drift_detected ? '#fb7185' : '#6366f1',
+            backgroundColor: 'transparent',
+            pointRadius: 3,
+            tension: 0.3,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', maxTicksLimit: 7 }, grid: { color: '#1e2533' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e2533' } },
+          },
+        },
+      });
+    },
+
+    // ===========================================================
+    // MISMATCH DISTRIBUTION
+    // ===========================================================
+    async loadMismatchDist(runId, result) {
+      if (this.mismatchDist[result.id]) return;
+      try {
+        const data = await api('GET', `/api/runs/${runId}/results/${result.id}/mismatch-distribution`);
+        this.mismatchDist = { ...this.mismatchDist, [result.id]: data.distribution };
+      } catch {
+        this.mismatchDist = { ...this.mismatchDist, [result.id]: [] };
+      }
+    },
+
+    // ===========================================================
+    // LINEAGE
+    // ===========================================================
+    async loadLineage() {
+      this.lineageLoading = true;
+      try {
+        this.lineageGraph = await api('GET', '/api/lineage/jobs');
+      } catch (e) {
+        this.toast('error', 'Lineage load failed', e.message);
+      } finally {
+        this.lineageLoading = false;
+      }
+    },
+
+    lineageSvg() {
+      if (!this.lineageGraph?.nodes?.length) return '';
+      const nodes = this.lineageGraph.nodes;
+      const edges = this.lineageGraph.edges;
+      const W = 140, H = 40, HGAP = 180, VGAP = 70, PAD = 20;
+
+      // Assign layers via topological sort
+      const layer = {};
+      const inDeg = {};
+      nodes.forEach(n => { inDeg[n.name] = 0; layer[n.name] = 0; });
+      edges.forEach(e => { inDeg[e.to] = (inDeg[e.to] || 0) + 1; });
+      const queue = nodes.filter(n => !inDeg[n.name]).map(n => n.name);
+      while (queue.length) {
+        const cur = queue.shift();
+        edges.filter(e => e.from === cur).forEach(e => {
+          layer[e.to] = Math.max(layer[e.to] || 0, (layer[cur] || 0) + 1);
+          inDeg[e.to]--;
+          if (inDeg[e.to] === 0) queue.push(e.to);
+        });
+      }
+
+      // Position nodes
+      const byLayer = {};
+      nodes.forEach(n => {
+        const l = layer[n.name] || 0;
+        if (!byLayer[l]) byLayer[l] = [];
+        byLayer[l].push(n.name);
+      });
+      const pos = {};
+      Object.entries(byLayer).forEach(([l, names]) => {
+        names.forEach((name, i) => {
+          pos[name] = { x: PAD + Number(l) * HGAP, y: PAD + i * VGAP };
+        });
+      });
+      const maxX = Math.max(...Object.values(pos).map(p => p.x)) + W + PAD;
+      const maxY = Math.max(...Object.values(pos).map(p => p.y)) + H + PAD;
+
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxX}" height="${maxY}" style="font-family:monospace;font-size:11px">`;
+      svg += `<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#6366f1"/></marker></defs>`;
+      edges.forEach(e => {
+        if (!pos[e.from] || !pos[e.to]) return;
+        const x1 = pos[e.from].x + W, y1 = pos[e.from].y + H / 2;
+        const x2 = pos[e.to].x, y2 = pos[e.to].y + H / 2;
+        svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arr)"/>`;
+      });
+      nodes.forEach(n => {
+        const { x, y } = pos[n.name];
+        svg += `<rect x="${x}" y="${y}" width="${W}" height="${H}" rx="4" fill="#1e2533" stroke="#334155" stroke-width="1"/>`;
+        svg += `<text x="${x + W/2}" y="${y + H/2 + 4}" text-anchor="middle" fill="#c7d0dc">${n.name}</text>`;
+      });
+      svg += '</svg>';
+      return svg;
     },
 
     // ===========================================================

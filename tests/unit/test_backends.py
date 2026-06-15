@@ -65,11 +65,8 @@ def test_polars_backend_importable():
 
 
 def test_polars_backend_raises_when_polars_missing(monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "polars", None)
-    import importlib
     import etl_framework.reconciliation.backends.polars_backend as pb
-    importlib.reload(pb)
+    monkeypatch.setattr(pb, "_POLARS_AVAILABLE", False)
     backend = pb.PolarsBackend(key_columns=["id"], float_tolerance=1e-9,
                                null_equals_null=True, mismatch_row_limit=1000)
     src = pd.DataFrame({"id": [1], "val": ["a"]})

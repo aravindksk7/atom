@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -31,6 +30,7 @@ from api.services.run_executor import RunExecutor
 from etl_framework.repository.repository import RunRepository
 from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
+from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
 
 router = APIRouter(tags=["runs"])
 
@@ -47,56 +47,6 @@ def _wants_html(request: Request, fmt: str | None) -> bool:
     return "text/html" in request.headers.get("accept", "").lower()
 
 
-def _detect_log_level(line: str) -> str:
-    for level in ("ERROR", "WARNING", "WARN", "INFO", "DEBUG"):
-        if f"| {level}" in line or line.startswith(level) or f" {level} " in line:
-            return level
-    return ""
-
-
-def _parse_log_events(text: str) -> list[dict]:
-    events: list[dict] = []
-    current: dict | None = None
-    for idx, line in enumerate(text.splitlines(), start=1):
-        detected = _detect_log_level(line)
-        starts_event = bool(detected or re.match(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", line))
-        if starts_event:
-            if current is not None:
-                current["text"] = "\n".join(current.pop("lines"))
-                events.append(current)
-            current = {"number": idx, "level": detected or "TRACE", "lines": [line]}
-        elif current is not None:
-            current["lines"].append(line)
-        else:
-            current = {"number": idx, "level": "TRACE", "lines": [line]}
-    if current is not None:
-        current["text"] = "\n".join(current.pop("lines"))
-        events.append(current)
-    return events
-
-
-def _filter_log_events(
-    text: str,
-    run_id: str = "",
-    query: str = "",
-    level: str = "",
-    limit: int = 500,
-) -> list[dict]:
-    query_l = query.lower().strip()
-    level_u = level.upper().strip()
-    run_l = run_id.lower().strip()
-    matches: list[dict] = []
-    for event in _parse_log_events(text):
-        body_l = event["text"].lower()
-        detected = event["level"]
-        if run_l and run_l not in body_l:
-            continue
-        if query_l and query_l not in body_l:
-            continue
-        if level_u and detected != level_u and not (level_u == "WARN" and detected == "WARNING"):
-            continue
-        matches.append(event)
-    return matches[-max(1, min(limit, 5000)):]
 
 
 def _metrics_from_run(run) -> dict:
@@ -328,8 +278,8 @@ def get_run_logs(
     scope_l = scope.lower().strip() or "run"
     if scope_l not in {"run", "all"}:
         raise HTTPException(status_code=400, detail="scope must be 'run' or 'all'")
-    total_events = len(_parse_log_events(text))
-    lines = _filter_log_events(
+    total_events = len(parse_log_events(text))
+    lines = filter_log_events(
         text,
         run_id=run_id if scope_l == "run" else "",
         query=q,
@@ -449,6 +399,66 @@ def accept_mismatch(
         accepted_by=updated.accepted_by,
         result_status_updated=status_changed,
     )
+
+
+@router.get("/trends")
+def get_trends(
+    job_name: str,
+    metric: str = "mismatch_rate",
+    window: int = 30,
+    db: Session = Depends(get_session),
+):
+    from datetime import timedelta
+    import statistics
+    from etl_framework.repository.models import TestRun, TestResult
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window)
+    rows = (
+        db.query(TestResult.value_mismatch_count, TestResult.missing_in_target_count,
+                 TestResult.missing_in_source_count, TestResult.source_row_count,
+                 TestResult.duration_seconds, TestRun.completed_at)
+        .join(TestRun, TestRun.run_id == TestResult.run_id)
+        .filter(TestResult.query_name == job_name)
+        .filter(TestRun.completed_at.isnot(None))
+        .order_by(TestRun.completed_at)
+        .all()
+    )
+
+    points = []
+    for r in rows:
+        completed = r.completed_at
+        if completed and completed.tzinfo is None:
+            completed = completed.replace(tzinfo=timezone.utc)
+        if completed and completed < cutoff:
+            continue
+        total_issues = (r.value_mismatch_count or 0) + (r.missing_in_target_count or 0) + (r.missing_in_source_count or 0)
+        src = r.source_row_count or 0
+        if metric == "mismatch_rate":
+            value = total_issues / src if src else 0.0
+        elif metric == "row_count_delta":
+            value = float(r.missing_in_target_count or 0) - float(r.missing_in_source_count or 0)
+        elif metric == "duration_seconds":
+            value = float(r.duration_seconds or 0)
+        else:
+            value = float(total_issues)
+        date_str = completed.strftime("%Y-%m-%d") if completed else "unknown"
+        points.append({"date": date_str, "value": round(value, 6)})
+
+    drift_detected = False
+    if len(points) >= 3:
+        vals = [p["value"] for p in points]
+        mean = statistics.mean(vals[:-1])
+        try:
+            stdev = statistics.stdev(vals[:-1])
+            last = vals[-1]
+            if stdev > 0:
+                drift_detected = (last - mean) > 2 * stdev
+            elif last != mean:
+                drift_detected = True
+        except statistics.StatisticsError:
+            pass
+
+    return {"job_name": job_name, "metric": metric, "window": window, "points": points, "drift_detected": drift_detected}
 
 
 @router.get("/compare", response_model=RunCompareOut)
@@ -595,3 +605,104 @@ def delete_run(run_id: str, db: Session = Depends(get_session)):
     repo = RunRepository(db)
     if not repo.delete_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
+
+
+# ---------------------------------------------------------------------------
+# P2 – Badge SVG
+# ---------------------------------------------------------------------------
+
+_BADGE_COLORS = {
+    "PASSED":    "#4ade80",
+    "FAILED":    "#fb7185",
+    "SLOW":      "#fbbf24",
+    "ERROR":     "#f43f5e",
+    "RUNNING":   "#38bdf8",
+    "PENDING":   "#94a3b8",
+    "COMPLETED": "#4ade80",
+}
+
+
+def _badge_svg(label: str, status: str) -> str:
+    color = _BADGE_COLORS.get(status, "#94a3b8")
+    label_w = len(label) * 6 + 10
+    val_w = len(status) * 7 + 10
+    total_w = label_w + val_w
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" height="20">'
+        f'<rect width="{label_w}" height="20" fill="#555"/>'
+        f'<rect x="{label_w}" width="{val_w}" height="20" fill="{color}"/>'
+        f'<text x="{label_w // 2}" y="14" fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" '
+        f'font-size="11" text-anchor="middle">{label}</text>'
+        f'<text x="{label_w + val_w // 2}" y="14" fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" '
+        f'font-size="11" text-anchor="middle">{status}</text>'
+        f'</svg>'
+    )
+
+
+from fastapi.responses import Response  # noqa: E402 (local import avoids circular at top)
+
+
+@router.get("/{run_id}/badge")
+def run_badge(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    status = run.status if run else "UNKNOWN"
+    svg = _badge_svg("ETL", status)
+    return Response(content=svg, media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/latest/badge")
+def latest_badge(job_name: str = "", db: Session = Depends(get_session)):
+    from etl_framework.repository.models import TestRun, TestResult
+    q = db.query(TestRun).join(TestResult, TestResult.run_id == TestRun.run_id)
+    if job_name:
+        q = q.filter(TestResult.query_name == job_name)
+    run = q.order_by(TestRun.id.desc()).first()
+    status = run.status if run else "UNKNOWN"
+    svg = _badge_svg(job_name or "ETL", status)
+    return Response(content=svg, media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------------------
+# P2 – Baseline pinning
+# ---------------------------------------------------------------------------
+
+@router.post("/{run_id}/set-baseline", status_code=204)
+def set_baseline(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.set_baseline(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+
+@router.get("/{run_id}/vs-baseline")
+def vs_baseline(run_id: str, db: Session = Depends(get_session)):
+    from api.schemas import RunCompareOut
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    baseline = repo.get_baseline(run.source_env or "", run.target_env or "")
+    if baseline is None:
+        raise HTTPException(status_code=404, detail="No baseline set for this env pair")
+    if baseline.run_id == run_id:
+        raise HTTPException(status_code=400, detail="Run is already the baseline")
+    # Delegate to existing compare logic
+    from api.routes.runs import compare_runs
+    return compare_runs(run_a=baseline.run_id, run_b=run_id, db=db)
+
+
+# ---------------------------------------------------------------------------
+# P2 – Mismatch distribution
+# ---------------------------------------------------------------------------
+
+@router.get("/{run_id}/results/{result_id}/mismatch-distribution")
+def mismatch_distribution(run_id: str, result_id: int, top_n: int = 10,
+                           db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"result_id": result_id, "distribution": repo.mismatch_distribution(result_id, top_n)}

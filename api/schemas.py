@@ -69,6 +69,22 @@ class RunSettings(BaseModel):
     health_check: bool = False
     metrics_enabled: bool = True
     notes: str = ""
+    max_retries: int = Field(default=0, ge=0, le=10)
+    retry_delay_seconds: float = Field(default=30.0, ge=0)
+    retry_on: list[Literal["error", "timeout"]] = Field(default_factory=lambda: ["error"])
+
+
+class DQRule(BaseModel):
+    type: Literal[
+        "not_null", "unique", "row_count_min", "row_count_max",
+        "row_count_between", "column_mean_between", "match_regex", "custom_sql",
+    ]
+    column: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    pattern: str | None = None
+    sql: str | None = None
+    severity: Literal["error", "warn"] = "error"
 
 
 class RunTrigger(BaseModel):
@@ -185,6 +201,8 @@ class JobDefinition(BaseModel):
     target_env: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
+    rules: list[DQRule] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_reconciliation_contract(self) -> "JobDefinition":

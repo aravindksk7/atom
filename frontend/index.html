@@ -104,6 +104,115 @@
     </template>
   </div>
 
+  <!-- Security – API Tokens -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
+      <div class="font-semibold text-slate-700">🔑 Security — API Tokens</div>
+      <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="securityOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Bearer tokens gate all <code>/api/*</code> endpoints. Create a token here, then paste it in the field below to authenticate this browser session.</p>
+        <div class="flex items-center gap-2">
+          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" placeholder="Paste token here to authenticate…" />
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-muted text-xs" x-text="tokens.length + ' token(s) exist'"></span>
+          <button @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm">+ New Token</button>
+        </div>
+        <template x-if="showCreateToken">
+          <div class="flex gap-2">
+            <input x-model="newTokenName" class="field-input flex-1" placeholder="Token label (e.g. ci-pipeline)" @keydown.enter="createToken()" />
+            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm">Create</button>
+          </div>
+        </template>
+        <template x-if="createdToken">
+          <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
+            <div class="font-semibold text-amber-800">Token created — copy it now, it won't be shown again:</div>
+            <div class="font-mono text-xs break-all text-amber-900 select-all" x-text="createdToken"></div>
+            <button @click="createdToken = null" class="text-xs text-amber-700 underline">Dismiss</button>
+          </div>
+        </template>
+        <div class="space-y-1">
+          <template x-for="tok in tokens" :key="tok.id">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+              <div class="flex-1 min-w-0">
+                <span class="font-medium text-slate-700" x-text="tok.name"></span>
+                <span class="text-muted ml-2 text-xs" x-text="'created ' + fmtDate(tok.created_at)"></span>
+                <span x-show="tok.last_used_at" class="text-muted ml-2 text-xs" x-text="'last used ' + fmtDate(tok.last_used_at)"></span>
+              </div>
+              <span :class="tok.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="tok.enabled ? 'Active' : 'Revoked'"></span>
+              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs">Revoke</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Notifications – Webhook Hooks -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()">
+      <div class="font-semibold text-slate-700">🔔 Notifications — Webhooks</div>
+      <span class="text-muted text-sm" x-text="notifOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="notifOpen">
+      <div class="mt-3 space-y-3">
+        <div class="flex justify-end">
+          <button @click="openNewHookModal()" class="btn-primary btn-sm">+ New Webhook</button>
+        </div>
+        <template x-if="hooks.length === 0">
+          <div class="empty-state py-4"><div class="empty-state-title">No webhooks configured</div></div>
+        </template>
+        <div class="space-y-1">
+          <template x-for="hook in hooks" :key="hook.id">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+              <div class="flex-1 min-w-0">
+                <span class="font-medium text-slate-700" x-text="hook.name"></span>
+                <span class="text-muted ml-2 text-xs font-mono truncate" x-text="hook.url"></span>
+                <div class="flex flex-wrap gap-1 mt-0.5">
+                  <template x-for="ev in (hook.events||[])" :key="ev">
+                    <span class="badge badge-sky text-xs" x-text="ev"></span>
+                  </template>
+                </div>
+              </div>
+              <span :class="hook.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="hook.enabled ? 'On' : 'Off'"></span>
+              <button @click="testHook(hook.id)" class="btn-secondary btn-sm text-xs">Test</button>
+              <button @click="deleteHook(hook.id)" class="btn-danger btn-sm text-xs">Delete</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Webhook Modal -->
+  <div x-show="showHookModal" x-cloak class="modal-backdrop" @click.self="showHookModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4">New Webhook</h2>
+      <div class="space-y-3">
+        <div><label class="field-label">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" /></div>
+        <div><label class="field-label">URL *</label><input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" /></div>
+        <div>
+          <label class="field-label">Events *</label>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <template x-for="ev in hookEventOptions" :key="ev">
+              <label class="flex items-center gap-1 text-sm cursor-pointer">
+                <input type="checkbox" class="rounded" :checked="hookModal.events.includes(ev)" @change="toggleHookEvent(ev)" />
+                <span x-text="ev"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+        <div><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" /></div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showHookModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveHook()" :disabled="!hookModal.name || !hookModal.url || !hookModal.events.length" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Config Modal -->
   <div x-show="showConfigModal" x-cloak class="modal-backdrop" @click.self="showConfigModal = false">
     <div class="modal-box w-full max-w-2xl">
@@ -180,15 +289,26 @@
       <div class="section-title">Job Launcher</div>
       <div class="section-sub">Select jobs, configure settings, and trigger a run</div>
     </div>
-    <label class="toggle-wrap">
-      <div class="toggle-track" :class="launchSettings.use_live_connections ? 'on' : ''">
-        <div class="toggle-thumb"></div>
+    <div class="flex items-center gap-3">
+      <div class="flex rounded-lg border border-slate-200 overflow-hidden">
+        <button @click="launchSubTab='jobs'" :class="launchSubTab==='jobs' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Jobs</button>
+        <button @click="launchSubTab='schedules'; loadSchedules()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
       </div>
-      <span class="toggle-label" @click="launchSettings.use_live_connections = !launchSettings.use_live_connections">
-        Live Connections
-      </span>
-    </label>
+      <template x-if="launchSubTab==='jobs'">
+        <label class="toggle-wrap">
+          <div class="toggle-track" :class="launchSettings.use_live_connections ? 'on' : ''">
+            <div class="toggle-thumb"></div>
+          </div>
+          <span class="toggle-label" @click="launchSettings.use_live_connections = !launchSettings.use_live_connections">
+            Live Connections
+          </span>
+        </label>
+      </template>
+    </div>
   </div>
+
+  <!-- ── Jobs sub-tab ── -->
+  <div x-show="launchSubTab === 'jobs'">
 
   <!-- Launch settings card -->
   <div class="card mb-4">
@@ -253,6 +373,17 @@
       <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
         <input type="checkbox" class="rounded" x-model="launchSettings.use_hash_precheck" /> Hash precheck
       </label>
+    </div>
+    <!-- Retry policy -->
+    <div class="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100">
+      <div>
+        <label class="field-label">Max Retries (0 = off)</label>
+        <input x-model="launchSettings.max_retries" type="number" min="0" max="10" class="field-input" />
+      </div>
+      <div>
+        <label class="field-label">Retry Delay (seconds)</label>
+        <input x-model="launchSettings.retry_delay_seconds" type="number" min="0" class="field-input" />
+      </div>
     </div>
   </div>
 
@@ -327,6 +458,68 @@
         <label class="flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" class="rounded" x-model="jobModal.enabled" /> Enabled
         </label>
+        <div>
+          <label class="field-label">Depends On (comma-separated job names)</label>
+          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" />
+        </div>
+        <!-- DQ Rules accordion -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="field-label mb-0">Data Quality Rules</label>
+            <button @click="addDQRule()" class="btn-secondary btn-sm text-xs">+ Add Rule</button>
+          </div>
+          <template x-if="jobModal.rules && jobModal.rules.length > 0">
+            <div class="space-y-2 mt-1">
+              <template x-for="(rule, idx) in jobModal.rules" :key="idx">
+                <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
+                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-40">
+                    <option value="not_null">not_null</option>
+                    <option value="unique">unique</option>
+                    <option value="row_count_min">row_count_min</option>
+                    <option value="row_count_max">row_count_max</option>
+                    <option value="row_count_between">row_count_between</option>
+                    <option value="column_mean_between">column_mean_between</option>
+                    <option value="match_regex">match_regex</option>
+                    <option value="custom_sql">custom_sql</option>
+                  </select>
+                  <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" />
+                  <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between'].includes(rule.type)">
+                    <input x-model="rule.min_value" type="number" class="field-input text-xs py-1 w-20" placeholder="min" />
+                  </template>
+                  <template x-if="['row_count_max','row_count_between','column_mean_between'].includes(rule.type)">
+                    <input x-model="rule.max_value" type="number" class="field-input text-xs py-1 w-20" placeholder="max" />
+                  </template>
+                  <template x-if="rule.type === 'match_regex'">
+                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="^[A-Z]+" />
+                  </template>
+                  <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20">
+                    <option value="error">error</option>
+                    <option value="warn">warn</option>
+                  </select>
+                  <button @click="removeDQRule(idx)" class="btn-danger btn-sm text-xs py-1 px-2">✕</button>
+                </div>
+              </template>
+            </div>
+          </template>
+          <template x-if="!jobModal.rules || jobModal.rules.length === 0">
+            <div class="text-muted text-xs py-2">No rules — job will skip DQ checks</div>
+          </template>
+        </div>
+        <!-- Validate query button (editing mode only) -->
+        <template x-if="jobModalEditing">
+          <div>
+            <div class="flex items-center gap-3">
+              <button @click="validateJob()" class="btn-secondary btn-sm" :disabled="validateJobLoading">
+                <span x-show="!validateJobLoading">🔍 Validate Query</span>
+                <span x-show="validateJobLoading">Validating…</span>
+              </button>
+              <template x-if="validateJobResult">
+                <span class="text-xs" :class="validateJobResult.errors?.length ? 'text-rose-500' : 'text-emerald-600'"
+                      x-text="validateJobResult.errors?.length ? '✗ ' + validateJobResult.errors[0] : '✓ Query validated'"></span>
+              </template>
+            </div>
+          </div>
+        </template>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showJobModal = false" class="btn-secondary">Cancel</button>
@@ -364,6 +557,81 @@
       <span x-show="isLaunching">Launching…</span>
     </button>
   </div>
+  </div><!-- end jobs sub-tab -->
+
+  <!-- ── Schedules sub-tab ── -->
+  <div x-show="launchSubTab === 'schedules'">
+    <div class="flex justify-end mb-3">
+      <button @click="openNewScheduleModal()" class="btn-primary">+ New Schedule</button>
+    </div>
+    <template x-if="schedules.length === 0">
+      <div class="card empty-state">
+        <div class="empty-state-icon">🕒</div>
+        <div class="empty-state-title">No schedules yet</div>
+        <div class="empty-state-sub">Create a schedule to run jobs on a cron expression automatically</div>
+      </div>
+    </template>
+    <div class="space-y-3">
+      <template x-for="sched in schedules" :key="sched.id">
+        <div class="card">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-slate-800" x-text="sched.name"></span>
+                <span :class="sched.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="sched.enabled ? 'Enabled' : 'Disabled'"></span>
+              </div>
+              <div class="text-muted text-sm mt-0.5 font-mono" x-text="sched.cron_expr"></div>
+              <div class="flex gap-3 mt-1 text-xs text-muted">
+                <span x-text="sched.source_env + ' → ' + sched.target_env"></span>
+                <span x-text="(sched.job_sequence||[]).length + ' job(s)'"></span>
+              </div>
+              <div class="flex gap-4 mt-1 text-xs text-muted">
+                <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
+                <span x-show="sched.next_run_at" x-text="'Next: ' + fmtDate(sched.next_run_at)"></span>
+              </div>
+            </div>
+            <div class="flex gap-2 flex-shrink-0">
+              <button @click="runScheduleNow(sched.id)" class="btn-secondary btn-sm">▶ Now</button>
+              <button @click="openEditScheduleModal(sched)" class="btn-secondary btn-sm">Edit</button>
+              <button @click="deleteSchedule(sched.id)" class="btn-danger btn-sm">Delete</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div><!-- end schedules sub-tab -->
+
+  <!-- Schedule Modal -->
+  <div x-show="showScheduleModal" x-cloak class="modal-backdrop" @click.self="showScheduleModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
+      <div class="space-y-3">
+        <div><label class="field-label">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" /></div>
+        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily</div></div>
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Source Env</label>
+            <select x-model="scheduleModal.source_env" class="field-input field-select">
+              <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Target Env</label>
+            <select x-model="scheduleModal.target_env" class="field-input field-select">
+              <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
+            </select>
+          </div>
+        </div>
+        <div><label class="field-label">Jobs (comma-separated, in order)</label><input x-model="scheduleModal.job_sequence_raw" class="field-input" placeholder="orders_reconciliation, customers_reconciliation" /></div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" /> Enabled</label>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showScheduleModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 
@@ -496,11 +764,22 @@
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
           <div class="flex gap-3 pt-2 flex-wrap">
             <a :href="'/api/runs/' + selectedRun.run_id + '/report'" target="_blank" class="text-indigo-500 hover:underline text-xs">Report</a>
             <a :href="'/api/runs/' + selectedRun.run_id + '/metrics'" target="_blank" class="text-indigo-500 hover:underline text-xs">Metrics</a>
             <a :href="'/api/runs/' + selectedRun.run_id + '/logs'" target="_blank" class="text-indigo-500 hover:underline text-xs">Logs</a>
             <button @click="downloadRunCsv(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Export CSV</button>
+          </div>
+          <div class="pt-2 border-t border-slate-100 space-y-2">
+            <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
+              ★ Pin as Baseline
+            </button>
+            <div class="flex gap-1 items-center">
+              <input readonly :value="badgeUrl(selectedRun.run_id)"
+                     class="field-input text-xs py-1 flex-1 font-mono bg-slate-50" />
+              <button @click="copyBadgeUrl(selectedRun.run_id)" class="btn-secondary btn-sm text-xs px-2">Copy</button>
+            </div>
           </div>
         </div>
       </div>
@@ -605,6 +884,31 @@
                             </button>
                           </div>
                         </template>
+                        <!-- Mismatch Distribution -->
+                        <div class="px-3 py-2 border-t border-slate-100 mt-2">
+                          <button @click="loadMismatchDist(selectedRun.run_id, r)"
+                                  x-show="!mismatchDist[r.id]"
+                                  class="text-indigo-500 hover:underline text-xs">
+                            📊 Load Value Distribution
+                          </button>
+                          <template x-if="mismatchDist[r.id]">
+                            <div>
+                              <div class="text-xs text-muted font-semibold mb-1">Top mismatch patterns</div>
+                              <template x-for="d in (mismatchDist[r.id] || []).slice(0,5)" :key="d.column + d.source + d.target">
+                                <div class="flex items-center gap-2 text-xs py-0.5">
+                                  <span class="font-mono text-indigo-600 w-24 truncate" x-text="d.column"></span>
+                                  <span class="text-rose-500 font-mono truncate max-w-24" x-text="d.source ?? '∅'"></span>
+                                  <span class="text-muted">→</span>
+                                  <span class="text-emerald-600 font-mono truncate max-w-24" x-text="d.target ?? '∅'"></span>
+                                  <span class="ml-auto text-slate-500 font-semibold" x-text="d.count + 'x'"></span>
+                                </div>
+                              </template>
+                              <template x-if="!mismatchDist[r.id] || mismatchDist[r.id].length === 0">
+                                <div class="text-muted text-xs">No distribution data</div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -616,9 +920,94 @@
     </div>
   </template>
 
-  <!-- History list -->
+  <!-- History list / trends / lineage -->
   <template x-if="!selectedRun">
     <div>
+      <!-- Sub-tab switcher -->
+      <div class="flex gap-1 mb-4 border-b border-slate-200 pb-2">
+        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Runs</button>
+        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Trends</button>
+        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Lineage</button>
+      </div>
+
+      <!-- Trends panel -->
+      <div x-show="historySubTab==='trends'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Metric Trends</div>
+          <div class="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="trendsJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Metric</label>
+              <select x-model="trendsMetric" class="field-input field-select">
+                <option value="mismatch_rate">mismatch_rate</option>
+                <option value="row_count_delta">row_count_delta</option>
+                <option value="duration_seconds">duration_seconds</option>
+                <option value="total_issues">total_issues</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Window (days)</label>
+              <input x-model="trendsWindow" type="number" min="7" max="365" class="field-input" />
+            </div>
+          </div>
+          <button @click="loadTrends()" :disabled="!trendsJobName || trendsLoading" class="btn-primary btn-sm mb-3">
+            <span x-show="!trendsLoading">Load Trends</span>
+            <span x-show="trendsLoading">Loading…</span>
+          </button>
+          <template x-if="trendsData">
+            <div>
+              <div class="flex items-center gap-3 mb-2">
+                <span class="text-muted text-sm" x-text="trendsData.points.length + ' data points'"></span>
+                <template x-if="trendsData.drift_detected">
+                  <span class="badge badge-rose text-xs">⚠ Drift detected</span>
+                </template>
+              </div>
+              <div style="position:relative;height:200px">
+                <canvas id="trendsChart"></canvas>
+              </div>
+            </div>
+          </template>
+          <template x-if="trendsData && trendsData.points.length === 0">
+            <div class="empty-state py-4">
+              <div class="empty-state-title">No data for selected job/window</div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Lineage panel -->
+      <div x-show="historySubTab==='lineage'">
+        <div class="card mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-semibold text-slate-700">Job Dependency Graph</div>
+            <button @click="loadLineage()" class="btn-secondary btn-sm" :disabled="lineageLoading">
+              <span x-show="!lineageLoading">↻ Refresh</span>
+              <span x-show="lineageLoading">Loading…</span>
+            </button>
+          </div>
+          <template x-if="lineageGraph && lineageGraph.nodes.length > 0">
+            <div class="overflow-auto" x-html="lineageSvg()"></div>
+          </template>
+          <template x-if="!lineageGraph || lineageGraph.nodes.length === 0">
+            <div class="empty-state py-8">
+              <div class="empty-state-icon">🔗</div>
+              <div class="empty-state-title">No job dependencies configured</div>
+              <div class="empty-state-sub">Add <code>depends_on</code> to jobs to see their lineage here</div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Runs list (default) -->
+      <div x-show="historySubTab==='runs'">
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
         <div class="flex flex-wrap gap-2 items-center">
@@ -784,7 +1173,10 @@
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
               <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)">
-                <td class="font-mono text-xs text-slate-500" x-text="run.run_id.substring(0,8)+'…'"></td>
+                <td class="font-mono text-xs text-slate-500">
+                  <span x-text="run.run_id.substring(0,8)+'…'"></span>
+                  <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
+                </td>
                 <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
@@ -802,6 +1194,7 @@
           </tbody>
         </table>
       </div>
+      </div><!-- end runs sub-tab -->
     </div>
   </template>
 </div>

@@ -2,13 +2,15 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.schemas import JobDefinition, RunTrigger
 from api.routes import runs as runs_module
 from etl_framework.repository.database import Base, get_db
+from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401 — registers ORM models with Base
+from etl_framework.repository.repository import TokenRepository
 from api.main import app
 
 
@@ -20,6 +22,7 @@ def client(monkeypatch):
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
 
     def override_get_db():
         with Session(engine) as session:
@@ -27,7 +30,11 @@ def client(monkeypatch):
 
     monkeypatch.setattr(runs_module, "_execute_run", lambda *args, **kwargs: None)
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test")
+
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
         yield c
     app.dependency_overrides.clear()
 
