@@ -47,6 +47,7 @@ The application can run entirely in local simulation mode for development, or it
 - Configure **webhook notifications** for run events (`run.failed`, `run.passed`, etc.) with optional HMAC-SHA256 signing.
 - Schedule recurring runs with **APScheduler cron expressions**.
 - View the **job lineage DAG** (job → job dependency graph) in the History tab.
+- **Audit log** — every create, update, delete, and mismatch-accept action is recorded with actor, action, resource type, resource ID, and a JSON diff. Queryable via `GET /api/audit`.
 
 ## Architecture
 
@@ -403,6 +404,7 @@ The repository layer stores:
 | `notification_hooks` | Webhook endpoints with event filters |
 | `scheduled_runs` | Cron-driven job sequences |
 | `job_lineage_edges` | Job-to-job dependency edges (synced from `depends_on`) |
+| `audit_events` | Immutable log of all mutating API actions with actor, action, resource, and diff |
 
 Startup calls `init_db()`, creates missing tables, and applies lightweight SQLite column additions for existing local databases.
 
@@ -723,6 +725,7 @@ python -m pytest tests/unit/test_dq_engine.py -q
 python -m pytest tests/unit/test_dag_retry_trends.py -q
 python -m pytest tests/unit/test_p2_features.py -q
 python -m pytest tests/unit/test_lineage.py -q
+python -m pytest tests/unit/test_audit.py -q
 python -m pytest tests/integration/test_api_frontend_smoke.py -q
 ```
 
