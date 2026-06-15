@@ -103,6 +103,7 @@ function app() {
     // -----------------------------------------------------------
     activeRuns: [],
     pollTimer: null,
+    runStreams: {},
 
     // -----------------------------------------------------------
     // History
@@ -113,6 +114,10 @@ function app() {
     historyFilterStatus: '',
     historyFilterRunType: '',
     historySubTab: 'runs',
+    auditEvents: [],
+    auditLoading: false,
+    auditFilterResourceType: '',
+    auditFilterResourceId: '',
 
     // -----------------------------------------------------------
     // Trends
@@ -445,6 +450,9 @@ function app() {
         name: '', description: '', job_type: 'reconciliation', query: '',
         key_columns_raw: 'id', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
+        bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
+        automic_job_name: '', automic_run_id: '',
+        dbt_manifest_path: '', dbt_run_results_path: '',
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
@@ -459,6 +467,13 @@ function app() {
         tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
         depends_on_raw: (job.depends_on || []).join(', '),
         rules: (job.rules || []).map(r => ({ ...r })),
+        bo_report_id: job.params?.report_id || '',
+        bo_page_id: job.params?.bo_report_id || '',
+        bo_format: job.params?.format || 'xlsx',
+        automic_job_name: job.params?.job_name || '',
+        automic_run_id: job.params?.run_id || '',
+        dbt_manifest_path: job.params?.manifest_path || '',
+        dbt_run_results_path: job.params?.run_results_path || '',
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
@@ -494,14 +509,33 @@ function app() {
 
     async saveJob() {
       const m = this.jobModal;
+      const params = {};
+      if (m.job_type === 'automic_job') {
+        if (m.automic_job_name) params.job_name = m.automic_job_name;
+        if (m.automic_run_id) params.run_id = m.automic_run_id;
+      }
+      if (m.job_type === 'bo_report') {
+        if (m.bo_report_id) params.report_id = m.bo_report_id;
+        if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
+        params.format = m.bo_format || 'xlsx';
+      }
+      if (m.job_type === 'dbt_artifact') {
+        if (m.dbt_manifest_path) params.manifest_path = m.dbt_manifest_path;
+        if (m.dbt_run_results_path) params.run_results_path = m.dbt_run_results_path;
+      }
+      const keyColumns = ['reconciliation', 'bo_report'].includes(m.job_type)
+        ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
       const body = {
         name: m.name, description: m.description,
-        job_type: m.job_type, query: m.query,
-        key_columns: m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean),
+        job_type: m.job_type,
+        query: m.job_type === 'reconciliation' ? m.query : '',
+        key_columns: keyColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
         depends_on: m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean),
         rules: (m.rules || []).filter(r => r.type),
+        params,
       };
       try {
         if (this.jobModalEditing) {
@@ -515,6 +549,18 @@ function app() {
       } catch (e) {
         this.toast('error', 'Save failed', e.message);
       }
+    },
+
+    canSaveJob() {
+      const m = this.jobModal;
+      if (!m?.name) return false;
+      if (m.job_type === 'reconciliation') {
+        return Boolean(m.query?.trim() && m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length);
+      }
+      if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
+      if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
+      if (m.job_type === 'dbt_artifact') return Boolean(m.dbt_run_results_path);
+      return true;
     },
 
     async deleteJob(name) {
@@ -566,6 +612,7 @@ function app() {
           config_data: cfg ? cfg.config_data : {},
         });
         this.activeRuns.unshift(run);
+        this.startRunStream(run);
         this.selectedJobs = [];
         this.currentView = 'monitor';
         this.toast('success', 'Run started', `ID: ${run.run_id.substring(0,8)}…`);
@@ -581,6 +628,42 @@ function app() {
     // ===========================================================
     startPolling() {
       this.pollTimer = setInterval(() => this.pollActiveRuns(), 5000);
+    },
+
+    isTerminalStatus(status) {
+      return ['PASSED','FAILED','SLOW','ERROR','COMPLETED'].includes(status);
+    },
+
+    startRunStream(run) {
+      if (!window.EventSource || !run?.run_id || this.runStreams[run.run_id] || this.isTerminalStatus(run.status)) return;
+      const stream = new EventSource(API + `/api/runs/${run.run_id}/stream`);
+      this.runStreams[run.run_id] = stream;
+      stream.addEventListener('progress', (event) => {
+        const progress = JSON.parse(event.data);
+        const idx = this.activeRuns.findIndex(r => r.run_id === progress.run_id);
+        if (idx >= 0) {
+          Object.assign(this.activeRuns[idx], {
+            status: progress.status,
+            total_tests: progress.total_tests,
+            _progress: progress,
+          });
+        }
+      });
+      stream.addEventListener('done', async (event) => {
+        const progress = JSON.parse(event.data);
+        const idx = this.activeRuns.findIndex(r => r.run_id === progress.run_id);
+        if (idx >= 0) Object.assign(this.activeRuns[idx], { status: progress.status, _progress: progress });
+        this.closeRunStream(progress.run_id);
+        await this.loadRuns();
+      });
+      stream.onerror = () => this.closeRunStream(run.run_id);
+    },
+
+    closeRunStream(runId) {
+      if (this.runStreams[runId]) {
+        this.runStreams[runId].close();
+        delete this.runStreams[runId];
+      }
     },
 
     async pollActiveRuns() {
@@ -605,12 +688,13 @@ function app() {
           if (!this.activeRuns.find(a => a.run_id === run.run_id)) {
             this.activeRuns.unshift(run);
           }
+          this.startRunStream(run);
         }
       }
     },
 
     runProgress(run) {
-      if (['PASSED','FAILED','SLOW','ERROR','COMPLETED'].includes(run.status)) return 100;
+      if (this.isTerminalStatus(run.status)) return 100;
       if (run.status === 'PENDING') return 5;
       if (run._progress) return run._progress.percent_complete || 5;
       const done = (run.passed||0) + (run.failed||0) + (run.slow||0) + (run.error||0);
@@ -626,6 +710,20 @@ function app() {
       if (this.historyFilterRunType) params.set('run_type', this.historyFilterRunType);
       const qs = params.toString() ? '?' + params.toString() : '';
       try { this.runs = await api('GET', '/api/runs' + qs); } catch {}
+    },
+
+    async loadAudit() {
+      this.auditLoading = true;
+      const params = new URLSearchParams({ limit: '100' });
+      if (this.auditFilterResourceType) params.set('resource_type', this.auditFilterResourceType);
+      if (this.auditFilterResourceId) params.set('resource_id', this.auditFilterResourceId);
+      try {
+        this.auditEvents = await api('GET', '/api/audit?' + params.toString());
+      } catch (e) {
+        this.toast('error', 'Audit load failed', e.message);
+      } finally {
+        this.auditLoading = false;
+      }
     },
 
     async viewRunDetail(runId) {
@@ -653,6 +751,8 @@ function app() {
         await api('DELETE', `/api/runs/${runId}`);
         this.runs = this.runs.filter(r => r.run_id !== runId);
         if (this.selectedRun?.run_id === runId) this.selectedRun = null;
+        this.closeRunStream(runId);
+        if (this.historySubTab === 'audit') this.loadAudit();
         this.toast('success', 'Run deleted');
       } catch (e) {
         this.toast('error', 'Delete failed', e.message);
@@ -1198,9 +1298,11 @@ function app() {
       if (!this.automicResult) return;
       try {
         const name = ('automic_' + this.automicResult.identifier).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        const body = { name };
+        if (this.automicResult.identifier_type === 'run_id') body.run_id = this.automicResult.identifier;
+        else body.job_name = this.automicResult.identifier;
         await api('POST', '/api/adapters/jobs/from-automic', {
-          name,
-          job_name: this.automicResult.identifier,
+          ...body,
         });
         await this.loadJobs();
         this.toast('success', 'Job added', name);

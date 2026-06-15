@@ -55,6 +55,12 @@ def test_create_config(client):
     assert data["name"] == "dev"
     assert data["id"] is not None
 
+    audit = client.get("/api/audit?resource_type=config&resource_id=" + str(data["id"]))
+    assert audit.status_code == 200
+    events = audit.json()
+    assert events[0]["action"] == "config.created"
+    assert events[0]["actor"] == "test"
+
 
 def test_get_config(client):
     resp = client.post("/api/configs", json={"name": "qa", "env_name": "qa", "config_data": {}})
@@ -193,6 +199,43 @@ def test_trigger_run_stores_sequence_and_settings(client, monkeypatch):
     assert snapshot["run_settings"]["execution_mode"] == "sequential"
     assert snapshot["run_settings"]["schema_mismatch_policy"] == "warn"
     assert snapshot["run_settings"]["comparison_backend"] == "pandas"
+    assert snapshot["source_credentials"]["name"] == "dev"
+    assert snapshot["target_credentials"]["name"] == "prod"
+    assert snapshot["automic_credentials"]["db_host"] == "localhost"
+
+
+def test_trigger_run_injects_saved_config_credentials(client):
+    cfg = client.post(
+        "/api/configs",
+        json={
+            "name": "live",
+            "env_name": "qa",
+            "config_data": {
+                "db_host": "sql-live",
+                "db_password": "secret",
+                "automic_url": "http://automic",
+                "automic_user": "svc",
+                "automic_password": "pw",
+            },
+        },
+    ).json()
+    run = client.post(
+        "/api/runs",
+        json={
+            "source_env": "qa",
+            "target_env": "prod",
+            "job_sequence": [],
+            "config_id": cfg["id"],
+            "run_settings": {"use_live_connections": True},
+        },
+    )
+    assert run.status_code == 202
+
+    detail = client.get(f"/api/runs/{run.json()['run_id']}")
+    snapshot = detail.json()["config_snapshot"]
+    assert snapshot["config_id"] == cfg["id"]
+    assert snapshot["source_credentials"]["db_host"] == "sql-live"
+    assert snapshot["automic_credentials"]["automic_user"] == "svc"
 
 
 def test_trigger_run_rejects_invalid_backend(client):
@@ -443,6 +486,21 @@ def test_create_job_rejects_unimplemented_external_job_types(client):
             },
         )
         assert resp.status_code == 422
+
+
+def test_create_dbt_artifact_job(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "dbt_orders",
+            "job_type": "dbt_artifact",
+            "query": "",
+            "key_columns": [],
+            "params": {"run_results_path": "target/run_results.json"},
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["job_type"] == "dbt_artifact"
 
 
 def test_health_endpoint(client):

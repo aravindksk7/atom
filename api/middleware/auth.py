@@ -45,6 +45,9 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         db = _db_module.SessionLocal()
         try:
             token = TokenRepository(db).verify(raw_token)
+            if token is not None:
+                request.state.token_actor = token.name
+                request.state.token_id = token.id
         finally:
             db.close()
 

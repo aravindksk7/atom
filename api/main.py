@@ -8,6 +8,7 @@ from etl_framework.repository.database import init_db
 from etl_framework.utils.logging import configure_logging
 from etl_framework.utils.tracing import configure_tracing
 from api.routes import configs, runs, jobs, health as health_routes, adapters, compare as compare_routes
+from api.routes import audit as audit_routes
 from api.routes import tokens, notifications, schedules, lineage as lineage_routes
 from api.middleware.auth import BearerTokenMiddleware
 
@@ -33,6 +34,7 @@ app.include_router(jobs.router, prefix="/api/jobs")
 app.include_router(health_routes.router, prefix="/api/health")
 app.include_router(adapters.router, prefix="/api/adapters")
 app.include_router(compare_routes.router, prefix="/api/compare")
+app.include_router(audit_routes.router, prefix="/api/audit")
 app.include_router(tokens.router, prefix="/api/tokens")
 app.include_router(notifications.router, prefix="/api/notifications")
 app.include_router(schedules.router, prefix="/api/schedules")

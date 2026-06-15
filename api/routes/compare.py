@@ -5,7 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from api.schemas import (
@@ -19,6 +19,7 @@ from api.schemas import (
 from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
 from etl_framework.repository.repository import RunRepository
+from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["compare"])
 logger = logging.getLogger("api.routes.compare")
@@ -64,10 +65,8 @@ def _snapshot_for_config(
     else:
         snapshot["source_credentials"] = {"name": source_env, **config_data}
         snapshot["target_credentials"] = {"name": target_env, **config_data}
-    if "bo_credentials" in config_data:
-        snapshot["bo_credentials"] = config_data["bo_credentials"]
-    if "automic_credentials" in config_data:
-        snapshot["automic_credentials"] = config_data["automic_credentials"]
+    snapshot["bo_credentials"] = config_data.get("bo_credentials") or {"name": "bo", **config_data}
+    snapshot["automic_credentials"] = config_data.get("automic_credentials") or {"name": "automic", **config_data}
     return snapshot
 
 
@@ -167,6 +166,7 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
 def compare_bo_report(
     body: BOCompareRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
     run_id = str(uuid.uuid4())
@@ -178,6 +178,13 @@ def compare_bo_report(
         config_snapshot=None,
         run_type="bo_comparison",
     )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {"run_type": "bo_comparison", "label_a": body.label_a, "label_b": body.label_b},
+    )
     background_tasks.add_task(_run_bo_bg, body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
@@ -187,6 +194,7 @@ def compare_bo_report(
 def launch_dual_env(
     body: DualEnvLaunchRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> DualEnvLaunchOut:
     cfg_a = db.get(SavedConfig, body.config_id_a)
@@ -231,6 +239,13 @@ def launch_dual_env(
     )
 
     background_tasks.add_task(_launch_dual_env_bg, run_id_a, run_id_b, body)
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run_pair",
+        pair_id,
+        {"run_id_a": run_id_a, "run_id_b": run_id_b, "job_names": body.job_names},
+    )
     return DualEnvLaunchOut(pair_id=pair_id, run_id_a=run_id_a, run_id_b=run_id_b)
 
 
@@ -238,6 +253,7 @@ def launch_dual_env(
 def compare_recon_file(
     body: ReconFileCompareRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
     run_id = str(uuid.uuid4())
@@ -247,6 +263,13 @@ def compare_recon_file(
         source_env=body.label_a,
         target_env=body.label_b,
         run_type="recon_file",
+    )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {"run_type": "recon_file", "label_a": body.label_a, "label_b": body.label_b},
     )
     background_tasks.add_task(_run_recon_file_bg, body, run_id)
     run = repo.get_run(run_id)

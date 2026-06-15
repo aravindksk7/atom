@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 import yaml
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from etl_framework.config.loader import ConfigLoader
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
+from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["configs"])
 
@@ -37,9 +38,13 @@ def list_configs(db: Session = Depends(get_session)):
 
 
 @router.post("", response_model=ConfigOut, status_code=201)
-def create_config(body: ConfigCreate, db: Session = Depends(get_session)):
+def create_config(body: ConfigCreate, request: Request, db: Session = Depends(get_session)):
     repo = ConfigRepository(db)
     cfg = repo.create(name=body.name, env_name=body.env_name, config_data=body.config_data)
+    AuditService(db).log(
+        request, "config.created", "config", cfg.id,
+        {"name": cfg.name, "env_name": cfg.env_name},
+    )
     return ConfigOut(id=cfg.id, name=cfg.name, env_name=cfg.env_name,
                      config_data=cfg.config_json,
                      created_at=cfg.created_at, updated_at=cfg.updated_at)
@@ -70,7 +75,7 @@ def validate_config(body: ConfigValidationRequest):
 
 
 @router.post("/import-yaml", response_model=list[ConfigOut], status_code=201)
-def import_yaml_config(body: ConfigImportYamlRequest, db: Session = Depends(get_session)):
+def import_yaml_config(body: ConfigImportYamlRequest, request: Request, db: Session = Depends(get_session)):
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -120,6 +125,13 @@ def import_yaml_config(body: ConfigImportYamlRequest, db: Session = Depends(get_
                 updated_at=cfg.updated_at,
             )
         )
+        AuditService(db).log(
+            request,
+            "config.imported" if existing is None else "config.updated",
+            "config",
+            cfg.id,
+            {"name": cfg.name, "env_name": cfg.env_name, "source": "yaml"},
+        )
     return imported
 
 
@@ -137,8 +149,16 @@ def get_config(config_id: int, db: Session = Depends(get_session)):
 
 
 @router.put("/{config_id}", response_model=ConfigOut)
-def update_config(config_id: int, body: ConfigUpdate, db: Session = Depends(get_session)):
+def update_config(config_id: int, body: ConfigUpdate, request: Request, db: Session = Depends(get_session)):
     repo = ConfigRepository(db)
+    before = repo.get(config_id)
+    before_data = None
+    if before is not None:
+        before_data = {
+            "name": before.name,
+            "env_name": before.env_name,
+            "config_data": before.config_json,
+        }
     kwargs = {}
     if body.config_data is not None:
         kwargs["config_data"] = body.config_data
@@ -149,13 +169,31 @@ def update_config(config_id: int, body: ConfigUpdate, db: Session = Depends(get_
     cfg = repo.update(config_id, **kwargs)
     if cfg is None:
         raise HTTPException(status_code=404, detail="Config not found")
+    AuditService(db).log(
+        request,
+        "config.updated",
+        "config",
+        cfg.id,
+        {
+            "before": before_data,
+            "after": {"name": cfg.name, "env_name": cfg.env_name, "config_data": cfg.config_json},
+        },
+    )
     return ConfigOut(id=cfg.id, name=cfg.name, env_name=cfg.env_name,
                      config_data=cfg.config_json,
                      created_at=cfg.created_at, updated_at=cfg.updated_at)
 
 
 @router.delete("/{config_id}", status_code=204)
-def delete_config(config_id: int, db: Session = Depends(get_session)):
+def delete_config(config_id: int, request: Request, db: Session = Depends(get_session)):
     repo = ConfigRepository(db)
+    cfg = repo.get(config_id)
     if not repo.delete(config_id):
         raise HTTPException(status_code=404, detail="Config not found")
+    AuditService(db).log(
+        request,
+        "config.deleted",
+        "config",
+        config_id,
+        {"name": cfg.name if cfg else None, "env_name": cfg.env_name if cfg else None},
+    )

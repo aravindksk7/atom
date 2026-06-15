@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
 from etl_framework.repository.repository import ScheduleRepository
 import api.services.scheduler as _sched_svc
+from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["schedules"])
 
@@ -59,36 +60,45 @@ def list_schedules(db: Session = Depends(get_session)):
 
 
 @router.post("", response_model=ScheduleOut, status_code=201)
-def create_schedule(body: ScheduleCreate, db: Session = Depends(get_session)):
+def create_schedule(body: ScheduleCreate, request: Request, db: Session = Depends(get_session)):
     repo = ScheduleRepository(db)
     if repo.get_by_name(body.name):
         raise HTTPException(status_code=409, detail="Schedule name already exists")
     sched = repo.create(body.model_dump())
     _sched_svc.add_job(sched)
+    AuditService(db).log(
+        request, "schedule.created", "schedule", sched.id,
+        {"name": sched.name, "cron_expr": sched.cron_expr},
+    )
     return sched
 
 
 @router.put("/{schedule_id}", response_model=ScheduleOut)
 def update_schedule(
-    schedule_id: int, body: ScheduleCreate, db: Session = Depends(get_session)
+    schedule_id: int, body: ScheduleCreate, request: Request, db: Session = Depends(get_session)
 ):
     repo = ScheduleRepository(db)
     sched = repo.update(schedule_id, body.model_dump())
     if sched is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
     _sched_svc.reload_job(sched)
+    AuditService(db).log(
+        request, "schedule.updated", "schedule", sched.id,
+        {"name": sched.name, "cron_expr": sched.cron_expr, "enabled": sched.enabled},
+    )
     return sched
 
 
 @router.delete("/{schedule_id}", status_code=204)
-def delete_schedule(schedule_id: int, db: Session = Depends(get_session)):
+def delete_schedule(schedule_id: int, request: Request, db: Session = Depends(get_session)):
     _sched_svc.remove_job(schedule_id)
     if not ScheduleRepository(db).delete(schedule_id):
         raise HTTPException(status_code=404, detail="Schedule not found")
+    AuditService(db).log(request, "schedule.deleted", "schedule", schedule_id)
 
 
 @router.post("/{schedule_id}/run-now", status_code=202)
-def run_now(schedule_id: int, db: Session = Depends(get_session)):
+def run_now(schedule_id: int, request: Request, db: Session = Depends(get_session)):
     sched = ScheduleRepository(db).get(schedule_id)
     if sched is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -97,4 +107,5 @@ def run_now(schedule_id: int, db: Session = Depends(get_session)):
     threading.Thread(
         target=_run_schedule, args=(sched.id, sched.name), daemon=True
     ).start()
+    AuditService(db).log(request, "schedule.run_now", "schedule", schedule_id)
     return {"detail": f"Schedule '{sched.name}' triggered manually"}

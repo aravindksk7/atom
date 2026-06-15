@@ -74,6 +74,18 @@ class RunSettings(BaseModel):
     retry_on: list[Literal["error", "timeout"]] = Field(default_factory=lambda: ["error"])
 
 
+class AuditEventOut(BaseModel):
+    id: int
+    actor: str | None = None
+    action: str
+    resource_type: str
+    resource_id: str | None = None
+    diff: dict[str, Any] | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class DQRule(BaseModel):
     type: Literal[
         "not_null", "unique", "row_count_min", "row_count_max",
@@ -193,7 +205,7 @@ class JobDefinition(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    job_type: Literal["reconciliation", "health_check", "bo_report", "automic_job"] = "reconciliation"
+    job_type: Literal["reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact"] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
     exclude_columns: list[str] = Field(default_factory=list)
@@ -212,6 +224,9 @@ class JobDefinition(BaseModel):
         elif self.job_type == "automic_job":
             if not self.params.get("job_name") and not self.params.get("run_id"):
                 raise ValueError("automic_job jobs require 'job_name' or 'run_id' in params")
+        elif self.job_type == "dbt_artifact":
+            if not self.params.get("run_results_path"):
+                raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
         elif self.job_type == "reconciliation":
             if not self.query.strip():
                 raise ValueError("reconciliation jobs require a query")
@@ -280,7 +295,14 @@ class BOJobCreateRequest(BaseModel):
 
 class AutomicJobCreateRequest(BaseModel):
     name: str
-    job_name: str
+    job_name: str | None = None
+    run_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_identifier(self) -> "AutomicJobCreateRequest":
+        if not self.job_name and not self.run_id:
+            raise ValueError("job_name or run_id is required")
+        return self
 
 
 class TestCompareOut(BaseModel):

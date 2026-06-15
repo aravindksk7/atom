@@ -51,6 +51,13 @@ The application can run entirely in local simulation mode for development, or it
 
 ## Architecture
 
+Additional runtime capabilities:
+
+- Trend responses are cached briefly and automatically invalidated when matching result rows change.
+- Active run progress can be streamed from `GET /api/runs/{run_id}/stream`; the web UI uses this SSE stream with polling fallback.
+- External monitor jobs can be created for SAP BO reports, Automic job/run lookups, and dbt artifact summaries.
+- Audit events are visible in the History tab and queryable with `GET /api/audit`.
+
 ```text
 Browser
   Alpine.js SPA
@@ -449,6 +456,14 @@ Use this tab to:
 - Start a run.
 - **Schedules sub-tab** — create, edit, enable, disable, and manually trigger cron-scheduled runs.
 
+The generic job editor supports `reconciliation`, `bo_report`, `automic_job`, and `dbt_artifact` jobs:
+
+- Reconciliation jobs require SQL and key columns.
+- BO report jobs require a BO document ID and BO report/page ID, plus optional output format.
+- Automic jobs require either an Automic job name or run ID.
+- dbt artifact jobs require a `run_results.json` path and can optionally include a `manifest.json` path for friendly node names.
+- Validate Query is shown only for reconciliation jobs.
+
 Default seed jobs are returned if the database has no saved jobs.
 
 ### Monitor
@@ -459,6 +474,7 @@ Use this tab to:
 - View run progress.
 - See passed, failed, slow, and error counters.
 - Track the current job where progress data is available.
+- Receive live updates through `GET /api/runs/{run_id}/stream`; the browser falls back to 5-second polling if SSE is unavailable.
 
 ### History
 
@@ -477,6 +493,8 @@ Use this tab to:
 - **Trends sub-tab** — select a job and metric (`mismatch_rate`, `row_count_delta`, `duration_seconds`, `total_issues`), choose a rolling window, and view a line chart. Drift is flagged in red when the latest point is more than 2σ above the mean.
 - **Lineage sub-tab** — view the job dependency DAG as an SVG diagram. Nodes are job boxes; arrows show `depends_on` relationships.
 
+The History tab also includes an Audit sub-tab for filtering audit events by resource type and resource ID.
+
 ### Adapters
 
 Use this tab for external systems.
@@ -493,7 +511,13 @@ Automic:
 
 - Look up a job by job name or run ID.
 - Review recent lookups in browser session storage.
-- Add an Automic job to the job catalog.
+- Add an Automic job to the job catalog with either job-name or run-ID lookup semantics.
+
+dbt artifacts:
+
+- Create `dbt_artifact` jobs in the Launch job editor.
+- Point the job at `target/run_results.json`; optionally include `target/manifest.json`.
+- Execution converts dbt result statuses into normal run results and records failing/error nodes as mismatch details.
 
 ### Reports
 
@@ -635,6 +659,25 @@ Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/runs/trends?job_name=or
 ```
 
 Response includes `drift_detected: true` when the last point is more than 2σ above the 30-day mean.
+
+Trend responses are cached for a short TTL and invalidated when matching result rows change.
+
+### SSE Run Progress
+
+```text
+GET /api/runs/{run_id}/stream
+```
+
+Returns a `text/event-stream` response with `progress` events while the run is active and a final `done` event when it reaches a terminal status.
+
+### Audit Events
+
+```powershell
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/audit?resource_type=job&limit=100"
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/audit?resource_type=run&resource_id=<run_id>"
+```
+
+Each event includes `actor`, `action`, `resource_type`, `resource_id`, `diff`, and `created_at`.
 
 ### Badge SVG
 

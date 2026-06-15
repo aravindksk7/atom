@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -17,6 +17,7 @@ from api.schemas import (
 )
 from api.services.adapter_service import AdapterService
 from etl_framework.repository.repository import ConfigRepository, JobRepository
+from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["adapters"])
 
@@ -100,6 +101,7 @@ def lookup_automic_job(
 @router.post("/jobs/from-bo-report", response_model=JobDefinition, status_code=201)
 def create_job_from_bo_report(
     body: BOJobCreateRequest,
+    request: Request,
     db: Session = Depends(get_session),
 ):
     job_data = {
@@ -118,24 +120,35 @@ def create_job_from_bo_report(
         "enabled": True,
     }
     JobRepository(db).upsert(job_data)
+    AuditService(db).log(
+        request, "job.created", "job", body.name,
+        {"source": "sap_bo", "params": job_data["params"]},
+    )
     return JobDefinition(**job_data)
 
 
 @router.post("/jobs/from-automic", response_model=JobDefinition, status_code=201)
 def create_job_from_automic(
     body: AutomicJobCreateRequest,
+    request: Request,
     db: Session = Depends(get_session),
 ):
+    identifier = body.job_name or body.run_id or ""
+    params = {"job_name": body.job_name} if body.job_name else {"run_id": body.run_id}
     job_data = {
         "name": body.name,
-        "description": f"Automic Job: {body.job_name}",
+        "description": f"Automic Job: {identifier}",
         "tags": ["automic_job"],
         "job_type": "automic_job",
         "query": "",
         "key_columns": [],
         "exclude_columns": [],
-        "params": {"job_name": body.job_name},
+        "params": params,
         "enabled": True,
     }
     JobRepository(db).upsert(job_data)
+    AuditService(db).log(
+        request, "job.created", "job", body.name,
+        {"source": "automic", "params": params},
+    )
     return JobDefinition(**job_data)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from api.dependencies import get_session
 from api.schemas import JobDefinition
 from etl_framework.repository.models import SavedJob
 from etl_framework.repository.repository import JobRepository
+from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["jobs"])
 
@@ -111,35 +112,71 @@ def list_jobs(db: Session = Depends(get_session)):
 
 
 @router.post("", response_model=JobDefinition, status_code=201)
-def create_job(body: JobDefinition, db: Session = Depends(get_session)):
+def create_job(body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
     if repo.get(body.name) is not None:
         raise HTTPException(status_code=409, detail="Job already exists")
-    return _job_to_schema(repo.create(_job_to_data(body)))
+    job = repo.create(_job_to_data(body))
+    AuditService(db).log(
+        request, "job.created", "job", job.name,
+        {"job_type": job.job_type, "enabled": job.enabled},
+    )
+    return _job_to_schema(job)
 
 
 @router.post("/import", response_model=list[JobDefinition], status_code=201)
-def import_jobs(body: list[JobDefinition], db: Session = Depends(get_session)):
+def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
-    return [_job_to_schema(repo.upsert(_job_to_data(job))) for job in body]
+    imported = []
+    for job_def in body:
+        existed = repo.get(job_def.name) is not None
+        job = repo.upsert(_job_to_data(job_def))
+        AuditService(db).log(
+            request,
+            "job.updated" if existed else "job.created",
+            "job",
+            job.name,
+            {"source": "import", "job_type": job.job_type},
+        )
+        imported.append(_job_to_schema(job))
+    return imported
 
 
 @router.put("/{name}", response_model=JobDefinition)
-def update_job(name: str, body: JobDefinition, db: Session = Depends(get_session)):
+def update_job(name: str, body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
+    before = repo.get(name)
     data = _job_to_data(body)
     data["name"] = name
     job = repo.update(name, data)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    AuditService(db).log(
+        request,
+        "job.updated",
+        "job",
+        name,
+        {
+            "before": _job_to_schema(before).model_dump(mode="json") if before else None,
+            "after": _job_to_schema(job).model_dump(mode="json"),
+        },
+    )
     return _job_to_schema(job)
 
 
 @router.delete("/{name}", status_code=204)
-def delete_job(name: str, db: Session = Depends(get_session)):
+def delete_job(name: str, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
+    job = repo.get(name)
     if not repo.delete(name):
         raise HTTPException(status_code=404, detail="Job not found")
+    AuditService(db).log(
+        request,
+        "job.deleted",
+        "job",
+        name,
+        {"job_type": job.job_type if job else None},
+    )
 
 
 # ---------------------------------------------------------------------------

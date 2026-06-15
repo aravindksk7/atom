@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import asyncio
 import io
 import json
+import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -27,15 +29,18 @@ from api.schemas import (
     TestResultOut,
 )
 from api.services.run_executor import RunExecutor
-from etl_framework.repository.repository import RunRepository
+from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
+from api.services.audit_service import AuditService
 from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
 
 router = APIRouter(tags=["runs"])
 
 
 _TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED"}
+_TREND_CACHE_TTL_SECONDS = 30
+_TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 
 def _wants_html(request: Request, fmt: str | None) -> bool:
@@ -82,6 +87,33 @@ def _metrics_from_run(run) -> dict:
         "tests": tests,
         "source": "database",
     }
+
+
+def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
+    cfg_data = dict(body.config_data or {})
+    cfg = ConfigRepository(db).get(body.config_id) if body.config_id is not None else None
+    if body.config_id is not None and cfg is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    if cfg is not None:
+        cfg_data = {**(cfg.config_json or {}), **cfg_data}
+
+    snapshot = dict(cfg_data)
+    if cfg is not None:
+        snapshot.update({
+            "config_id": cfg.id,
+            "config_name": cfg.name,
+            "env_name": cfg.env_name,
+        })
+
+    if "source_credentials" not in snapshot:
+        snapshot["source_credentials"] = {"name": body.source_env, **cfg_data}
+    if "target_credentials" not in snapshot:
+        snapshot["target_credentials"] = {"name": body.target_env, **cfg_data}
+    if "bo_credentials" not in snapshot:
+        snapshot["bo_credentials"] = {"name": "bo", **cfg_data}
+    if "automic_credentials" not in snapshot:
+        snapshot["automic_credentials"] = {"name": "automic", **cfg_data}
+    return snapshot
 
 
 def _execute_run(
@@ -145,13 +177,14 @@ def list_runs(
 def trigger_run(
     body: RunTrigger,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_session),
 ):
     run_id = str(uuid.uuid4())
     repo = RunRepository(db)
     ordered_jobs = body.job_sequence or body.job_names
     run_settings = body.run_settings.model_dump()
-    config_snapshot = dict(body.config_data or {})
+    config_snapshot = _snapshot_from_trigger(body, db)
     if ordered_jobs:
         config_snapshot["job_sequence"] = ordered_jobs
     config_snapshot["run_settings"] = run_settings
@@ -160,6 +193,18 @@ def trigger_run(
         source_env=body.source_env,
         target_env=body.target_env,
         config_snapshot=config_snapshot or None,
+    )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {
+            "source_env": body.source_env,
+            "target_env": body.target_env,
+            "job_sequence": ordered_jobs,
+            "config_id": body.config_id,
+        },
     )
     background_tasks.add_task(
         _execute_run,
@@ -378,6 +423,7 @@ def accept_mismatch(
     mismatch_id: int,
     body: MismatchAcceptRequest,
     db: Session = Depends(get_session),
+    request: Request = None,
 ):
     from etl_framework.repository.models import MismatchDetail, TestResult
 
@@ -391,6 +437,20 @@ def accept_mismatch(
     if md is None or md.test_result_id != result_id:
         raise HTTPException(status_code=404, detail="Mismatch not found")
     updated, status_changed = repo.accept_mismatch(mismatch_id, body.note, body.accepted_by)
+    AuditService(db).log(
+        request,
+        "mismatch.accepted",
+        "mismatch",
+        mismatch_id,
+        {
+            "run_id": run_id,
+            "result_id": result_id,
+            "note": body.note,
+            "accepted_by": body.accepted_by,
+            "result_status_updated": status_changed,
+        },
+        actor=body.accepted_by,
+    )
     return MismatchAcceptOut(
         id=updated.id,
         accepted=updated.accepted,
@@ -410,7 +470,20 @@ def get_trends(
 ):
     from datetime import timedelta
     import statistics
+    from sqlalchemy import func
     from etl_framework.repository.models import TestRun, TestResult
+
+    signature = (
+        db.query(func.count(TestResult.id), func.max(TestResult.id))
+        .join(TestRun, TestRun.run_id == TestResult.run_id)
+        .filter(TestResult.query_name == job_name)
+        .first()
+    )
+    cache_key = (id(db.get_bind()), job_name, metric, window, signature[0], signature[1])
+    cached = _TREND_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _TREND_CACHE_TTL_SECONDS:
+        return cached[1]
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=window)
     rows = (
@@ -458,7 +531,45 @@ def get_trends(
         except statistics.StatisticsError:
             pass
 
-    return {"job_name": job_name, "metric": metric, "window": window, "points": points, "drift_detected": drift_detected}
+    payload = {"job_name": job_name, "metric": metric, "window": window, "points": points, "drift_detected": drift_detected}
+    _TREND_CACHE[cache_key] = (now, payload)
+    return payload
+
+
+@router.get("/{run_id}/stream")
+async def stream_run(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    async def events():
+        last_payload = ""
+        while True:
+            run = repo.get_run(run_id)
+            if run is None:
+                yield "event: error\ndata: {\"detail\":\"Run not found\"}\n\n"
+                break
+            total = run.total_tests or 0
+            completed = repo.count_completed_results(run_id)
+            percent = int(completed / total * 100) if total > 0 else (100 if run.status in _TERMINAL else 0)
+            payload = {
+                "run_id": run.run_id,
+                "status": run.status,
+                "total_tests": total,
+                "completed_tests": completed,
+                "current_job": repo.get_current_job(run_id),
+                "percent_complete": min(percent, 100),
+            }
+            payload_text = json.dumps(payload, default=str)
+            if payload_text != last_payload:
+                yield f"event: progress\ndata: {payload_text}\n\n"
+                last_payload = payload_text
+            if run.status in _TERMINAL:
+                yield f"event: done\ndata: {payload_text}\n\n"
+                break
+            await asyncio.sleep(1)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @router.get("/compare", response_model=RunCompareOut)
@@ -601,10 +712,11 @@ def export_run_csv(run_id: str, db: Session = Depends(get_session)):
 
 
 @router.delete("/{run_id}", status_code=204)
-def delete_run(run_id: str, db: Session = Depends(get_session)):
+def delete_run(run_id: str, request: Request, db: Session = Depends(get_session)):
     repo = RunRepository(db)
     if not repo.delete_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
+    AuditService(db).log(request, "run.deleted", "run", run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -670,11 +782,12 @@ def latest_badge(job_name: str = "", db: Session = Depends(get_session)):
 # ---------------------------------------------------------------------------
 
 @router.post("/{run_id}/set-baseline", status_code=204)
-def set_baseline(run_id: str, db: Session = Depends(get_session)):
+def set_baseline(run_id: str, request: Request, db: Session = Depends(get_session)):
     repo = RunRepository(db)
     run = repo.set_baseline(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    AuditService(db).log(request, "run.baseline_set", "run", run_id)
 
 
 @router.get("/{run_id}/vs-baseline")

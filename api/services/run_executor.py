@@ -246,6 +246,8 @@ class RunExecutor:
         )
 
     def _build_case(self, job: JobDefinition):
+        if job.job_type == "dbt_artifact":
+            return self._build_case_dbt(job)
         if job.job_type == "bo_report" and self._settings.use_live_connections:
             return self._build_case_bo_report(job)
         if job.job_type == "automic_job" and self._settings.use_live_connections:
@@ -356,7 +358,7 @@ class RunExecutor:
 
     def _build_case_automic(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
-            creds = self._config_snapshot.get("automic_credentials", {})
+            creds = self._config_snapshot.get("automic_credentials") or self._config_snapshot.get("config_data") or self._config_snapshot
             env = EnvironmentConfig(name=creds.get("name", "automic"), **{
                 k: v for k, v in creds.items() if k != "name"
             })
@@ -380,6 +382,44 @@ class RunExecutor:
                 status=mapped,
                 executed_at=datetime.now(timezone.utc),
                 duration_seconds=0.0,
+            )
+        return run_job
+
+    def _build_case_dbt(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            from api.services.dbt_artifact_parser import DbtArtifactParser
+
+            parser = DbtArtifactParser()
+            summary = parser.parse(
+                run_results_path=job.params.get("run_results_path") or job.params.get("artifact_path"),
+                manifest_path=job.params.get("manifest_path"),
+            )
+            mismatches = [
+                MismatchRecord(
+                    key_values={"unique_id": result.unique_id},
+                    column_name="dbt_status",
+                    source_value=result.status,
+                    target_value="pass",
+                    mismatch_type="dbt_result",
+                )
+                for result in summary.results
+                if result.status in {"fail", "error"}
+            ]
+            duration = sum(result.execution_time for result in summary.results)
+            return ReconciliationResult(
+                query_name=job.name,
+                source_env=self._source_env,
+                target_env=self._target_env,
+                source_row_count=summary.total,
+                target_row_count=summary.total,
+                matched_count=summary.passed,
+                missing_in_target_count=0,
+                missing_in_source_count=0,
+                value_mismatch_count=len(mismatches),
+                mismatches=mismatches,
+                status=TestStatus.FAILED if summary.failed else TestStatus.PASSED,
+                executed_at=datetime.now(timezone.utc),
+                duration_seconds=duration,
             )
         return run_job
 

@@ -141,3 +141,32 @@ def test_mismatches_default_pagination_is_100_0(client, mock_run_repo):
     mock_run_repo.list_mismatches.assert_called_once_with(
         result_id=7, limit=100, offset=0
     )
+
+
+# ---------------------------------------------------------------------------
+# /stream
+# ---------------------------------------------------------------------------
+
+def test_stream_returns_404_for_unknown_run(client, mock_run_repo):
+    mock_run_repo.get_run.return_value = None
+
+    resp = client.get("/api/runs/ghost/stream")
+    assert resp.status_code == 404
+
+
+def test_stream_emits_terminal_progress_and_done(client, mock_run_repo):
+    run = MagicMock()
+    run.run_id = "done-run"
+    run.status = "PASSED"
+    run.total_tests = 2
+    mock_run_repo.get_run.return_value = run
+    mock_run_repo.count_completed_results.return_value = 2
+    mock_run_repo.get_current_job.return_value = None
+
+    with client.stream("GET", "/api/runs/done-run/stream") as resp:
+        body = "".join(resp.iter_text())
+
+    assert resp.status_code == 200
+    assert "event: progress" in body
+    assert "event: done" in body
+    assert '"percent_complete": 100' in body

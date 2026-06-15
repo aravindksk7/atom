@@ -79,3 +79,21 @@ def test_audit_list_default_limit():
         repo.log(actor="a", action="run.created", resource_type="run", resource_id=str(i))
     results = repo.list()
     assert len(results) == 50  # default limit
+
+
+def test_audit_event_out_schema_from_orm():
+    from api.schemas import AuditEventOut
+
+    db = _session()
+    event = AuditRepository(db).log(
+        actor="api",
+        action="job.created",
+        resource_type="job",
+        resource_id="orders",
+        diff={"job_type": "reconciliation"},
+    )
+
+    out = AuditEventOut.model_validate(event)
+    assert out.id == event.id
+    assert out.actor == "api"
+    assert out.diff == {"job_type": "reconciliation"}

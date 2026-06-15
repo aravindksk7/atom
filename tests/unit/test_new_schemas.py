@@ -109,3 +109,39 @@ def test_automic_job_create_request_fields():
     from api.schemas import AutomicJobCreateRequest
     r = AutomicJobCreateRequest(name="nightly", job_name="ETL_NIGHTLY")
     assert r.job_name == "ETL_NIGHTLY"
+
+
+def test_automic_job_create_request_accepts_run_id():
+    from api.schemas import AutomicJobCreateRequest
+    r = AutomicJobCreateRequest(name="nightly", run_id="RUN_42")
+    assert r.run_id == "RUN_42"
+
+
+def test_automic_job_create_request_requires_identifier():
+    from api.schemas import AutomicJobCreateRequest
+    with pytest.raises(ValidationError):
+        AutomicJobCreateRequest(name="nightly")
+
+
+def test_job_definition_accepts_dbt_artifact():
+    from api.schemas import JobDefinition
+    job = JobDefinition(
+        name="dbt_orders",
+        job_type="dbt_artifact",
+        query="",
+        key_columns=[],
+        params={"run_results_path": "target/run_results.json"},
+    )
+    assert job.params["run_results_path"] == "target/run_results.json"
+
+
+def test_job_definition_rejects_dbt_manifest_without_run_results():
+    from api.schemas import JobDefinition
+    with pytest.raises(ValidationError):
+        JobDefinition(
+            name="dbt_orders",
+            job_type="dbt_artifact",
+            query="",
+            key_columns=[],
+            params={"manifest_path": "target/manifest.json"},
+        )
