@@ -200,3 +200,19 @@ class ScheduledRun(Base):
     last_run_at = Column(DateTime(timezone=True), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    actor         = Column(String(255), nullable=True)
+    action        = Column(String(100), nullable=False)
+    resource_type = Column(String(50),  nullable=False)
+    resource_id   = Column(String(255), nullable=True)
+    diff          = Column(JSON,        nullable=True)
+    created_at    = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

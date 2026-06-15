@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
-    ApiToken, NotificationHook, ScheduledRun, JobLineageEdge,
+    ApiToken, NotificationHook, ScheduledRun, JobLineageEdge, AuditEvent,
 )
 
 
@@ -527,3 +527,42 @@ class LineageRepository:
             .all()
         )
         return [r[0] for r in rows]
+
+
+class AuditRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def log(
+        self,
+        actor: str | None,
+        action: str,
+        resource_type: str,
+        resource_id: str | None = None,
+        diff: dict | None = None,
+    ) -> AuditEvent:
+        event = AuditEvent(
+            actor=actor,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            diff=diff,
+        )
+        self._db.add(event)
+        self._db.commit()
+        self._db.refresh(event)
+        return event
+
+    def list(
+        self,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AuditEvent]:
+        q = self._db.query(AuditEvent).order_by(AuditEvent.created_at.desc())
+        if resource_type:
+            q = q.filter(AuditEvent.resource_type == resource_type)
+        if resource_id:
+            q = q.filter(AuditEvent.resource_id == resource_id)
+        return q.offset(offset).limit(limit).all()
