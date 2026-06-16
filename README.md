@@ -48,6 +48,9 @@ The application can run entirely in local simulation mode for development, or it
 - Schedule recurring runs with **APScheduler cron expressions**.
 - View the **job lineage DAG** (job → job dependency graph) in the History tab.
 - **Audit log** — every create, update, delete, and mismatch-accept action is recorded with actor, action, resource type, resource ID, and a JSON diff. Queryable via `GET /api/audit`.
+- **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
+- **Trend caching** — trend responses are memoised in-process with a short TTL; the cache is invalidated automatically when matching result rows change.
+- **dbt artifact adapter** — `dbt_artifact` job type parses `run_results.json` (and optionally `manifest.json`) and maps dbt test statuses to normal run results, with failing/error nodes recorded as mismatch details.
 
 ## Architecture
 
@@ -68,7 +71,8 @@ Browser
 FastAPI app  (BearerTokenMiddleware on all /api/* routes)
   api/routes/configs.py
   api/routes/jobs.py          — CRUD, DQ rules, depends_on, EXPLAIN validate
-  api/routes/runs.py          — runs, trends, badges, baseline, mismatch-distribution
+  api/routes/runs.py          — runs, SSE stream, trends, badges, baseline, mismatch-distribution
+  api/routes/audit.py         — GET /api/audit event log
   api/routes/tokens.py        — API token CRUD
   api/routes/notifications.py — webhook CRUD + test ping
   api/routes/schedules.py     — cron schedule CRUD + run-now
@@ -82,10 +86,12 @@ Core framework
   etl_framework/reconciliation   — ReconciliationEngine, DQEngine, polars/pandas backends
   etl_framework/runner
   etl_framework/reporting
-  etl_framework/repository       — ORM models, repositories
+  etl_framework/repository       — ORM models, repositories (incl. AuditRepository)
   etl_framework/sap_bo
   etl_framework/automic
-  api/services/run_executor.py   — retry, DAG resolution, DQ evaluation
+  api/services/run_executor.py   — retry, DAG resolution, DQ evaluation, dbt adapter
+  api/services/audit_service.py  — actor extraction + AuditRepository facade
+  api/services/dbt_artifact_parser.py — parse run_results.json / manifest.json
   api/services/notifier.py       — webhook fire-and-forget
   api/services/scheduler.py      — APScheduler wrapper
       |
@@ -769,6 +775,10 @@ python -m pytest tests/unit/test_dag_retry_trends.py -q
 python -m pytest tests/unit/test_p2_features.py -q
 python -m pytest tests/unit/test_lineage.py -q
 python -m pytest tests/unit/test_audit.py -q
+python -m pytest tests/unit/test_dbt_artifact_parser.py -q
+python -m pytest tests/unit/test_api.py -q
+python -m pytest tests/unit/test_new_schemas.py -q
+python -m pytest tests/unit/test_runs_extensions.py -q
 python -m pytest tests/integration/test_api_frontend_smoke.py -q
 ```
 
