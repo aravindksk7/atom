@@ -38,6 +38,28 @@
 </nav>
 
 <!-- ============================================================
+     AUTH STATUS
+     ============================================================ -->
+<section class="auth-status-bar" :class="storedToken ? 'is-connected' : 'is-missing'">
+  <div class="auth-status-inner">
+    <template x-if="!storedToken">
+      <div class="auth-status-content">
+        <span class="auth-status-dot">🔑</span>
+        <span>No API token set</span>
+        <button class="auth-status-action" @click="openAuthModal()">Set up access →</button>
+      </div>
+    </template>
+    <template x-if="storedToken">
+      <div class="auth-status-content">
+        <span class="auth-status-dot">●</span>
+        <span x-text="activeTokenName ? 'Connected as ' + activeTokenName : 'Connected'"></span>
+        <button class="auth-status-action" @click="goToTokenManagement()">Manage →</button>
+      </div>
+    </template>
+  </div>
+</section>
+
+<!-- ============================================================
      MAIN CONTENT
      ============================================================ -->
 <main class="main-content">
@@ -1964,6 +1986,45 @@
 
 
 </main><!-- end .main-content -->
+
+
+<!-- ====================================================================
+     AUTH SETUP MODAL
+     ==================================================================== -->
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
+  <div class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="auth-modal-header">
+      <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
+      <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
+    </div>
+
+    <div class="auth-path">
+      <div class="auth-path-label">Create New Token</div>
+      <div class="auth-row">
+        <input x-model="authTokenName" class="field-input" placeholder="Token name" @keydown.enter="createToken('auth')" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button">Create →</button>
+      </div>
+    </div>
+
+    <div class="auth-or">
+      <span></span>
+      <strong>or</strong>
+      <span></span>
+    </div>
+
+    <div class="auth-path">
+      <div class="auth-path-label">Paste Existing Token</div>
+      <div class="auth-row">
+        <input x-model="authPasteValue" type="password" class="field-input" placeholder="Token" @keydown.enter="activateToken()" />
+        <button @click="activateToken()" class="btn-secondary auth-row-button">Activate</button>
+      </div>
+    </div>
+
+    <template x-if="authError">
+      <div class="auth-error" x-text="authError"></div>
+    </template>
+  </div>
+</div>
 
 
 <!-- ====================================================================

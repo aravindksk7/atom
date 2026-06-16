@@ -2,8 +2,18 @@
 
 const API = window.ETL_API_BASE || '';
 
+function normalizeToken(raw) {
+  let token = String(raw || '').trim();
+  token = token.replace(/^Authorization\s*:\s*/i, '').trim();
+  token = token.replace(/^["']+|["']+$/g, '').trim();
+  while (/^Bearer\s+/i.test(token)) {
+    token = token.replace(/^Bearer\s+/i, '').trim();
+  }
+  return token;
+}
+
 async function api(method, path, body) {
-  const token = localStorage.getItem('etl_token');
+  const token = normalizeToken(localStorage.getItem('etl_token'));
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const opts = { method, headers };
@@ -12,16 +22,22 @@ async function api(method, path, body) {
   if (resp.status === 204) return null;
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    throw new Error(err.detail || resp.statusText);
+    const error = new Error(err.detail || resp.statusText);
+    error.status = resp.status;
+    throw error;
   }
   return resp.json();
 }
 
 async function apiBlob(path) {
-  const token = localStorage.getItem('etl_token');
+  const token = normalizeToken(localStorage.getItem('etl_token'));
   const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
   const resp = await fetch(API + path, { headers });
-  if (!resp.ok) throw new Error(resp.statusText);
+  if (!resp.ok) {
+    const error = new Error(resp.statusText);
+    error.status = resp.status;
+    throw error;
+  }
   return { blob: await resp.blob(), disposition: resp.headers.get('content-disposition') || '' };
 }
 
@@ -50,6 +66,16 @@ function app() {
       { id: 'compare',  label: '\u21c4 Compare' },
     ],
     apiOk: false,
+
+    // -----------------------------------------------------------
+    // Auth setup wizard
+    // -----------------------------------------------------------
+    showAuthModal: false,
+    authTokenName: '',
+    authPasteValue: '',
+    authError: '',
+    activeTokenName: '',
+    storedTokenValue: normalizeToken(localStorage.getItem('etl_token')),
 
     // -----------------------------------------------------------
     // Config
@@ -292,10 +318,17 @@ function app() {
     // INIT
     // ===========================================================
     async init() {
-      await Promise.all([this.loadConfigs(), this.loadJobs(), this.loadRuns()]);
-      this.loadTokens();
-      this.loadHooks();
-      this.loadSchedules();
+      this.storedTokenValue = normalizeToken(localStorage.getItem('etl_token'));
+      if (this.storedTokenValue) localStorage.setItem('etl_token', this.storedTokenValue);
+      if (this.storedToken) {
+        const tokenValid = await this.resolveActiveTokenName({ verify: true, clearInvalid: true });
+        if (tokenValid) {
+          await this.loadAll();
+          this.loadTokens();
+          this.loadHooks();
+          this.loadSchedules();
+        }
+      }
       this.startPolling();
       try {
         await api('GET', '/api/health');
@@ -316,6 +349,110 @@ function app() {
         if (t) t.fading = true;
         setTimeout(() => { this.toasts = this.toasts.filter(x => x.id !== id); }, 350);
       }, 3500);
+    },
+
+    isAuthError(e) {
+      return e?.status === 401 || /invalid or expired token|authorization header/i.test(e?.message || '');
+    },
+
+    handleAuthError(e) {
+      if (!this.isAuthError(e)) return false;
+      localStorage.removeItem('etl_token');
+      this.storedTokenValue = '';
+      this.activeTokenName = '';
+      this.authError = 'Your API token was rejected. Create or paste a valid token.';
+      this.showAuthModal = true;
+      this.toast('error', 'API token rejected', 'Set up access again');
+      return true;
+    },
+
+    async loadAll() {
+      await Promise.allSettled([
+        this.loadConfigs(),
+        this.loadJobs(),
+        this.loadRuns(),
+      ]);
+    },
+
+    openAuthModal() {
+      this.authError = '';
+      this.showAuthModal = true;
+    },
+
+    closeAuthModal() {
+      this.showAuthModal = false;
+    },
+
+    async activateToken() {
+      const raw = normalizeToken(this.authPasteValue);
+      if (!raw) {
+        this.authError = 'Paste your token';
+        return;
+      }
+      localStorage.setItem('etl_token', raw);
+      this.storedTokenValue = raw;
+      this.authPasteValue = '';
+      this.authError = '';
+      const valid = await this.resolveActiveTokenName({ verify: true });
+      if (!valid) {
+        localStorage.removeItem('etl_token');
+        this.storedTokenValue = '';
+        this.authError = 'Your API token was rejected. Paste a valid raw token.';
+        this.showAuthModal = true;
+        return;
+      }
+      this.closeAuthModal();
+      await this.loadAll();
+    },
+
+    async verifyStoredToken({ clearInvalid = false } = {}) {
+      if (!this.storedToken) return false;
+      try {
+        const verified = await api('GET', '/api/auth/verify');
+        this.activeTokenName = verified.actor || '';
+        return true;
+      } catch (e) {
+        if (e?.status === 404) {
+          try {
+            this.configs = await api('GET', '/api/configs');
+            this.activeTokenName = '';
+            return true;
+          } catch (fallbackError) {
+            e = fallbackError;
+          }
+        }
+        if (clearInvalid) {
+          localStorage.removeItem('etl_token');
+          this.storedTokenValue = '';
+          this.activeTokenName = '';
+        }
+        return false;
+      }
+    },
+
+    async resolveActiveTokenName({ verify = false, clearInvalid = false } = {}) {
+      this.activeTokenName = '';
+      if (!this.storedToken) return;
+      if (verify) {
+        const valid = await this.verifyStoredToken({ clearInvalid });
+        if (!valid) return false;
+        return true;
+      }
+      try {
+        const tokens = await this.loadTokens();
+        const active = (tokens || []).find(t => t.enabled);
+        this.activeTokenName = active?.name || '';
+        return true;
+      } catch {
+        this.activeTokenName = '';
+        return true;
+      }
+    },
+
+    goToTokenManagement() {
+      this.currentView = 'config';
+      this.securityOpen = true;
+      this.loadTokens();
     },
 
     // ===========================================================
@@ -720,7 +857,7 @@ function app() {
       try {
         this.auditEvents = await api('GET', '/api/audit?' + params.toString());
       } catch (e) {
-        this.toast('error', 'Audit load failed', e.message);
+        if (!this.handleAuthError(e)) this.toast('error', 'Audit load failed', e.message);
       } finally {
         this.auditLoading = false;
       }
@@ -1384,21 +1521,44 @@ function app() {
     // SECURITY – API TOKENS
     // ===========================================================
     async loadTokens() {
-      try { this.tokens = await api('GET', '/api/tokens'); } catch {}
+      try {
+        this.tokens = await api('GET', '/api/tokens');
+        return this.tokens;
+      } catch {
+        return [];
+      }
     },
 
-    async createToken() {
-      if (!this.newTokenName.trim()) return;
+    async createToken(source = 'security') {
+      const fromAuthWizard = source === 'auth';
+      const name = (fromAuthWizard ? this.authTokenName : this.newTokenName).trim();
+      if (!name) {
+        if (fromAuthWizard) this.authError = 'Enter a token name';
+        return;
+      }
       try {
-        const resp = await api('POST', '/api/tokens', { name: this.newTokenName.trim() });
-        this.createdToken = resp.raw_token;
+        const resp = await api('POST', '/api/tokens', { name });
         localStorage.setItem('etl_token', resp.raw_token);
-        this.newTokenName = '';
-        this.showCreateToken = false;
+        this.storedTokenValue = resp.raw_token;
+        this.activeTokenName = resp.name || name;
+        if (fromAuthWizard) {
+          this.authTokenName = '';
+          this.authError = '';
+          this.closeAuthModal();
+          await this.loadAll();
+        } else {
+          this.createdToken = resp.raw_token;
+          this.newTokenName = '';
+          this.showCreateToken = false;
+          this.toast('success', 'Token created', 'Saved to localStorage automatically');
+        }
         await this.loadTokens();
-        this.toast('success', 'Token created', 'Saved to localStorage automatically');
       } catch (e) {
-        this.toast('error', 'Create failed', e.message);
+        const msg = /already exists|duplicate|unique/i.test(e.message || '')
+          ? 'A token with that name already exists'
+          : e.message;
+        if (fromAuthWizard) this.authError = msg;
+        else this.toast('error', 'Create failed', msg);
       }
     },
 
@@ -1414,17 +1574,23 @@ function app() {
     },
 
     setStoredToken(raw) {
-      if (raw.trim()) {
-        localStorage.setItem('etl_token', raw.trim());
+      const token = normalizeToken(raw);
+      if (token) {
+        localStorage.setItem('etl_token', token);
+        this.storedTokenValue = token;
+        this.resolveActiveTokenName({ verify: true });
+        this.loadAll();
         this.toast('success', 'Token saved', 'Will be used for all API calls');
       } else {
         localStorage.removeItem('etl_token');
+        this.storedTokenValue = '';
+        this.activeTokenName = '';
         this.toast('warn', 'Token cleared');
       }
     },
 
     get storedToken() {
-      return localStorage.getItem('etl_token') || '';
+      return this.storedTokenValue;
     },
 
     // ===========================================================
@@ -1662,7 +1828,7 @@ function app() {
       try {
         this.lineageGraph = await api('GET', '/api/lineage/jobs');
       } catch (e) {
-        this.toast('error', 'Lineage load failed', e.message);
+        if (!this.handleAuthError(e)) this.toast('error', 'Lineage load failed', e.message);
       } finally {
         this.lineageLoading = false;
       }
