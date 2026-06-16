@@ -25,7 +25,7 @@ class AuditService:
             except Exception:
                 token_id = getattr(request.state, "token_id", None)
                 return f"token:{token_id}" if token_id else None
-        return request.headers.get("x-actor") or request.headers.get("x-user")
+        return None
 
     def log(
         self,

@@ -422,8 +422,8 @@ def accept_mismatch(
     result_id: int,
     mismatch_id: int,
     body: MismatchAcceptRequest,
+    request: Request,
     db: Session = Depends(get_session),
-    request: Request = None,
 ):
     from etl_framework.repository.models import MismatchDetail, TestResult
 
@@ -479,11 +479,15 @@ def get_trends(
         .filter(TestResult.query_name == job_name)
         .first()
     )
-    cache_key = (id(db.get_bind()), job_name, metric, window, signature[0], signature[1])
+    cache_key = (id(db.bind), job_name, metric, window, signature[0], signature[1])
     cached = _TREND_CACHE.get(cache_key)
     now = time.monotonic()
     if cached and now - cached[0] < _TREND_CACHE_TTL_SECONDS:
         return cached[1]
+    if len(_TREND_CACHE) > 500:
+        cutoff = now - _TREND_CACHE_TTL_SECONDS
+        for k in [k for k, (ts, _) in _TREND_CACHE.items() if ts < cutoff]:
+            _TREND_CACHE.pop(k, None)
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=window)
     rows = (
@@ -545,6 +549,7 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
     async def events():
         last_payload = ""
         while True:
+            db.expire_all()  # force re-fetch; identity map caches stale status without this
             run = repo.get_run(run_id)
             if run is None:
                 yield "event: error\ndata: {\"detail\":\"Run not found\"}\n\n"

@@ -69,7 +69,9 @@ class DbtArtifactParser:
             return {}
         with Path(path).expanduser().open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Expected a JSON object in {path}, got {type(data).__name__}")
+        return data
 
     def _message(self, raw: dict[str, Any]) -> str:
         message = raw.get("message") or raw.get("failures")

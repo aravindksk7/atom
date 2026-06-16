@@ -118,6 +118,7 @@ def test_accept_mismatch_endpoint_rejects_result_from_other_run(db, repo):
             tr.id,
             md.id,
             MismatchAcceptRequest(note="wrong run"),
+            None,
             db,
         )
     assert exc.value.status_code == 404

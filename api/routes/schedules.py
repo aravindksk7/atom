@@ -91,9 +91,9 @@ def update_schedule(
 
 @router.delete("/{schedule_id}", status_code=204)
 def delete_schedule(schedule_id: int, request: Request, db: Session = Depends(get_session)):
-    _sched_svc.remove_job(schedule_id)
     if not ScheduleRepository(db).delete(schedule_id):
         raise HTTPException(status_code=404, detail="Schedule not found")
+    _sched_svc.remove_job(schedule_id)
     AuditService(db).log(request, "schedule.deleted", "schedule", schedule_id)
 
 
