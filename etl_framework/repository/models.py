@@ -164,6 +164,8 @@ class ApiToken(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    token_hint = Column(String(8), nullable=False, default="")
 
 
 # ---------------------------------------------------------------------------
