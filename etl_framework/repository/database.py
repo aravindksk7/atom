@@ -79,16 +79,14 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE INDEX IF NOT EXISTS ix_api_tokens_token_hash ON api_tokens (token_hash)"
         ))
         # --- Token auth hardening: is_admin + token_hint ---
-        api_token_cols = {col["name"] for col in inspector.get_columns("api_tokens")} \
-            if "api_tokens" in tables else set()
-        if "is_admin" not in api_token_cols:
-            conn.execute(text(
-                "ALTER TABLE api_tokens ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"
-            ))
-        if "token_hint" not in api_token_cols:
-            conn.execute(text(
-                "ALTER TABLE api_tokens ADD COLUMN token_hint VARCHAR(8) NOT NULL DEFAULT ''"
-            ))
+        for _ddl in [
+            "ALTER TABLE api_tokens ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE api_tokens ADD COLUMN token_hint VARCHAR(8) NOT NULL DEFAULT ''",
+        ]:
+            try:
+                conn.execute(text(_ddl))
+            except Exception:
+                pass  # column already exists (fresh install or repeated startup)
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS notification_hooks ("
             "id INTEGER PRIMARY KEY, "
