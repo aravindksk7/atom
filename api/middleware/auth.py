@@ -103,6 +103,8 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             if token_row is not None:
                 now = datetime.now(timezone.utc)
                 lu = token_row.last_used_at
+                if lu is not None and lu.tzinfo is None:
+                    lu = lu.replace(tzinfo=timezone.utc)
                 if lu is None or (now - lu).total_seconds() > _LAZY_WRITE_INTERVAL:
                     token_row.last_used_at = now
                     db.commit()
