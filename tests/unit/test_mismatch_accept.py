@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from etl_framework.repository.database import Base, get_db
@@ -145,20 +145,26 @@ def test_list_pairs_returns_unique_pair_ids(repo):
 @pytest.fixture
 def api_client(monkeypatch):
     from api.routes import runs as runs_module
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import TokenRepository
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
 
     def override_get_db():
         with Session(engine) as session:
             yield session
 
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test-runner")
+
     monkeypatch.setattr(runs_module, "_execute_run", lambda *a, **kw: None)
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
         yield c
     app.dependency_overrides.clear()
 

@@ -4,14 +4,33 @@ from __future__ import annotations
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from api.schemas import RunProgressOut, MismatchOut
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     from api.main import app
-    return TestClient(app)
+    from etl_framework.repository.database import Base
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import TokenRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test-runner")
+
+    return TestClient(app, headers={"Authorization": f"Bearer {raw}"})
 
 
 @pytest.fixture(autouse=True)

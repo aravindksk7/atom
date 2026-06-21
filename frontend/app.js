@@ -1659,9 +1659,12 @@ function app() {
         }
         await this.loadTokens();
       } catch (e) {
-        const msg = /already exists|duplicate|unique/i.test(e.message || '')
-          ? 'A token with that name already exists'
-          : e.message;
+        let msg = e.message;
+        if (/already exists|duplicate|unique/i.test(msg)) {
+          msg = 'A token with that name already exists';
+        } else if (fromAuthWizard && e.status === 403) {
+          msg = 'Token creation is restricted — paste an existing token or ask an admin to create one for you.';
+        }
         if (fromAuthWizard) this.authError = msg;
         else this.toast('error', 'Create failed', msg);
       }
