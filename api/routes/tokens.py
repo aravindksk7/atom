@@ -58,6 +58,6 @@ def list_tokens(db: Session = Depends(get_session)):
 
 @router.delete("/{token_id}", status_code=204)
 def revoke_token(token_id: int, request: Request, db: Session = Depends(get_session)):
-    if not TokenRepository(db).revoke(token_id):
+    if TokenRepository(db).revoke(token_id) is None:
         raise HTTPException(status_code=404, detail="Token not found")
     AuditService(db).log(request, "token.revoked", "token", token_id)
