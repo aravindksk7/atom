@@ -364,9 +364,15 @@ class TokenRepository:
     def _hash(raw: str) -> str:
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    def create(self, name: str, expires_at: datetime | None = None) -> tuple[str, ApiToken]:
+    def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False) -> tuple[str, ApiToken]:
         raw = "etl_" + _secrets.token_hex(32)
-        token = ApiToken(token_hash=self._hash(raw), name=name, expires_at=expires_at)
+        token = ApiToken(
+            token_hash=self._hash(raw),
+            name=name,
+            expires_at=expires_at,
+            is_admin=is_admin,
+            token_hint=raw[-8:],
+        )
         self._db.add(token)
         self._db.commit()
         self._db.refresh(token)
@@ -390,13 +396,17 @@ class TokenRepository:
     def list(self) -> list[ApiToken]:
         return self._db.query(ApiToken).order_by(ApiToken.created_at.desc()).all()
 
-    def revoke(self, token_id: int) -> bool:
+    def revoke(self, token_id: int) -> str | None:
         token = self._db.get(ApiToken, token_id)
         if token is None:
-            return False
+            return None
+        token_hash = token.token_hash
         token.enabled = False
         self._db.commit()
-        return True
+        return token_hash
+
+    def count(self) -> int:
+        return self._db.query(ApiToken).count()
 
 
 # ---------------------------------------------------------------------------
