@@ -289,6 +289,7 @@ function app() {
     showCreateToken: false,
     newTokenName: '',
     createdToken: null,
+    createdTokenHint: null,
 
     // -----------------------------------------------------------
     // Notifications – webhook hooks
@@ -314,6 +315,80 @@ function app() {
     toasts: [],
     _toastSeq: 0,
 
+    // --- Task 1: Job Catalog Search/Filter ---
+    jobSearchQuery: '',
+
+    // --- Task 2: Job Last Run Status ---
+    // (stored in localStorage, accessed via methods)
+
+    // --- Task 3: Multi-select with Shift-click ---
+    multiSelectMode: false,
+    shiftLastIndex: -1,
+
+    // --- Task 7: Config Dropdown + Session Memory ---
+    // (savedConfigDisplay is a method; session settings persisted via methods)
+
+    // --- Task 8: Job Modal Tab Reorganization ---
+    jobModalTab: 'basic',
+    jobModalTabs: [
+      { id: 'basic', label: 'Basic Info' },
+      { id: 'settings', label: 'Settings' },
+      { id: 'deps', label: 'Dependencies' },
+      { id: 'rules', label: 'DQ Rules' },
+      { id: 'tags', label: 'Tags' },
+    ],
+
+    // --- Task 9: Job Modal Inline Validation ---
+    jobModalValidation: { sql: '', keyColumns: '', dependencies: '' },
+
+    // --- Task 10: DQ Rule Templates + Job Templates ---
+    dqRuleTemplates: [
+      { name: 'Price must be positive', type: 'column_mean_between', defaults: { min: 0, max: null } },
+      { name: 'ID must be not null', type: 'not_null', defaults: {} },
+      { name: 'Status code range', type: 'column_mean_between', defaults: { min: 100, max: 599 } },
+      { name: 'Email format validation', type: 'match_regex', defaults: { pattern: '^[\\w.+-]+@[\\w-]+\\.[\\w.]+$' } },
+    ],
+    jobTemplates: [],
+    jobTemplateName: '',
+    showSaveTemplatePrompt: false,
+
+    // --- Task 11: Execution Sequence Drag-to-Reorder ---
+    dragSrcIndex: null,
+
+    // --- Task 13: Compare Tab Template System ---
+    compareTemplates: [],
+    activeCompareTemplate: '',
+    showCompareTemplatePanel: false,
+    newCompareTemplateName: '',
+    predefinedCompareTemplates: [
+      { name: 'Daily BO Report Compare', type: 'bo', config: { sourceTypeA: 'api', sourceTypeB: 'api' } },
+      { name: 'Weekly Report Trend Analysis', type: 'bo', config: { sourceTypeA: 'api', sourceTypeB: 'baseline' } },
+      { name: 'Ad-hoc File Upload Comparison', type: 'bo', config: { sourceTypeA: 'upload', sourceTypeB: 'upload' } },
+      { name: 'Daily Reconciliation vs Baseline', type: 'reconciliation', config: {} },
+      { name: 'Production File Validation', type: 'reconciliation', config: { fileMode: 'upload' } },
+      { name: 'Environment-to-Environment Diff', type: 'reconciliation', config: {} },
+    ],
+
+    // --- Task 14: BO Report Tab Improvements ---
+    boSaveAsBaseline: false,
+    boLastUsedSourceTypes: { a: '', b: '' },
+
+    // --- Task 15: Quick Compare Mode ---
+    quickCompareMode: false,
+
+    // --- Task 17: Results Panel Export + Visualization Toggle ---
+    showMismatchChart: false,
+    mismatchChartType: 'column',
+    mismatchChartData: null,
+
+    // --- Task 18: Mismatch Acceptance Workflow ---
+    mismatchStatusFilter: 'ALL',
+
+    // --- Task 19: Help System + Keyboard Shortcuts ---
+    showingHelp: false,
+    helpTitle: '',
+    helpContent: '',
+
     // ===========================================================
     // INIT
     // ===========================================================
@@ -336,6 +411,14 @@ function app() {
       } catch {
         this.apiOk = false;
       }
+      // --- Task 7: Load session settings from localStorage ---
+      this.loadSessionSettings();
+      // --- Task 10: Load job templates from localStorage ---
+      this._loadJobTemplatesFromStorage();
+      // --- Task 13: Load compare templates from localStorage ---
+      this.loadCompareTemplates();
+      // --- Task 19: Init keyboard shortcuts ---
+      this.initKeyboardShortcuts();
     },
 
     // ===========================================================
@@ -593,6 +676,8 @@ function app() {
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
+      this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
+      this.jobModalTab = 'basic';  // Task 8: reset tab
       this.showJobModal = true;
     },
 
@@ -614,6 +699,8 @@ function app() {
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
+      this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
+      this.jobModalTab = 'basic';  // Task 8: reset tab
       this.showJobModal = true;
     },
 
@@ -791,6 +878,20 @@ function app() {
         const idx = this.activeRuns.findIndex(r => r.run_id === progress.run_id);
         if (idx >= 0) Object.assign(this.activeRuns[idx], { status: progress.status, _progress: progress });
         this.closeRunStream(progress.run_id);
+        // --- Task 2: Save per-job last run statuses ---
+        if (progress.job_results) {
+          progress.job_results.forEach(jr => {
+            if (jr.job_name && jr.status) this.saveJobRunStatus(jr.job_name, jr.status);
+          });
+        }
+        // --- Task 12: Save per-job durations ---
+        if (progress.job_results) {
+          progress.job_results.forEach(jr => {
+            if (jr.job_name && jr.duration_seconds != null) {
+              this.saveJobDuration(jr.job_name, jr.duration_seconds);
+            }
+          });
+        }
         await this.loadRuns();
       });
       stream.onerror = () => this.closeRunStream(run.run_id);
@@ -1150,6 +1251,9 @@ function app() {
           this.boComparePollInterval = null;
           this.boCompareResult = await api('GET', `/api/runs/${this.boCompareRunId}`);
           this.boCompareLoading = false;
+          if (this.boSaveAsBaseline && status.status === 'passed') {
+            try { await api('POST', `/api/runs/${this.boCompareRunId}/set-baseline`); } catch (_) {}
+          }
           await this.loadRuns();
         }
       } catch (e) {
@@ -1548,6 +1652,7 @@ function app() {
           await this.loadAll();
         } else {
           this.createdToken = resp.raw_token;
+          this.createdTokenHint = resp.token_hint || null;
           this.newTokenName = '';
           this.showCreateToken = false;
           this.toast('success', 'Token created', 'Saved to localStorage automatically');
@@ -1908,6 +2013,652 @@ function app() {
         COMPLETED: 'badge-green',
       };
       return 'badge ' + (map[status] || 'badge-gray');
+    },
+
+    // ===========================================================
+    // --- Task 1: Job Catalog Search/Filter ---
+    // ===========================================================
+    get filteredJobList() {
+      const q = (this.jobSearchQuery || '').toLowerCase().trim();
+      if (!q) return this.jobs || [];
+      return (this.jobs || []).filter(job => {
+        const nameMatch = (job.name || '').toLowerCase().includes(q);
+        const descMatch = (job.description || '').toLowerCase().includes(q);
+        const tagsMatch = (job.tags || []).some(t => t.toLowerCase().includes(q));
+        return nameMatch || descMatch || tagsMatch;
+      });
+    },
+
+    // ===========================================================
+    // --- Task 2: Job Last Run Status ---
+    // ===========================================================
+    getJobLastStatus(jobName) {
+      try {
+        return localStorage.getItem(`etl_job_status_${jobName}`) || null;
+      } catch {
+        return null;
+      }
+    },
+
+    saveJobRunStatus(jobName, status) {
+      try {
+        localStorage.setItem(`etl_job_status_${jobName}`, status);
+      } catch {}
+    },
+
+    // ===========================================================
+    // --- Task 3: Multi-select with Shift-click + Select All/None ---
+    // ===========================================================
+    toggleJobWithShift(idx, event) {
+      const jobs = this.filteredJobList;
+      const job = jobs[idx];
+      if (!job) return;
+      if (event && event.shiftKey && this.shiftLastIndex >= 0) {
+        const lo = Math.min(this.shiftLastIndex, idx);
+        const hi = Math.max(this.shiftLastIndex, idx);
+        for (let i = lo; i <= hi; i++) {
+          const j = jobs[i];
+          if (!j) continue;
+          if (!this.selectedJobs.includes(j.name)) {
+            this.selectedJobs.push(j.name);
+          }
+        }
+      } else {
+        const pos = this.selectedJobs.indexOf(job.name);
+        if (pos >= 0) this.selectedJobs.splice(pos, 1);
+        else this.selectedJobs.push(job.name);
+      }
+      this.shiftLastIndex = idx;
+    },
+
+    selectAllJobs() {
+      const names = this.filteredJobList.map(j => j.name);
+      names.forEach(name => {
+        if (!this.selectedJobs.includes(name)) this.selectedJobs.push(name);
+      });
+    },
+
+    selectNoneJobs() {
+      this.selectedJobs = [];
+      this.shiftLastIndex = -1;
+    },
+
+    // ===========================================================
+    // --- Task 7: Config Dropdown Enhancement + Session Memory ---
+    // ===========================================================
+    savedConfigDisplay(config) {
+      if (!config) return '';
+      return `${config.name} (${config.env_name})`;
+    },
+
+    saveSessionSettings() {
+      try {
+        const settings = {
+          launchSettings: { ...this.launchSettings },
+          compareSubTab: this.compareSubTab,
+          reconMode: this.reconMode,
+          boSourceAType: this.boSourceAType,
+          boSourceBType: this.boSourceBType,
+          boKeyColumns: this.boKeyColumns,
+          boExcludeColumns: this.boExcludeColumns,
+          historyFilterStatus: this.historyFilterStatus,
+          historyFilterRunType: this.historyFilterRunType,
+        };
+        localStorage.setItem('etl_session_settings', JSON.stringify(settings));
+      } catch {}
+    },
+
+    loadSessionSettings() {
+      try {
+        const raw = localStorage.getItem('etl_session_settings');
+        if (!raw) return;
+        const settings = JSON.parse(raw);
+        if (settings.launchSettings) Object.assign(this.launchSettings, settings.launchSettings);
+        if (settings.compareSubTab !== undefined) this.compareSubTab = settings.compareSubTab;
+        if (settings.reconMode !== undefined) this.reconMode = settings.reconMode;
+        if (settings.boSourceAType !== undefined) this.boSourceAType = settings.boSourceAType;
+        if (settings.boSourceBType !== undefined) this.boSourceBType = settings.boSourceBType;
+        if (settings.boKeyColumns !== undefined) this.boKeyColumns = settings.boKeyColumns;
+        if (settings.boExcludeColumns !== undefined) this.boExcludeColumns = settings.boExcludeColumns;
+        if (settings.historyFilterStatus !== undefined) this.historyFilterStatus = settings.historyFilterStatus;
+        if (settings.historyFilterRunType !== undefined) this.historyFilterRunType = settings.historyFilterRunType;
+      } catch {}
+    },
+
+    // ===========================================================
+    // --- Task 8: Job Modal Tab – reset on open (patch existing openers) ---
+    // ===========================================================
+    // Note: jobModalTab is reset in openNewJobModal/openEditJobModal by calling _resetJobModalTab()
+    _resetJobModalTab() {
+      this.jobModalTab = 'basic';
+    },
+
+    // ===========================================================
+    // --- Task 9: Job Modal Inline Validation ---
+    // ===========================================================
+    validateJobModal() {
+      const m = this.jobModal || {};
+      const v = { sql: '', keyColumns: '', dependencies: '' };
+
+      // SQL validation: only for reconciliation jobs
+      if (m.job_type === 'reconciliation') {
+        const query = (m.query || '').trim();
+        if (query && !/select/i.test(query)) {
+          v.sql = 'Query should contain a SELECT statement';
+        } else if (query && /select/i.test(query)) {
+          v.sql = '✓ Query looks valid';
+        }
+      }
+
+      // Key columns: check alphanumeric/underscore
+      if (m.key_columns_raw) {
+        const cols = m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean);
+        const invalid = cols.filter(c => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c));
+        if (invalid.length) {
+          v.keyColumns = `Invalid column name(s): ${invalid.join(', ')}`;
+        }
+      }
+
+      // Dependencies: check if referenced job names exist
+      if (m.depends_on_raw) {
+        const deps = m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean);
+        const jobNames = (this.jobs || []).map(j => j.name);
+        const missing = deps.filter(d => d && !jobNames.includes(d));
+        if (missing.length) {
+          v.dependencies = `Unknown job(s): ${missing.join(', ')}`;
+        }
+      }
+
+      this.jobModalValidation = v;
+    },
+
+    // ===========================================================
+    // --- Task 10: DQ Rule Templates + Save as Template ---
+    // ===========================================================
+    applyDqTemplate(templateName) {
+      const tpl = (this.dqRuleTemplates || []).find(t => t.name === templateName);
+      if (!tpl) return;
+      if (!this.jobModal.rules) this.jobModal.rules = [];
+      this.jobModal.rules.push({
+        type: tpl.type,
+        column: '',
+        severity: 'error',
+        min_value: tpl.defaults.min !== undefined ? tpl.defaults.min : null,
+        max_value: tpl.defaults.max !== undefined ? tpl.defaults.max : null,
+        pattern: null,
+      });
+    },
+
+    _loadJobTemplatesFromStorage() {
+      try {
+        const raw = localStorage.getItem('etl_job_templates');
+        this.jobTemplates = raw ? JSON.parse(raw) : [];
+      } catch {
+        this.jobTemplates = [];
+      }
+    },
+
+    saveJobAsTemplate() {
+      const name = (this.jobTemplateName || '').trim();
+      if (!name) {
+        this.toast('warn', 'Template name required', 'Enter a name for the template');
+        return;
+      }
+      const m = this.jobModal || {};
+      // Save all modal fields except id
+      const tpl = {
+        name,
+        job_type: m.job_type,
+        description: m.description,
+        query: m.query,
+        key_columns_raw: m.key_columns_raw,
+        tags_raw: m.tags_raw,
+        enabled: m.enabled,
+        depends_on_raw: m.depends_on_raw,
+        rules: (m.rules || []).map(r => ({ ...r })),
+        bo_report_id: m.bo_report_id,
+        bo_page_id: m.bo_page_id,
+        bo_format: m.bo_format,
+        automic_job_name: m.automic_job_name,
+        automic_run_id: m.automic_run_id,
+        dbt_manifest_path: m.dbt_manifest_path,
+        dbt_run_results_path: m.dbt_run_results_path,
+      };
+      // Replace if same name exists
+      const idx = this.jobTemplates.findIndex(t => t.name === name);
+      if (idx >= 0) this.jobTemplates.splice(idx, 1, tpl);
+      else this.jobTemplates.push(tpl);
+      try {
+        localStorage.setItem('etl_job_templates', JSON.stringify(this.jobTemplates));
+      } catch {}
+      this.jobTemplateName = '';
+      this.showSaveTemplatePrompt = false;
+      this.toast('success', 'Template saved', name);
+    },
+
+    loadJobTemplate(name) {
+      const tpl = (this.jobTemplates || []).find(t => t.name === name);
+      if (!tpl) return;
+      const fields = { ...tpl };
+      delete fields.name;
+      Object.assign(this.jobModal, fields);
+      this.toast('success', 'Template loaded', name);
+    },
+
+    deleteJobTemplate(name) {
+      this.jobTemplates = (this.jobTemplates || []).filter(t => t.name !== name);
+      try {
+        localStorage.setItem('etl_job_templates', JSON.stringify(this.jobTemplates));
+      } catch {}
+      this.toast('success', 'Template deleted', name);
+    },
+
+    // ===========================================================
+    // --- Task 11: Execution Sequence Drag-to-Reorder ---
+    // ===========================================================
+    onDragStart(idx) {
+      this.dragSrcIndex = idx;
+    },
+
+    onDragOver(e, idx) {
+      e.preventDefault();
+    },
+
+    onDrop(idx) {
+      if (this.dragSrcIndex === null || this.dragSrcIndex === idx) {
+        this.dragSrcIndex = null;
+        return;
+      }
+      const seq = this.selectedJobs;
+      const item = seq.splice(this.dragSrcIndex, 1)[0];
+      seq.splice(idx, 0, item);
+      this.dragSrcIndex = null;
+    },
+
+    onDragEnd() {
+      this.dragSrcIndex = null;
+    },
+
+    // ===========================================================
+    // --- Task 12: Execution Sequence Utilities ---
+    // ===========================================================
+    clearExecutionSequence() {
+      this.selectedJobs = [];
+    },
+
+    invertJobSelection() {
+      const visibleNames = this.filteredJobList.map(j => j.name);
+      const newSelected = [];
+      visibleNames.forEach(name => {
+        if (!this.selectedJobs.includes(name)) newSelected.push(name);
+      });
+      // Keep selections outside the visible list unchanged
+      const outsideVisible = this.selectedJobs.filter(n => !visibleNames.includes(n));
+      this.selectedJobs = [...outsideVisible, ...newSelected];
+    },
+
+    hasCircularDependency() {
+      const seq = this.selectedJobs || [];
+      const jobMap = {};
+      (this.jobs || []).forEach(j => { jobMap[j.name] = j; });
+      for (const nameA of seq) {
+        const jobA = jobMap[nameA];
+        if (!jobA) continue;
+        const depsA = (jobA.depends_on || []);
+        for (const nameB of depsA) {
+          const jobB = jobMap[nameB];
+          if (!jobB) continue;
+          const depsB = (jobB.depends_on || []);
+          if (depsB.includes(nameA)) return true;
+        }
+      }
+      return false;
+    },
+
+    get estimatedSequenceDuration() {
+      const seq = this.selectedJobs || [];
+      let total = 0;
+      seq.forEach(name => {
+        try {
+          const val = localStorage.getItem(`etl_job_duration_${name}`);
+          if (val) total += Number(val) || 0;
+        } catch {}
+      });
+      if (total === 0) return '';
+      const m = Math.floor(total / 60);
+      const s = Math.round(total % 60);
+      return m > 0 ? `~${m}m ${s}s` : `~${s}s`;
+    },
+
+    saveJobDuration(jobName, durationSeconds) {
+      try {
+        localStorage.setItem(`etl_job_duration_${jobName}`, String(durationSeconds));
+      } catch {}
+    },
+
+    // ===========================================================
+    // --- Task 13: Compare Tab Template System ---
+    // ===========================================================
+    loadCompareTemplates() {
+      try {
+        const raw = localStorage.getItem('etl_compare_templates');
+        const saved = raw ? JSON.parse(raw) : [];
+        // Merge predefined with user-saved (user saved names take priority)
+        const savedNames = saved.map(t => t.name);
+        const predefined = (this.predefinedCompareTemplates || []).filter(t => !savedNames.includes(t.name));
+        this.compareTemplates = [...predefined, ...saved];
+      } catch {
+        this.compareTemplates = [...(this.predefinedCompareTemplates || [])];
+      }
+    },
+
+    saveCompareTemplate() {
+      const name = (this.newCompareTemplateName || '').trim();
+      if (!name) {
+        this.toast('warn', 'Template name required', 'Enter a name for the compare template');
+        return;
+      }
+      const tpl = {
+        name,
+        type: this.compareSubTab,
+        config: {
+          compareSubTab: this.compareSubTab,
+          reconMode: this.reconMode,
+          boSourceAType: this.boSourceAType,
+          boSourceBType: this.boSourceBType,
+          boKeyColumns: this.boKeyColumns,
+          boExcludeColumns: this.boExcludeColumns,
+          boSourceA: { ...this.boSourceA },
+          boSourceB: { ...this.boSourceB },
+        },
+      };
+      const idx = this.compareTemplates.findIndex(t => t.name === name);
+      if (idx >= 0) this.compareTemplates.splice(idx, 1, tpl);
+      else this.compareTemplates.push(tpl);
+      // Persist only user-saved (non-predefined) templates
+      const predefinedNames = (this.predefinedCompareTemplates || []).map(t => t.name);
+      const toSave = this.compareTemplates.filter(t => !predefinedNames.includes(t.name));
+      try {
+        localStorage.setItem('etl_compare_templates', JSON.stringify(toSave));
+      } catch {}
+      this.newCompareTemplateName = '';
+      this.activeCompareTemplate = name;
+      this.toast('success', 'Compare template saved', name);
+    },
+
+    loadCompareTemplate(name) {
+      const tpl = (this.compareTemplates || []).find(t => t.name === name);
+      if (!tpl || !tpl.config) return;
+      const c = tpl.config;
+      if (c.compareSubTab) this.compareSubTab = c.compareSubTab;
+      if (c.reconMode) this.reconMode = c.reconMode;
+      if (c.boSourceAType) this.boSourceAType = c.boSourceAType;
+      if (c.boSourceBType) this.boSourceBType = c.boSourceBType;
+      if (c.boKeyColumns !== undefined) this.boKeyColumns = c.boKeyColumns;
+      if (c.boExcludeColumns !== undefined) this.boExcludeColumns = c.boExcludeColumns;
+      if (c.boSourceA) Object.assign(this.boSourceA, c.boSourceA);
+      if (c.boSourceB) Object.assign(this.boSourceB, c.boSourceB);
+      this.activeCompareTemplate = name;
+      this.toast('success', 'Compare template loaded', name);
+    },
+
+    deleteCompareTemplate(name) {
+      this.compareTemplates = (this.compareTemplates || []).filter(t => t.name !== name);
+      const predefinedNames = (this.predefinedCompareTemplates || []).map(t => t.name);
+      const toSave = this.compareTemplates.filter(t => !predefinedNames.includes(t.name));
+      try {
+        localStorage.setItem('etl_compare_templates', JSON.stringify(toSave));
+      } catch {}
+      if (this.activeCompareTemplate === name) this.activeCompareTemplate = '';
+      this.toast('success', 'Compare template deleted', name);
+    },
+
+    // ===========================================================
+    // --- Task 14: BO Report Tab Improvements ---
+    // ===========================================================
+    swapCompareSides() {
+      // Swap source types
+      const tmpType = this.boSourceAType;
+      this.boSourceAType = this.boSourceBType;
+      this.boSourceBType = tmpType;
+      // Swap source configs
+      const tmpSrc = { ...this.boSourceA };
+      this.boSourceA = { ...this.boSourceB, label: 'Source A' };
+      this.boSourceB = { ...tmpSrc, label: 'Source B' };
+      // Swap loaded docs/reports
+      const tmpDocs = this.boDocsA;
+      this.boDocsA = this.boDocsB;
+      this.boDocsB = tmpDocs;
+      const tmpReports = this.boReportsA;
+      this.boReportsA = this.boReportsB;
+      this.boReportsB = tmpReports;
+      this.toast('success', 'Sides swapped', 'Source A and Source B have been swapped');
+    },
+
+    saveBoLastUsedSourceTypes() {
+      try {
+        this.boLastUsedSourceTypes = { a: this.boSourceAType, b: this.boSourceBType };
+        localStorage.setItem('etl_bo_last_source_types', JSON.stringify(this.boLastUsedSourceTypes));
+      } catch {}
+    },
+
+    loadBoLastUsedSourceTypes() {
+      try {
+        const raw = localStorage.getItem('etl_bo_last_source_types');
+        if (raw) this.boLastUsedSourceTypes = JSON.parse(raw);
+      } catch {}
+    },
+
+    // ===========================================================
+    // --- Task 15: Quick Compare Mode ---
+    // ===========================================================
+    enableQuickCompare() {
+      this.quickCompareMode = true;
+      // Auto-select last successful run as source A
+      const passed = (this.runs || []).filter(r => r.status === 'PASSED' || r.status === 'COMPLETED');
+      if (passed.length > 0) {
+        // Sort by created_at descending
+        const sorted = this.sortRunsForDisplay(passed);
+        this.fileRunId = sorted[0].run_id;
+        this.fileSourceAType = 'run';
+        this.toast('success', 'Quick compare enabled', `Using run ${sorted[0].run_id.substring(0, 8)}... as Source A`);
+      } else {
+        this.toast('warn', 'No successful runs found', 'Quick compare needs at least one passed run');
+      }
+    },
+
+    disableQuickCompare() {
+      this.quickCompareMode = false;
+      this.fileRunId = '';
+      this.fileSourceAType = 'run';
+    },
+
+    // ===========================================================
+    // --- Task 16: Sort Runs for Display ---
+    // ===========================================================
+    sortRunsForDisplay(runs) {
+      if (!runs || !runs.length) return [];
+      return [...runs].sort((a, b) => {
+        const da = new Date(a.created_at || 0).getTime();
+        const db = new Date(b.created_at || 0).getTime();
+        return db - da;
+      });
+    },
+
+    // ===========================================================
+    // --- Task 17: Results Panel Export Settings + Chart Toggle ---
+    // ===========================================================
+    exportCompareSettings() {
+      try {
+        const settings = {
+          compareSubTab: this.compareSubTab,
+          reconMode: this.reconMode,
+          boSourceAType: this.boSourceAType,
+          boSourceBType: this.boSourceBType,
+          boKeyColumns: this.boKeyColumns,
+          boExcludeColumns: this.boExcludeColumns,
+          boSourceA: { ...this.boSourceA },
+          boSourceB: { ...this.boSourceB },
+          dualEnvConfigA: this.dualEnvConfigA,
+          dualEnvConfigB: this.dualEnvConfigB,
+          dualEnvSourceEnvA: this.dualEnvSourceEnvA,
+          dualEnvTargetEnvA: this.dualEnvTargetEnvA,
+          dualEnvSourceEnvB: this.dualEnvSourceEnvB,
+          dualEnvTargetEnvB: this.dualEnvTargetEnvB,
+          exportedAt: new Date().toISOString(),
+        };
+        const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+        triggerDownload(blob, `compare-settings-${Date.now()}.json`);
+        this.toast('success', 'Settings exported');
+      } catch (e) {
+        this.toast('error', 'Export failed', e.message);
+      }
+    },
+
+    async loadMismatchChart(runId, resultId) {
+      try {
+        const data = await api('GET', `/api/runs/${runId}/results/${resultId}/mismatch-distribution`);
+        this.mismatchChartData = data;
+        this.$nextTick(() => this._renderMismatchChart());
+      } catch {
+        this.mismatchChartData = null;
+      }
+    },
+
+    _renderMismatchChart() {
+      const canvas = document.getElementById('mismatchChart');
+      if (!canvas || !this.mismatchChartData) return;
+      const dist = this.mismatchChartData.distribution || [];
+      if (typeof Chart === 'undefined') return;
+      // Destroy previous instance if any
+      if (this._mismatchChartInstance) {
+        this._mismatchChartInstance.destroy();
+        this._mismatchChartInstance = null;
+      }
+      this._mismatchChartInstance = new Chart(canvas, {
+        type: this.mismatchChartType === 'column' ? 'bar' : this.mismatchChartType,
+        data: {
+          labels: dist.map(d => d.column || d.label || ''),
+          datasets: [{
+            label: 'Mismatches',
+            data: dist.map(d => d.count || 0),
+            backgroundColor: '#fb7185',
+            borderColor: '#0d0f12',
+            borderWidth: 1,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e2533' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e2533' } },
+          },
+        },
+      });
+    },
+
+    // ===========================================================
+    // --- Task 18: Mismatch Acceptance Workflow ---
+    // ===========================================================
+    get filteredMismatches() {
+      const rows = this.drawer.rows || [];
+      if (this.mismatchStatusFilter === 'ALL') return rows;
+      if (this.mismatchStatusFilter === 'ACCEPTED') return rows.filter(m => m.accepted);
+      if (this.mismatchStatusFilter === 'REJECTED') return rows.filter(m => m.rejected);
+      if (this.mismatchStatusFilter === 'PENDING') return rows.filter(m => !m.accepted && !m.rejected);
+      return rows;
+    },
+
+    async acceptAllVisibleMismatches() {
+      const pending = this.filteredMismatches.filter(m => !m.accepted && !m.rejected);
+      if (!pending.length) {
+        this.toast('warn', 'No pending mismatches', 'No pending mismatches visible to accept');
+        return;
+      }
+      const runId = this.drawer.runId;
+      const resultId = this.drawer.result && this.drawer.result.id;
+      if (!runId || !resultId) return;
+      let accepted = 0;
+      for (const m of pending) {
+        try {
+          const result = await api('PATCH',
+            `/api/runs/${runId}/results/${resultId}/mismatches/${m.id}/accept`,
+            { note: 'Bulk accepted' });
+          const patchRow = (row) => row.id === m.id
+            ? { ...row, accepted: result.accepted, accepted_note: result.accepted_note, accepted_at: result.accepted_at, accepted_by: result.accepted_by }
+            : row;
+          this.drawer.rows = this.drawer.rows.map(patchRow);
+          accepted++;
+        } catch {}
+      }
+      this.toast('success', `${accepted} mismatch(es) accepted`);
+      if (accepted > 0) await this.loadRuns();
+    },
+
+    // ===========================================================
+    // --- Task 19: Help System + Keyboard Shortcuts ---
+    // ===========================================================
+    showHelp(topic) {
+      const helpTopics = {
+        'job-search': { title: 'Job Search', content: 'Search jobs by name, description, or tags. The search is case-insensitive and matches partial text.' },
+        'chunkSize': { title: 'Chunk Size', content: 'Number of rows to process at once. Set to 0 to disable chunking and process all rows in memory. Larger values use more memory but may be faster for simple comparisons.' },
+        'hashPrecheck': { title: 'Hash Precheck', content: 'When enabled, computes hash values for rows first and only performs full row comparison when hashes differ. Significantly speeds up comparisons for large datasets with few actual differences.' },
+        'nullEqualsNull': { title: 'NULL Semantics', content: 'When enabled, treats two NULL values as equal during comparison. When disabled, NULL != NULL (SQL standard behavior).' },
+        'maxWorkers': { title: 'Max Workers', content: 'Maximum number of parallel test execution threads. Higher values speed up large test suites but increase database load.' },
+        'compareTemplate': { title: 'Compare Templates', content: 'Save and reuse comparison configurations. Templates store your source settings, key columns, and other options so you can quickly repeat common comparisons.' },
+        'sqlQuery': { title: 'SQL Query', content: 'The SELECT statement used to extract data for comparison. Must include all key columns and comparison columns. Parameterized queries use {env} as a placeholder for the environment name.' },
+      };
+      const entry = helpTopics[topic];
+      if (!entry) return;
+      this.helpTitle = entry.title;
+      this.helpContent = entry.content;
+      this.showingHelp = true;
+    },
+
+    initKeyboardShortcuts() {
+      document.addEventListener('keydown', (e) => {
+        // Skip if focus is in a form input
+        const tag = (document.activeElement && document.activeElement.tagName) || '';
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+
+        const isMac = navigator.platform && navigator.platform.toUpperCase().includes('MAC');
+        const ctrl = isMac ? e.metaKey : e.ctrlKey;
+
+        if (ctrl && e.key === 's') {
+          e.preventDefault();
+          if (this.showJobModal) {
+            this.saveJob();
+          } else if (this.currentView === 'compare') {
+            this.saveCompareTemplate();
+          }
+          return;
+        }
+
+        if (e.key === 'Enter') {
+          if (this.currentView === 'jobs') {
+            this.launchJobs();
+          } else if (this.currentView === 'compare') {
+            const sub = this.compareSubTab;
+            if (sub === 'bo') this.runBOComparison && this.runBOComparison();
+            else if (sub === 'reconciliation') this.runReconciliation && this.runReconciliation();
+          }
+          return;
+        }
+
+        if (e.key === 'Escape') {
+          if (this.showingHelp) { this.showingHelp = false; return; }
+          if (this.showJobModal) { this.showJobModal = false; return; }
+          if (this.showCompareTemplatePanel) { this.showCompareTemplatePanel = false; return; }
+          if (this.showConfigModal) { this.showConfigModal = false; return; }
+          if (this.showBOJobModal) { this.showBOJobModal = false; return; }
+          if (this.showScheduleModal) { this.showScheduleModal = false; return; }
+          if (this.showHookModal) { this.showHookModal = false; return; }
+          if (this.drawer && this.drawer.show) { this.drawer.show = false; return; }
+        }
+      });
     },
   };
 }
