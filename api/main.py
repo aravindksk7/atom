@@ -19,7 +19,8 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# CORS must be added before auth middleware so preflight OPTIONS are never blocked
+# CORS must be registered BEFORE auth middleware: Starlette applies middleware LIFO,
+# so CORSMiddleware runs outermost and handles OPTIONS preflights before BearerTokenMiddleware sees them.
 _cors_origins = [
     o.strip()
     for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8000").split(",")

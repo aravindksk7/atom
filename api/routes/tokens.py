@@ -55,12 +55,20 @@ def _verify_admin_from_request(request: Request, db: Session) -> None:
     # Slow path: middleware was exempt, check the Authorization header ourselves
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=403, detail="Admin token required")
+        raise HTTPException(
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+            detail="Missing or invalid Authorization header",
+        )
 
     raw_token = auth[len("Bearer "):]
     verified = TokenRepository(db).verify(raw_token)
     if verified is None:
-        raise HTTPException(status_code=403, detail="Admin token required")
+        raise HTTPException(
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+            detail="Invalid or expired token",
+        )
     if not getattr(verified, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin token required")
 
