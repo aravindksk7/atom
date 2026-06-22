@@ -120,6 +120,70 @@ def test_bo_compare_infers_employee_id_key_for_files():
     assert CompareService._infer_key_columns(df_a, df_b) == ["Employee ID"]
 
 
+def test_recon_compare_requires_exactly_one_source_per_side():
+    from pydantic import ValidationError
+    from api.schemas import ReconFileCompareRequest
+
+    valid = ReconFileCompareRequest(stored_run_id="run-a", stored_run_id_b="run-b")
+    assert valid.stored_run_id_b == "run-b"
+
+    with pytest.raises(ValidationError, match="Source A requires exactly one"):
+        ReconFileCompareRequest(
+            stored_run_id="run-a",
+            file_a_path="a.html",
+            stored_run_id_b="run-b",
+        )
+
+
+def test_recon_html_parser_reads_report_metrics_from_correct_columns():
+    from api.services.compare_service import CompareService
+
+    html = """
+    <table><tbody><tr>
+      <td>orders</td><td>PASSED</td><td>0.25s</td>
+      <td>1,200</td><td>1,199</td><td>3</td>
+    </tr></tbody></table>
+    """
+    assert CompareService._parse_html_report(html)["orders"] == {
+        "status": "PASSED",
+        "source_row_count": 1200,
+        "target_row_count": 1199,
+        "total_issues": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    ("rows_b", "expected_status"),
+    [(10, "PASSED"), (11, "FAILED")],
+)
+def test_recon_stored_runs_compare_status_and_metrics(rows_b, expected_status):
+    from api.schemas import ReconFileCompareRequest
+    from api.services.compare_service import CompareService
+
+    result_a = SimpleNamespace(
+        query_name="orders", effective_status="FAILED",
+        source_row_count=10, target_row_count=9, total_issues=1,
+    )
+    result_b = SimpleNamespace(
+        query_name="orders", effective_status="FAILED",
+        source_row_count=rows_b, target_row_count=9, total_issues=1,
+    )
+    repo = MagicMock()
+    repo.get_run.side_effect = [
+        SimpleNamespace(results=[result_a]),
+        SimpleNamespace(results=[result_b]),
+    ]
+    service = CompareService.__new__(CompareService)
+    service._repo = repo
+    request = ReconFileCompareRequest(stored_run_id="run-a", stored_run_id_b="run-b")
+
+    with patch("api.services.compare_service.MetricsWriter.write"):
+        service.run_recon_file_compare(request, "comparison-run")
+
+    comparison_result = repo.add_test_result.call_args.args[1]
+    assert comparison_result.status.value == expected_status
+
+
 def test_dual_env_launch_returns_pair(client, monkeypatch):
     import api.routes.compare as cmp_module
     monkeypatch.setattr(cmp_module, "_launch_dual_env_bg", lambda *a, **kw: None)

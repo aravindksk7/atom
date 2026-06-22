@@ -2232,13 +2232,14 @@
           <input x-model="fileLabelA" class="field-input mb-2" placeholder="Source A label" />
           <div class="mode-row mb-3">
             <button @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
-            <button @click="fileSourceAType = 'file'" :class="fileSourceAType === 'file' ? 'pill active' : 'pill'">HTML File</button>
+            <button @click="fileSourceAType = 'path'" :class="fileSourceAType === 'path' ? 'pill active' : 'pill'">Server Path</button>
+            <button @click="fileSourceAType = 'upload'" :class="fileSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           </div>
           <template x-if="fileSourceAType === 'run'">
             <div>
               <!-- Task 16: Most recent first hint -->
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
-              <select x-model="fileRunId" class="field-input field-select mt-1">
+              <select x-model="fileRunIdA" class="field-input field-select mt-1">
                 <option value="">Select run</option>
                 <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
                   <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
@@ -2246,10 +2247,13 @@
               </select>
             </div>
           </template>
-          <template x-if="fileSourceAType === 'file'">
-            <div class="space-y-2">
-              <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" />
+          <template x-if="fileSourceAType === 'path'">
+            <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" />
+          </template>
+          <template x-if="fileSourceAType === 'upload'">
+            <div>
               <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+              <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1">HTML loaded</div>
             </div>
           </template>
         </div>
@@ -2258,14 +2262,29 @@
           <div class="compare-card-title">Source B</div>
           <input x-model="fileLabelB" class="field-input mb-2" placeholder="Source B label" />
           <div class="mode-row mb-3">
-            <button @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
+            <button @click="fileSourceBType = 'run'" :class="fileSourceBType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
+            <button @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Server Path</button>
             <button @click="fileSourceBType = 'upload'" :class="fileSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           </div>
+          <template x-if="fileSourceBType === 'run'">
+            <div>
+              <span class="text-xs text-slate-400 ml-1">most recent first</span>
+              <select x-model="fileRunIdB" class="field-input field-select mt-1">
+                <option value="">Select run</option>
+                <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
+                  <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
+                </template>
+              </select>
+            </div>
+          </template>
           <template x-if="fileSourceBType === 'path'">
             <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" />
           </template>
           <template x-if="fileSourceBType === 'upload'">
-            <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+            <div>
+              <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+              <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1">HTML loaded</div>
+            </div>
           </template>
         </div>
       </div>

@@ -407,6 +407,7 @@ class PairSummaryOut(BaseModel):
 
 class ReconFileCompareRequest(BaseModel):
     stored_run_id: str | None = None
+    stored_run_id_b: str | None = None
     file_a_path: str | None = None
     file_a_content_b64: str | None = None
     file_b_path: str | None = None
@@ -416,12 +417,12 @@ class ReconFileCompareRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_sources(self) -> "ReconFileCompareRequest":
-        has_a = bool(self.stored_run_id or self.file_a_path or self.file_a_content_b64)
-        has_b = bool(self.file_b_path or self.file_b_content_b64)
-        if not has_a:
-            raise ValueError("Source A must be stored_run_id, file_a_path, or file_a_content_b64")
-        if not has_b:
-            raise ValueError("Source B must be file_b_path or file_b_content_b64")
+        sources_a = [self.stored_run_id, self.file_a_path, self.file_a_content_b64]
+        sources_b = [self.stored_run_id_b, self.file_b_path, self.file_b_content_b64]
+        if sum(bool(value) for value in sources_a) != 1:
+            raise ValueError("Source A requires exactly one stored run, file path, or upload")
+        if sum(bool(value) for value in sources_b) != 1:
+            raise ValueError("Source B requires exactly one stored run, file path, or upload")
         return self
 
 

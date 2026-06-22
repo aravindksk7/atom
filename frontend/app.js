@@ -269,7 +269,8 @@ function app() {
     fileSourceBType: 'upload',
     fileLabelA: 'Source A',
     fileLabelB: 'Production Report',
-    fileRunId: '',
+    fileRunIdA: '',
+    fileRunIdB: '',
     filePathA: '',
     fileB64A: '',
     filePathB: '',
@@ -1245,8 +1246,13 @@ function app() {
       const reader = new FileReader();
       reader.onload = (e) => {
         const b64 = btoa(unescape(encodeURIComponent(e.target.result || '')));
-        if (side === 'a') this.fileB64A = b64;
-        else this.fileB64B = b64;
+        if (side === 'a') {
+          this.fileB64A = b64;
+          this.fileSourceAType = 'upload';
+        } else {
+          this.fileB64B = b64;
+          this.fileSourceBType = 'upload';
+        }
       };
       reader.readAsText(file);
     },
@@ -1369,15 +1375,23 @@ function app() {
         const payload = {
           label_a: this.fileLabelA || 'Source A',
           label_b: this.fileLabelB || 'Production Report',
-          file_b_path: this.filePathB || null,
-          file_b_content_b64: this.fileB64B || null,
         };
-        if (this.fileSourceAType === 'run') {
-          payload.stored_run_id = this.fileRunId;
-        } else {
-          payload.file_a_path = this.filePathA || null;
-          payload.file_a_content_b64 = this.fileB64A || null;
-        }
+        const applySource = (side, type, runId, path, content) => {
+          const label = side === 'a' ? 'Source A' : 'Source B';
+          const suffix = side === 'a' ? '' : '_b';
+          if (type === 'run') {
+            if (!runId) throw new Error(`${label}: select a stored run`);
+            payload[`stored_run_id${suffix}`] = runId;
+          } else if (type === 'path') {
+            if (!(path || '').trim()) throw new Error(`${label}: enter a server HTML path`);
+            payload[`file_${side}_path`] = path.trim();
+          } else {
+            if (!content) throw new Error(`${label}: upload an HTML report`);
+            payload[`file_${side}_content_b64`] = content;
+          }
+        };
+        applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A);
+        applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B);
         const run = await api('POST', '/api/compare/recon-file', payload);
         const poll = setInterval(async () => {
           try {
@@ -2509,7 +2523,7 @@ function app() {
       if (passed.length > 0) {
         // Sort by created_at descending
         const sorted = this.sortRunsForDisplay(passed);
-        this.fileRunId = sorted[0].run_id;
+        this.fileRunIdA = sorted[0].run_id;
         this.fileSourceAType = 'run';
         this.toast('success', 'Quick compare enabled', `Using run ${sorted[0].run_id.substring(0, 8)}... as Source A`);
       } else {
@@ -2519,7 +2533,7 @@ function app() {
 
     disableQuickCompare() {
       this.quickCompareMode = false;
-      this.fileRunId = '';
+      this.fileRunIdA = '';
       this.fileSourceAType = 'run';
     },
 

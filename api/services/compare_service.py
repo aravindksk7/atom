@@ -159,8 +159,8 @@ class CompareService:
         """Diff a production HTML report against a stored run or another file."""
         try:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
-            stats_a = self._load_recon_source_a(req)
-            stats_b = self._load_recon_html(req.file_b_path, req.file_b_content_b64)
+            stats_a = self._load_recon_source(req, "a")
+            stats_b = self._load_recon_source(req, "b")
 
             all_names = sorted(set(stats_a) | set(stats_b))
             passed = failed = 0
@@ -168,7 +168,11 @@ class CompareService:
             for name in all_names:
                 a = stats_a.get(name, {})
                 b = stats_b.get(name, {})
-                status = "PASSED" if a.get("status") == b.get("status") == "PASSED" else "FAILED"
+                compared_metrics = (
+                    "status", "source_row_count", "target_row_count", "total_issues",
+                )
+                differences = sum(a.get(metric) != b.get(metric) for metric in compared_metrics)
+                status = "PASSED" if a and b and differences == 0 else "FAILED"
                 if status == "PASSED":
                     passed += 1
                 else:
@@ -184,7 +188,7 @@ class CompareService:
                     matched_count=0,
                     missing_in_target_count=0,
                     missing_in_source_count=0,
-                    value_mismatch_count=0 if status == "PASSED" else 1,
+                    value_mismatch_count=0 if status == "PASSED" else max(1, differences),
                     mismatches=[],
                     status=TS.PASSED if status == "PASSED" else TS.FAILED,
                     executed_at=datetime.now(timezone.utc),
@@ -205,19 +209,24 @@ class CompareService:
             self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)
             raise
 
-    def _load_recon_source_a(self, req: ReconFileCompareRequest) -> dict:
-        if req.stored_run_id:
-            run = self._repo.get_run(req.stored_run_id)
+    def _load_recon_source(self, req: ReconFileCompareRequest, side: str) -> dict:
+        stored_run_id = req.stored_run_id if side == "a" else req.stored_run_id_b
+        file_path = req.file_a_path if side == "a" else req.file_b_path
+        file_content_b64 = req.file_a_content_b64 if side == "a" else req.file_b_content_b64
+        if stored_run_id:
+            run = self._repo.get_run(stored_run_id)
             if run is None:
-                raise HTTPException(status_code=404, detail="Stored run not found")
+                raise HTTPException(status_code=404, detail=f"Stored run for Source {side.upper()} not found")
             return {
                 r.query_name: {
-                    "status": r.status,
+                    "status": r.effective_status,
                     "source_row_count": r.source_row_count,
+                    "target_row_count": r.target_row_count,
+                    "total_issues": r.total_issues,
                 }
                 for r in run.results
             }
-        return self._load_recon_html(req.file_a_path, req.file_a_content_b64)
+        return self._load_recon_html(file_path, file_content_b64)
 
     @staticmethod
     def _load_recon_html(path: str | None, b64: str | None) -> dict[str, dict]:
@@ -238,7 +247,7 @@ class CompareService:
     def _parse_html_report(html: str) -> dict[str, dict]:
         """
         Extract per-test stats from a framework-generated HTML report.
-        Returns {test_name: {status, source_row_count}}.
+        Returns per-test status, source/target row counts, and mismatch totals.
         """
         try:
             from bs4 import BeautifulSoup
@@ -254,9 +263,19 @@ class CompareService:
             if len(cells) >= 2:
                 name, status = cells[0], cells[1].upper()
                 if status in ("PASSED", "FAILED", "ERROR", "SLOW"):
+                    def parse_int(index: int) -> int:
+                        if len(cells) <= index:
+                            return 0
+                        try:
+                            return int(cells[index].replace(",", ""))
+                        except ValueError:
+                            return 0
+
                     results[name] = {
                         "status": status,
-                        "source_row_count": int(cells[2]) if len(cells) > 2 and cells[2].isdigit() else 0,
+                        "source_row_count": parse_int(3),
+                        "target_row_count": parse_int(4),
+                        "total_issues": parse_int(5),
                     }
         if not results:
             raise HTTPException(
