@@ -128,3 +128,60 @@ def revoke_token(token_id: int, request: Request, db: Session = Depends(get_sess
         raise HTTPException(status_code=404, detail="Token not found")
     evict_token_cache(token_hash)
     AuditService(db).log(request, "token.revoked", "token", token_id)
+
+
+class TokenPatch(BaseModel):
+    expires_at: datetime | None = None
+    enabled: bool | None = None
+
+
+@router.patch("/{token_id}", response_model=TokenOut, dependencies=[Depends(require_admin)])
+def update_token(token_id: int, body: TokenPatch, request: Request, db: Session = Depends(get_session)):
+    """Update expiry or enabled state of an existing token."""
+    from etl_framework.repository.models import ApiToken as _ApiToken
+    token = db.get(_ApiToken, token_id)
+    if token is None:
+        raise HTTPException(status_code=404, detail="Token not found")
+    changed: dict = {}
+    if body.expires_at is not None:
+        token.expires_at = body.expires_at
+        changed["expires_at"] = body.expires_at.isoformat()
+    if body.enabled is not None:
+        token.enabled = body.enabled
+        changed["enabled"] = body.enabled
+        if not body.enabled:
+            evict_token_cache(token.token_hash)
+    db.commit()
+    db.refresh(token)
+    AuditService(db).log(request, "token.updated", "token", token_id, changed)
+    return token
+
+
+@router.post("/{token_id}/rotate", response_model=TokenCreatedOut, dependencies=[Depends(require_admin)])
+def rotate_token(token_id: int, request: Request, db: Session = Depends(get_session)):
+    """Atomically revoke old token and issue a replacement with same name/role/expiry."""
+    from etl_framework.repository.models import ApiToken as _ApiToken
+    repo = TokenRepository(db)
+    old = db.get(_ApiToken, token_id)
+    if old is None or not old.enabled:
+        raise HTTPException(status_code=404, detail="Token not found")
+
+    old_hash = repo.revoke(token_id)
+    evict_token_cache(old_hash)
+
+    raw, new_token = repo.create(old.name, old.expires_at, is_admin=old.is_admin)
+    AuditService(db).log(
+        request, "token.rotated", "token", new_token.id,
+        {"replaced_token_id": token_id, "name": new_token.name},
+    )
+    return TokenCreatedOut(
+        id=new_token.id,
+        name=new_token.name,
+        created_at=new_token.created_at,
+        last_used_at=new_token.last_used_at,
+        expires_at=new_token.expires_at,
+        enabled=new_token.enabled,
+        is_admin=new_token.is_admin,
+        token_hint=new_token.token_hint,
+        raw_token=raw,
+    )

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
@@ -355,6 +355,8 @@ class RunRepository:
 import hashlib
 import secrets as _secrets
 
+_TOKEN_MAX_TTL_DAYS = 730  # hard cap: no token lives longer than 2 years
+
 
 class TokenRepository:
     def __init__(self, db: Session) -> None:
@@ -365,6 +367,12 @@ class TokenRepository:
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False) -> tuple[str, ApiToken]:
+        if expires_at is not None:
+            cap = datetime.now(timezone.utc) + timedelta(days=_TOKEN_MAX_TTL_DAYS)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at > cap:
+                expires_at = cap
         raw = "etl_" + _secrets.token_hex(32)
         token = ApiToken(
             token_hash=self._hash(raw),

@@ -13,7 +13,7 @@ function normalizeToken(raw) {
 }
 
 async function api(method, path, body) {
-  const token = normalizeToken(localStorage.getItem('etl_token'));
+  const token = normalizeToken(sessionStorage.getItem('etl_token'));
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const opts = { method, headers };
@@ -30,7 +30,7 @@ async function api(method, path, body) {
 }
 
 async function apiBlob(path) {
-  const token = normalizeToken(localStorage.getItem('etl_token'));
+  const token = normalizeToken(sessionStorage.getItem('etl_token'));
   const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
   const resp = await fetch(API + path, { headers });
   if (!resp.ok) {
@@ -77,7 +77,7 @@ function app() {
     authInitialized: true,
     activeTokenName: '',
     activeTokenIsAdmin: false,
-    storedTokenValue: normalizeToken(localStorage.getItem('etl_token')),
+    storedTokenValue: normalizeToken(sessionStorage.getItem('etl_token')),
 
     // -----------------------------------------------------------
     // Config
@@ -400,9 +400,9 @@ function app() {
     // INIT
     // ===========================================================
     async init() {
-      this.storedTokenValue = normalizeToken(localStorage.getItem('etl_token'));
+      this.storedTokenValue = normalizeToken(sessionStorage.getItem('etl_token'));
       await this.loadAuthSetupStatus();
-      if (this.storedTokenValue) localStorage.setItem('etl_token', this.storedTokenValue);
+      if (this.storedTokenValue) sessionStorage.setItem('etl_token', this.storedTokenValue);
       if (this.storedToken) {
         const tokenValid = await this.resolveActiveTokenName({ verify: true, clearInvalid: true });
         if (tokenValid) {
@@ -449,7 +449,7 @@ function app() {
 
     handleAuthError(e) {
       if (!this.isAuthError(e)) return false;
-      localStorage.removeItem('etl_token');
+      sessionStorage.removeItem('etl_token');
       this.storedTokenValue = '';
       this.activeTokenName = '';
       this.activeTokenIsAdmin = false;
@@ -491,13 +491,13 @@ function app() {
         this.authError = 'Paste your token';
         return;
       }
-      localStorage.setItem('etl_token', raw);
+      sessionStorage.setItem('etl_token', raw);
       this.storedTokenValue = raw;
       this.authPasteValue = '';
       this.authError = '';
       const valid = await this.resolveActiveTokenName({ verify: true });
       if (!valid) {
-        localStorage.removeItem('etl_token');
+        sessionStorage.removeItem('etl_token');
         this.storedTokenValue = '';
         this.authError = 'Your API token was rejected. Paste a valid raw token.';
         this.showAuthModal = true;
@@ -525,7 +525,7 @@ function app() {
           }
         }
         if (clearInvalid) {
-          localStorage.removeItem('etl_token');
+          sessionStorage.removeItem('etl_token');
           this.storedTokenValue = '';
           this.activeTokenName = '';
           this.activeTokenIsAdmin = false;
@@ -1733,7 +1733,7 @@ function app() {
         };
         const resp = await api('POST', '/api/tokens', body);
         if (fromAuthWizard) {
-          localStorage.setItem('etl_token', resp.raw_token);
+          sessionStorage.setItem('etl_token', resp.raw_token);
           this.storedTokenValue = resp.raw_token;
           this.activeTokenName = resp.name || name;
           this.activeTokenIsAdmin = true;
@@ -1779,13 +1779,13 @@ function app() {
     setStoredToken(raw) {
       const token = normalizeToken(raw);
       if (token) {
-        localStorage.setItem('etl_token', token);
+        sessionStorage.setItem('etl_token', token);
         this.storedTokenValue = token;
         this.resolveActiveTokenName({ verify: true });
         this.loadAll();
         this.toast('success', 'Token saved', 'Will be used for all API calls');
       } else {
-        localStorage.removeItem('etl_token');
+        sessionStorage.removeItem('etl_token');
         this.storedTokenValue = '';
         this.activeTokenName = '';
         this.activeTokenIsAdmin = false;

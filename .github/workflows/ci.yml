@@ -1,0 +1,203 @@
+name: ETL Reconciliation CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      job_names:
+        description: "Comma-separated job names to run (leave blank for all)"
+        required: false
+        default: ""
+      source_env:
+        description: "Source environment"
+        required: false
+        default: "dev"
+      target_env:
+        description: "Target environment"
+        required: false
+        default: "prod"
+
+env:
+  API_BASE: ${{ vars.ATOM_API_URL }}       # e.g. https://atom.internal — set in repo Variables
+  SOURCE_ENV: ${{ inputs.source_env || 'dev' }}
+  TARGET_ENV: ${{ inputs.target_env || 'prod' }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Unit + integration tests (no live API needed)
+  # ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v --tb=short
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Live reconciliation run via the API (only on push to master/manual trigger)
+  # Uses short-lived token — minted at start, revoked in always-run cleanup step
+  # ─────────────────────────────────────────────────────────────────────────────
+  reconcile:
+    name: Trigger reconciliation run
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      TOKEN_NAME: gh-actions-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Health check
+        run: |
+          STATUS=$(curl -fsS "${API_BASE}/api/health" | jq -r '.status // "unknown"')
+          echo "API status: $STATUS"
+          [ "$STATUS" = "ok" ] || { echo "API not healthy"; exit 1; }
+
+      - name: Mint short-lived pipeline token (1 hour TTL)
+        id: mint
+        env:
+          ATOM_ADMIN_TOKEN: ${{ secrets.ATOM_ADMIN_TOKEN }}
+        run: |
+          EXPIRE=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')
+          RESP=$(curl -fsS -X POST "${API_BASE}/api/tokens" \
+            -H "Authorization: Bearer ${ATOM_ADMIN_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"${TOKEN_NAME}\",\"is_admin\":false,\"expires_at\":\"${EXPIRE}\"}")
+
+          PIPELINE_TOKEN=$(echo "$RESP" | jq -r '.raw_token')
+          TOKEN_ID=$(echo "$RESP" | jq -r '.id')
+
+          if [ -z "$PIPELINE_TOKEN" ] || [ "$PIPELINE_TOKEN" = "null" ]; then
+            echo "Failed to mint pipeline token"
+            exit 1
+          fi
+
+          echo "::add-mask::$PIPELINE_TOKEN"
+          echo "pipeline_token=$PIPELINE_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "token_id=$TOKEN_ID"             >> "$GITHUB_OUTPUT"
+          echo "Minted token ID=$TOKEN_ID (hint: $(echo "$RESP" | jq -r '.token_hint'))"
+
+      - name: Resolve job sequence
+        id: jobs
+        env:
+          PIPELINE_TOKEN: ${{ steps.mint.outputs.pipeline_token }}
+        run: |
+          INPUT="${{ inputs.job_names }}"
+          if [ -n "$INPUT" ]; then
+            # User supplied explicit list — convert to JSON array
+            JOB_SEQ=$(echo "$INPUT" | tr ',' '\n' | jq -Rsc 'split("\n") | map(select(length > 0))')
+          else
+            # Fetch all enabled jobs from API and use them
+            JOB_SEQ=$(curl -fsS "${API_BASE}/api/jobs" \
+              -H "Authorization: Bearer ${PIPELINE_TOKEN}" \
+              | jq '[.[] | select(.enabled == true) | .name]')
+          fi
+          echo "job_sequence=$JOB_SEQ" >> "$GITHUB_OUTPUT"
+          echo "Jobs to run: $JOB_SEQ"
+
+      - name: Trigger reconciliation run
+        id: run
+        env:
+          PIPELINE_TOKEN: ${{ steps.mint.outputs.pipeline_token }}
+        run: |
+          JOB_SEQ='${{ steps.jobs.outputs.job_sequence }}'
+          RESP=$(curl -fsS -X POST "${API_BASE}/api/runs" \
+            -H "Authorization: Bearer ${PIPELINE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"source_env\": \"${SOURCE_ENV}\",
+              \"target_env\": \"${TARGET_ENV}\",
+              \"job_sequence\": ${JOB_SEQ},
+              \"run_settings\": {
+                \"execution_mode\": \"parallel\",
+                \"max_workers\": 4,
+                \"metrics_enabled\": true,
+                \"use_hash_precheck\": true
+              }
+            }")
+
+          RUN_ID=$(echo "$RESP" | jq -r '.run_id')
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "Failed to start run: $RESP"
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Run started: $RUN_ID"
+
+      - name: Poll until run completes (timeout 30m)
+        id: poll
+        env:
+          PIPELINE_TOKEN: ${{ steps.mint.outputs.pipeline_token }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          TERMINAL_STATUSES="PASSED FAILED SLOW ERROR COMPLETED"
+          DEADLINE=$(date -u -d '+30 minutes' '+%s')
+
+          while true; do
+            NOW=$(date -u '+%s')
+            if [ "$NOW" -gt "$DEADLINE" ]; then
+              echo "Timed out waiting for run $RUN_ID"
+              exit 1
+            fi
+
+            STATUS=$(curl -fsS "${API_BASE}/api/runs/${RUN_ID}/status" \
+              -H "Authorization: Bearer ${PIPELINE_TOKEN}" \
+              | jq -r '.status')
+
+            echo "  $(date -u '+%H:%M:%S') — status: $STATUS"
+
+            for TERM in $TERMINAL_STATUSES; do
+              if [ "$STATUS" = "$TERM" ]; then
+                echo "final_status=$STATUS" >> "$GITHUB_OUTPUT"
+                break 2
+              fi
+            done
+
+            sleep 15
+          done
+
+      - name: Fetch run summary
+        if: always() && steps.run.outputs.run_id != ''
+        env:
+          PIPELINE_TOKEN: ${{ steps.mint.outputs.pipeline_token }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          curl -fsS "${API_BASE}/api/runs/${RUN_ID}" \
+            -H "Authorization: Bearer ${PIPELINE_TOKEN}" \
+            | jq '{run_id, status, passed, failed, slow, error, total_tests}'
+
+      - name: Fail workflow if run did not pass
+        if: steps.poll.outputs.final_status != 'PASSED'
+        run: |
+          echo "Run ended with status: ${{ steps.poll.outputs.final_status }}"
+          exit 1
+
+      # ── Always runs — even on failure or cancellation ──────────────────────
+      - name: Revoke pipeline token
+        if: always() && steps.mint.outputs.token_id != ''
+        env:
+          ATOM_ADMIN_TOKEN: ${{ secrets.ATOM_ADMIN_TOKEN }}
+          TOKEN_ID: ${{ steps.mint.outputs.token_id }}
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X DELETE "${API_BASE}/api/tokens/${TOKEN_ID}" \
+            -H "Authorization: Bearer ${ATOM_ADMIN_TOKEN}")
+          if [ "$HTTP_STATUS" = "204" ] || [ "$HTTP_STATUS" = "404" ]; then
+            echo "Token $TOKEN_ID revoked (HTTP $HTTP_STATUS)"
+          else
+            echo "Warning: revoke returned HTTP $HTTP_STATUS — token may still be active"
+          fi
