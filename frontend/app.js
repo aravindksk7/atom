@@ -74,7 +74,9 @@ function app() {
     authTokenName: '',
     authPasteValue: '',
     authError: '',
+    authInitialized: true,
     activeTokenName: '',
+    activeTokenIsAdmin: false,
     storedTokenValue: normalizeToken(localStorage.getItem('etl_token')),
 
     // -----------------------------------------------------------
@@ -290,8 +292,11 @@ function app() {
     securityOpen: false,
     showCreateToken: false,
     newTokenName: '',
+    newTokenRole: 'user',
+    newTokenExpiresAt: '',
     createdToken: null,
     createdTokenHint: null,
+    createdTokenRole: 'user',
 
     // -----------------------------------------------------------
     // Notifications – webhook hooks
@@ -396,6 +401,7 @@ function app() {
     // ===========================================================
     async init() {
       this.storedTokenValue = normalizeToken(localStorage.getItem('etl_token'));
+      await this.loadAuthSetupStatus();
       if (this.storedTokenValue) localStorage.setItem('etl_token', this.storedTokenValue);
       if (this.storedToken) {
         const tokenValid = await this.resolveActiveTokenName({ verify: true, clearInvalid: true });
@@ -406,6 +412,7 @@ function app() {
           this.loadSchedules();
         }
       }
+      if (!this.storedToken && !this.authInitialized) this.showAuthModal = true;
       this.startPolling();
       try {
         await api('GET', '/api/health');
@@ -445,6 +452,7 @@ function app() {
       localStorage.removeItem('etl_token');
       this.storedTokenValue = '';
       this.activeTokenName = '';
+      this.activeTokenIsAdmin = false;
       this.authError = 'Your API token was rejected. Create or paste a valid token.';
       this.showAuthModal = true;
       this.toast('error', 'API token rejected', 'Set up access again');
@@ -457,6 +465,15 @@ function app() {
         this.loadJobs(),
         this.loadRuns(),
       ]);
+    },
+
+    async loadAuthSetupStatus() {
+      try {
+        const status = await api('GET', '/api/auth/setup-status');
+        this.authInitialized = Boolean(status.initialized);
+      } catch {
+        this.authInitialized = true;
+      }
     },
 
     openAuthModal() {
@@ -495,6 +512,7 @@ function app() {
       try {
         const verified = await api('GET', '/api/auth/verify');
         this.activeTokenName = verified.actor || '';
+        this.activeTokenIsAdmin = Boolean(verified.is_admin);
         return true;
       } catch (e) {
         if (e?.status === 404) {
@@ -510,6 +528,7 @@ function app() {
           localStorage.removeItem('etl_token');
           this.storedTokenValue = '';
           this.activeTokenName = '';
+          this.activeTokenIsAdmin = false;
         }
         return false;
       }
@@ -517,6 +536,7 @@ function app() {
 
     async resolveActiveTokenName({ verify = false, clearInvalid = false } = {}) {
       this.activeTokenName = '';
+      this.activeTokenIsAdmin = false;
       if (!this.storedToken) return;
       if (verify) {
         const valid = await this.verifyStoredToken({ clearInvalid });
@@ -527,9 +547,11 @@ function app() {
         const tokens = await this.loadTokens();
         const active = (tokens || []).find(t => t.enabled);
         this.activeTokenName = active?.name || '';
+        this.activeTokenIsAdmin = Boolean(active?.is_admin);
         return true;
       } catch {
         this.activeTokenName = '';
+        this.activeTokenIsAdmin = false;
         return true;
       }
     },
@@ -1702,11 +1724,20 @@ function app() {
         return;
       }
       try {
-        const resp = await api('POST', '/api/tokens', { name });
-        localStorage.setItem('etl_token', resp.raw_token);
-        this.storedTokenValue = resp.raw_token;
-        this.activeTokenName = resp.name || name;
+        const body = {
+          name,
+          is_admin: fromAuthWizard || this.newTokenRole === 'admin',
+          expires_at: !fromAuthWizard && this.newTokenExpiresAt
+            ? new Date(this.newTokenExpiresAt).toISOString()
+            : null,
+        };
+        const resp = await api('POST', '/api/tokens', body);
         if (fromAuthWizard) {
+          localStorage.setItem('etl_token', resp.raw_token);
+          this.storedTokenValue = resp.raw_token;
+          this.activeTokenName = resp.name || name;
+          this.activeTokenIsAdmin = true;
+          this.authInitialized = true;
           this.authTokenName = '';
           this.authError = '';
           this.closeAuthModal();
@@ -1714,9 +1745,12 @@ function app() {
         } else {
           this.createdToken = resp.raw_token;
           this.createdTokenHint = resp.token_hint || null;
+          this.createdTokenRole = resp.is_admin ? 'admin' : 'user';
           this.newTokenName = '';
+          this.newTokenRole = 'user';
+          this.newTokenExpiresAt = '';
           this.showCreateToken = false;
-          this.toast('success', 'Token created', 'Saved to localStorage automatically');
+          this.toast('success', 'Access created', 'Copy and give this token to the intended user');
         }
         await this.loadTokens();
       } catch (e) {
@@ -1754,6 +1788,7 @@ function app() {
         localStorage.removeItem('etl_token');
         this.storedTokenValue = '';
         this.activeTokenName = '';
+        this.activeTokenIsAdmin = false;
         this.toast('warn', 'Token cleared');
       }
     },

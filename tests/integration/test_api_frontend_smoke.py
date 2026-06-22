@@ -78,6 +78,9 @@ def test_frontend_api_run_lifecycle_smoke(client):
     assert "Execution Sequence" in frontend.text
     assert "Comparison Backend" in frontend.text
     assert "Pass with actions" in frontend.text
+    assert "Users &amp; API Access" in frontend.text
+    assert "Create Initial Administrator" in frontend.text
+    assert "Standard user" in frontend.text
 
     app_js = client.get("/app.js")
     assert app_js.status_code == 200

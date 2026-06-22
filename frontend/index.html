@@ -52,7 +52,7 @@
     <template x-if="storedToken">
       <div class="auth-status-content">
         <span class="auth-status-dot">●</span>
-        <span x-text="activeTokenName ? 'Connected as ' + activeTokenName : 'Connected'"></span>
+        <span x-text="activeTokenName ? 'Connected as ' + activeTokenName + (activeTokenIsAdmin ? ' (Administrator)' : ' (Standard user)') : 'Connected'"></span>
         <button class="auth-status-action" @click="goToTokenManagement()">Manage →</button>
       </div>
     </template>
@@ -129,28 +129,44 @@
   <!-- Security – API Tokens -->
   <div class="card mt-4">
     <div class="flex items-center justify-between cursor-pointer" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
-      <div class="font-semibold text-slate-700">🔑 Security — API Tokens</div>
+      <div class="font-semibold text-slate-700">🔑 Security — Users &amp; API Access</div>
       <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
     </div>
     <template x-if="securityOpen">
       <div class="mt-3 space-y-3">
-        <p class="text-muted text-sm">Bearer tokens gate all <code>/api/*</code> endpoints. Create a token here, then paste it in the field below to authenticate this browser session.</p>
+        <p class="text-muted text-sm">Each user receives a personal bearer token. Administrators can create and revoke standard-user or administrator access.</p>
         <div class="flex items-center gap-2">
           <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" placeholder="Paste token here to authenticate…" />
+          <span class="badge text-xs" :class="activeTokenIsAdmin ? 'badge-blue' : 'badge-gray'" x-text="activeTokenIsAdmin ? 'Administrator' : 'Standard user'"></span>
         </div>
         <div class="flex justify-between items-center">
-          <span class="text-muted text-xs" x-text="tokens.length + ' token(s) exist'"></span>
-          <button @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm">+ New Token</button>
+          <span class="text-muted text-xs" x-text="activeTokenIsAdmin ? tokens.length + ' user credential(s)' : 'Administrator access is required to manage users'"></span>
+          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm">+ Add User Access</button>
         </div>
-        <template x-if="showCreateToken">
-          <div class="flex gap-2">
-            <input x-model="newTokenName" class="field-input flex-1" placeholder="Token label (e.g. ci-pipeline)" @keydown.enter="createToken()" />
-            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm">Create</button>
+        <template x-if="showCreateToken && activeTokenIsAdmin">
+          <div class="grid gap-2 md:grid-cols-4 items-end">
+            <div class="md:col-span-2">
+              <label class="field-label">User / service name</label>
+              <input x-model="newTokenName" class="field-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
+            </div>
+            <div>
+              <label class="field-label">Role</label>
+              <select x-model="newTokenRole" class="field-input field-select">
+                <option value="user">Standard user</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Expires (optional)</label>
+              <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" />
+            </div>
+            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4">Create Access</button>
           </div>
         </template>
         <template x-if="createdToken">
           <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
-            <div class="font-semibold text-amber-800">Token created — copy it now, it won't be shown again:</div>
+            <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : 'a standard user'"></span> — copy this token now:</div>
+            <div class="text-xs text-amber-700">Give it to the intended user securely. Your current administrator session has not changed.</div>
             <div class="font-mono text-xs break-all text-amber-900 select-all" x-text="createdToken"></div>
             <template x-if="createdTokenHint">
               <div class="text-xs text-amber-700">Hint (last 8 chars): <span class="font-mono" x-text="'…' + createdTokenHint"></span></div>
@@ -163,10 +179,11 @@
             <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
               <div class="flex-1 min-w-0">
                 <span class="font-medium text-slate-700" x-text="tok.name"></span>
-                <span x-show="tok.is_admin" class="ml-1 text-xs font-medium text-indigo-600">(admin)</span>
+                <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : 'text-slate-500'" x-text="tok.is_admin ? '(administrator)' : '(standard user)'"></span>
                 <span class="text-muted ml-2 text-xs" x-text="'created ' + fmtDate(tok.created_at)"></span>
                 <span x-show="tok.last_used_at" class="text-muted ml-2 text-xs" x-text="'last used ' + fmtDate(tok.last_used_at)"></span>
                 <span x-show="tok.token_hint" class="text-muted ml-2 text-xs font-mono" x-text="'…' + tok.token_hint"></span>
+                <span x-show="tok.expires_at" class="text-muted ml-2 text-xs" x-text="'expires ' + fmtDate(tok.expires_at)"></span>
               </div>
               <span :class="tok.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="tok.enabled ? 'Active' : 'Revoked'"></span>
               <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs">Revoke</button>
@@ -2340,22 +2357,24 @@
       <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
     </div>
 
-    <div class="auth-path">
-      <div class="auth-path-label">Create New Token</div>
+    <div class="auth-path" x-show="!authInitialized">
+      <div class="auth-path-label">Create Initial Administrator</div>
+      <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
       <div class="auth-row">
-        <input x-model="authTokenName" class="field-input" placeholder="Token name" @keydown.enter="createToken('auth')" />
-        <button @click="createToken('auth')" class="btn-primary auth-row-button">Create →</button>
+        <input x-model="authTokenName" class="field-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button">Create Admin →</button>
       </div>
     </div>
 
-    <div class="auth-or">
+    <div class="auth-or" x-show="!authInitialized">
       <span></span>
       <strong>or</strong>
       <span></span>
     </div>
 
     <div class="auth-path">
-      <div class="auth-path-label">Paste Existing Token</div>
+      <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
+      <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
       <div class="auth-row">
         <input x-model="authPasteValue" type="password" class="field-input" placeholder="Token" @keydown.enter="activateToken()" />
         <button @click="activateToken()" class="btn-secondary auth-row-button">Activate</button>

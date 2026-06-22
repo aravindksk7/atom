@@ -22,7 +22,7 @@ _LAZY_WRITE_INTERVAL = 300.0  # seconds — min gap between last_used_at DB writ
 _cache: dict[str, tuple] = {}
 
 _EXEMPT_PREFIXES = ("/api/health",)
-_EXEMPT_EXACT = {"/", "/api/health"}
+_EXEMPT_EXACT = {"/", "/api/health", "/api/auth/setup-status"}
 _EXEMPT_PATTERNS = [re.compile(r"^/api/runs/[^/]+/badge\.svg$")]
 
 
