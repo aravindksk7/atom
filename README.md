@@ -4,6 +4,18 @@ ETL Test Framework is a FastAPI and Alpine.js application for running ETL reconc
 
 The application can run entirely in local simulation mode for development, or it can connect to live SQL Server, SAP BusinessObjects, and Automic environments when configured.
 
+## Quick Start
+
+```powershell
+cd C:\atom
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follow the [bootstrap steps](#authentication) below.
+
 ## Contents
 
 - [Capabilities](#capabilities)
@@ -192,15 +204,49 @@ pip install -e ".[json-logging,tracing,metrics,dev]"
 
 ### Authentication
 
-All `/api/*` routes (except `/api/health` and the token bootstrap endpoint) require a Bearer token.
+All `/api/*` routes (except `/api/health`) require a Bearer token. See [docs/auth.md](docs/auth.md) for the full reference.
 
-**First-time setup**:
+#### Bootstrap (first run)
 
-1. Start the server.
-2. Open `http://127.0.0.1:8000` in a browser.
-3. Go to the **Config** tab and scroll to **Security**.
-4. Enter a token name and click **Create Token**. The raw token is shown once.
-5. Paste the token into the **Set Active Token** input. It is saved in `localStorage` and sent automatically.
+The database starts empty. The first `POST /api/tokens` requires no auth and always creates an admin token.
+
+**Option A — Web UI**
+
+1. Start the server and open `http://127.0.0.1:8000`.
+2. The auth modal appears automatically. Enter a name (e.g. `admin`) and click **Create Token**.
+3. The raw token is shown once — copy it now.
+4. Paste it into the **Use existing token** field and click **Activate**.
+5. The token is stored in `sessionStorage` and sent automatically. It clears when the tab closes.
+
+**Option B — curl (scripted or CI)**
+
+```bash
+ADMIN_TOKEN=$(curl -sS -X POST http://localhost:8000/api/tokens \
+  -H "Content-Type: application/json" \
+  -d '{"name": "admin"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['raw_token'])")
+
+echo "$ADMIN_TOKEN"   # store in a password manager — shown once only
+```
+
+After bootstrap, all `POST /api/tokens` calls require an admin `Authorization` header.
+
+#### Create a standard user token
+
+```bash
+curl -sS -X POST http://localhost:8000/api/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "alice", "is_admin": false, "expires_at": "2027-01-01T00:00:00Z"}'
+```
+
+#### Verify a token
+
+```bash
+curl http://localhost:8000/api/auth/verify \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+# → {"ok": true, "actor": "admin", "is_admin": true}
+```
 
 API clients: pass `Authorization: Bearer etl_<token>` on every request.
 
@@ -443,7 +489,7 @@ Use this tab to:
 - Validate config values.
 - Store SAP BO and Automic credentials for adapter workflows.
 - **Import YAML** — expand the "Import YAML" card, paste a YAML block defining one or more named environments, and click Import to create all configs in one step.
-- **Security** — create and manage API tokens. Created tokens are automatically stored in `localStorage`.
+- **Security** — create and manage API tokens. Created tokens are stored in `sessionStorage` (cleared when the browser tab closes).
 - **Notifications** — add webhook endpoints with event filters and optional HMAC-SHA256 secret signing.
 
 ### Launch
@@ -594,12 +640,42 @@ All API calls require `Authorization: Bearer <token>` except `/api/health`.
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
 
-### Create A Token (Bootstrap)
+### Token Management
+
+All token endpoints except bootstrap require an admin Bearer token.
 
 ```powershell
-$body = @{ name = "my-token" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/tokens" -Body $body -ContentType "application/json"
-# Returns { raw_token: "etl_..." } — store this value, it is shown once.
+$h = @{ Authorization = "Bearer etl_<ADMIN_TOKEN>" }
+
+# Bootstrap — no auth needed, first call only
+$body = @{ name = "admin" } | ConvertTo-Json
+$resp = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/tokens" -Body $body -ContentType "application/json"
+# $resp.raw_token — store this now, shown once only
+
+# Create a standard user token (90-day expiry)
+$body = @{ name = "alice"; is_admin = $false; expires_at = "2027-01-01T00:00:00Z" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/tokens" -Body $body -ContentType "application/json" -Headers $h
+
+# List tokens (hints only — raw token never returned after creation)
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/tokens
+
+# Update expiry or disable a token
+$body = @{ expires_at = "2028-01-01T00:00:00Z" } | ConvertTo-Json
+Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:8000/api/tokens/2" -Body $body -ContentType "application/json" -Headers $h
+
+$body = @{ enabled = $false } | ConvertTo-Json
+Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:8000/api/tokens/2" -Body $body -ContentType "application/json" -Headers $h
+
+# Revoke a token permanently
+Invoke-RestMethod -Method Delete -Headers $h "http://127.0.0.1:8000/api/tokens/2"
+
+# Rotate — atomically revoke old token and issue replacement with same name/role/expiry
+# Use during planned credential rotation to avoid any access gap
+Invoke-RestMethod -Method Post -Headers $h "http://127.0.0.1:8000/api/tokens/2/rotate"
+# Returns new raw_token — old token is immediately invalid
+
+# Verify the active token
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/auth/verify
 ```
 
 ### List Jobs
@@ -856,10 +932,11 @@ python -m uvicorn api.main:app --port 8004 --reload
 
 ### 401 Unauthorized
 
-- You have not created a token yet, or the token was revoked.
-- Open the Security section in the Config tab and create a new token.
-- Paste the raw token into the "Set Active Token" input in the Security section.
+- No token created yet, token revoked, or token expired.
+- Open the Security section in the Config tab, create a new token, and paste it into **Use existing token**.
+- Tokens are stored in `sessionStorage` — re-entering is required after closing the browser tab.
 - For API clients, pass `Authorization: Bearer etl_<token>` on every request (except `/api/health`).
+- See [docs/auth.md](docs/auth.md) for bootstrap and token management reference.
 
 ### Metrics Not Found
 
@@ -897,30 +974,12 @@ Background execution happens in the API process. If the process exits mid-run, s
 
 Hard-refresh the browser or open dev tools and disable cache.
 
-## Quick Start
+## Minimal First Run
 
-```powershell
-cd C:\atom
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8000
-```
-
-Minimal first run:
-
-1. Open Config → Security → create a token → paste it into Set Active Token.
-2. Open Launch.
-3. Keep `use_live_connections` off.
-4. Select one or more seed jobs.
-5. Click Run Tests.
-6. Open Monitor.
-7. Open History for details and mismatches.
-8. Open Reports for report, metrics, and logs.
-9. Open Compare to compare runs or files.
+1. Complete [bootstrap](#authentication) to create and activate a token.
+2. Open **Launch** — keep `use_live_connections` off for a local simulation run.
+3. Select one or more seed jobs and click **Run Tests**.
+4. Open **Monitor** to watch progress.
+5. Open **History** for per-test results and mismatch details.
+6. Open **Reports** for the HTML report, metrics dashboard, and searchable logs.
+7. Open **Compare** to diff two runs or compare BO report sources.
