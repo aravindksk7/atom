@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -50,6 +50,19 @@ class ConfigImportYamlRequest(BaseModel):
     yaml_content: str = Field(min_length=1)
 
 
+class TestResultOverrideRequest(BaseModel):
+    status: Literal["PASSED"] = "PASSED"
+    reason: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> "TestResultOverrideRequest":
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValueError("reason must contain agreed actions")
+        return self
+
+
+
 class RunSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -90,12 +103,17 @@ class DQRule(BaseModel):
     type: Literal[
         "not_null", "unique", "row_count_min", "row_count_max",
         "row_count_between", "column_mean_between", "match_regex", "custom_sql",
+        "column_max_length", "column_min_length", "value_in_set", "value_not_in_set",
+        "column_contains", "date_range", "positive_values", "negative_values",
     ]
     column: str | None = None
     min_value: float | None = None
     max_value: float | None = None
     pattern: str | None = None
     sql: str | None = None
+    values: list[str | int | float | bool] = Field(default_factory=list)
+    min_date: date | datetime | None = None
+    max_date: date | datetime | None = None
     severity: Literal["error", "warn"] = "error"
 
 
@@ -161,6 +179,7 @@ class TestResultOut(BaseModel):
     id: int
     query_name: str
     status: str
+    effective_status: str
     duration_seconds: float
     source_row_count: int
     target_row_count: int
@@ -169,6 +188,9 @@ class TestResultOut(BaseModel):
     missing_in_source_count: int
     error_message: str | None = None
     executed_at: datetime | None = None
+    override_reason: str | None = None
+    overridden_by: str | None = None
+    override_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

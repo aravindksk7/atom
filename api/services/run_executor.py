@@ -544,6 +544,6 @@ class RunExecutor:
             from etl_framework.repository.repository import NotificationRepository
             from api.services.notifier import notify
             hooks = NotificationRepository(self._db).list_enabled_for_event(status)
-            notify(self._run_id, status, extra=extra, hooks=hooks)
+            notify(self._run_id, status, extra=extra, hooks=hooks, db_session=self._db)
         except Exception:
             pass  # never let notifier failures affect the run

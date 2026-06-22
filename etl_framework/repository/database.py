@@ -29,10 +29,11 @@ def _ensure_compare_columns(bind) -> None:
 
     inspector = inspect(bind)
     tables = set(inspector.get_table_names())
-    if "test_runs" not in tables or "mismatch_details" not in tables:
+    if not {"test_runs", "test_results", "mismatch_details"}.issubset(tables):
         return
 
     test_run_cols = {col["name"] for col in inspector.get_columns("test_runs")}
+    test_result_cols = {col["name"] for col in inspector.get_columns("test_results")}
     mismatch_cols = {col["name"] for col in inspector.get_columns("mismatch_details")}
 
     with bind.begin() as conn:
@@ -61,6 +62,16 @@ def _ensure_compare_columns(bind) -> None:
             conn.execute(text(
                 "ALTER TABLE mismatch_details ADD COLUMN accepted_by VARCHAR(255)"
             ))
+
+        # --- pass-with-agreed-actions columns ---
+        if "override_status" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_status VARCHAR(20)"))
+        if "override_reason" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_reason TEXT"))
+        if "override_by" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_by VARCHAR(255)"))
+        if "override_at" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_at DATETIME"))
 
         # --- P0: new tables (created by create_all; ensure idempotent) ---
         conn.execute(text(

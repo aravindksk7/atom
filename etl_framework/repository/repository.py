@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
-    ApiToken, NotificationHook, ScheduledRun, JobLineageEdge, AuditEvent,
+    ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
 )
 
 
@@ -444,6 +444,116 @@ class NotificationRepository:
             self._db.query(NotificationHook)
             .filter(NotificationHook.enabled.is_(True))
             .all()
+        )
+
+
+# ---------------------------------------------------------------------------
+# P0 — Alerting: notification delivery repository
+# ---------------------------------------------------------------------------
+
+class NotificationDeliveryRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create_delivery_attempt(
+        self,
+        hook_id: int,
+        run_id: str,
+        event: str,
+        status: str = "pending",
+        error_message: str | None = None,
+        response_status_code: int | None = None,
+        response_body: str | None = None
+    ) -> NotificationDelivery:
+        delivery = NotificationDelivery(
+            hook_id=hook_id,
+            run_id=run_id,
+            event=event,
+            status=status,
+            attempt_count=1,
+            last_attempt_at=datetime.now(timezone.utc),
+            error_message=error_message,
+            response_status_code=response_status_code,
+            response_body=response_body
+        )
+        self._db.add(delivery)
+        self._db.commit()
+        self._db.refresh(delivery)
+        return delivery
+
+    def update_delivery_status(
+        self,
+        delivery_id: int,
+        status: str,
+        error_message: str | None = None,
+        response_status_code: int | None = None,
+        response_body: str | None = None
+    ) -> NotificationDelivery | None:
+        delivery = self._db.get(NotificationDelivery, delivery_id)
+        if delivery is None:
+            return None
+
+        delivery.status = status
+        delivery.last_attempt_at = datetime.now(timezone.utc)
+        if status == "success":
+            delivery.delivered_at = datetime.now(timezone.utc)
+
+        if error_message is not None:
+            delivery.error_message = error_message
+        if response_status_code is not None:
+            delivery.response_status_code = response_status_code
+        if response_body is not None:
+            delivery.response_body = response_body
+
+        self._db.commit()
+        self._db.refresh(delivery)
+        return delivery
+
+    def list_deliveries_for_run(
+        self,
+        run_id: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> list[NotificationDelivery]:
+        return (
+            self._db.query(NotificationDelivery)
+            .filter(NotificationDelivery.run_id == run_id)
+            .order_by(NotificationDelivery.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    def list_deliveries_for_hook(
+        self,
+        hook_id: int,
+        limit: int = 50,
+        offset: int = 0
+    ) -> list[NotificationDelivery]:
+        return (
+            self._db.query(NotificationDelivery)
+            .filter(NotificationDelivery.hook_id == hook_id)
+            .order_by(NotificationDelivery.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    def get_latest_delivery(
+        self,
+        hook_id: int,
+        run_id: str,
+        event: str
+    ) -> NotificationDelivery | None:
+        return (
+            self._db.query(NotificationDelivery)
+            .filter(
+                NotificationDelivery.hook_id == hook_id,
+                NotificationDelivery.run_id == run_id,
+                NotificationDelivery.event == event
+            )
+            .order_by(NotificationDelivery.id.desc())
+            .first()
         )
 
 

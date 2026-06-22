@@ -7,7 +7,7 @@ from pydantic import BaseModel, HttpUrl
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
-from etl_framework.repository.repository import NotificationRepository
+from etl_framework.repository.repository import NotificationDeliveryRepository, NotificationRepository
 from api.services.notifier import EVENTS
 from api.services.audit_service import AuditService
 
@@ -29,6 +29,21 @@ class HookOut(BaseModel):
     url: str
     events: list[str]
     enabled: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class DeliveryOut(BaseModel):
+    id: int
+    hook_id: int
+    run_id: str
+    event: str
+    status: str
+    attempt_count: int
+    last_attempt_at: datetime | None = None
+    delivered_at: datetime | None = None
+    error_message: str | None = None
+    response_status_code: int | None = None
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -56,6 +71,22 @@ def delete_hook(hook_id: int, request: Request, db: Session = Depends(get_sessio
     if not NotificationRepository(db).delete(hook_id):
         raise HTTPException(status_code=404, detail="Hook not found")
     AuditService(db).log(request, "notification_hook.deleted", "notification_hook", hook_id)
+
+
+@router.get("/{hook_id}/deliveries", response_model=list[DeliveryOut])
+def list_hook_deliveries(
+    hook_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_session),
+):
+    if NotificationRepository(db).get(hook_id) is None:
+        raise HTTPException(status_code=404, detail="Hook not found")
+    return NotificationDeliveryRepository(db).list_deliveries_for_hook(
+        hook_id,
+        limit=max(1, min(limit, 200)),
+        offset=max(0, offset),
+    )
 
 
 @router.post("/{hook_id}/test", status_code=202)

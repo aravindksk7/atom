@@ -138,3 +138,44 @@ def test_severity_error_is_default():
     df = _df(val=[None])
     v = engine.evaluate(df, [_rule(type="not_null", column="val")])
     assert v[0].severity == "error"
+
+
+@pytest.mark.parametrize(
+    ("rule", "column", "values", "expected"),
+    [
+        ({"type": "column_max_length", "column": "v", "max_value": 3}, "v", ["ok", "long"], 1),
+        ({"type": "column_min_length", "column": "v", "min_value": 3}, "v", ["ok", "long"], 1),
+        ({"type": "value_in_set", "column": "v", "values": ["a", "b"]}, "v", ["a", "c"], 1),
+        ({"type": "value_not_in_set", "column": "v", "values": ["x"]}, "v", ["x", "y"], 1),
+        ({"type": "column_contains", "column": "v", "pattern": "."}, "v", ["a.b", "ab"], 1),
+        ({"type": "positive_values", "column": "v"}, "v", [1, 0, -1, None], 3),
+        ({"type": "negative_values", "column": "v"}, "v", [-1, 0, 1, None], 3),
+    ],
+)
+def test_extended_rules(rule, column, values, expected):
+    violations = engine.evaluate(_df(**{column: values}), [_rule(**rule)])
+    assert len(violations) == 1
+    assert violations[0].actual_value == expected
+
+
+def test_date_range_accepts_iso_date_bounds():
+    rule = _rule(
+        type="date_range",
+        column="created_at",
+        min_date="2026-01-01",
+        max_date="2026-12-31",
+    )
+    violations = engine.evaluate(
+        _df(created_at=["2025-12-31", "2026-06-01", "invalid"]),
+        [rule],
+    )
+    assert violations[0].actual_value == 2
+
+
+def test_length_and_contains_rules_ignore_nulls():
+    df = _df(v=[None, "abc"])
+    rules = [
+        _rule(type="column_min_length", column="v", min_value=2),
+        _rule(type="column_contains", column="v", pattern="a"),
+    ]
+    assert engine.evaluate(df, rules) == []

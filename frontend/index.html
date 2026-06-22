@@ -1078,7 +1078,10 @@
             <tbody>
               <tr>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
-                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                  <td>
+                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
+                    <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
+                  </td>
                   <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
                   <td x-text="r.source_row_count ?? '—'"></td>
                   <td x-text="r.target_row_count ?? '—'"></td>
@@ -1093,6 +1096,32 @@
                             class="hover:underline text-xs">
                       <span x-text="expandedMismatches[r.id] !== undefined ? '▲ Collapse' : (expandingMismatch[r.id] ? '…' : '▼ Expand')"></span>
                     </button>
+                    <button x-show="r.status === 'FAILED' && !r.override_reason"
+                            @click="toggleOutcomeOverrideForm(r.id)"
+                            class="text-emerald-500 hover:underline text-xs">Pass with actions</button>
+                    <button x-show="r.override_reason"
+                            @click="removeOutcomeOverride(selectedRun.run_id, r)"
+                            class="text-amber-500 hover:underline text-xs">Remove pass</button>
+                  </td>
+                </tr>
+                <tr x-show="outcomeOverrideForms[r.id]?.open || r.override_reason">
+                  <td colspan="7" class="px-4 py-3 bg-amber-50">
+                    <template x-if="r.override_reason">
+                      <div class="text-xs">
+                        <strong>Agreed actions:</strong> <span x-text="r.override_reason"></span>
+                        <span class="text-muted ml-2" x-text="r.overridden_by ? 'by ' + r.overridden_by : ''"></span>
+                      </div>
+                    </template>
+                    <template x-if="outcomeOverrideForms[r.id]?.open">
+                      <div class="flex gap-2 items-start">
+                        <textarea x-model="outcomeOverrideForms[r.id].reason" maxlength="4000" rows="2"
+                                  class="field-input flex-1" placeholder="Describe the agreed actions required to accept this failed outcome"></textarea>
+                        <button @click="passWithAgreedActions(selectedRun.run_id, r)"
+                                :disabled="outcomeOverrideForms[r.id].saving"
+                                class="btn-primary btn-sm">Save pass</button>
+                        <button @click="toggleOutcomeOverrideForm(r.id)" class="btn-secondary btn-sm">Cancel</button>
+                      </div>
+                    </template>
                   </td>
                 </tr>
                 <!-- Error row -->

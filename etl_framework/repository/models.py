@@ -100,6 +100,12 @@ class TestResult(Base):
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Override fields for marking test outcomes as passing even when they fail
+    override_status = Column(String(20), nullable=True)
+    override_reason = Column(Text, nullable=True)
+    override_by = Column(String(255), nullable=True)
+    override_at = Column(DateTime(timezone=True), nullable=True)
+
     run = relationship("TestRun", back_populates="results")
     mismatches = relationship("MismatchDetail", back_populates="test_result",
                               cascade="all, delete-orphan", lazy="select")
@@ -111,6 +117,11 @@ class TestResult(Base):
             + (self.missing_in_target_count or 0)
             + (self.missing_in_source_count or 0)
         )
+
+    @property
+    def effective_status(self) -> str:
+        """Return the override status if set, otherwise the computed status."""
+        return self.override_status if self.override_status is not None else self.status
 
     @property
     def schema_diff(self):
@@ -183,6 +194,9 @@ class NotificationHook(Base):
     secret = Column(Text, nullable=True)                 # HMAC-SHA256 signing key
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
+    # Relationship
+    deliveries = relationship("NotificationDelivery", back_populates="hook", cascade="all, delete-orphan")
+
 
 # ---------------------------------------------------------------------------
 # P0 — Scheduling
@@ -218,3 +232,27 @@ class AuditEvent(Base):
     resource_id   = Column(String(255), nullable=True,  index=True)
     diff          = Column(JSON,        nullable=True)
     created_at    = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+
+# ---------------------------------------------------------------------------
+# P0 — Alerting: notification delivery tracking
+# ---------------------------------------------------------------------------
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    hook_id = Column(Integer, ForeignKey("notification_hooks.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(String(36), nullable=False, index=True)
+    event = Column(String(100), nullable=False)
+    status = Column(String(20), nullable=False)  # pending, success, failed
+    attempt_count = Column(Integer, default=0)
+    last_attempt_at = Column(DateTime(timezone=True))
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    response_status_code = Column(Integer, nullable=True)
+    response_body = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    # Relationship
+    hook = relationship("NotificationHook", back_populates="deliveries")

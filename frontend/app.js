@@ -221,6 +221,7 @@ function app() {
     expandedMismatches: {},      // result_id → rows[]
     expandingMismatch: {},       // result_id → bool
     expandedMismatchOffset: {},  // result_id → current offset
+    outcomeOverrideForms: {},    // result_id → { open, reason, saving }
 
     // -----------------------------------------------------------
     // Compare runs
@@ -999,6 +1000,52 @@ function app() {
 
     totalMismatches(r) {
       return (r.value_mismatch_count || 0) + (r.missing_in_target_count || 0) + (r.missing_in_source_count || 0);
+    },
+
+    toggleOutcomeOverrideForm(resultId) {
+      if (this.outcomeOverrideForms[resultId]?.open) {
+        const forms = { ...this.outcomeOverrideForms };
+        delete forms[resultId];
+        this.outcomeOverrideForms = forms;
+        return;
+      }
+      this.outcomeOverrideForms = {
+        ...this.outcomeOverrideForms,
+        [resultId]: { open: true, reason: '', saving: false },
+      };
+    },
+
+    async passWithAgreedActions(runId, result) {
+      const form = this.outcomeOverrideForms[result.id];
+      const reason = (form?.reason || '').trim();
+      if (!reason) {
+        this.toast('warn', 'Agreed actions required', 'Enter the actions before marking this test as passed');
+        return;
+      }
+      form.saving = true;
+      try {
+        const updated = await api('PATCH', `/api/runs/${runId}/results/${result.id}/override`, {
+          status: 'PASSED', reason,
+        });
+        Object.assign(result, updated);
+        const forms = { ...this.outcomeOverrideForms };
+        delete forms[result.id];
+        this.outcomeOverrideForms = forms;
+        this.toast('success', 'Test marked as passed', 'Agreed actions recorded');
+      } catch (e) {
+        form.saving = false;
+        this.toast('error', 'Outcome update failed', e.message);
+      }
+    },
+
+    async removeOutcomeOverride(runId, result) {
+      try {
+        const updated = await api('DELETE', `/api/runs/${runId}/results/${result.id}/override`);
+        Object.assign(result, updated);
+        this.toast('success', 'Pass override removed');
+      } catch (e) {
+        this.toast('error', 'Outcome update failed', e.message);
+      }
     },
 
     renderChart() {

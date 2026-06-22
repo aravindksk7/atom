@@ -12,6 +12,8 @@
 .windsurfrules
 .mcp.json
 .opencode.json
+.swarm/
+agentdb.rvf*
 AGENTS.md
 CLAUDE.md
 GEMINI.md
@@ -24,6 +26,7 @@ reports/
 *.sqlite3
 __pycache__/
 *.py[cod]
+node_modules/
 
 # Local-only validation and planning material
 tests/

@@ -27,6 +27,7 @@ from api.schemas import (
     RunTrigger,
     TestCompareOut,
     TestResultOut,
+    TestResultOverrideRequest,
 )
 from api.services.run_executor import RunExecutor
 from etl_framework.repository.repository import ConfigRepository, RunRepository
@@ -41,6 +42,26 @@ router = APIRouter(tags=["runs"])
 _TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED"}
 _TREND_CACHE_TTL_SECONDS = 30
 _TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
+
+
+def _test_result_out(result) -> TestResultOut:
+    return TestResultOut(
+        id=result.id,
+        query_name=result.query_name,
+        status=result.status,
+        effective_status=result.effective_status,
+        duration_seconds=result.duration_seconds,
+        source_row_count=result.source_row_count,
+        target_row_count=result.target_row_count,
+        value_mismatch_count=result.value_mismatch_count,
+        missing_in_target_count=result.missing_in_target_count,
+        missing_in_source_count=result.missing_in_source_count,
+        error_message=result.error_message,
+        executed_at=result.executed_at,
+        override_reason=result.override_reason,
+        overridden_by=result.override_by,
+        override_at=result.override_at,
+    )
 
 
 def _wants_html(request: Request, fmt: str | None) -> bool:
@@ -61,7 +82,7 @@ def _metrics_from_run(run) -> dict:
     for result in run.results:
         duration = float(result.duration_seconds or 0)
         total_duration += duration
-        status = result.status or "UNKNOWN"
+        status = getattr(result, "effective_status", None) or result.status or "UNKNOWN"
         if status == "PASSED":
             passed += 1
         elif status == "SLOW":
@@ -603,8 +624,8 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_session)):
     for name in all_names:
         a = tests_a.get(name)
         b = tests_b.get(name)
-        sa = a.status if a else None
-        sb = b.status if b else None
+        sa = a.effective_status if a else None
+        sb = b.effective_status if b else None
 
         if a and b:
             if sa == "PASSED" and sb != "PASSED":
@@ -648,22 +669,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    results = [
-        TestResultOut(
-            id=r.id,
-            query_name=r.query_name,
-            status=r.status,
-            duration_seconds=r.duration_seconds,
-            source_row_count=r.source_row_count,
-            target_row_count=r.target_row_count,
-            value_mismatch_count=r.value_mismatch_count,
-            missing_in_target_count=r.missing_in_target_count,
-            missing_in_source_count=r.missing_in_source_count,
-            error_message=r.error_message,
-            executed_at=r.executed_at,
-        )
-        for r in run.results
-    ]
+    results = [_test_result_out(r) for r in run.results]
     return RunDetailOut(
         run_id=run.run_id,
         status=run.status,
@@ -693,14 +699,16 @@ def export_run_csv(run_id: str, db: Session = Depends(get_session)):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "run_id", "query_name", "status", "duration_seconds",
+        "run_id", "query_name", "status", "effective_status", "agreed_actions",
+        "overridden_by", "override_at", "duration_seconds",
         "source_row_count", "target_row_count",
         "value_mismatch_count", "missing_in_target_count", "missing_in_source_count",
         "executed_at",
     ])
     for r in run.results:
         writer.writerow([
-            run_id, r.query_name, r.status,
+            run_id, r.query_name, r.status, r.effective_status, r.override_reason,
+            r.override_by, r.override_at,
             r.duration_seconds, r.source_row_count, r.target_row_count,
             r.value_mismatch_count or 0,
             r.missing_in_target_count or 0,
@@ -722,6 +730,136 @@ def delete_run(run_id: str, request: Request, db: Session = Depends(get_session)
     if not repo.delete_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
     AuditService(db).log(request, "run.deleted", "run", run_id)
+
+
+# Test result override endpoints
+@router.patch("/{run_id}/results/{result_id}/override", response_model=TestResultOut)
+def set_test_result_override(
+    run_id: str,
+    result_id: int,
+    body: TestResultOverrideRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Set an override on a test result to mark it as passing even when it fails."""
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    test_result = db.get(TestResult, result_id)
+    if test_result is None or test_result.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    if test_result.status != "FAILED":
+        raise HTTPException(
+            status_code=409,
+            detail="Only failed test results can be passed with agreed actions",
+        )
+
+    actor = AuditService.actor_from_request(request) or "unknown"
+    test_result.override_status = body.status
+    test_result.override_reason = body.reason
+    test_result.override_by = actor
+    test_result.override_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(test_result)
+
+    # Log the override action
+    AuditService(db).log(
+        request,
+        "test_result.override_set",
+        "test_result",
+        result_id,
+        {
+            "run_id": run_id,
+            "query_name": test_result.query_name,
+            "original_status": test_result.status,
+            "override_status": body.status,
+            "reason": body.reason,
+            "overridden_by": actor,
+        },
+        actor=actor,
+    )
+
+    return _test_result_out(test_result)
+
+
+@router.get("/{run_id}/results/{result_id}/override", response_model=dict)
+def get_test_result_override(
+    run_id: str,
+    result_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Get the current override for a test result, if any."""
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    test_result = db.get(TestResult, result_id)
+    if test_result is None or test_result.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    if test_result.override_status is None:
+        return {"override": None}
+
+    return {
+        "override": {
+            "status": test_result.override_status,
+            "reason": test_result.override_reason,
+            "overridden_by": test_result.override_by,
+            "override_at": test_result.override_at,
+        }
+    }
+
+
+@router.delete("/{run_id}/results/{result_id}/override", response_model=TestResultOut)
+def delete_test_result_override(
+    run_id: str,
+    result_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Remove the override from a test result, restoring its original status."""
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    test_result = db.get(TestResult, result_id)
+    if test_result is None or test_result.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    # Remove the override
+    original_status = test_result.status
+    test_result.override_status = None
+    test_result.override_reason = None
+    test_result.override_by = None
+    test_result.override_at = None
+
+    db.commit()
+    db.refresh(test_result)
+
+    # Log the override removal
+    AuditService(db).log(
+        request,
+        "test_result.override_removed",
+        "test_result",
+        result_id,
+        {
+            "run_id": run_id,
+            "query_name": test_result.query_name,
+            "restored_status": original_status,
+        },
+    )
+
+    return _test_result_out(test_result)
 
 
 # ---------------------------------------------------------------------------
