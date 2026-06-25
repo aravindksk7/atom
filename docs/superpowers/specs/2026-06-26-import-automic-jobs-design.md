@@ -81,7 +81,7 @@ GET /api/adapters/automic/search?config_id=1&filter=ETL_*
 ```
 POST /api/adapters/jobs/from-automic/bulk
 Body: AutomicBulkImportRequest
-→ list[JobDefinition]
+→ AutomicBulkImportResponse
 ```
 
 The bulk import endpoint iterates `job_names`, upserts each as `job_type="automic_job"` with `params.job_name` set, logs to `AuditService` with `source: "automic_browse"`, and collects per-name errors. It returns the successfully created jobs; errors are included in a separate `errors` field.
