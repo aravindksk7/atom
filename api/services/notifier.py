@@ -21,11 +21,16 @@ EVENTS = {
     "run.slow",
     "run.error",
     "run.completed",
+    "run.held",
+    "run.cancelled",
 }
 
 
 def _status_to_event(status: str) -> list[str]:
-    """Map a run status to the set of events it should fire."""
+    """Map a run status (or event name) to the set of events it should fire."""
+    # Allow callers to pass an event name directly (e.g. "run.held")
+    if status.lower() in EVENTS:
+        return [status.lower()]
     s = status.upper()
     events = ["run.completed"]
     if s == "PASSED":
@@ -36,6 +41,8 @@ def _status_to_event(status: str) -> list[str]:
         events.append("run.slow")
     elif s == "ERROR":
         events.append("run.error")
+    elif s == "CANCELLED":
+        events.append("run.cancelled")
     return events
 
 
