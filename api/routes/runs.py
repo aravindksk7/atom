@@ -209,7 +209,11 @@ def trigger_run(
     run_settings = body.run_settings.model_dump()
     config_snapshot = _snapshot_from_trigger(body, db)
     if ordered_jobs:
-        config_snapshot["job_sequence"] = ordered_jobs
+        # Serialize SequenceStep objects to plain dicts for JSON storage
+        config_snapshot["job_sequence"] = [
+            s.model_dump() if hasattr(s, "model_dump") else s
+            for s in ordered_jobs
+        ]
     config_snapshot["run_settings"] = run_settings
     repo.create_run(
         run_id=run_id,
@@ -225,7 +229,7 @@ def trigger_run(
         {
             "source_env": body.source_env,
             "target_env": body.target_env,
-            "job_sequence": ordered_jobs,
+            "job_sequence": config_snapshot.get("job_sequence"),
             "config_id": body.config_id,
         },
     )
