@@ -142,6 +142,27 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE INDEX IF NOT EXISTS ix_job_lineage_downstream ON job_lineage_edges (downstream_job)"
         ))
 
+        # --- Execution Sequence Scheduler: run_steps table ---
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS run_steps ("
+            "id INTEGER PRIMARY KEY, "
+            "run_id VARCHAR(36) REFERENCES test_runs(run_id) ON DELETE CASCADE, "
+            "job_name VARCHAR(255) NOT NULL, "
+            "step_index INTEGER NOT NULL, "
+            "status VARCHAR(20) NOT NULL DEFAULT 'PENDING', "
+            "hold_after BOOLEAN NOT NULL DEFAULT 0, "
+            "condition JSON, "
+            "wait_seconds INTEGER NOT NULL DEFAULT 0, "
+            "held_at DATETIME, "
+            "released_at DATETIME, "
+            "released_by VARCHAR(255), "
+            "release_note TEXT, "
+            "release_action VARCHAR(20))"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_run_steps_run_id ON run_steps (run_id)"
+        ))
+
         # --- P2: is_baseline column on test_runs ---
         if "is_baseline" not in test_run_cols:
             conn.execute(text(

@@ -61,6 +61,9 @@ class TestRun(Base):
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
+    steps = relationship("RunStep", back_populates="run",
+                         cascade="all, delete-orphan", lazy="select",
+                         order_by="RunStep.step_index")
 
     @property
     def test_cases(self):
@@ -232,6 +235,35 @@ class AuditEvent(Base):
     resource_id   = Column(String(255), nullable=True,  index=True)
     diff          = Column(JSON,        nullable=True)
     created_at    = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+
+# ---------------------------------------------------------------------------
+# Execution Sequence Scheduler
+# ---------------------------------------------------------------------------
+
+class RunStep(Base):
+    __tablename__ = "run_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(
+        String(36),
+        ForeignKey("test_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_name = Column(String(255), nullable=False)
+    step_index = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    hold_after = Column(Boolean, nullable=False, default=False)
+    condition = Column(JSON, nullable=True)
+    wait_seconds = Column(Integer, nullable=False, default=0)
+    held_at = Column(DateTime(timezone=True), nullable=True)
+    released_at = Column(DateTime(timezone=True), nullable=True)
+    released_by = Column(String(255), nullable=True)
+    release_note = Column(Text, nullable=True)
+    release_action = Column(String(20), nullable=True)
+
+    run = relationship("TestRun", back_populates="steps")
 
 
 # ---------------------------------------------------------------------------
