@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 import re
+import time
 from typing import Any
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from api.schemas import JobDefinition, RunSettings
+from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.db.engine import DBEngine
 from etl_framework.automic.client import AutomicClient
@@ -18,13 +20,15 @@ from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import TestResult
-from etl_framework.repository.repository import JobRepository, RunRepository
+from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
 from etl_framework.runner.health import HealthChecker
 from etl_framework.runner.state import TestCaseState, TestStatus
 from etl_framework.runner.test_runner import TestRunner
 from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.utils.context import set_run_id
 from etl_framework.utils.tracing import span
+
+HOLD_POLL_INTERVAL_SECONDS = int(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
 
 
 _SEED_JOBS: list[JobDefinition] = [
@@ -140,7 +144,7 @@ class RunExecutor:
         run_id: str,
         source_env: str,
         target_env: str,
-        job_sequence: list[str],
+        job_sequence: list[str | SequenceStep],
         run_settings: RunSettings,
         config_snapshot: dict[str, Any] | None = None,
     ) -> None:
@@ -158,21 +162,78 @@ class RunExecutor:
         with span("api.run_executor.execute", {"run_id": self._run_id}):
             set_run_id(self._run_id)
             started_at = datetime.now(timezone.utc)
+            steps = self._resolve_sequence_steps()
+
             self._run_repo.update_run_status(
                 self._run_id,
                 "RUNNING",
                 started_at=started_at,
-                total_tests=len(self._job_sequence),
+                total_tests=len(steps),
             )
 
             try:
                 self._apply_health_gate()
-                cases = [(job.name, self._build_case(job)) for job in self._resolve_jobs()]
-                max_workers = 1 if self._settings.execution_mode == "sequential" else self._settings.max_workers
-                states = TestRunner(max_workers=max_workers).run(cases)
-                results = self._persist_states(states)
-                self._write_metrics(results)
-                self._complete_run(states)
+                step_repo = RunStepRepository(self._db)
+                step_repo.materialize_steps(self._run_id, steps)
+
+                all_states: list[TestCaseState] = []
+                all_results: list[ReconciliationResult] = []
+                prev_result: ReconciliationResult | None = None
+                cancelled = False
+                jobs_index = self._build_jobs_index()
+
+                for i, seq_step in enumerate(steps):
+                    # Condition gate: check previous step's outcome before running this step
+                    if seq_step.condition is not None and prev_result is not None:
+                        if not self._check_condition(seq_step.condition, prev_result):
+                            step_repo.cancel_remaining(self._run_id, from_index=i)
+                            break
+
+                    if seq_step.wait_seconds > 0:
+                        time.sleep(seq_step.wait_seconds)
+
+                    step_repo.update_status(self._run_id, i, "RUNNING")
+
+                    job_def = jobs_index.get(seq_step.job_name)
+                    if job_def is None:
+                        step_repo.update_status(self._run_id, i, "ERROR")
+                        continue
+
+                    case_fn = self._build_case(job_def)
+                    state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]
+                    all_states.append(state)
+
+                    step_results = self._persist_states([state])
+                    if step_results:
+                        prev_result = step_results[0]
+                        all_results.extend(step_results)
+
+                    job_outcome = state.status.value if hasattr(state.status, "value") else str(state.status)
+                    step_repo.update_status(self._run_id, i, job_outcome)
+
+                    if seq_step.hold_after:
+                        step_repo.update_status(
+                            self._run_id, i, "HELD",
+                            held_at=datetime.now(timezone.utc),
+                        )
+                        self._fire_held_webhook(i, seq_step.job_name)
+                        release_action = self._poll_for_release(step_repo, i)
+                        if release_action == "cancel":
+                            step_repo.cancel_remaining(self._run_id, from_index=i + 1)
+                            cancelled = True
+                            break
+
+                if cancelled:
+                    self._run_repo.update_run_status(
+                        self._run_id,
+                        "CANCELLED",
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    self._fire_webhooks("CANCELLED")
+                else:
+                    self._write_metrics(all_results)
+                    self._complete_run(all_states)
+
             except Exception as exc:
                 self._run_repo.update_run_status(
                     self._run_id,
@@ -183,6 +244,59 @@ class RunExecutor:
                 self._persist_error("<run>", exc)
             finally:
                 set_run_id("")
+
+    def _resolve_sequence_steps(self) -> list[SequenceStep]:
+        result: list[SequenceStep] = []
+        for item in self._job_sequence:
+            if isinstance(item, str):
+                result.append(SequenceStep(job_name=item))
+            elif isinstance(item, dict):
+                result.append(SequenceStep(**item))
+            else:
+                result.append(item)
+        return result
+
+    def _build_jobs_index(self) -> dict[str, JobDefinition]:
+        index: dict[str, JobDefinition] = {job.name: job for job in _SEED_JOBS}
+        index.update({job.name: self._job_to_definition(job) for job in self._job_repo.list()})
+        return index
+
+    def _check_condition(self, condition: StepCondition, prev_result: ReconciliationResult) -> bool:
+        prev_status = prev_result.status.value if hasattr(prev_result.status, "value") else str(prev_result.status)
+        if condition.require_status and prev_status not in condition.require_status:
+            return False
+        if condition.max_mismatch_count is not None:
+            total = (
+                prev_result.value_mismatch_count
+                + prev_result.missing_in_target_count
+                + prev_result.missing_in_source_count
+            )
+            if total > condition.max_mismatch_count:
+                return False
+        return True
+
+    def _poll_for_release(self, step_repo: RunStepRepository, step_index: int) -> str:
+        while True:
+            time.sleep(HOLD_POLL_INTERVAL_SECONDS)
+            self._db.expire_all()
+            step = step_repo.get_step(self._run_id, step_index)
+            if step is None or step.status != "HELD":
+                return (step.release_action or "approve") if step else "approve"
+
+    def _fire_held_webhook(self, step_index: int, job_name: str) -> None:
+        try:
+            from etl_framework.repository.repository import NotificationRepository
+            from api.services.notifier import notify
+            hooks = NotificationRepository(self._db).list_enabled_for_event("run.held")
+            notify(
+                self._run_id,
+                "run.held",
+                extra={"step_index": step_index, "job_name": job_name},
+                hooks=hooks,
+                db_session=self._db,
+            )
+        except Exception:
+            pass
 
     def _resolve_jobs(self) -> list[JobDefinition]:
         jobs_by_name = {job.name: self._job_to_definition(job) for job in self._job_repo.list()}
