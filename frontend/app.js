@@ -99,6 +99,8 @@ function app() {
     // -----------------------------------------------------------
     jobs: [],
     selectedJobs: [],
+    stepSettings: {},      // { jobName: { hold_after, wait_seconds, require_status, max_mismatch_count } }
+    stepSettingsOpen: {},  // { jobName: bool } — expanded settings panel
     showJobModal: false,
     jobModal: {},
     jobModalEditing: false,
@@ -132,6 +134,8 @@ function app() {
     activeRuns: [],
     pollTimer: null,
     runStreams: {},
+    runStepsCache: {},   // { run_id: RunStep[] }
+    stepReleaseModal: { show: false, runId: '', stepIndex: 0, releasedBy: '', note: '', action: 'approve' },
 
     // -----------------------------------------------------------
     // History
@@ -305,7 +309,7 @@ function app() {
     notifOpen: false,
     showHookModal: false,
     hookModal: { name: '', url: '', events: [], secret: '' },
-    hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed'],
+    hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed', 'run.held', 'run.cancelled'],
 
     // -----------------------------------------------------------
     // Schedules
@@ -844,6 +848,29 @@ function app() {
       };
     },
 
+    getStepCfg(name) {
+      if (!this.stepSettings[name]) {
+        this.stepSettings[name] = { hold_after: false, wait_seconds: 0, require_status: '', max_mismatch_count: '' };
+      }
+      return this.stepSettings[name];
+    },
+
+    _buildJobSequence() {
+      return this.selectedJobs.map(name => {
+        const s = this.stepSettings[name] || {};
+        const step = { job_name: name };
+        if (s.hold_after) step.hold_after = true;
+        if (Number(s.wait_seconds) > 0) step.wait_seconds = Number(s.wait_seconds);
+        const hasCondition = s.require_status || (s.max_mismatch_count !== '' && s.max_mismatch_count != null);
+        if (hasCondition) {
+          step.condition = {};
+          if (s.require_status) step.condition.require_status = s.require_status.split(',').map(x => x.trim()).filter(Boolean);
+          if (s.max_mismatch_count !== '' && s.max_mismatch_count != null) step.condition.max_mismatch_count = Number(s.max_mismatch_count);
+        }
+        return step;
+      });
+    },
+
     async runTests() {
       if (!this.selectedJobs.length) return;
       this.isLaunching = true;
@@ -854,7 +881,7 @@ function app() {
         const run = await api('POST', '/api/runs', {
           source_env: this.launchSettings.source_env,
           target_env: this.launchSettings.target_env,
-          job_sequence: [...this.selectedJobs],
+          job_sequence: this._buildJobSequence(),
           config_id: cfg ? cfg.id : null,
           run_settings: this._runSettingsPayload(),
           config_data: cfg ? cfg.config_data : {},
@@ -862,6 +889,8 @@ function app() {
         this.activeRuns.unshift(run);
         this.startRunStream(run);
         this.selectedJobs = [];
+        this.stepSettings = {};
+        this.stepSettingsOpen = {};
         this.currentView = 'monitor';
         this.toast('success', 'Run started', `ID: ${run.run_id.substring(0,8)}…`);
       } catch (e) {
@@ -879,7 +908,7 @@ function app() {
     },
 
     isTerminalStatus(status) {
-      return ['PASSED','FAILED','SLOW','ERROR','COMPLETED'].includes(status);
+      return ['PASSED','FAILED','SLOW','ERROR','COMPLETED','CANCELLED'].includes(status);
     },
 
     startRunStream(run) {
@@ -895,6 +924,9 @@ function app() {
             total_tests: progress.total_tests,
             _progress: progress,
           });
+        }
+        if (progress.held_step != null) {
+          this.loadRunSteps(progress.run_id);
         }
       });
       stream.addEventListener('done', async (event) => {
@@ -961,6 +993,47 @@ function app() {
       if (run._progress) return run._progress.percent_complete || 5;
       const done = (run.passed||0) + (run.failed||0) + (run.slow||0) + (run.error||0);
       return run.total_tests > 0 ? Math.round(done / run.total_tests * 100) : 10;
+    },
+
+    async loadRunSteps(runId) {
+      try {
+        this.runStepsCache[runId] = await api('GET', `/api/runs/${runId}/steps`);
+      } catch {
+        this.runStepsCache[runId] = [];
+      }
+    },
+
+    openStepRelease(runId, stepIndex) {
+      this.stepReleaseModal = { show: true, runId, stepIndex, releasedBy: '', note: '', action: 'approve' };
+    },
+
+    async submitStepRelease() {
+      const m = this.stepReleaseModal;
+      if (!m.note.trim() || !m.releasedBy.trim()) {
+        this.toast('error', 'Required', 'Name and note are required to release a hold');
+        return;
+      }
+      try {
+        await api('POST', `/api/runs/${m.runId}/steps/${m.stepIndex}/release`, {
+          action: m.action,
+          note: m.note.trim(),
+          released_by: m.releasedBy.trim(),
+        });
+        this.stepReleaseModal.show = false;
+        await this.loadRunSteps(m.runId);
+        this.toast('success', 'Step released', `Action: ${m.action}`);
+      } catch(e) {
+        this.toast('error', 'Release failed', e.message);
+      }
+    },
+
+    stepStatusBadgeClass(status) {
+      const map = {
+        PENDING: 'badge-gray', RUNNING: 'badge-blue', HELD: 'badge-amber',
+        APPROVED: 'badge-green', SKIPPED: 'badge-blue', CANCELLED: 'badge-gray',
+        PASSED: 'badge-green', FAILED: 'badge-rose', ERROR: 'badge-rose',
+      };
+      return map[status] || 'badge-gray';
     },
 
     // ===========================================================
