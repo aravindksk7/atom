@@ -7,6 +7,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
+from api.schemas import SequenceStep
 from etl_framework.repository.repository import ScheduleRepository
 import api.services.scheduler as _sched_svc
 from api.services.audit_service import AuditService
@@ -27,7 +28,7 @@ def _validate_cron(expr: str) -> str:
 class ScheduleCreate(BaseModel):
     name: str
     cron_expr: str
-    job_sequence: list[str]
+    job_sequence: list[str | SequenceStep]
     source_env: str
     target_env: str
     run_settings_json: dict = {}
@@ -43,7 +44,7 @@ class ScheduleOut(BaseModel):
     id: int
     name: str
     cron_expr: str
-    job_sequence: list[str]
+    job_sequence: list[str | SequenceStep]
     source_env: str
     target_env: str
     run_settings_json: dict

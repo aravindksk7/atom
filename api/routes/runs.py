@@ -24,13 +24,15 @@ from api.schemas import (
     RunDetailOut,
     RunProgressOut,
     RunStatusOut,
+    RunStepOut,
+    RunStepReleaseRequest,
     RunTrigger,
     TestCompareOut,
     TestResultOut,
     TestResultOverrideRequest,
 )
 from api.services.run_executor import RunExecutor
-from etl_framework.repository.repository import ConfigRepository, RunRepository
+from etl_framework.repository.repository import ConfigRepository, RunRepository, RunStepRepository
 from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
@@ -39,7 +41,7 @@ from api.services.log_parser import detect_log_level, parse_log_events, filter_l
 router = APIRouter(tags=["runs"])
 
 
-_TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED"}
+_TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
 _TREND_CACHE_TTL_SECONDS = 30
 _TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
 
@@ -569,6 +571,7 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
 
     async def events():
         last_payload = ""
+        step_repo = RunStepRepository(db)
         while True:
             db.expire_all()  # force re-fetch; identity map caches stale status without this
             run = repo.get_run(run_id)
@@ -578,6 +581,19 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
             total = run.total_tests or 0
             completed = repo.count_completed_results(run_id)
             percent = int(completed / total * 100) if total > 0 else (100 if run.status in _TERMINAL else 0)
+
+            # Determine held/current step from run_steps table
+            held_step: int | None = None
+            current_step: int | None = None
+            steps = step_repo.list_steps(run_id)
+            for s in steps:
+                if s.status == "HELD":
+                    held_step = s.step_index
+                    current_step = s.step_index
+                    break
+                if s.status == "RUNNING":
+                    current_step = s.step_index
+
             payload = {
                 "run_id": run.run_id,
                 "status": run.status,
@@ -585,6 +601,8 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                 "completed_tests": completed,
                 "current_job": repo.get_current_job(run_id),
                 "percent_complete": min(percent, 100),
+                "current_step": current_step,
+                "held_step": held_step,
             }
             payload_text = json.dumps(payload, default=str)
             if payload_text != last_payload:
@@ -962,3 +980,50 @@ def mismatch_distribution(run_id: str, result_id: int, top_n: int = 10,
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return {"result_id": result_id, "distribution": repo.mismatch_distribution(result_id, top_n)}
+
+
+# ---------------------------------------------------------------------------
+# Execution Sequence Scheduler — step endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/{run_id}/steps", response_model=list[RunStepOut])
+def list_run_steps(run_id: str, db: Session = Depends(get_session)):
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return RunStepRepository(db).list_steps(run_id)
+
+
+@router.post(
+    "/{run_id}/steps/{step_index}/release",
+    response_model=RunStepOut,
+)
+def release_run_step(
+    run_id: str,
+    step_index: int,
+    body: RunStepReleaseRequest,
+    db: Session = Depends(get_session),
+):
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    step = RunStepRepository(db).get_step(run_id, step_index)
+    if step is None:
+        raise HTTPException(status_code=404, detail="Step not found")
+    if step.status != "HELD":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Step is not held (current status: {step.status})",
+        )
+
+    released = RunStepRepository(db).release_step(
+        run_id=run_id,
+        step_index=step_index,
+        action=body.action,
+        note=body.note,
+        released_by=body.released_by,
+    )
+    if released is None:
+        raise HTTPException(status_code=409, detail="Step could not be released")
+    return released

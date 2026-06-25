@@ -313,6 +313,8 @@ class RunProgressOut(BaseModel):
     completed_tests: int = 0
     current_job: str | None = None
     percent_complete: int = Field(default=0, ge=0, le=100)
+    current_step: int | None = None
+    held_step: int | None = None
 
 
 class BODocOut(BaseModel):
