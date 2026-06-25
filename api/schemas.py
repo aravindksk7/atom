@@ -117,19 +117,64 @@ class DQRule(BaseModel):
     severity: Literal["error", "warn"] = "error"
 
 
+class StepCondition(BaseModel):
+    require_status: list[str] = Field(default_factory=lambda: ["PASSED"])
+    max_mismatch_count: int | None = None
+
+
+class SequenceStep(BaseModel):
+    job_name: str
+    hold_after: bool = False
+    condition: StepCondition | None = None
+    wait_seconds: int = Field(default=0, ge=0)
+
+
+class RunStepOut(BaseModel):
+    id: int
+    run_id: str
+    job_name: str
+    step_index: int
+    status: str
+    hold_after: bool
+    condition: dict[str, Any] | None = None
+    wait_seconds: int
+    held_at: datetime | None = None
+    released_at: datetime | None = None
+    released_by: str | None = None
+    release_note: str | None = None
+    release_action: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RunStepReleaseRequest(BaseModel):
+    action: Literal["approve", "skip", "cancel"]
+    note: str = Field(min_length=1)
+    released_by: str = Field(min_length=1)
+
+
 class RunTrigger(BaseModel):
     source_env: str
     target_env: str
     job_names: list[str] = Field(default_factory=list)
-    job_sequence: list[str] = Field(default_factory=list)
+    job_sequence: list[str | SequenceStep] = Field(default_factory=list)
     config_id: int | None = None
     config_data: dict[str, Any] = Field(default_factory=dict)
     run_settings: RunSettings = Field(default_factory=RunSettings)
 
     @model_validator(mode="after")
-    def normalize_legacy_job_names(self) -> "RunTrigger":
+    def normalize_job_sequence(self) -> "RunTrigger":
         if not self.job_sequence and self.job_names:
             self.job_sequence = list(self.job_names)
+        coerced: list[SequenceStep] = []
+        for item in self.job_sequence:
+            if isinstance(item, str):
+                coerced.append(SequenceStep(job_name=item))
+            elif isinstance(item, dict):
+                coerced.append(SequenceStep(**item))
+            else:
+                coerced.append(item)
+        self.job_sequence = coerced
         return self
 
 

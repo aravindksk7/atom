@@ -5,6 +5,7 @@ from etl_framework.reconciliation.models import MismatchRecord, ReconciliationRe
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
+    RunStep,
 )
 
 
@@ -695,3 +696,89 @@ class AuditRepository:
             q = q.filter(AuditEvent.resource_id == resource_id)
         q = q.order_by(AuditEvent.created_at.desc())
         return q.offset(offset).limit(limit).all()
+
+
+class RunStepRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def materialize_steps(self, run_id: str, steps: list) -> list[RunStep]:
+        rows: list[RunStep] = []
+        for i, step in enumerate(steps):
+            cond = step.condition.model_dump() if step.condition is not None else None
+            row = RunStep(
+                run_id=run_id,
+                job_name=step.job_name,
+                step_index=i,
+                status="PENDING",
+                hold_after=step.hold_after,
+                condition=cond,
+                wait_seconds=step.wait_seconds,
+            )
+            self._db.add(row)
+            rows.append(row)
+        self._db.commit()
+        for row in rows:
+            self._db.refresh(row)
+        return rows
+
+    def get_step(self, run_id: str, step_index: int) -> RunStep | None:
+        return (
+            self._db.query(RunStep)
+            .filter(RunStep.run_id == run_id, RunStep.step_index == step_index)
+            .first()
+        )
+
+    def list_steps(self, run_id: str) -> list[RunStep]:
+        return (
+            self._db.query(RunStep)
+            .filter(RunStep.run_id == run_id)
+            .order_by(RunStep.step_index)
+            .all()
+        )
+
+    def update_status(
+        self, run_id: str, step_index: int, status: str, **kwargs
+    ) -> RunStep | None:
+        step = self.get_step(run_id, step_index)
+        if step is None:
+            return None
+        step.status = status
+        for k, v in kwargs.items():
+            setattr(step, k, v)
+        self._db.commit()
+        self._db.refresh(step)
+        return step
+
+    def release_step(
+        self,
+        run_id: str,
+        step_index: int,
+        action: str,
+        note: str,
+        released_by: str,
+    ) -> RunStep | None:
+        step = self.get_step(run_id, step_index)
+        if step is None or step.status != "HELD":
+            return None
+        _status_map = {"approve": "APPROVED", "skip": "SKIPPED", "cancel": "CANCELLED"}
+        step.status = _status_map.get(action.lower(), action.upper())
+        step.release_action = action
+        step.release_note = note
+        step.released_by = released_by
+        step.released_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(step)
+        return step
+
+    def cancel_remaining(self, run_id: str, from_index: int) -> None:
+        (
+            self._db.query(RunStep)
+            .filter(
+                RunStep.run_id == run_id,
+                RunStep.step_index >= from_index,
+                RunStep.status == "PENDING",
+            )
+            .update({"status": "CANCELLED"})
+        )
+        self._db.commit()
