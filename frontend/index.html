@@ -2396,56 +2396,53 @@
 
   <template x-if="reportRunId && reportLoaded && reportView === 'logs'">
     <div class="space-y-4">
+      <!-- Search bar + level chips -->
       <div class="card">
-        <div class="log-toolbar">
-          <div class="flex-1" style="min-width:240px">
-            <label class="field-label">Search logs</label>
-            <input x-model="reportLogQuery" @keydown.enter.prevent="loadRunLogs()" class="field-input" placeholder="exception, module, run id, message" />
+        <div class="flex flex-col gap-3">
+          <input
+            x-model="logFilterQuery"
+            class="field-input"
+            placeholder="Search logs… (live)"
+          />
+          <div class="flex gap-2 flex-wrap items-center">
+            <button class="level-chip" :class="logFilterLevel === '' ? 'chip-active-ALL' : ''" @click="logFilterLevel = ''">ALL</button>
+            <button class="level-chip" :class="logFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="logFilterLevel = logFilterLevel === 'ERROR' ? '' : 'ERROR'">ERROR</button>
+            <button class="level-chip" :class="logFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="logFilterLevel = logFilterLevel === 'WARNING' ? '' : 'WARNING'">WARN</button>
+            <button class="level-chip" :class="logFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="logFilterLevel = logFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
+            <button class="level-chip" :class="logFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="logFilterLevel = logFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
+            <span class="text-muted text-xs ml-2" x-text="filteredLogEvents().length + ' / ' + allLogEvents.length + ' events'"></span>
           </div>
-          <div style="min-width:150px">
-            <label class="field-label">Level</label>
-            <select x-model="reportLogLevel" class="field-input field-select">
-              <option value="">All levels</option>
-              <option value="ERROR">ERROR</option>
-              <option value="WARNING">WARNING</option>
-              <option value="INFO">INFO</option>
-              <option value="DEBUG">DEBUG</option>
-            </select>
-          </div>
-          <div style="width:120px">
-            <label class="field-label">Limit</label>
-            <input x-model.number="reportLogLimit" type="number" min="1" max="5000" class="field-input" />
-          </div>
-          <button @click="loadRunLogs()" :disabled="reportLogsLoading" class="btn-primary">
-            <span x-text="reportLogsLoading ? 'Searching...' : 'Search'"></span>
-          </button>
-          <button @click="openRunTab(reportRunId, 'logs')" class="btn-secondary">Open Log GUI</button>
         </div>
       </div>
-      <template x-if="reportLogs">
+
+      <!-- Loading state -->
+      <template x-if="allLogEventsLoading">
+        <div class="card empty-state"><div class="empty-state-title">Loading logs…</div></div>
+      </template>
+
+      <!-- No events for this run -->
+      <template x-if="!allLogEventsLoading && allLogEvents.length === 0">
+        <div class="card empty-state"><div class="empty-state-title">No log events for this run.</div></div>
+      </template>
+
+      <!-- Log list -->
+      <template x-if="!allLogEventsLoading && allLogEvents.length > 0">
         <div class="card p-0 overflow-hidden">
-          <div class="log-summary">
-            <span x-text="reportLogs.matched_lines + ' matches'"></span>
-            <span x-text="reportLogs.total_lines + ' total lines'"></span>
-          </div>
           <div class="log-list">
-            <template x-if="!reportLogs.lines || reportLogs.lines.length === 0">
-              <div class="empty-state"><div class="empty-state-title">No log lines match the current search</div></div>
+            <template x-if="filteredLogEvents().length === 0">
+              <div class="empty-state"><div class="empty-state-title">No events match the current filter.</div></div>
             </template>
-            <template x-for="line in (reportLogs.lines || [])" :key="line.number">
+            <template x-for="line in filteredLogEvents()" :key="line.number">
               <div class="log-entry" :class="logLevelClass(line.level)">
                 <div class="log-entry-meta">
                   <span class="font-mono" x-text="'#' + line.number"></span>
                   <span class="badge" x-text="line.level"></span>
                 </div>
-                <pre x-text="line.text"></pre>
+                <pre x-html="highlightMatch(line.text, logFilterQuery)"></pre>
               </div>
             </template>
           </div>
         </div>
-      </template>
-      <template x-if="reportLogsLoading">
-        <div class="card empty-state"><div class="empty-state-title">Searching logs...</div></div>
       </template>
     </div>
   </template>
