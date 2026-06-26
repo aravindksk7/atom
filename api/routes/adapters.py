@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_session
 from api.schemas import (
     AdapterTestOut,
+    AutomicBulkImportRequest,
+    AutomicBulkImportResponse,
     AutomicJobStatusOut,
+    AutomicJobSummary,
     AutomicJobCreateRequest,
     AutomicLookupRequest,
     BODocOut,
@@ -92,6 +95,15 @@ def lookup_automic_job(
     service: AdapterService = Depends(get_adapter_service),
 ):
     return service.lookup_automic_job(body.config_id, body.identifier, body.id_type)
+
+
+@router.get("/automic/search", response_model=list[AutomicJobSummary])
+def search_automic_jobs(
+    config_id: int,
+    filter: str,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.search_automic_jobs(config_id, filter)
 
 
 # ---------------------------------------------------------------------------

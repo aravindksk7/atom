@@ -109,3 +109,13 @@ class AdapterService:
             environment=status.environment,
             checked_at=status.checked_at,
         )
+
+    def search_automic_jobs(self, config_id: int, filter: str) -> list:
+        from api.schemas import AutomicJobSummary
+        env = self._get_env_config(config_id)
+        try:
+            client = AutomicClient(env)
+            raw = client.search_jobs(filter)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+        return [AutomicJobSummary(name=j["name"], status=j.get("status", "UNKNOWN")) for j in raw]

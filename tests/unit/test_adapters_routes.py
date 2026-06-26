@@ -157,6 +157,30 @@ def test_create_job_from_automic_returns_201(client):
     assert data["params"]["job_name"] == "ETL_NIGHTLY_LOAD"
 
 
+def test_search_automic_returns_job_list(client, mock_adapter_service):
+    from api.schemas import AutomicJobSummary
+    mock_adapter_service.search_automic_jobs.return_value = [
+        AutomicJobSummary(name="ETL_NIGHTLY", status="ENDED_OK"),
+        AutomicJobSummary(name="ETL_WEEKLY", status="ENDED_OK"),
+    ]
+    resp = client.get("/api/adapters/automic/search?config_id=1&filter=ETL_*")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    assert data[0]["name"] == "ETL_NIGHTLY"
+    assert data[1]["status"] == "ENDED_OK"
+
+
+def test_search_automic_missing_filter_returns_422(client):
+    resp = client.get("/api/adapters/automic/search?config_id=1")
+    assert resp.status_code == 422
+
+
+def test_search_automic_missing_config_id_returns_422(client):
+    resp = client.get("/api/adapters/automic/search?filter=ETL_*")
+    assert resp.status_code == 422
+
+
 def test_automic_client_search_jobs_returns_list():
     from unittest.mock import patch
     from etl_framework.automic.client import AutomicClient
