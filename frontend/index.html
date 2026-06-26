@@ -1538,6 +1538,8 @@
         <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Trends</button>
         <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Lineage</button>
         <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Audit</button>
+        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Profile</button>
+        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Schema</button>
       </div>
 
       <!-- Trends panel -->
@@ -1662,6 +1664,142 @@
                   </template>
                 </tbody>
               </table>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Profile panel -->
+      <div x-show="historySubTab==='profile'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Column Profile</div>
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="profileJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <button @click="loadProfile()" :disabled="!profileJobName || profileLoading" class="btn-primary btn-sm">
+              <span x-show="!profileLoading">Load Profile</span>
+              <span x-show="profileLoading">Loading…</span>
+            </button>
+            <button x-show="profileJobName" @click="suggestDQRules()" :disabled="profileLoading" class="btn-secondary btn-sm">✨ Suggest DQ Rules</button>
+          </div>
+          <template x-if="profileData && profileData.length === 0">
+            <div class="empty-state py-4"><div class="empty-state-title">No profile data — run a profile job first</div></div>
+          </template>
+          <template x-if="profileData && profileData.length > 0">
+            <div class="overflow-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Column</th>
+                    <th>Null Rate</th>
+                    <th>Distinct</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Mean</th>
+                    <th>Std Dev</th>
+                    <th>p25</th>
+                    <th>p50</th>
+                    <th>p75</th>
+                    <th>p95</th>
+                    <th>Captured</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="col in profileData" :key="col.column_name">
+                    <tr>
+                      <td class="font-mono text-xs font-semibold" x-text="col.column_name"></td>
+                      <td x-text="col.null_rate != null ? (col.null_rate * 100).toFixed(1) + '%' : '—'"></td>
+                      <td x-text="col.distinct_count ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.min_val ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.max_val ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.mean_val != null ? Number(col.mean_val).toFixed(4) : '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.std_val != null ? Number(col.std_val).toFixed(4) : '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p25 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p50 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p75 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p95 ?? '—'"></td>
+                      <td class="text-muted text-xs" x-text="fmtDate(col.captured_at)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <template x-if="suggestedRules && suggestedRules.length > 0">
+            <div class="mt-4 border-t border-slate-100 pt-3">
+              <div class="text-xs font-semibold text-slate-600 mb-2">Suggested DQ Rules</div>
+              <pre class="bg-slate-50 rounded p-3 text-xs font-mono overflow-auto max-h-48" x-text="JSON.stringify(suggestedRules, null, 2)"></pre>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Schema History panel -->
+      <div x-show="historySubTab==='schema'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Schema Snapshot History</div>
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="schemaJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Environment</label>
+              <select x-model="schemaEnvironment" class="field-input field-select">
+                <option value="source">source</option>
+                <option value="target">target</option>
+                <option value="both">both</option>
+              </select>
+            </div>
+            <button @click="loadSchemaHistory()" :disabled="!schemaJobName || schemaLoading" class="btn-primary btn-sm">
+              <span x-show="!schemaLoading">Load History</span>
+              <span x-show="schemaLoading">Loading…</span>
+            </button>
+          </div>
+          <template x-if="schemaHistory && schemaHistory.length === 0">
+            <div class="empty-state py-4"><div class="empty-state-title">No schema snapshots — run a schema_snapshot job first</div></div>
+          </template>
+          <template x-if="schemaHistory && schemaHistory.length > 0">
+            <div class="space-y-3">
+              <template x-for="snap in schemaHistory" :key="snap.id">
+                <div class="border border-slate-200 rounded p-3">
+                  <div class="flex items-center gap-3 mb-2">
+                    <span class="font-mono text-xs text-muted" x-text="fmtDate(snap.captured_at)"></span>
+                    <span class="badge badge-blue text-xs" x-text="snap.environment"></span>
+                    <span class="text-xs text-muted">Run: <span class="font-mono" x-text="snap.run_id"></span></span>
+                  </div>
+                  <template x-if="snap.diff && (snap.diff.added?.length || snap.diff.removed?.length || snap.diff.changed?.length)">
+                    <div class="text-xs space-y-1 mb-2">
+                      <template x-if="snap.diff.added?.length">
+                        <div class="text-emerald-600">+ Added: <span x-text="snap.diff.added.join(', ')"></span></div>
+                      </template>
+                      <template x-if="snap.diff.removed?.length">
+                        <div class="text-rose-600">- Removed: <span x-text="snap.diff.removed.join(', ')"></span></div>
+                      </template>
+                      <template x-if="snap.diff.changed?.length">
+                        <div class="text-amber-600">~ Changed: <span x-text="snap.diff.changed.join(', ')"></span></div>
+                      </template>
+                    </div>
+                  </template>
+                  <div class="flex flex-wrap gap-1">
+                    <template x-for="col in (snap.columns || [])" :key="col.name">
+                      <span class="bg-slate-100 text-slate-600 text-xs font-mono px-1.5 py-0.5 rounded" x-text="col.name + ' (' + col.dtype + ')'"></span>
+                    </template>
+                  </div>
+                </div>
+              </template>
             </div>
           </template>
         </div>

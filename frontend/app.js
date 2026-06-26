@@ -153,6 +153,18 @@ function app() {
     auditFilterResourceId: '',
 
     // -----------------------------------------------------------
+    // Profile & Schema
+    // -----------------------------------------------------------
+    profileJobName: '',
+    profileData: null,
+    profileLoading: false,
+    suggestedRules: null,
+    schemaJobName: '',
+    schemaEnvironment: 'source',
+    schemaHistory: null,
+    schemaLoading: false,
+
+    // -----------------------------------------------------------
     // Trends
     // -----------------------------------------------------------
     trendsJobName: '',
@@ -1163,6 +1175,49 @@ function app() {
         if (!this.handleAuthError(e)) this.toast('error', 'Audit load failed', e.message);
       } finally {
         this.auditLoading = false;
+      }
+    },
+
+    async loadProfile() {
+      if (!this.profileJobName) return;
+      this.profileLoading = true;
+      this.profileData = null;
+      this.suggestedRules = null;
+      try {
+        this.profileData = await api('GET', `/api/jobs/${encodeURIComponent(this.profileJobName)}/profile`);
+      } catch (e) {
+        if (e.message && e.message.includes('404')) this.profileData = [];
+        else if (!this.handleAuthError(e)) this.toast('error', 'Profile load failed', e.message);
+      } finally {
+        this.profileLoading = false;
+      }
+    },
+
+    async suggestDQRules() {
+      if (!this.profileJobName) return;
+      this.profileLoading = true;
+      try {
+        const res = await api('POST', `/api/jobs/${encodeURIComponent(this.profileJobName)}/suggest-rules`);
+        this.suggestedRules = res.suggested_rules || [];
+      } catch (e) {
+        if (!this.handleAuthError(e)) this.toast('error', 'Suggest failed', e.message);
+      } finally {
+        this.profileLoading = false;
+      }
+    },
+
+    async loadSchemaHistory() {
+      if (!this.schemaJobName) return;
+      this.schemaLoading = true;
+      this.schemaHistory = null;
+      try {
+        const qs = new URLSearchParams({ environment: this.schemaEnvironment || 'source' });
+        this.schemaHistory = await api('GET', `/api/jobs/${encodeURIComponent(this.schemaJobName)}/schema-history?${qs}`);
+      } catch (e) {
+        if (e.message && e.message.includes('404')) this.schemaHistory = [];
+        else if (!this.handleAuthError(e)) this.toast('error', 'Schema history load failed', e.message);
+      } finally {
+        this.schemaLoading = false;
       }
     },
 
