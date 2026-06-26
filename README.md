@@ -564,6 +564,8 @@ Automic:
 - Look up a job by job name or run ID.
 - Review recent lookups in browser session storage.
 - Add an Automic job to the job catalog with either job-name or run-ID lookup semantics.
+- **Import from File** — upload a `.json` array or `.csv` file of Automic job definitions to bulk-import them into the job catalog. CSV columns: `name, job_type, job_name, run_id, tags, description` (`job_type` defaults to `automic_job`).
+- **Browse & Import from Automic** — enter a filter pattern (e.g. `ETL_*`) to search the Automic API for matching jobs, select multiple results, and import them to the catalog in one step. Uses `GET /api/adapters/automic/search` backed by `AutomicClient.search_jobs()`.
 
 dbt artifacts:
 
@@ -683,6 +685,42 @@ Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/auth/verify
 ```powershell
 $h = @{ Authorization = "Bearer etl_<token>" }
 Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/jobs
+```
+
+### Import Jobs (Bulk)
+
+Import multiple job definitions in one request. Existing jobs with the same name are updated (upsert).
+
+```powershell
+$jobs = @(
+  @{ name = "etl_nightly"; job_type = "automic_job"; params = @{ job_name = "ETL_NIGHTLY_LOAD" }; query = ""; key_columns = @(); tags = @("automic", "nightly"); enabled = $true }
+  @{ name = "etl_weekly";  job_type = "automic_job"; params = @{ job_name = "ETL_WEEKLY_LOAD"  }; query = ""; key_columns = @(); tags = @("automic", "weekly"); enabled = $true }
+) | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/jobs/import" -Body $jobs -ContentType "application/json" -Headers $h
+```
+
+### Search Automic Jobs
+
+Search the Automic API for jobs matching a filter pattern and return their names and statuses.
+
+```powershell
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/adapters/automic/search?config_id=1&filter=ETL_*"
+# Returns: [{ "name": "ETL_NIGHTLY_LOAD", "status": "ENDED_OK" }, ...]
+```
+
+### Bulk Import Automic Jobs
+
+Import multiple Automic jobs from the live API into the job catalog in one request.
+
+```powershell
+$body = @{
+  config_id = 1
+  job_names = @("ETL_NIGHTLY_LOAD", "ETL_WEEKLY_LOAD", "ETL_MONTHLY_CLOSE")
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/adapters/jobs/from-automic/bulk" -Body $body -ContentType "application/json" -Headers $h
+# Returns: { "imported": [...], "errors": {} }
 ```
 
 ### Create A Job With DQ Rules
