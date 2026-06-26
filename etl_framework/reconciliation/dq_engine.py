@@ -17,7 +17,7 @@ class DQViolation:
 
 
 class DQEngine:
-    def evaluate(self, df: pd.DataFrame, rules: list) -> list[DQViolation]:
+    def evaluate(self, df: pd.DataFrame, rules: list, engine=None) -> list[DQViolation]:
         violations: list[DQViolation] = []
         for rule in rules:
             rtype = rule.type
@@ -235,6 +235,236 @@ class DQEngine:
                                 actual_value=total_bad,
                             ))
                     except Exception:
-                        pass  # Skip if numeric conversion fails
+                        pass
+
+            elif rtype == "completeness_ratio":
+                if col and col in df.columns and rule.min_value is not None:
+                    total = len(df)
+                    if total > 0:
+                        ratio = float(df[col].notna().sum()) / total
+                        if ratio < rule.min_value:
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"Completeness of '{col}' ({ratio:.2%}) < min {rule.min_value:.2%}",
+                                actual_value=ratio,
+                            ))
+
+            elif rtype == "distinct_count_between":
+                if col and col in df.columns:
+                    actual = int(df[col].nunique())
+                    lo = rule.min_value if rule.min_value is not None else float("-inf")
+                    hi = rule.max_value if rule.max_value is not None else float("inf")
+                    if not (lo <= actual <= hi):
+                        violations.append(DQViolation(
+                            rule_type=rtype, column=col, severity=sev,
+                            message=f"Distinct count of '{col}' ({actual}) not in [{lo}, {hi}]",
+                            actual_value=actual,
+                        ))
+
+            elif rtype == "column_sum_between":
+                if col and col in df.columns:
+                    try:
+                        actual = float(pd.to_numeric(df[col], errors="coerce").sum())
+                        lo = rule.min_value if rule.min_value is not None else float("-inf")
+                        hi = rule.max_value if rule.max_value is not None else float("inf")
+                        if not (lo <= actual <= hi):
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"Sum of '{col}' ({actual:.4g}) not in [{lo}, {hi}]",
+                                actual_value=actual,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "column_std_dev_between":
+                if col and col in df.columns:
+                    try:
+                        actual = float(pd.to_numeric(df[col], errors="coerce").std())
+                        lo = rule.min_value if rule.min_value is not None else float("-inf")
+                        hi = rule.max_value if rule.max_value is not None else float("inf")
+                        if not (lo <= actual <= hi):
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"Std dev of '{col}' ({actual:.4g}) not in [{lo}, {hi}]",
+                                actual_value=actual,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "column_percentile":
+                if col and col in df.columns and rule.percentile is not None:
+                    try:
+                        actual = float(pd.to_numeric(df[col], errors="coerce").quantile(rule.percentile / 100))
+                        lo = rule.min_value if rule.min_value is not None else float("-inf")
+                        hi = rule.max_value if rule.max_value is not None else float("inf")
+                        if not (lo <= actual <= hi):
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"p{rule.percentile} of '{col}' ({actual:.4g}) not in [{lo}, {hi}]",
+                                actual_value=actual,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "column_type_check":
+                if col and col in df.columns and rule.expected_type:
+                    non_null = df[col].dropna()
+                    if rule.expected_type in ("int", "float"):
+                        bad = int(pd.to_numeric(non_null, errors="coerce").isna().sum())
+                    elif rule.expected_type == "date":
+                        bad = int(pd.to_datetime(non_null, errors="coerce").isna().sum())
+                    elif rule.expected_type == "uuid":
+                        import re as _re
+                        _uuid_re = _re.compile(
+                            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                            _re.IGNORECASE,
+                        )
+                        bad = int((~non_null.astype(str).str.match(_uuid_re)).sum())
+                    else:
+                        bad = 0
+                    if bad:
+                        violations.append(DQViolation(
+                            rule_type=rtype, column=col, severity=sev,
+                            message=f"{bad} value(s) in '{col}' cannot be cast to {rule.expected_type}",
+                            actual_value=bad,
+                        ))
+
+            elif rtype == "column_value_between":
+                if col and col in df.columns:
+                    try:
+                        numeric = pd.to_numeric(df[col], errors="coerce")
+                        lo = rule.min_value if rule.min_value is not None else float("-inf")
+                        hi = rule.max_value if rule.max_value is not None else float("inf")
+                        bad = int(((numeric < lo) | (numeric > hi)).sum())
+                        if bad:
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"{bad} value(s) in '{col}' outside [{lo}, {hi}]",
+                                actual_value=bad,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "cross_column_consistency":
+                col_a = col
+                col_b = rule.column_b
+                op = rule.operator or "<="
+                if col_a and col_b and col_a in df.columns and col_b in df.columns:
+                    try:
+                        a = pd.to_numeric(df[col_a], errors="coerce")
+                        b = pd.to_numeric(df[col_b], errors="coerce")
+                        if op == "<=":
+                            mask = a > b
+                        elif op == "<":
+                            mask = a >= b
+                        elif op == ">=":
+                            mask = a < b
+                        elif op == ">":
+                            mask = a <= b
+                        elif op == "==":
+                            mask = a != b
+                        else:
+                            mask = pd.Series([False] * len(df))
+                        bad = int(mask.sum())
+                        if bad:
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col_a, severity=sev,
+                                message=f"{bad} row(s) violate {col_a} {op} {col_b}",
+                                actual_value=bad,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "pii_mask_check":
+                if col and col in df.columns and rule.pattern:
+                    try:
+                        import re as _re
+                        pat = _re.compile(rule.pattern)
+                        bad = int(df[col].astype(str).str.match(pat).sum())
+                        if bad:
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=col, severity=sev,
+                                message=f"{bad} value(s) in '{col}' match PII pattern — column may be unmasked",
+                                actual_value=bad,
+                            ))
+                    except Exception:
+                        pass
+
+            elif rtype == "no_whitespace":
+                if col and col in df.columns:
+                    vals = df[col].dropna().astype(str)
+                    bad = int((vals != vals.str.strip()).sum())
+                    if bad:
+                        violations.append(DQViolation(
+                            rule_type=rtype, column=col, severity=sev,
+                            message=f"{bad} value(s) in '{col}' have leading/trailing whitespace",
+                            actual_value=bad,
+                        ))
+
+            elif rtype == "referential_check":
+                if col and col in df.columns and rule.lookup_query:
+                    if engine is None:
+                        import logging as _logging
+                        _logging.getLogger("etl_framework.dq_engine").warning(
+                            "referential_check rule skipped — no DB engine available"
+                        )
+                    else:
+                        try:
+                            lookup_df = engine.execute_query(rule.lookup_query)
+                            valid_values: set = set(lookup_df.iloc[:, 0].astype(str)) if not lookup_df.empty else set()
+                            col_vals = df[col].dropna().astype(str)
+                            bad = int((~col_vals.isin(valid_values)).sum())
+                            if bad:
+                                violations.append(DQViolation(
+                                    rule_type=rtype, column=col, severity=sev,
+                                    message=f"{bad} value(s) in '{col}' not found in lookup query result",
+                                    actual_value=bad,
+                                ))
+                        except Exception as exc:
+                            import logging as _logging
+                            _logging.getLogger("etl_framework.dq_engine").warning(
+                                "referential_check failed: %s", exc
+                            )
+
+            elif rtype == "custom_sql_assert":
+                if rule.sql and rule.operator:
+                    if engine is None:
+                        import logging as _logging
+                        _logging.getLogger("etl_framework.dq_engine").warning(
+                            "custom_sql_assert rule skipped — no DB engine available"
+                        )
+                    else:
+                        try:
+                            result_df = engine.execute_query(rule.sql)
+                            if result_df.empty or result_df.shape != (1, 1):
+                                violations.append(DQViolation(
+                                    rule_type=rtype, column=None, severity="error",
+                                    message=f"custom_sql_assert expected 1 row x 1 col, got {result_df.shape}",
+                                    actual_value=None,
+                                ))
+                            else:
+                                scalar = float(result_df.iloc[0, 0])
+                                threshold = rule.min_value if rule.min_value is not None else 0.0
+                                op = rule.operator
+                                passed = (
+                                    (op == ">=" and scalar >= threshold) or
+                                    (op == ">" and scalar > threshold) or
+                                    (op == "<=" and scalar <= threshold) or
+                                    (op == "<" and scalar < threshold) or
+                                    (op == "==" and scalar == threshold) or
+                                    (op == "!=" and scalar != threshold)
+                                )
+                                if not passed:
+                                    violations.append(DQViolation(
+                                        rule_type=rtype, column=None, severity=sev,
+                                        message=f"SQL scalar {scalar} did not satisfy {op} {threshold}",
+                                        actual_value=scalar,
+                                    ))
+                        except Exception as exc:
+                            violations.append(DQViolation(
+                                rule_type=rtype, column=None, severity=sev,
+                                message=f"custom_sql_assert error: {exc}",
+                                actual_value=None,
+                            ))
 
         return violations

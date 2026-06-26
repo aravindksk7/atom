@@ -437,7 +437,7 @@ class RunExecutor:
             source_df = source_engine.execute_query(job.query, job.params)
         except Exception:
             return result
-        violations = DQEngine().evaluate(source_df, job.rules)
+        violations = DQEngine().evaluate(source_df, job.rules, engine=source_engine)
         if not violations:
             return result
         extra: list[MismatchRecord] = []
