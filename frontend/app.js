@@ -2061,6 +2061,54 @@ function app() {
       }
     },
 
+    async loadAllLogEvents() {
+      if (!this.reportRunId) return;
+      this.allLogEventsLoading = true;
+      this.allLogEvents = [];
+      try {
+        const data = await api('GET', `/api/runs/${this.reportRunId}/logs?format=json&limit=5000&scope=run`);
+        this.allLogEvents = data.lines || [];
+      } catch (e) {
+        this.toast('error', 'Failed to load logs', e.message);
+      } finally {
+        this.allLogEventsLoading = false;
+      }
+    },
+
+    filteredLogEvents() {
+      let events = this.allLogEvents;
+      if (this.logFilterLevel) {
+        const lvl = this.logFilterLevel.toUpperCase();
+        events = events.filter(e => {
+          const el = (e.level || '').toUpperCase();
+          if (lvl === 'WARNING') return el === 'WARNING' || el === 'WARN';
+          return el === lvl;
+        });
+      }
+      if (this.logFilterQuery.trim()) {
+        const q = this.logFilterQuery.toLowerCase();
+        events = events.filter(e => (e.text || '').toLowerCase().includes(q));
+      }
+      return events;
+    },
+
+    highlightMatch(text, query) {
+      const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      if (!query.trim()) return safe;
+      const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
+    },
+
+    navigateToRunArtifact(runId, view) {
+      this.resetReportArtifacts();
+      this.reportRunId = runId;
+      this.reportView = view;
+      this.currentView = 'reports';
+      this.reportLoaded = true;
+      if (view === 'metrics') this.loadRunMetrics();
+      if (view === 'logs') this.loadAllLogEvents();
+    },
+
     async loadRunMetrics() {
       if (!this.reportRunId) return;
       this.reportMetricsLoading = true;
