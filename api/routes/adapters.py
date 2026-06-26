@@ -164,3 +164,36 @@ def create_job_from_automic(
         {"source": "automic", "params": params},
     )
     return JobDefinition(**job_data)
+
+
+@router.post("/jobs/from-automic/bulk", response_model=AutomicBulkImportResponse, status_code=201)
+def bulk_create_jobs_from_automic(
+    body: AutomicBulkImportRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    imported = []
+    errors: dict[str, str] = {}
+    for job_name in body.job_names:
+        slug = job_name.lower().replace(" ", "_")
+        job_data = {
+            "name": slug,
+            "description": f"Automic Job: {job_name}",
+            "tags": ["automic_job"],
+            "job_type": "automic_job",
+            "query": "",
+            "key_columns": [],
+            "exclude_columns": [],
+            "params": {"job_name": job_name},
+            "enabled": True,
+        }
+        try:
+            JobRepository(db).upsert(job_data)
+            AuditService(db).log(
+                request, "job.created", "job", slug,
+                {"source": "automic_browse", "params": {"job_name": job_name}},
+            )
+            imported.append(JobDefinition(**job_data))
+        except Exception as exc:
+            errors[job_name] = str(exc)
+    return AutomicBulkImportResponse(imported=imported, errors=errors)

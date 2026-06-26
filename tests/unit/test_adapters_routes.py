@@ -228,6 +228,44 @@ def test_automic_client_search_jobs_empty_response():
 # Router is registered in main.py
 # ---------------------------------------------------------------------------
 
+def test_bulk_import_automic_jobs_returns_201(client):
+    with patch("api.routes.adapters.JobRepository") as MockRepo, \
+         patch("api.routes.adapters.AuditService"):
+        MockRepo.return_value.upsert.return_value = MagicMock()
+        resp = client.post("/api/adapters/jobs/from-automic/bulk", json={
+            "config_id": 1,
+            "job_names": ["ETL_NIGHTLY", "ETL_WEEKLY"],
+        })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data["imported"]) == 2
+    assert data["errors"] == {}
+    names = [j["name"] for j in data["imported"]]
+    assert "etl_nightly" in names
+    assert "etl_weekly" in names
+
+
+def test_bulk_import_automic_sets_job_type(client):
+    with patch("api.routes.adapters.JobRepository") as MockRepo, \
+         patch("api.routes.adapters.AuditService"):
+        MockRepo.return_value.upsert.return_value = MagicMock()
+        resp = client.post("/api/adapters/jobs/from-automic/bulk", json={
+            "config_id": 1,
+            "job_names": ["ETL_NIGHTLY"],
+        })
+    assert resp.status_code == 201
+    assert resp.json()["imported"][0]["job_type"] == "automic_job"
+    assert resp.json()["imported"][0]["params"]["job_name"] == "ETL_NIGHTLY"
+
+
+def test_bulk_import_automic_empty_job_names_returns_422(client):
+    resp = client.post("/api/adapters/jobs/from-automic/bulk", json={
+        "config_id": 1,
+        "job_names": [],
+    })
+    assert resp.status_code == 422
+
+
 def test_adapters_prefix_registered(client):
     """Confirms /api/adapters/* is reachable (not 404 routing miss)."""
     resp = client.post("/api/adapters/sap-bo/test", json={"config_id": 1})
