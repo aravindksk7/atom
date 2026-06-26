@@ -117,9 +117,27 @@ class DQRule(BaseModel):
     severity: Literal["error", "warn"] = "error"
 
 
+class PassCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_row_count: int | None = None
+    max_row_count: int | None = None
+    max_value_mismatches: int | None = None
+    max_missing_in_target: int | None = None
+    max_missing_in_source: int | None = None
+    require_status: list[str] = Field(default_factory=list)
+    pass_sql: str | None = None
+    pass_sql_mode: Literal["rows_mean_pass", "rows_mean_fail"] = "rows_mean_pass"
+
+
 class StepCondition(BaseModel):
     require_status: list[str] = Field(default_factory=lambda: ["PASSED"])
     max_mismatch_count: int | None = None
+    min_row_count: int | None = None
+    max_row_count: int | None = None
+    max_value_mismatches: int | None = None
+    max_missing_in_target: int | None = None
+    max_missing_in_source: int | None = None
 
 
 class SequenceStep(BaseModel):
@@ -282,6 +300,7 @@ class JobDefinition(BaseModel):
     enabled: bool = True
     rules: list[DQRule] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
+    pass_condition: PassCondition | None = None
 
     @model_validator(mode="after")
     def validate_reconciliation_contract(self) -> "JobDefinition":
