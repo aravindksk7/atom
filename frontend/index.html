@@ -824,6 +824,48 @@
         </div>
       </div>
 
+      <!-- Conditions tab panel -->
+      <div x-show="jobModalTab === 'conditions'" class="space-y-3">
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Min Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_min_row_count" class="field-input" placeholder="e.g. 1 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_row_count" class="field-input" placeholder="e.g. 1000000 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Value Mismatches</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_value_mismatches" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Missing in Target</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_target" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Missing in Source</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_source" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Required Status (comma-sep)</label>
+            <input type="text" x-model="jobModal.pass_require_status" class="field-input" placeholder="PASSED" />
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'reconciliation'">
+          <label class="field-label">Pass SQL <span class="text-muted text-xs font-normal">(runs against source after reconciliation)</span></label>
+          <textarea x-model="jobModal.pass_sql" rows="3" class="field-input font-mono text-xs"
+                    placeholder="SELECT 1 WHERE EXISTS (SELECT 1 FROM orders WHERE status = 'ok')"></textarea>
+          <div class="mt-2">
+            <label class="field-label text-xs">Pass SQL Mode</label>
+            <select x-model="jobModal.pass_sql_mode" class="field-input field-select text-sm">
+              <option value="rows_mean_pass">Rows returned → PASS (assert good state exists)</option>
+              <option value="rows_mean_fail">Rows returned → FAIL (assert no bad rows exist)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showJobModal = false" class="btn-secondary">Cancel</button>
         <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()">Save</button>
@@ -892,6 +934,28 @@
             <div>
               <label class="field-label text-xs">Required prior status (comma-sep, e.g. PASSED)</label>
               <input type="text" class="field-input text-sm py-1" x-model="getStepCfg(name).require_status" placeholder="PASSED" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="field-label text-xs">Min source row count</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).min_row_count" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max source row count</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_row_count" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max value mismatches</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_value_mismatches" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max missing in target</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_target" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max missing in source</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_source" placeholder="blank = skip" />
+              </div>
             </div>
           </div>
         </div>
