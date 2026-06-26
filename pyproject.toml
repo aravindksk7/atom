@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "etl-framework"
@@ -37,6 +37,9 @@ dev = [
     "pytest-cov",
     "python-json-logger>=2.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["etl_framework*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
