@@ -11,6 +11,7 @@ from api.routes import configs, runs, jobs, health as health_routes, adapters, c
 from api.routes import auth as auth_routes
 from api.routes import audit as audit_routes
 from api.routes import tokens, notifications, schedules, lineage as lineage_routes
+from api.routes import profiles as profiles_routes, schema_snapshots as schema_snapshot_routes
 from api.middleware.auth import BearerTokenMiddleware
 
 app = FastAPI(
@@ -47,6 +48,8 @@ app.include_router(tokens.router, prefix="/api/tokens")
 app.include_router(notifications.router, prefix="/api/notifications")
 app.include_router(schedules.router, prefix="/api/schedules")
 app.include_router(lineage_routes.router)
+app.include_router(profiles_routes.router, prefix="/api")
+app.include_router(schema_snapshot_routes.router, prefix="/api")
 
 
 @app.get("/api/health")

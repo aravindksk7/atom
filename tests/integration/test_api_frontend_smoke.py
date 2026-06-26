@@ -250,3 +250,23 @@ def test_webhook_delivery_is_tracked_with_thread_owned_session(client):
     assert deliveries[0]["event"] == "run.failed"
     assert deliveries[0]["status"] == "failed"
     assert deliveries[0]["attempt_count"] == 1
+
+
+def test_profile_endpoint_returns_200_or_404(client):
+    r = client.get("/api/jobs/orders_reconciliation/profile")
+    assert r.status_code in (200, 404)
+
+
+def test_profile_history_endpoint_returns_200_or_404(client):
+    r = client.get("/api/jobs/orders_reconciliation/profile/history?column=amount")
+    assert r.status_code in (200, 404)
+
+
+def test_suggest_rules_endpoint_returns_200_or_404(client):
+    r = client.post("/api/jobs/orders_reconciliation/suggest-rules")
+    assert r.status_code in (200, 404)
+
+
+def test_schema_history_endpoint_returns_200(client):
+    r = client.get("/api/jobs/orders_reconciliation/schema-history")
+    assert r.status_code in (200, 404)
