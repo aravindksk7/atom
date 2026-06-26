@@ -141,7 +141,7 @@ def test_frontend_api_run_lifecycle_smoke(client):
     detail_data = detail.json()
     assert detail_data["source_env"] == "dev"
     assert detail_data["target_env"] == "prod"
-    assert detail_data["config_snapshot"]["job_sequence"] == [
+    assert [s["job_name"] for s in detail_data["config_snapshot"]["job_sequence"]] == [
         "customers_reconciliation",
         "orders_reconciliation",
     ]
