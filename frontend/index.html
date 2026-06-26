@@ -2345,13 +2345,11 @@
     <div class="space-y-4">
       <div class="flex gap-2 mb-3 flex-wrap">
         <button @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
-          <span x-text="reportMetricsLoading ? 'Refreshing...' : 'Refresh Metrics'"></span>
+          <span x-text="reportMetricsLoading ? 'Refreshing…' : 'Refresh Metrics'"></span>
         </button>
-        <button @click="openRunTab(reportRunId, 'metrics')" class="btn-secondary btn-sm">Open Themed Metrics</button>
-        <button @click="openRunTab(reportRunId, 'metrics?format=json')" class="btn-secondary btn-sm">Raw JSON</button>
       </div>
       <template x-if="reportMetricsLoading">
-        <div class="card empty-state"><div class="empty-state-title">Loading metrics...</div></div>
+        <div class="card empty-state"><div class="empty-state-title">Loading metrics…</div></div>
       </template>
       <template x-if="!reportMetricsLoading && reportMetrics">
         <div>
@@ -2368,19 +2366,24 @@
           </div>
           <div class="card overflow-hidden p-0">
             <table class="data-table">
-              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th></tr></thead>
+              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
               <tbody>
                 <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
-                  <tr><td colspan="6" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                  <tr><td colspan="7" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
                 </template>
                 <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
-                  <tr>
+                  <tr :class="(t.status||'').toUpperCase()==='FAILED' ? 'metric-row-failed' : (t.status||'').toUpperCase()==='SLOW' ? 'metric-row-slow' : ''">
                     <td class="font-mono text-xs" x-text="t.name"></td>
                     <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
-                    <td x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
+                    <td :class="(t.status||'').toUpperCase()==='SLOW' ? 'text-amber-400 font-semibold' : ''" x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
                     <td x-text="t.source_row_count ?? 0"></td>
                     <td x-text="t.target_row_count ?? 0"></td>
-                    <td x-text="t.total_issues ?? 0"></td>
+                    <td :class="(t.total_issues ?? 0) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'" x-text="t.total_issues ?? 0"></td>
+                    <td>
+                      <div class="metric-mini-bar">
+                        <span :style="'width:100%;background:' + ((t.status||'').toUpperCase()==='FAILED' ? 'var(--rose)' : (t.status||'').toUpperCase()==='SLOW' ? 'var(--amber)' : 'var(--emerald)')"></span>
+                      </div>
+                    </td>
                   </tr>
                 </template>
               </tbody>
