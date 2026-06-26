@@ -131,7 +131,7 @@ Remove the "Open Themed Metrics" and "Raw JSON" buttons from the metrics toolbar
 ## What Does Not Change
 
 - `openReportTab()` and `openRunTab()` remain for the Report sub-tab blob approach and any other callers.
-- `loadRunLogs()` (server-side, JSON) remains — still used when the Report tab is loaded with view=logs via `loadReport()` → `switchReportView()` path.
+- `loadRunLogs()` (server-side, paginated JSON) remains in the codebase but is no longer called from the logs sub-tab flow. It is superseded by `loadAllLogEvents()` for the Reports tab logs view. It can be removed in a follow-up cleanup once confirmed unused.
 - The Report sub-tab (HTML blob in iframe) is unchanged.
 - `BearerTokenMiddleware`, API routes, and backend rendering functions are unchanged.
 

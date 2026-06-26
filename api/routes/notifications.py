@@ -99,7 +99,7 @@ def test_hook(hook_id: int, request: Request, db: Session = Depends(get_session)
     import threading
     payload = {"event": "test.ping", "run_id": "test", "status": "TEST",
                "message": "ETL Framework webhook test"}
-    hook_secret = decrypt_secret(hook.secret) if hook.secret else hook.secret
+    hook_secret = decrypt_secret(hook.secret)
     threading.Thread(target=_post, args=(hook.url, payload, hook_secret), daemon=True).start()
     AuditService(db).log(request, "notification_hook.tested", "notification_hook", hook_id)
     return {"detail": "Test ping dispatched"}

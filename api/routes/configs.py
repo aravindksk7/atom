@@ -29,7 +29,7 @@ _MASK = "********"
 
 def _mask(data: dict) -> dict:
     """Replace sensitive credential values with a fixed mask before returning to callers."""
-    return {k: (_MASK if k in _SENSITIVE_KEYS and v else v) for k, v in data.items()}
+    return {k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v) for k, v in data.items()}
 
 
 @router.get("", response_model=list[ConfigOut])

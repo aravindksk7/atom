@@ -8,6 +8,7 @@ import json
 import logging
 import socket
 import threading
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -26,7 +27,6 @@ _BLOCKED_NETWORKS = [
 def _is_ssrf_target(url: str) -> bool:
     """Return True if the URL resolves to a private/loopback address."""
     try:
-        from urllib.parse import urlparse
         host = urlparse(url).hostname or ""
         addr = ipaddress.ip_address(socket.gethostbyname(host))
         return any(addr in net for net in _BLOCKED_NETWORKS)
@@ -166,7 +166,7 @@ def notify(
         for event in fired_events:
             if event in hook_events:
                 p = {**payload, "event": event}
-                hook_secret = decrypt_secret(hook.secret) if hook.secret else hook.secret
+                hook_secret = decrypt_secret(hook.secret)
 
                 delivery_id = None
                 if delivery_repo:

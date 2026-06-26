@@ -213,8 +213,7 @@ def validate_job(name: str, body: "_ValidateRequest", db: Session = Depends(get_
         # without executing it.  The query is passed as a bound parameter so it
         # cannot break out of the text boundary — no string interpolation here.
         try:
-            from sqlalchemy import text, event
-            from sqlalchemy.pool import ConnectionPoolEntry
+            from sqlalchemy import text
 
             with engine._engine.connect() as conn:
                 conn.execute(text("SET FMTONLY ON"))
