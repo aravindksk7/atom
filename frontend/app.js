@@ -195,6 +195,22 @@ function app() {
     automicResult: null,
     automicHistory: JSON.parse(sessionStorage.getItem('automicHistory') || '[]'),
 
+    // Adapters – Import from File
+    fileImportOpen: false,
+    fileImportJobs: [],
+    fileImportErrors: [],
+    fileImportLoading: false,
+
+    // Adapters – Browse & Import from Automic
+    browseAutomicOpen: false,
+    browseAutomicConfigId: '',
+    browseAutomicFilter: '',
+    browseAutomicResults: [],
+    browseAutomicSelected: [],
+    browseAutomicLoading: false,
+    browseAutomicImporting: false,
+    browseAutomicError: '',
+
     // -----------------------------------------------------------
     // Reports tab
     // -----------------------------------------------------------
@@ -1707,7 +1723,149 @@ function app() {
     },
 
     // ===========================================================
-    // ADAPTERS – Automic
+    // ADAPTERS – Import from File
+    // ===========================================================
+
+    _parseCSV(text) {
+      const lines = text.trim().split('\n').filter(l => l.trim());
+      if (lines.length < 2) return [];
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      return lines.slice(1).map(line => {
+        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = vals[i] || ''; });
+        return obj;
+      });
+    },
+
+    _csvRowToJobDef(row) {
+      const params = {};
+      if (row.job_name) params.job_name = row.job_name;
+      if (row.run_id)   params.run_id   = row.run_id;
+      return {
+        name:        row.name || '',
+        description: row.description || '',
+        job_type:    row.job_type || 'automic_job',
+        query:       '',
+        key_columns: [],
+        tags:        row.tags ? row.tags.split(/[,\s]+/).filter(Boolean) : [],
+        params,
+        enabled:     true,
+      };
+    },
+
+    onFileSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        this.fileImportErrors = [];
+        try {
+          let rows;
+          if (file.name.endsWith('.csv')) {
+            rows = this._parseCSV(text).map(r => this._csvRowToJobDef(r));
+          } else {
+            rows = JSON.parse(text);
+          }
+          this.fileImportJobs = rows;
+          const missing = rows.filter(r => !r.name);
+          if (missing.length > 0) {
+            this.fileImportErrors = [`${missing.length} row(s) missing "name" — fix the file and re-upload`];
+          }
+        } catch (err) {
+          this.fileImportErrors = [`Parse error: ${err.message}`];
+          this.fileImportJobs = [];
+        }
+      };
+      reader.readAsText(file);
+    },
+
+    async importFromFile() {
+      if (!this.fileImportJobs.length || this.fileImportErrors.length) return;
+      this.fileImportLoading = true;
+      try {
+        const result = await api('POST', '/api/jobs/import', this.fileImportJobs);
+        this.toast('success', 'Import complete', `${result.length} job(s) imported`);
+        this.fileImportJobs = [];
+        this.fileImportOpen = false;
+        await this.loadJobs();
+      } catch (e) {
+        this.toast('error', 'Import failed', e.message);
+      } finally {
+        this.fileImportLoading = false;
+      }
+    },
+
+    // ===========================================================
+    // ADAPTERS – Browse & Import from Automic
+    // ===========================================================
+
+    async searchAutomic() {
+      if (!this.browseAutomicConfigId || !this.browseAutomicFilter.trim()) return;
+      this.browseAutomicLoading = true;
+      this.browseAutomicResults = [];
+      this.browseAutomicSelected = [];
+      this.browseAutomicError = '';
+      try {
+        const qs = `config_id=${this.browseAutomicConfigId}&filter=${encodeURIComponent(this.browseAutomicFilter)}`;
+        this.browseAutomicResults = await api('GET', `/api/adapters/automic/search?${qs}`);
+        if (!this.browseAutomicResults.length) {
+          this.browseAutomicError = 'No jobs found for that filter.';
+        }
+      } catch (e) {
+        this.browseAutomicError = e.message;
+      } finally {
+        this.browseAutomicLoading = false;
+      }
+    },
+
+    toggleBrowseSelection(name) {
+      const idx = this.browseAutomicSelected.indexOf(name);
+      if (idx >= 0) this.browseAutomicSelected.splice(idx, 1);
+      else this.browseAutomicSelected.push(name);
+    },
+
+    isBrowseAllSelected() {
+      return this.browseAutomicResults.length > 0 &&
+             this.browseAutomicResults.every(r => this.browseAutomicSelected.includes(r.name));
+    },
+
+    toggleSelectAll() {
+      if (this.isBrowseAllSelected()) {
+        this.browseAutomicSelected = [];
+      } else {
+        this.browseAutomicSelected = this.browseAutomicResults.map(r => r.name);
+      }
+    },
+
+    async importSelectedAutomic() {
+      if (!this.browseAutomicSelected.length) return;
+      this.browseAutomicImporting = true;
+      try {
+        const result = await api('POST', '/api/adapters/jobs/from-automic/bulk', {
+          config_id: Number(this.browseAutomicConfigId),
+          job_names: this.browseAutomicSelected,
+        });
+        const nImported = result.imported.length;
+        const nErrors = Object.keys(result.errors).length;
+        if (nErrors > 0) {
+          this.toast('error', `${nImported} imported, ${nErrors} failed`,
+            Object.keys(result.errors).join(', '));
+        } else {
+          this.toast('success', 'Import complete', `${nImported} job(s) added to catalog`);
+        }
+        this.browseAutomicSelected = [];
+        await this.loadJobs();
+      } catch (e) {
+        this.toast('error', 'Import failed', e.message);
+      } finally {
+        this.browseAutomicImporting = false;
+      }
+    },
+
+    // ===========================================================
+    // ADAPTERS – Automic (single lookup — unchanged)
     // ===========================================================
     async lookupAutomic() {
       if (!this.automicConfigId || !this.automicIdentifier) return;
