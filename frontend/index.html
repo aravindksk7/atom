@@ -654,6 +654,10 @@
             <option value="bo_report">bo_report</option>
             <option value="automic_job">automic_job</option>
             <option value="dbt_artifact">dbt_artifact</option>
+            <option value="freshness">freshness</option>
+            <option value="schema_snapshot">schema_snapshot</option>
+            <option value="profile">profile</option>
+            <option value="cross_job_assertion">cross_job_assertion</option>
           </select>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -726,6 +730,104 @@
             <input x-model="jobModal.dbt_run_results_path" class="field-input" placeholder="target/run_results.json" />
           </div>
         </div>
+        <!-- Freshness params -->
+        <div x-show="jobModal.job_type === 'freshness'" class="space-y-3">
+          <div>
+            <label class="field-label">SQL Query (must return a timestamp column)</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT MAX(created_at) as ts FROM orders"></textarea>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Timestamp Column Name</label>
+              <input x-model="jobModal.freshness_ts_col" class="field-input" placeholder="ts" />
+            </div>
+            <div>
+              <label class="field-label">Max Age (hours)</label>
+              <input type="number" x-model="jobModal.freshness_max_hours" class="field-input" placeholder="24" min="0" step="0.5" />
+            </div>
+          </div>
+        </div>
+        <!-- Profile params -->
+        <div x-show="jobModal.job_type === 'profile'" class="space-y-3">
+          <div>
+            <label class="field-label">SQL Query</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT * FROM orders"></textarea>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Columns (comma-separated, blank = all)</label>
+              <input x-model="jobModal.profile_columns" class="field-input" placeholder="amount, status, created_at" />
+            </div>
+            <div>
+              <label class="field-label">Drift Threshold %</label>
+              <input type="number" x-model="jobModal.profile_drift_pct" class="field-input" placeholder="20" min="0" max="100" />
+            </div>
+          </div>
+        </div>
+        <!-- Schema Snapshot params -->
+        <div x-show="jobModal.job_type === 'schema_snapshot'" class="space-y-3">
+          <div>
+            <label class="field-label">SQL Query (schema is captured from the result columns)</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT * FROM orders LIMIT 0"></textarea>
+          </div>
+          <div>
+            <label class="field-label">Environment</label>
+            <select x-model="jobModal.snapshot_environment" class="field-input field-select">
+              <option value="source">source</option>
+              <option value="target">target</option>
+              <option value="both">both</option>
+            </select>
+          </div>
+        </div>
+        <!-- Cross-Job Assertion params -->
+        <div x-show="jobModal.job_type === 'cross_job_assertion'" class="space-y-3">
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Source Job Name</label>
+              <input x-model="jobModal.cja_source_job" class="field-input" placeholder="orders_profile" />
+            </div>
+            <div>
+              <label class="field-label">Source Metric</label>
+              <select x-model="jobModal.cja_source_metric" class="field-input field-select">
+                <option value="count">count</option>
+                <option value="distinct_count">distinct_count</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Source Column</label>
+              <input x-model="jobModal.cja_source_col" class="field-input" placeholder="amount" />
+            </div>
+            <div>
+              <label class="field-label">Target Job Name</label>
+              <input x-model="jobModal.cja_target_job" class="field-input" placeholder="payments_profile" />
+            </div>
+            <div>
+              <label class="field-label">Target Metric</label>
+              <select x-model="jobModal.cja_target_metric" class="field-input field-select">
+                <option value="count">count</option>
+                <option value="distinct_count">distinct_count</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Target Column</label>
+              <input x-model="jobModal.cja_target_col" class="field-input" placeholder="total" />
+            </div>
+            <div>
+              <label class="field-label">Tolerance</label>
+              <input type="number" x-model="jobModal.cja_tolerance" class="field-input" placeholder="0" min="0" />
+            </div>
+            <div>
+              <label class="field-label">Tolerance Type</label>
+              <select x-model="jobModal.cja_tolerance_type" class="field-input field-select">
+                <option value="absolute">absolute</option>
+                <option value="percent">percent</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <!-- Validate query button (editing mode only) -->
         <template x-if="jobModalEditing && jobModal.job_type === 'reconciliation'">
           <div>
@@ -778,7 +880,7 @@
             <div class="space-y-2 mt-1">
               <template x-for="(rule, idx) in jobModal.rules" :key="idx">
                 <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
-                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-40">
+                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-44">
                     <option value="not_null">not_null</option>
                     <option value="unique">unique</option>
                     <option value="row_count_min">row_count_min</option>
@@ -787,16 +889,54 @@
                     <option value="column_mean_between">column_mean_between</option>
                     <option value="match_regex">match_regex</option>
                     <option value="custom_sql">custom_sql</option>
+                    <option value="completeness_ratio">completeness_ratio</option>
+                    <option value="distinct_count_between">distinct_count_between</option>
+                    <option value="column_sum_between">column_sum_between</option>
+                    <option value="column_std_dev_between">column_std_dev_between</option>
+                    <option value="column_percentile">column_percentile</option>
+                    <option value="column_type_check">column_type_check</option>
+                    <option value="column_value_between">column_value_between</option>
+                    <option value="cross_column_consistency">cross_column_consistency</option>
+                    <option value="pii_mask_check">pii_mask_check</option>
+                    <option value="no_whitespace">no_whitespace</option>
+                    <option value="referential_check">referential_check</option>
+                    <option value="custom_sql_assert">custom_sql_assert</option>
                   </select>
                   <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" />
-                  <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between'].includes(rule.type)">
+                  <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between','completeness_ratio','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between','custom_sql_assert'].includes(rule.type)">
                     <input x-model="rule.min_value" type="number" class="field-input text-xs py-1 w-20" placeholder="min" />
                   </template>
-                  <template x-if="['row_count_max','row_count_between','column_mean_between'].includes(rule.type)">
+                  <template x-if="['row_count_max','row_count_between','column_mean_between','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between'].includes(rule.type)">
                     <input x-model="rule.max_value" type="number" class="field-input text-xs py-1 w-20" placeholder="max" />
                   </template>
-                  <template x-if="rule.type === 'match_regex'">
-                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="^[A-Z]+" />
+                  <template x-if="['match_regex','pii_mask_check'].includes(rule.type)">
+                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="regex pattern" />
+                  </template>
+                  <template x-if="rule.type === 'column_percentile'">
+                    <input x-model="rule.percentile" type="number" class="field-input text-xs py-1 w-16" placeholder="p%" min="1" max="99" />
+                  </template>
+                  <template x-if="rule.type === 'column_type_check'">
+                    <select x-model="rule.expected_type" class="field-input field-select text-xs py-1 w-24">
+                      <option value="int">int</option>
+                      <option value="float">float</option>
+                      <option value="date">date</option>
+                      <option value="uuid">uuid</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'cross_column_consistency'">
+                    <input x-model="rule.column_b" class="field-input text-xs py-1 w-24" placeholder="column B" />
+                  </template>
+                  <template x-if="['cross_column_consistency','custom_sql_assert'].includes(rule.type)">
+                    <select x-model="rule.operator" class="field-input field-select text-xs py-1 w-16">
+                      <option value="&lt;=">&lt;=</option>
+                      <option value="&lt;">&lt;</option>
+                      <option value="&gt;=">&gt;=</option>
+                      <option value="&gt;">&gt;</option>
+                      <option value="==">==</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'referential_check'">
+                    <input x-model="rule.lookup_query" class="field-input text-xs py-1 flex-1" placeholder="SELECT id FROM ref_table" />
                   </template>
                   <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20">
                     <option value="error">error</option>
@@ -2629,7 +2769,7 @@
       <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
     </div>
 
-    <div class="auth-path" x-show="!authInitialized">
+    <div class="auth-path" x-show="!authInitialized && !authCreatedToken">
       <div class="auth-path-label">Create Initial Administrator</div>
       <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
       <div class="auth-row">
@@ -2638,13 +2778,27 @@
       </div>
     </div>
 
-    <div class="auth-or" x-show="!authInitialized">
+    <template x-if="authCreatedToken">
+      <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
+        <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
+        <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
+        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" x-text="authCreatedToken"></div>
+        <button
+          @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
+          class="btn-primary btn-sm text-xs">
+          Copy to Clipboard
+        </button>
+        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2">Done — I've saved my token</button>
+      </div>
+    </template>
+
+    <div class="auth-or" x-show="!authInitialized && !authCreatedToken">
       <span></span>
       <strong>or</strong>
       <span></span>
     </div>
 
-    <div class="auth-path">
+    <div class="auth-path" x-show="!authCreatedToken">
       <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
       <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
       <div class="auth-row">

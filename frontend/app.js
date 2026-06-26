@@ -74,6 +74,7 @@ function app() {
     authTokenName: '',
     authPasteValue: '',
     authError: '',
+    authCreatedToken: null,
     authInitialized: true,
     activeTokenName: '',
     activeTokenIsAdmin: false,
@@ -504,6 +505,7 @@ function app() {
 
     closeAuthModal() {
       this.showAuthModal = false;
+      this.authCreatedToken = null;
     },
 
     async activateToken() {
@@ -726,6 +728,12 @@ function app() {
         pass_require_status: '',
         pass_sql: '',
         pass_sql_mode: 'rows_mean_pass',
+        freshness_ts_col: '', freshness_max_hours: 24,
+        profile_columns: '', profile_drift_pct: 20,
+        snapshot_environment: 'source',
+        cja_source_job: '', cja_source_metric: 'count', cja_source_col: '',
+        cja_target_job: '', cja_target_metric: 'count', cja_target_col: '',
+        cja_tolerance: 0, cja_tolerance_type: 'absolute',
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
@@ -757,6 +765,19 @@ function app() {
         pass_require_status: (job.pass_condition?.require_status || []).join(', '),
         pass_sql: job.pass_condition?.pass_sql || '',
         pass_sql_mode: job.pass_condition?.pass_sql_mode || 'rows_mean_pass',
+        freshness_ts_col: job.params?.timestamp_column || '',
+        freshness_max_hours: job.params?.max_age_hours ?? 24,
+        profile_columns: (job.params?.columns || []).join(', '),
+        profile_drift_pct: job.params?.drift_threshold_pct ?? 20,
+        snapshot_environment: job.params?.environment || 'source',
+        cja_source_job: job.params?.source_job || '',
+        cja_source_metric: job.params?.source_metric || 'count',
+        cja_source_col: job.params?.source_column || '',
+        cja_target_job: job.params?.target_job || '',
+        cja_target_metric: job.params?.target_metric || 'count',
+        cja_target_col: job.params?.target_column || '',
+        cja_tolerance: job.params?.tolerance ?? 0,
+        cja_tolerance_type: job.params?.tolerance_type || 'absolute',
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
@@ -766,7 +787,7 @@ function app() {
     },
 
     addDQRule() {
-      this.jobModal.rules.push({ type: 'not_null', column: '', severity: 'error', min_value: null, max_value: null, pattern: null });
+      this.jobModal.rules.push({ type: 'not_null', column: '', severity: 'error', min_value: null, max_value: null, pattern: null, percentile: null, operator: null, column_b: null, lookup_query: null, expected_type: null });
     },
 
     removeDQRule(idx) {
@@ -808,6 +829,28 @@ function app() {
         if (m.dbt_manifest_path) params.manifest_path = m.dbt_manifest_path;
         if (m.dbt_run_results_path) params.run_results_path = m.dbt_run_results_path;
       }
+      if (m.job_type === 'freshness') {
+        if (m.freshness_ts_col) params.timestamp_column = m.freshness_ts_col;
+        params.max_age_hours = Number(m.freshness_max_hours) || 24;
+      }
+      if (m.job_type === 'profile') {
+        const cols = m.profile_columns.split(',').map(s => s.trim()).filter(Boolean);
+        if (cols.length) params.columns = cols;
+        params.drift_threshold_pct = Number(m.profile_drift_pct) || 20;
+      }
+      if (m.job_type === 'schema_snapshot') {
+        params.environment = m.snapshot_environment || 'source';
+      }
+      if (m.job_type === 'cross_job_assertion') {
+        params.source_job = m.cja_source_job;
+        params.source_metric = m.cja_source_metric || 'count';
+        if (m.cja_source_col) params.source_column = m.cja_source_col;
+        params.target_job = m.cja_target_job;
+        params.target_metric = m.cja_target_metric || 'count';
+        if (m.cja_target_col) params.target_column = m.cja_target_col;
+        params.tolerance = Number(m.cja_tolerance) || 0;
+        params.tolerance_type = m.cja_tolerance_type || 'absolute';
+      }
       const keyColumns = ['reconciliation', 'bo_report'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
@@ -822,7 +865,7 @@ function app() {
       const body = {
         name: m.name, description: m.description,
         job_type: m.job_type,
-        query: m.job_type === 'reconciliation' ? m.query : '',
+        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) ? m.query : '',
         key_columns: keyColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
@@ -854,6 +897,10 @@ function app() {
       if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
       if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
       if (m.job_type === 'dbt_artifact') return Boolean(m.dbt_run_results_path);
+      if (m.job_type === 'freshness') return Boolean(m.query?.trim() && m.freshness_ts_col);
+      if (m.job_type === 'profile') return Boolean(m.query?.trim());
+      if (m.job_type === 'schema_snapshot') return Boolean(m.query?.trim());
+      if (m.job_type === 'cross_job_assertion') return Boolean(m.cja_source_job && m.cja_target_job);
       return true;
     },
 
@@ -2013,7 +2060,7 @@ function app() {
           this.authInitialized = true;
           this.authTokenName = '';
           this.authError = '';
-          this.closeAuthModal();
+          this.authCreatedToken = resp.raw_token;
           await this.loadAll();
         } else {
           this.createdToken = resp.raw_token;
