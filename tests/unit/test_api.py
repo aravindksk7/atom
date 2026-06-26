@@ -636,3 +636,28 @@ def test_list_jobs_includes_pass_condition(client):
     pc_job = next((j for j in jobs if j["name"] == "pc_list_job"), None)
     assert pc_job is not None
     assert pc_job["pass_condition"]["max_value_mismatches"] == 0
+
+
+def test_automic_job_summary_valid():
+    from api.schemas import AutomicJobSummary
+    s = AutomicJobSummary(name="ETL_JOB", status="ENDED_OK")
+    assert s.name == "ETL_JOB"
+    assert s.status == "ENDED_OK"
+
+
+def test_automic_bulk_import_request_requires_nonempty_list():
+    from api.schemas import AutomicBulkImportRequest
+    with pytest.raises(Exception):
+        AutomicBulkImportRequest(config_id=1, job_names=[])
+
+
+def test_automic_bulk_import_request_valid():
+    from api.schemas import AutomicBulkImportRequest
+    r = AutomicBulkImportRequest(config_id=1, job_names=["ETL_A"])
+    assert r.job_names == ["ETL_A"]
+
+
+def test_automic_bulk_import_response_defaults_errors_to_empty():
+    from api.schemas import AutomicBulkImportResponse
+    r = AutomicBulkImportResponse(imported=[])
+    assert r.errors == {}

@@ -393,6 +393,21 @@ class AutomicJobCreateRequest(BaseModel):
         return self
 
 
+class AutomicJobSummary(BaseModel):
+    name: str
+    status: str
+
+
+class AutomicBulkImportRequest(BaseModel):
+    config_id: int
+    job_names: list[str] = Field(min_length=1)
+
+
+class AutomicBulkImportResponse(BaseModel):
+    imported: list[JobDefinition]
+    errors: dict[str, str] = Field(default_factory=dict)
+
+
 class TestCompareOut(BaseModel):
     test_name: str
     status_a: str | None = None
