@@ -229,6 +229,7 @@ function app() {
     // -----------------------------------------------------------
     reportRunId: '',
     reportLoaded: false,
+    reportBlobUrl: '',
     reportView: 'report',
     reportMetrics: null,
     reportMetricsLoading: false,
@@ -237,6 +238,10 @@ function app() {
     reportLogQuery: '',
     reportLogLevel: '',
     reportLogLimit: 500,
+    allLogEvents: [],
+    allLogEventsLoading: false,
+    logFilterQuery: '',
+    logFilterLevel: '',
 
     // -----------------------------------------------------------
     // Mismatch drawer
@@ -2017,6 +2022,7 @@ function app() {
       this.reportLoaded = false;
       this.reportMetrics = null;
       this.reportLogs = null;
+      if (this.reportBlobUrl) { URL.revokeObjectURL(this.reportBlobUrl); this.reportBlobUrl = ''; }
     },
 
     async switchReportView(view) {
@@ -2026,11 +2032,33 @@ function app() {
       if (view === 'logs') await this.loadRunLogs();
     },
 
-    loadReport() {
+    async loadReport() {
       if (!this.reportRunId) return;
+      if (this.reportBlobUrl) { URL.revokeObjectURL(this.reportBlobUrl); this.reportBlobUrl = ''; }
+      try {
+        const { blob } = await apiBlob(`/api/runs/${this.reportRunId}/report`);
+        this.reportBlobUrl = URL.createObjectURL(blob);
+      } catch (e) {
+        this.toast('error', 'Failed to load report', e.message);
+      }
       this.reportLoaded = true;
       if (this.reportView === 'metrics') this.loadRunMetrics();
       if (this.reportView === 'logs') this.loadRunLogs();
+    },
+
+    async openReportTab(runId) {
+      await this.openRunTab(runId, 'report');
+    },
+
+    async openRunTab(runId, suffix) {
+      try {
+        const { blob } = await apiBlob(`/api/runs/${runId}/${suffix}`);
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (e) {
+        this.toast('error', 'Failed to open', e.message);
+      }
     },
 
     async loadRunMetrics() {
