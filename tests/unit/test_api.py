@@ -195,7 +195,7 @@ def test_trigger_run_stores_sequence_and_settings(client, monkeypatch):
     assert detail.status_code == 200
     snapshot = detail.json()["config_snapshot"]
     assert snapshot["db_host"] == "localhost"
-    assert snapshot["job_sequence"] == ["customers_query", "orders_query"]
+    assert [s["job_name"] for s in snapshot["job_sequence"]] == ["customers_query", "orders_query"]
     assert snapshot["run_settings"]["execution_mode"] == "sequential"
     assert snapshot["run_settings"]["schema_mismatch_policy"] == "warn"
     assert snapshot["run_settings"]["comparison_backend"] == "pandas"
@@ -278,12 +278,15 @@ def test_trigger_run_rejects_removed_metadata_only_settings(client):
 
 
 def test_run_trigger_translates_legacy_job_names_to_sequence():
+    from api.schemas import SequenceStep
     trigger = RunTrigger(
         source_env="dev",
         target_env="prod",
         job_names=["first", "second"],
     )
-    assert trigger.job_sequence == ["first", "second"]
+    assert len(trigger.job_sequence) == 2
+    assert all(isinstance(s, SequenceStep) for s in trigger.job_sequence)
+    assert [s.job_name for s in trigger.job_sequence] == ["first", "second"]
 
 
 def test_job_definition_requires_key_columns_for_reconciliation():
@@ -562,4 +565,74 @@ def test_testrun_has_run_type_and_pair_id_columns(client):
     assert "run_type" in data
     assert data["run_type"] == "reconciliation"
     assert "pair_id" in data
-    assert data["pair_id"] is None
+
+
+# --- pass_condition round-trip ---
+
+def test_create_job_with_pass_condition(client):
+    body = {
+        "name": "pc_job",
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM orders",
+        "key_columns": ["id"],
+        "pass_condition": {
+            "min_row_count": 1,
+            "max_value_mismatches": 0,
+            "require_status": ["PASSED"],
+        },
+    }
+    resp = client.post("/api/jobs", json=body)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["pass_condition"]["min_row_count"] == 1
+    assert data["pass_condition"]["max_value_mismatches"] == 0
+    assert data["pass_condition"]["require_status"] == ["PASSED"]
+
+
+def test_update_job_pass_condition_round_trips(client):
+    body = {
+        "name": "pc_update_job",
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM orders",
+        "key_columns": ["id"],
+    }
+    client.post("/api/jobs", json=body)
+    update = {**body, "pass_condition": {"min_row_count": 5, "pass_sql": "SELECT 1"}}
+    resp = client.put("/api/jobs/pc_update_job", json=update)
+    assert resp.status_code == 200
+    pc = resp.json()["pass_condition"]
+    assert pc["min_row_count"] == 5
+    assert pc["pass_sql"] == "SELECT 1"
+    assert pc["pass_sql_mode"] == "rows_mean_pass"
+
+
+def test_update_job_pass_condition_null_clears_it(client):
+    body = {
+        "name": "pc_null_job",
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM orders",
+        "key_columns": ["id"],
+        "pass_condition": {"min_row_count": 1},
+    }
+    client.post("/api/jobs", json=body)
+    update = {**body, "pass_condition": None}
+    resp = client.put("/api/jobs/pc_null_job", json=update)
+    assert resp.status_code == 200
+    assert resp.json()["pass_condition"] is None
+
+
+def test_list_jobs_includes_pass_condition(client):
+    body = {
+        "name": "pc_list_job",
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM orders",
+        "key_columns": ["id"],
+        "pass_condition": {"max_value_mismatches": 0},
+    }
+    client.post("/api/jobs", json=body)
+    resp = client.get("/api/jobs")
+    assert resp.status_code == 200
+    jobs = resp.json()
+    pc_job = next((j for j in jobs if j["name"] == "pc_list_job"), None)
+    assert pc_job is not None
+    assert pc_job["pass_condition"]["max_value_mismatches"] == 0

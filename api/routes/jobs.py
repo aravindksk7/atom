@@ -72,8 +72,10 @@ def _job_to_schema(job: SavedJob) -> JobDefinition:
     params = dict(job.params or {})
     rules_raw = params.pop("rules", [])
     depends_on = params.pop("depends_on", [])
-    from api.schemas import DQRule
+    pass_condition_raw = params.pop("pass_condition", None)
+    from api.schemas import DQRule, PassCondition
     rules = [DQRule.model_validate(r) for r in (rules_raw or [])]
+    pass_condition = PassCondition.model_validate(pass_condition_raw) if pass_condition_raw else None
     return JobDefinition(
         name=job.name,
         description=job.description,
@@ -88,16 +90,19 @@ def _job_to_schema(job: SavedJob) -> JobDefinition:
         enabled=job.enabled,
         rules=rules,
         depends_on=depends_on,
+        pass_condition=pass_condition,
     )
 
 
 def _job_to_data(job: JobDefinition) -> dict:
-    data = job.model_dump(exclude={"rules", "depends_on"})
+    data = job.model_dump(exclude={"rules", "depends_on", "pass_condition"})
     params = dict(data.get("params") or {})
     if job.rules:
         params["rules"] = [r.model_dump() for r in job.rules]
     if job.depends_on:
         params["depends_on"] = list(job.depends_on)
+    if job.pass_condition:
+        params["pass_condition"] = job.pass_condition.model_dump(exclude_none=True)
     data["params"] = params
     return data
 
