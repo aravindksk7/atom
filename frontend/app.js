@@ -2023,13 +2023,16 @@ function app() {
       this.reportMetrics = null;
       this.reportLogs = null;
       if (this.reportBlobUrl) { URL.revokeObjectURL(this.reportBlobUrl); this.reportBlobUrl = ''; }
+      this.allLogEvents = [];
+      this.logFilterQuery = '';
+      this.logFilterLevel = '';
     },
 
     async switchReportView(view) {
       this.reportView = view;
       if (!this.reportRunId || !this.reportLoaded) return;
       if (view === 'metrics') await this.loadRunMetrics();
-      if (view === 'logs') await this.loadRunLogs();
+      if (view === 'logs' && this.allLogEvents.length === 0) await this.loadAllLogEvents();
     },
 
     async loadReport() {
@@ -2043,7 +2046,7 @@ function app() {
       }
       this.reportLoaded = true;
       if (this.reportView === 'metrics') this.loadRunMetrics();
-      if (this.reportView === 'logs') this.loadRunLogs();
+      if (this.reportView === 'logs') this.loadAllLogEvents();
     },
 
     async openReportTab(runId) {
