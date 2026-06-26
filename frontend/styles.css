@@ -1500,6 +1500,40 @@ select option {
 .log-level-debug { border-left-color: var(--violet); }
 .log-level-trace { border-left-color: rgba(148,163,184,0.35); }
 
+/* Live log filter — keyword highlight */
+.log-highlight {
+  background: rgba(251, 191, 36, 0.28);
+  color: #fcd34d;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Level filter chips */
+.level-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  line-height: 1;
+}
+.level-chip:hover { background: rgba(255, 255, 255, 0.09); }
+.chip-active-ALL     { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.4); color: var(--text); }
+.chip-active-ERROR   { border-color: rgba(251,113,133,.6); color: #fda4af; background: rgba(251,113,133,.12); }
+.chip-active-WARNING { border-color: rgba(251,191,36,.6);  color: #fcd34d; background: rgba(251,191,36,.12); }
+.chip-active-INFO    { border-color: rgba(59,130,246,.6);  color: #93c5fd; background: rgba(59,130,246,.12); }
+.chip-active-DEBUG   { border-color: rgba(139,92,246,.6);  color: #c4b5fd; background: rgba(139,92,246,.12); }
+
+/* Metrics table row tinting */
+.metric-row-failed { background: rgba(251, 113, 133, 0.06); }
+.metric-row-slow   { background: rgba(251, 191, 36,  0.04); }
+.metric-mini-bar   { width: 72px; height: 4px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+.metric-mini-bar span { display: block; height: 100%; border-radius: 999px; }
+
 @media (max-width: 760px) {
   .report-frame-card { height: 68vh; }
   .log-entry {
