@@ -105,6 +105,11 @@ class DQRule(BaseModel):
         "row_count_between", "column_mean_between", "match_regex", "custom_sql",
         "column_max_length", "column_min_length", "value_in_set", "value_not_in_set",
         "column_contains", "date_range", "positive_values", "negative_values",
+        # New rule types
+        "completeness_ratio", "distinct_count_between", "column_sum_between",
+        "column_std_dev_between", "column_percentile", "column_type_check",
+        "column_value_between", "cross_column_consistency", "pii_mask_check",
+        "no_whitespace", "referential_check", "custom_sql_assert",
     ]
     column: str | None = None
     min_value: float | None = None
@@ -115,6 +120,12 @@ class DQRule(BaseModel):
     min_date: date | datetime | None = None
     max_date: date | datetime | None = None
     severity: Literal["error", "warn"] = "error"
+    # New fields for extended rule types
+    percentile: int | None = None
+    operator: str | None = None
+    lookup_query: str | None = None
+    column_b: str | None = None
+    expected_type: str | None = None
 
 
 class PassCondition(BaseModel):
@@ -290,7 +301,10 @@ class JobDefinition(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    job_type: Literal["reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact"] = "reconciliation"
+    job_type: Literal[
+        "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
+        "freshness", "cross_job_assertion", "schema_snapshot", "profile",
+    ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
     exclude_columns: list[str] = Field(default_factory=list)
@@ -318,6 +332,15 @@ class JobDefinition(BaseModel):
                 raise ValueError("reconciliation jobs require a query")
             if not self.key_columns:
                 raise ValueError("reconciliation jobs require key_columns")
+        elif self.job_type == "freshness":
+            if not self.params.get("timestamp_column"):
+                raise ValueError("freshness jobs require 'timestamp_column' in params")
+        elif self.job_type == "cross_job_assertion":
+            if not self.params.get("source_job") or not self.params.get("target_job"):
+                raise ValueError("cross_job_assertion requires 'source_job' and 'target_job' in params")
+        elif self.job_type in ("schema_snapshot", "profile"):
+            if not self.query.strip():
+                raise ValueError(f"{self.job_type} jobs require a query")
         return self
 
 

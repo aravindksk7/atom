@@ -123,6 +123,96 @@ def test_automic_job_create_request_requires_identifier():
         AutomicJobCreateRequest(name="nightly")
 
 
+# ---------------------------------------------------------------------------
+# New DQRule types (Task 1)
+# ---------------------------------------------------------------------------
+
+def test_dq_rule_completeness_ratio():
+    from api.schemas import DQRule
+    r = DQRule.model_validate({"type": "completeness_ratio", "column": "amount", "min_value": 0.9})
+    assert r.type == "completeness_ratio"
+    assert r.min_value == 0.9
+
+
+def test_dq_rule_column_percentile():
+    from api.schemas import DQRule
+    r = DQRule.model_validate({"type": "column_percentile", "column": "price", "percentile": 95, "max_value": 1000.0})
+    assert r.percentile == 95
+
+
+def test_dq_rule_cross_column_consistency():
+    from api.schemas import DQRule
+    r = DQRule.model_validate({"type": "cross_column_consistency", "column": "start_date", "column_b": "end_date", "operator": "<="})
+    assert r.column_b == "end_date"
+    assert r.operator == "<="
+
+
+def test_dq_rule_referential_check():
+    from api.schemas import DQRule
+    r = DQRule.model_validate({"type": "referential_check", "column": "customer_id", "lookup_query": "SELECT id FROM customers"})
+    assert r.lookup_query == "SELECT id FROM customers"
+
+
+def test_dq_rule_column_type_check():
+    from api.schemas import DQRule
+    r = DQRule.model_validate({"type": "column_type_check", "column": "order_date", "expected_type": "date"})
+    assert r.expected_type == "date"
+
+
+# ---------------------------------------------------------------------------
+# New JobDefinition job_types (Task 1)
+# ---------------------------------------------------------------------------
+
+def test_job_definition_freshness():
+    from api.schemas import JobDefinition
+    j = JobDefinition.model_validate({
+        "name": "orders_freshness",
+        "job_type": "freshness",
+        "query": "SELECT MAX(created_at) as ts FROM orders",
+        "params": {"timestamp_column": "ts", "max_age_hours": 24},
+    })
+    assert j.job_type == "freshness"
+
+
+def test_job_definition_profile():
+    from api.schemas import JobDefinition
+    j = JobDefinition.model_validate({
+        "name": "orders_profile",
+        "job_type": "profile",
+        "query": "SELECT * FROM orders",
+        "params": {},
+    })
+    assert j.job_type == "profile"
+
+
+def test_job_definition_schema_snapshot():
+    from api.schemas import JobDefinition
+    j = JobDefinition.model_validate({
+        "name": "orders_schema",
+        "job_type": "schema_snapshot",
+        "query": "SELECT * FROM orders",
+        "params": {"environment": "source"},
+    })
+    assert j.job_type == "schema_snapshot"
+
+
+def test_job_definition_cross_job_assertion():
+    from api.schemas import JobDefinition
+    j = JobDefinition.model_validate({
+        "name": "revenue_check",
+        "job_type": "cross_job_assertion",
+        "params": {
+            "source_job": "orders_profile",
+            "source_metric": "sum",
+            "source_column": "amount",
+            "target_job": "payments_profile",
+            "target_metric": "sum",
+            "target_column": "total",
+        },
+    })
+    assert j.job_type == "cross_job_assertion"
+
+
 def test_job_definition_accepts_dbt_artifact():
     from api.schemas import JobDefinition
     job = JobDefinition(
