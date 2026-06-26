@@ -378,11 +378,6 @@ class TokenRepository:
             return _hmac.new(_HMAC_SECRET, raw.encode(), hashlib.sha256).hexdigest()
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    @staticmethod
-    def _legacy_hash(raw: str) -> str:
-        """Plain SHA-256 — used only during migration to re-hash existing rows."""
-        return hashlib.sha256(raw.encode()).hexdigest()
-
     def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False) -> tuple[str, ApiToken]:
         if expires_at is not None:
             cap = datetime.now(timezone.utc) + timedelta(days=_TOKEN_MAX_TTL_DAYS)
@@ -410,7 +405,7 @@ class TokenRepository:
         # Migration path: if TOKEN_HMAC_SECRET is set but the stored hash is the
         # old plain-SHA256 value, re-hash and update the row transparently.
         if token is None and _HMAC_SECRET:
-            legacy_h = self._legacy_hash(raw)
+            legacy_h = hashlib.sha256(raw.encode()).hexdigest()
             token = self._db.query(ApiToken).filter_by(token_hash=legacy_h, enabled=True).first()
             if token is not None:
                 token.token_hash = h  # upgrade to HMAC hash
@@ -810,3 +805,100 @@ class RunStepRepository:
             .update({"status": "CANCELLED"})
         )
         self._db.commit()
+
+
+class ColumnProfileRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def save(
+        self, job_name: str, run_id: str | None, column_name: str,
+        null_rate: float | None, distinct_count: int | None,
+        min_val: str | None, max_val: str | None,
+        mean_val: float | None, std_val: float | None,
+        p25: float | None, p50: float | None, p75: float | None, p95: float | None,
+    ) -> None:
+        from etl_framework.repository.models import ColumnProfile
+        row = ColumnProfile(
+            job_name=job_name, run_id=run_id, column_name=column_name,
+            null_rate=null_rate, distinct_count=distinct_count,
+            min_val=min_val, max_val=max_val,
+            mean_val=mean_val, std_val=std_val,
+            p25=p25, p50=p50, p75=p75, p95=p95,
+            captured_at=datetime.now(timezone.utc),
+        )
+        self._db.add(row)
+
+    def get_latest(self, job_name: str) -> list:
+        from etl_framework.repository.models import ColumnProfile
+        from sqlalchemy import func
+        max_captured = (
+            self._db.query(
+                ColumnProfile.column_name,
+                func.max(ColumnProfile.captured_at).label("max_captured"),
+            )
+            .filter(ColumnProfile.job_name == job_name)
+            .group_by(ColumnProfile.column_name)
+            .subquery()
+        )
+        return (
+            self._db.query(ColumnProfile)
+            .join(
+                max_captured,
+                (ColumnProfile.column_name == max_captured.c.column_name)
+                & (ColumnProfile.captured_at == max_captured.c.max_captured),
+            )
+            .filter(ColumnProfile.job_name == job_name)
+            .all()
+        )
+
+    def get_history(self, job_name: str, column_name: str) -> list:
+        from etl_framework.repository.models import ColumnProfile
+        return (
+            self._db.query(ColumnProfile)
+            .filter(
+                ColumnProfile.job_name == job_name,
+                ColumnProfile.column_name == column_name,
+            )
+            .order_by(ColumnProfile.captured_at.asc())
+            .all()
+        )
+
+    def get_latest_for_run(self, job_name: str, run_id: str) -> list:
+        from etl_framework.repository.models import ColumnProfile
+        return (
+            self._db.query(ColumnProfile)
+            .filter(ColumnProfile.job_name == job_name, ColumnProfile.run_id == run_id)
+            .all()
+        )
+
+
+class SchemaSnapshotRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def save(self, job_name: str, run_id: str | None, environment: str, columns: list[dict]) -> None:
+        from etl_framework.repository.models import SchemaSnapshot
+        row = SchemaSnapshot(
+            job_name=job_name, run_id=run_id, environment=environment,
+            columns=columns, captured_at=datetime.now(timezone.utc),
+        )
+        self._db.add(row)
+
+    def get_latest(self, job_name: str, environment: str):
+        from etl_framework.repository.models import SchemaSnapshot
+        return (
+            self._db.query(SchemaSnapshot)
+            .filter(SchemaSnapshot.job_name == job_name, SchemaSnapshot.environment == environment)
+            .order_by(SchemaSnapshot.captured_at.desc())
+            .first()
+        )
+
+    def get_history(self, job_name: str, environment: str) -> list:
+        from etl_framework.repository.models import SchemaSnapshot
+        return (
+            self._db.query(SchemaSnapshot)
+            .filter(SchemaSnapshot.job_name == job_name, SchemaSnapshot.environment == environment)
+            .order_by(SchemaSnapshot.captured_at.asc())
+            .all()
+        )
