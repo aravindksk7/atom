@@ -378,6 +378,14 @@ class RunExecutor:
         )
 
     def _build_case(self, job: JobDefinition):
+        if job.job_type == "freshness":
+            return self._build_case_freshness(job)
+        if job.job_type == "schema_snapshot":
+            return self._build_case_schema_snapshot(job)
+        if job.job_type == "profile":
+            return self._build_case_profile(job)
+        if job.job_type == "cross_job_assertion":
+            return self._build_case_cross_job(job)
         if job.job_type == "dbt_artifact":
             return self._build_case_dbt(job)
         if job.job_type == "bo_report" and self._settings.use_live_connections:
@@ -517,6 +525,313 @@ class RunExecutor:
             mismatches=result.mismatches + extra,
             value_mismatch_count=result.value_mismatch_count + len(extra),
             status=_TS.FAILED,
+        )
+
+    # ── Freshness ──────────────────────────────────────────────────────────
+
+    def _build_case_freshness(self, job: JobDefinition):
+        def run_freshness() -> ReconciliationResult:
+            source_engine, _ = self._build_engines(job)
+            return self._execute_freshness(job, source_engine)
+        return run_freshness
+
+    def _execute_freshness(self, job: JobDefinition, engine) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        ts_col = job.params.get("timestamp_column", "ts")
+        max_age_hours = float(job.params.get("max_age_hours", 24))
+        query = job.query or job.params.get("query", "")
+
+        try:
+            df = engine.execute_query(query)
+        except Exception as exc:
+            return ReconciliationResult(
+                query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+                source_row_count=0, target_row_count=0, matched_count=0,
+                missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1,
+                mismatches=[MismatchRecord(key_values={"job": job.name}, column_name=ts_col,
+                                           source_value=str(exc), target_value="",
+                                           mismatch_type="freshness_error")],
+                status=TestStatus.ERROR, executed_at=executed_at,
+                duration_seconds=time.monotonic() - t0,
+            )
+
+        if df.empty or ts_col not in df.columns:
+            return ReconciliationResult(
+                query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+                source_row_count=0, target_row_count=0, matched_count=1,
+                missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+                mismatches=[], status=TestStatus.PASSED, executed_at=executed_at,
+                duration_seconds=time.monotonic() - t0,
+            )
+
+        max_ts = pd.to_datetime(df[ts_col], errors="coerce").max()
+        if max_ts is None or pd.isna(max_ts):
+            return ReconciliationResult(
+                query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+                source_row_count=1, target_row_count=1, matched_count=0,
+                missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1,
+                mismatches=[MismatchRecord(key_values={"job": job.name}, column_name=ts_col,
+                                           source_value="NULL", target_value=f"<= {max_age_hours}h ago",
+                                           mismatch_type="freshness_null")],
+                status=TestStatus.FAILED, executed_at=executed_at,
+                duration_seconds=time.monotonic() - t0,
+            )
+
+        now_utc = datetime.now(timezone.utc)
+        if max_ts.tzinfo is None:
+            max_ts = max_ts.replace(tzinfo=timezone.utc)
+        age_hours = (now_utc - max_ts).total_seconds() / 3600
+
+        if age_hours <= max_age_hours:
+            return ReconciliationResult(
+                query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+                source_row_count=1, target_row_count=1, matched_count=1,
+                missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+                mismatches=[], status=TestStatus.PASSED, executed_at=executed_at,
+                duration_seconds=time.monotonic() - t0,
+            )
+
+        return ReconciliationResult(
+            query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+            source_row_count=1, target_row_count=1, matched_count=0,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1,
+            mismatches=[MismatchRecord(
+                key_values={"job": job.name}, column_name=ts_col,
+                source_value=f"{age_hours:.1f}h",
+                target_value=f"<= {max_age_hours}h",
+                mismatch_type="freshness_stale",
+            )],
+            status=TestStatus.FAILED, executed_at=executed_at,
+            duration_seconds=time.monotonic() - t0,
+        )
+
+    # ── Profile ────────────────────────────────────────────────────────────
+
+    def _build_case_profile(self, job: JobDefinition):
+        def run_profile() -> ReconciliationResult:
+            source_engine, _ = self._build_engines(job)
+            return self._execute_profile(job, source_engine)
+        return run_profile
+
+    def _execute_profile(self, job: JobDefinition, engine) -> ReconciliationResult:
+        from api.services.profile_service import compute_profile, detect_drift
+        from etl_framework.repository.repository import ColumnProfileRepository
+
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        columns = job.params.get("columns", [])
+        drift_threshold = float(job.params.get("drift_threshold_pct", 20.0))
+
+        try:
+            df = engine.execute_query(job.query)
+        except Exception:
+            df = pd.DataFrame()
+
+        if df.empty:
+            return ReconciliationResult(
+                query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+                source_row_count=0, target_row_count=0, matched_count=1,
+                missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+                mismatches=[], status=TestStatus.PASSED, executed_at=executed_at,
+                duration_seconds=time.monotonic() - t0,
+            )
+
+        current_profile = compute_profile(df, columns)
+        repo = ColumnProfileRepository(self._db)
+        previous_rows = repo.get_latest(job.name)
+        previous_profile = {
+            row.column_name: {
+                "null_rate": row.null_rate, "distinct_count": row.distinct_count,
+                "mean_val": row.mean_val, "std_val": row.std_val,
+                "p25": row.p25, "p50": row.p50, "p75": row.p75, "p95": row.p95,
+            }
+            for row in previous_rows
+        }
+
+        flagged = detect_drift(current_profile, previous_profile, drift_threshold)
+
+        for col, stats in current_profile.items():
+            repo.save(
+                job_name=job.name, run_id=self._run_id, column_name=col,
+                null_rate=stats.get("null_rate"), distinct_count=stats.get("distinct_count"),
+                min_val=stats.get("min_val"), max_val=stats.get("max_val"),
+                mean_val=stats.get("mean_val"), std_val=stats.get("std_val"),
+                p25=stats.get("p25"), p50=stats.get("p50"),
+                p75=stats.get("p75"), p95=stats.get("p95"),
+            )
+        self._db.commit()
+
+        mismatches = [
+            MismatchRecord(
+                key_values={"job": job.name, "column": col},
+                column_name=col,
+                source_value=str(current_profile.get(col, {}).get("mean_val")),
+                target_value=str(previous_profile.get(col, {}).get("mean_val")),
+                mismatch_type="profile_drift",
+            )
+            for col in flagged
+        ]
+
+        status = TestStatus.FAILED if flagged else TestStatus.PASSED
+        return ReconciliationResult(
+            query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+            source_row_count=len(df), target_row_count=len(df),
+            matched_count=len(current_profile) - len(flagged),
+            missing_in_target_count=0, missing_in_source_count=0,
+            value_mismatch_count=len(flagged),
+            mismatches=mismatches, status=status, executed_at=executed_at,
+            duration_seconds=time.monotonic() - t0,
+        )
+
+    # ── Schema Snapshot ────────────────────────────────────────────────────
+
+    def _build_case_schema_snapshot(self, job: JobDefinition):
+        def run_schema_snapshot() -> ReconciliationResult:
+            source_engine, target_engine = self._build_engines(job)
+            environment = job.params.get("environment", "both")
+            engine = target_engine if environment == "target" else source_engine
+            return self._execute_schema_snapshot(job, engine)
+        return run_schema_snapshot
+
+    def _execute_schema_snapshot(self, job: JobDefinition, engine) -> ReconciliationResult:
+        from api.services.schema_snapshot_service import capture_schema, diff_schemas
+        from etl_framework.repository.repository import SchemaSnapshotRepository
+
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        environment = job.params.get("environment", "source")
+
+        try:
+            df = engine.execute_query(job.query)
+        except Exception:
+            df = pd.DataFrame()
+
+        current_cols = capture_schema(df)
+        repo = SchemaSnapshotRepository(self._db)
+        previous = repo.get_latest(job.name, environment)
+        previous_cols = previous.columns if previous else []
+
+        diff = diff_schemas(current_cols, previous_cols)
+        repo.save(job.name, self._run_id, environment, current_cols)
+        self._db.commit()
+
+        mismatches = []
+        for col in diff["added"]:
+            mismatches.append(MismatchRecord(
+                key_values={"job": job.name, "change": "added"},
+                column_name=col, source_value="(new)", target_value="(absent)",
+                mismatch_type="schema_added",
+            ))
+        for col in diff["removed"]:
+            mismatches.append(MismatchRecord(
+                key_values={"job": job.name, "change": "removed"},
+                column_name=col, source_value="(absent)", target_value="(was present)",
+                mismatch_type="schema_removed",
+            ))
+        for change in diff["changed"]:
+            mismatches.append(MismatchRecord(
+                key_values={"job": job.name, "change": "type_changed"},
+                column_name=change["column"],
+                source_value=change["to"], target_value=change["from"],
+                mismatch_type="schema_type_changed",
+            ))
+
+        first_run = not previous_cols
+        changes = len(diff["added"]) + len(diff["removed"]) + len(diff["changed"])
+        status = TestStatus.PASSED if (first_run or not changes) else TestStatus.FAILED
+        return ReconciliationResult(
+            query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+            source_row_count=len(current_cols), target_row_count=len(previous_cols),
+            matched_count=len(current_cols) - changes,
+            missing_in_target_count=len(diff["removed"]),
+            missing_in_source_count=len(diff["added"]),
+            value_mismatch_count=len(diff["changed"]),
+            mismatches=mismatches, status=status, executed_at=executed_at,
+            duration_seconds=time.monotonic() - t0,
+        )
+
+    # ── Cross-Job Assertion ────────────────────────────────────────────────
+
+    def _build_case_cross_job(self, job: JobDefinition):
+        def run_cross_job() -> ReconciliationResult:
+            return self._execute_cross_job(job)
+        return run_cross_job
+
+    def _execute_cross_job(self, job: JobDefinition) -> ReconciliationResult:
+        from etl_framework.repository.models import ColumnProfile
+
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        source_job = p.get("source_job", "")
+        target_job = p.get("target_job", "")
+        source_metric = p.get("source_metric", "count")
+        target_metric = p.get("target_metric", "count")
+        source_col = p.get("source_column", "")
+        target_col = p.get("target_column", "")
+        tolerance = float(p.get("tolerance", 0.0))
+        tolerance_type = p.get("tolerance_type", "absolute")
+
+        def _get_count(job_name: str):
+            from etl_framework.repository.models import TestResult as _TR
+            row = (
+                self._db.query(_TR)
+                .filter(_TR.run_id == self._run_id, _TR.query_name == job_name)
+                .first()
+            )
+            return float(row.source_row_count) if row else None
+
+        def _get_profile_metric(job_name: str, column: str, metric: str):
+            row = (
+                self._db.query(ColumnProfile)
+                .filter(
+                    ColumnProfile.job_name == job_name,
+                    ColumnProfile.run_id == self._run_id,
+                    ColumnProfile.column_name == column,
+                )
+                .first()
+            )
+            if row is None:
+                return None
+            return {"distinct_count": float(row.distinct_count) if row.distinct_count is not None else None}.get(metric)
+
+        src_val = _get_count(source_job) if source_metric == "count" else _get_profile_metric(source_job, source_col, source_metric)
+        tgt_val = _get_count(target_job) if target_metric == "count" else _get_profile_metric(target_job, target_col, target_metric)
+
+        _skipped = ReconciliationResult(
+            query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+            source_row_count=0, target_row_count=0, matched_count=0,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=TestStatus.SKIPPED, executed_at=executed_at,
+            duration_seconds=time.monotonic() - t0,
+        )
+
+        if src_val is None or tgt_val is None:
+            return _skipped
+
+        effective_tolerance = (tolerance / 100 * abs(src_val)) if tolerance_type == "percent" else tolerance
+        delta = abs(src_val - tgt_val)
+        passed = delta <= effective_tolerance
+
+        mismatches = [] if passed else [
+            MismatchRecord(
+                key_values={"source_job": source_job, "target_job": target_job},
+                column_name=source_col or "row_count",
+                source_value=str(src_val), target_value=str(tgt_val),
+                mismatch_type="cross_job_delta",
+            )
+        ]
+
+        return ReconciliationResult(
+            query_name=job.name, source_env=self._source_env, target_env=self._target_env,
+            source_row_count=int(src_val), target_row_count=int(tgt_val),
+            matched_count=1 if passed else 0,
+            missing_in_target_count=0, missing_in_source_count=0,
+            value_mismatch_count=0 if passed else 1,
+            mismatches=mismatches,
+            status=TestStatus.PASSED if passed else TestStatus.FAILED,
+            executed_at=executed_at, duration_seconds=time.monotonic() - t0,
         )
 
     def _build_case_bo_report(self, job: JobDefinition):
