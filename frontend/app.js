@@ -347,6 +347,7 @@ function app() {
       { id: 'deps', label: 'Dependencies' },
       { id: 'rules', label: 'DQ Rules' },
       { id: 'tags', label: 'Tags' },
+      { id: 'conditions', label: 'Conditions' },
     ],
 
     // --- Task 9: Job Modal Inline Validation ---
@@ -701,6 +702,14 @@ function app() {
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
         automic_job_name: '', automic_run_id: '',
         dbt_manifest_path: '', dbt_run_results_path: '',
+        pass_min_row_count: '',
+        pass_max_row_count: '',
+        pass_max_value_mismatches: '',
+        pass_max_missing_in_target: '',
+        pass_max_missing_in_source: '',
+        pass_require_status: '',
+        pass_sql: '',
+        pass_sql_mode: 'rows_mean_pass',
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
@@ -724,6 +733,14 @@ function app() {
         automic_run_id: job.params?.run_id || '',
         dbt_manifest_path: job.params?.manifest_path || '',
         dbt_run_results_path: job.params?.run_results_path || '',
+        pass_min_row_count: job.pass_condition?.min_row_count ?? '',
+        pass_max_row_count: job.pass_condition?.max_row_count ?? '',
+        pass_max_value_mismatches: job.pass_condition?.max_value_mismatches ?? '',
+        pass_max_missing_in_target: job.pass_condition?.max_missing_in_target ?? '',
+        pass_max_missing_in_source: job.pass_condition?.max_missing_in_source ?? '',
+        pass_require_status: (job.pass_condition?.require_status || []).join(', '),
+        pass_sql: job.pass_condition?.pass_sql || '',
+        pass_sql_mode: job.pass_condition?.pass_sql_mode || 'rows_mean_pass',
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
@@ -778,6 +795,14 @@ function app() {
       const keyColumns = ['reconciliation', 'bo_report'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
+      const pc = {};
+      if (m.pass_min_row_count !== '') pc.min_row_count = Number(m.pass_min_row_count);
+      if (m.pass_max_row_count !== '') pc.max_row_count = Number(m.pass_max_row_count);
+      if (m.pass_max_value_mismatches !== '') pc.max_value_mismatches = Number(m.pass_max_value_mismatches);
+      if (m.pass_max_missing_in_target !== '') pc.max_missing_in_target = Number(m.pass_max_missing_in_target);
+      if (m.pass_max_missing_in_source !== '') pc.max_missing_in_source = Number(m.pass_max_missing_in_source);
+      if (m.pass_require_status) pc.require_status = m.pass_require_status.split(',').map(s => s.trim()).filter(Boolean);
+      if (m.pass_sql?.trim()) { pc.pass_sql = m.pass_sql.trim(); pc.pass_sql_mode = m.pass_sql_mode; }
       const body = {
         name: m.name, description: m.description,
         job_type: m.job_type,
@@ -788,6 +813,7 @@ function app() {
         depends_on: m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean),
         rules: (m.rules || []).filter(r => r.type),
         params,
+        pass_condition: Object.keys(pc).length ? pc : null,
       };
       try {
         if (this.jobModalEditing) {
@@ -850,7 +876,12 @@ function app() {
 
     getStepCfg(name) {
       if (!this.stepSettings[name]) {
-        this.stepSettings[name] = { hold_after: false, wait_seconds: 0, require_status: '', max_mismatch_count: '' };
+        this.stepSettings[name] = {
+          hold_after: false, wait_seconds: 0,
+          require_status: '', max_mismatch_count: '',
+          min_row_count: '', max_row_count: '',
+          max_value_mismatches: '', max_missing_in_target: '', max_missing_in_source: '',
+        };
       }
       return this.stepSettings[name];
     },
@@ -861,11 +892,22 @@ function app() {
         const step = { job_name: name };
         if (s.hold_after) step.hold_after = true;
         if (Number(s.wait_seconds) > 0) step.wait_seconds = Number(s.wait_seconds);
-        const hasCondition = s.require_status || (s.max_mismatch_count !== '' && s.max_mismatch_count != null);
+        const hasCondition = s.require_status
+          || (s.max_mismatch_count !== '' && s.max_mismatch_count != null)
+          || (s.min_row_count !== '' && s.min_row_count != null)
+          || (s.max_row_count !== '' && s.max_row_count != null)
+          || (s.max_value_mismatches !== '' && s.max_value_mismatches != null)
+          || (s.max_missing_in_target !== '' && s.max_missing_in_target != null)
+          || (s.max_missing_in_source !== '' && s.max_missing_in_source != null);
         if (hasCondition) {
           step.condition = {};
           if (s.require_status) step.condition.require_status = s.require_status.split(',').map(x => x.trim()).filter(Boolean);
           if (s.max_mismatch_count !== '' && s.max_mismatch_count != null) step.condition.max_mismatch_count = Number(s.max_mismatch_count);
+          if (s.min_row_count !== '' && s.min_row_count != null) step.condition.min_row_count = Number(s.min_row_count);
+          if (s.max_row_count !== '' && s.max_row_count != null) step.condition.max_row_count = Number(s.max_row_count);
+          if (s.max_value_mismatches !== '' && s.max_value_mismatches != null) step.condition.max_value_mismatches = Number(s.max_value_mismatches);
+          if (s.max_missing_in_target !== '' && s.max_missing_in_target != null) step.condition.max_missing_in_target = Number(s.max_missing_in_target);
+          if (s.max_missing_in_source !== '' && s.max_missing_in_source != null) step.condition.max_missing_in_source = Number(s.max_missing_in_source);
         }
         return step;
       });
