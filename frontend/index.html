@@ -1346,9 +1346,9 @@
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
           <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
           <div class="flex gap-3 pt-2 flex-wrap">
-            <a :href="'/api/runs/' + selectedRun.run_id + '/report'" target="_blank" class="text-indigo-500 hover:underline text-xs">Report</a>
-            <a :href="'/api/runs/' + selectedRun.run_id + '/metrics'" target="_blank" class="text-indigo-500 hover:underline text-xs">Metrics</a>
-            <a :href="'/api/runs/' + selectedRun.run_id + '/logs'" target="_blank" class="text-indigo-500 hover:underline text-xs">Logs</a>
+            <button @click="openReportTab(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Report</button>
+            <button @click="navigateToRunArtifact(selectedRun.run_id, 'metrics')" class="text-indigo-500 hover:underline text-xs">Metrics</button>
+            <button @click="navigateToRunArtifact(selectedRun.run_id, 'logs')" class="text-indigo-500 hover:underline text-xs">Logs</button>
             <button @click="downloadRunCsv(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Export CSV</button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
@@ -2331,12 +2331,12 @@
   <template x-if="reportRunId && reportLoaded && reportView === 'report'">
     <div>
       <div class="flex gap-2 mb-3 flex-wrap">
-        <a :href="'/api/runs/' + reportRunId + '/report'" target="_blank" class="btn-secondary btn-sm">Open Report</a>
-        <a :href="'/api/runs/' + reportRunId + '/metrics'" target="_blank" class="btn-secondary btn-sm">Open Metrics</a>
-        <a :href="'/api/runs/' + reportRunId + '/logs'" target="_blank" class="btn-secondary btn-sm">Open Logs</a>
+        <button @click="openReportTab(reportRunId)" class="btn-secondary btn-sm">Open Report</button>
+        <button @click="openRunTab(reportRunId, 'metrics')" class="btn-secondary btn-sm">Open Metrics</button>
+        <button @click="openRunTab(reportRunId, 'logs')" class="btn-secondary btn-sm">Open Logs</button>
       </div>
       <div class="card p-0 overflow-hidden report-frame-card">
-      <iframe :src="'/api/runs/' + reportRunId + '/report'" class="w-full h-full border-none"></iframe>
+      <iframe :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
       </div>
     </div>
   </template>
@@ -2347,8 +2347,8 @@
         <button @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
           <span x-text="reportMetricsLoading ? 'Refreshing...' : 'Refresh Metrics'"></span>
         </button>
-        <a :href="'/api/runs/' + reportRunId + '/metrics'" target="_blank" class="btn-secondary btn-sm">Open Themed Metrics</a>
-        <a :href="'/api/runs/' + reportRunId + '/metrics?format=json'" target="_blank" class="btn-secondary btn-sm">Raw JSON</a>
+        <button @click="openRunTab(reportRunId, 'metrics')" class="btn-secondary btn-sm">Open Themed Metrics</button>
+        <button @click="openRunTab(reportRunId, 'metrics?format=json')" class="btn-secondary btn-sm">Raw JSON</button>
       </div>
       <template x-if="reportMetricsLoading">
         <div class="card empty-state"><div class="empty-state-title">Loading metrics...</div></div>
@@ -2419,7 +2419,7 @@
           <button @click="loadRunLogs()" :disabled="reportLogsLoading" class="btn-primary">
             <span x-text="reportLogsLoading ? 'Searching...' : 'Search'"></span>
           </button>
-          <a :href="'/api/runs/' + reportRunId + '/logs'" target="_blank" class="btn-secondary">Open Log GUI</a>
+          <button @click="openRunTab(reportRunId, 'logs')" class="btn-secondary">Open Log GUI</button>
         </div>
       </div>
       <template x-if="reportLogs">
