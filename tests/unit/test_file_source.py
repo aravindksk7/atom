@@ -6,16 +6,20 @@ import pandas as pd
 from fastapi import HTTPException
 
 
-def test_read_tabular_from_csv_path(tmp_path):
+def test_read_tabular_from_csv_path(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path)
     from api.services.file_source import read_tabular
     f = tmp_path / "data.csv"
     f.write_text("id,amount\n1,100\n2,200\n")
-    df = read_tabular(path=str(f))
+    df = read_tabular(path="data.csv")   # relative to UPLOAD_BASE
     assert list(df.columns) == ["id", "amount"]
     assert len(df) == 2
 
 
-def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path):
+def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path)
     from api.services.file_source import read_tabular
     f = tmp_path / "report.csv"
     f.write_text(
@@ -27,7 +31,7 @@ def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path):
         "North,EM1092,7500.00\n",
         encoding="utf-8",
     )
-    df = read_tabular(path=str(f))
+    df = read_tabular(path="report.csv")   # relative to UPLOAD_BASE
     assert list(df.columns) == ["Region", "Employee ID", "Amount"]
     assert df.iloc[0]["Employee ID"] == "EM1092"
 

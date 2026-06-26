@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,6 +15,10 @@ from etl_framework.repository.repository import TokenRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tokens"])
+
+# Serialises the bootstrap check-and-create so two concurrent requests cannot
+# both see count()==0 and both create an unauthenticated admin token.
+_bootstrap_lock = threading.Lock()
 
 
 class TokenCreate(BaseModel):
@@ -76,13 +81,15 @@ def _verify_admin_from_request(request: Request, db: Session) -> None:
 @router.post("", response_model=TokenCreatedOut, status_code=201)
 def create_token(body: TokenCreate, request: Request, db: Session = Depends(get_session)):
     repo = TokenRepository(db)
-    is_bootstrap = repo.count() == 0
 
-    if not is_bootstrap:
-        _verify_admin_from_request(request, db)
+    with _bootstrap_lock:
+        is_bootstrap = repo.count() == 0
 
-    is_admin = True if is_bootstrap else body.is_admin
-    raw, token = repo.create(body.name, body.expires_at, is_admin=is_admin)
+        if not is_bootstrap:
+            _verify_admin_from_request(request, db)
+
+        is_admin = True if is_bootstrap else body.is_admin
+        raw, token = repo.create(body.name, body.expires_at, is_admin=is_admin)
 
     if is_bootstrap:
         logger.warning(

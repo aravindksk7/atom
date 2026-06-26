@@ -354,9 +354,17 @@ class RunRepository:
 # ---------------------------------------------------------------------------
 
 import hashlib
+import hmac as _hmac
+import os
 import secrets as _secrets
 
 _TOKEN_MAX_TTL_DAYS = 730  # hard cap: no token lives longer than 2 years
+
+# HMAC key bound to this server installation.  Set TOKEN_HMAC_SECRET in the
+# environment to a long random value (e.g. `openssl rand -hex 32`).
+# Without it, a DB-only compromise would let an attacker verify token hashes;
+# with it, the attacker also needs this secret.
+_HMAC_SECRET: bytes = os.environ.get("TOKEN_HMAC_SECRET", "").encode() or b""
 
 
 class TokenRepository:
@@ -365,6 +373,14 @@ class TokenRepository:
 
     @staticmethod
     def _hash(raw: str) -> str:
+        """Return HMAC-SHA256 when TOKEN_HMAC_SECRET is set, else plain SHA-256."""
+        if _HMAC_SECRET:
+            return _hmac.new(_HMAC_SECRET, raw.encode(), hashlib.sha256).hexdigest()
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @staticmethod
+    def _legacy_hash(raw: str) -> str:
+        """Plain SHA-256 — used only during migration to re-hash existing rows."""
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False) -> tuple[str, ApiToken]:
@@ -390,6 +406,16 @@ class TokenRepository:
     def verify(self, raw: str) -> ApiToken | None:
         h = self._hash(raw)
         token = self._db.query(ApiToken).filter_by(token_hash=h, enabled=True).first()
+
+        # Migration path: if TOKEN_HMAC_SECRET is set but the stored hash is the
+        # old plain-SHA256 value, re-hash and update the row transparently.
+        if token is None and _HMAC_SECRET:
+            legacy_h = self._legacy_hash(raw)
+            token = self._db.query(ApiToken).filter_by(token_hash=legacy_h, enabled=True).first()
+            if token is not None:
+                token.token_hash = h  # upgrade to HMAC hash
+                self._db.commit()
+
         if token is None:
             return None
         exp = token.expires_at
@@ -428,7 +454,9 @@ class NotificationRepository:
 
     def create(self, name: str, url: str, events: list[str],
                secret: str | None = None) -> NotificationHook:
-        hook = NotificationHook(name=name, url=url, events=events, secret=secret)
+        from api.services.secret_store import encrypt_secret
+        stored_secret = encrypt_secret(secret) if secret else secret
+        hook = NotificationHook(name=name, url=url, events=events, secret=stored_secret)
         self._db.add(hook)
         self._db.commit()
         self._db.refresh(hook)

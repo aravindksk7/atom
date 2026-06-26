@@ -18,7 +18,7 @@ _ALL_EVENTS = sorted(EVENTS)
 
 class HookCreate(BaseModel):
     name: str
-    url: str
+    url: HttpUrl
     events: list[str] = list(_ALL_EVENTS)
     secret: str | None = None
 
@@ -58,7 +58,7 @@ def create_hook(body: HookCreate, request: Request, db: Session = Depends(get_se
     invalid = [e for e in body.events if e not in EVENTS]
     if invalid:
         raise HTTPException(status_code=400, detail=f"Unknown events: {invalid}")
-    hook = NotificationRepository(db).create(body.name, body.url, body.events, body.secret)
+    hook = NotificationRepository(db).create(body.name, str(body.url), body.events, body.secret)
     AuditService(db).log(
         request, "notification_hook.created", "notification_hook", hook.id,
         {"name": hook.name, "events": hook.events},
@@ -95,9 +95,11 @@ def test_hook(hook_id: int, request: Request, db: Session = Depends(get_session)
     if hook is None:
         raise HTTPException(status_code=404, detail="Hook not found")
     from api.services.notifier import _post
+    from api.services.secret_store import decrypt_secret
     import threading
     payload = {"event": "test.ping", "run_id": "test", "status": "TEST",
                "message": "ETL Framework webhook test"}
-    threading.Thread(target=_post, args=(hook.url, payload, hook.secret), daemon=True).start()
+    hook_secret = decrypt_secret(hook.secret) if hook.secret else hook.secret
+    threading.Thread(target=_post, args=(hook.url, payload, hook_secret), daemon=True).start()
     AuditService(db).log(request, "notification_hook.tested", "notification_hook", hook_id)
     return {"detail": "Test ping dispatched"}

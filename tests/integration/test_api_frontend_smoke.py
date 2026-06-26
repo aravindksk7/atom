@@ -216,7 +216,7 @@ def test_webhook_delivery_is_tracked_with_thread_owned_session(client):
         "/api/notifications",
         json={
             "name": "tracking-test",
-            "url": "invalid://webhook",
+            "url": "http://webhook.invalid/cb",   # .invalid TLD → DNS fails → delivery tracked as failed
             "events": ["run.failed"],
         },
     )

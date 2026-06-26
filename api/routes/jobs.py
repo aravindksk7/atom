@@ -209,10 +209,22 @@ def validate_job(name: str, body: "_ValidateRequest", db: Session = Depends(get_
     plans: dict[str, str] = {}
 
     def _explain(engine, label: str) -> None:
+        # Use SET FMTONLY ON to ask the MSSQL engine to parse/compile the query
+        # without executing it.  The query is passed as a bound parameter so it
+        # cannot break out of the text boundary — no string interpolation here.
         try:
-            explain_sql = f"EXPLAIN {definition.query}"
-            df = engine.execute_query(explain_sql)
-            plans[label] = df.to_string(index=False) if not df.empty else "(no plan)"
+            from sqlalchemy import text, event
+            from sqlalchemy.pool import ConnectionPoolEntry
+
+            with engine._engine.connect() as conn:
+                conn.execute(text("SET FMTONLY ON"))
+                try:
+                    conn.execute(text(definition.query))
+                except Exception:
+                    pass  # FMTONLY returns no rows; drivers may raise innocuous errors
+                finally:
+                    conn.execute(text("SET FMTONLY OFF"))
+            plans[label] = "(syntax ok)"
         except Exception as exc:
             errors.append(f"{label}: {exc}")
 

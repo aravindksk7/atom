@@ -2,11 +2,20 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import os
 from pathlib import Path
 
 import pandas as pd
 from pandas.errors import ParserError
 from fastapi import HTTPException
+
+# Filesystem-path uploads are only permitted when UPLOAD_BASE_DIR is set.
+# All paths are resolved and checked to be inside this directory before opening.
+_UPLOAD_BASE: Path | None = (
+    Path(os.environ["UPLOAD_BASE_DIR"]).resolve()
+    if "UPLOAD_BASE_DIR" in os.environ
+    else None
+)
 
 
 def _read_csv_bytes(raw: bytes) -> pd.DataFrame:
@@ -69,7 +78,17 @@ def read_tabular(
             detail=f"Unsupported file format '{ext}'. Use .csv or .xlsx",
         )
 
-    p = Path(path)
+    if _UPLOAD_BASE is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Server-side file paths are disabled. Use content_b64 upload instead.",
+        )
+
+    resolved = (_UPLOAD_BASE / path).resolve()
+    if not str(resolved).startswith(str(_UPLOAD_BASE)):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    p = resolved
     ext = p.suffix.lower()
     try:
         if ext == ".csv":

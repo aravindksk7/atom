@@ -23,6 +23,14 @@ from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["configs"])
 
+_SENSITIVE_KEYS = {"db_password", "automic_password", "bo_password"}
+_MASK = "********"
+
+
+def _mask(data: dict) -> dict:
+    """Replace sensitive credential values with a fixed mask before returning to callers."""
+    return {k: (_MASK if k in _SENSITIVE_KEYS and v else v) for k, v in data.items()}
+
 
 @router.get("", response_model=list[ConfigOut])
 def list_configs(db: Session = Depends(get_session)):
@@ -31,7 +39,7 @@ def list_configs(db: Session = Depends(get_session)):
     default_keys = EnvironmentConfig(name="template", db_host="localhost", db_password="").model_dump(exclude={"name"})
     return [
         ConfigOut(id=c.id, name=c.name, env_name=c.env_name,
-                  config_data={**default_keys, **(c.config_json or {})},
+                  config_data=_mask({**default_keys, **(c.config_json or {})}),
                   created_at=c.created_at, updated_at=c.updated_at)
         for c in cfgs
     ]
@@ -46,7 +54,7 @@ def create_config(body: ConfigCreate, request: Request, db: Session = Depends(ge
         {"name": cfg.name, "env_name": cfg.env_name},
     )
     return ConfigOut(id=cfg.id, name=cfg.name, env_name=cfg.env_name,
-                     config_data=cfg.config_json,
+                     config_data=_mask(cfg.config_json or {}),
                      created_at=cfg.created_at, updated_at=cfg.updated_at)
 
 
@@ -70,7 +78,7 @@ def validate_config(body: ConfigValidationRequest):
     return ConfigValidationOut(
         ok=True,
         env_name=body.env_name,
-        config_data=env_config.model_dump(exclude={"name"}),
+        config_data=_mask(env_config.model_dump(exclude={"name"})),
     )
 
 
@@ -120,7 +128,7 @@ def import_yaml_config(body: ConfigImportYamlRequest, request: Request, db: Sess
                 id=cfg.id,
                 name=cfg.name,
                 env_name=cfg.env_name,
-                config_data=cfg.config_json,
+                config_data=_mask(cfg.config_json or {}),
                 created_at=cfg.created_at,
                 updated_at=cfg.updated_at,
             )
@@ -144,7 +152,7 @@ def get_config(config_id: int, db: Session = Depends(get_session)):
     default_keys = EnvironmentConfig(name="template", db_host="localhost", db_password="").model_dump(exclude={"name"})
     full_data = {**default_keys, **(cfg.config_json or {})}
     return ConfigOut(id=cfg.id, name=cfg.name, env_name=cfg.env_name,
-                     config_data=full_data,
+                     config_data=_mask(full_data),
                      created_at=cfg.created_at, updated_at=cfg.updated_at)
 
 
@@ -176,11 +184,11 @@ def update_config(config_id: int, body: ConfigUpdate, request: Request, db: Sess
         cfg.id,
         {
             "before": before_data,
-            "after": {"name": cfg.name, "env_name": cfg.env_name, "config_data": cfg.config_json},
+            "after": {"name": cfg.name, "env_name": cfg.env_name, "config_data": _mask(cfg.config_json or {})},
         },
     )
     return ConfigOut(id=cfg.id, name=cfg.name, env_name=cfg.env_name,
-                     config_data=cfg.config_json,
+                     config_data=_mask(cfg.config_json or {}),
                      created_at=cfg.created_at, updated_at=cfg.updated_at)
 
 
