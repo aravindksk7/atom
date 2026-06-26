@@ -288,3 +288,38 @@ class NotificationDelivery(Base):
 
     # Relationship
     hook = relationship("NotificationHook", back_populates="deliveries")
+
+
+# ---------------------------------------------------------------------------
+# ETL Capabilities Expansion — Profile + Schema Snapshot
+# ---------------------------------------------------------------------------
+
+class ColumnProfile(Base):
+    __tablename__ = "column_profiles"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    job_name       = Column(String(255), nullable=False, index=True)
+    run_id         = Column(String(36), nullable=True, index=True)
+    column_name    = Column(String(255), nullable=False)
+    null_rate      = Column(Float, nullable=True)
+    distinct_count = Column(Integer, nullable=True)
+    min_val        = Column(Text, nullable=True)
+    max_val        = Column(Text, nullable=True)
+    mean_val       = Column(Float, nullable=True)
+    std_val        = Column(Float, nullable=True)
+    p25            = Column(Float, nullable=True)
+    p50            = Column(Float, nullable=True)
+    p75            = Column(Float, nullable=True)
+    p95            = Column(Float, nullable=True)
+    captured_at    = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class SchemaSnapshot(Base):
+    __tablename__ = "schema_snapshots"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    job_name    = Column(String(255), nullable=False, index=True)
+    environment = Column(String(50), nullable=False, default="both")
+    run_id      = Column(String(36), nullable=True, index=True)
+    captured_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    columns     = Column(JSON, nullable=False, default=list)

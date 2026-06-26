@@ -172,6 +172,41 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE INDEX IF NOT EXISTS ix_test_runs_is_baseline ON test_runs (is_baseline)"
         ))
 
+        # --- ETL Capabilities: column_profiles + schema_snapshots tables ---
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS column_profiles ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "job_name TEXT NOT NULL, "
+            "run_id TEXT, "
+            "column_name TEXT NOT NULL, "
+            "null_rate REAL, "
+            "distinct_count INTEGER, "
+            "min_val TEXT, "
+            "max_val TEXT, "
+            "mean_val REAL, "
+            "std_val REAL, "
+            "p25 REAL, "
+            "p50 REAL, "
+            "p75 REAL, "
+            "p95 REAL, "
+            "captured_at DATETIME NOT NULL)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_column_profiles_job_name ON column_profiles (job_name)"
+        ))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS schema_snapshots ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "job_name TEXT NOT NULL, "
+            "environment TEXT NOT NULL DEFAULT 'both', "
+            "run_id TEXT, "
+            "captured_at DATETIME NOT NULL, "
+            "columns TEXT NOT NULL DEFAULT '[]')"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_schema_snapshots_job_name ON schema_snapshots (job_name)"
+        ))
+
 
 def get_db():
     db = SessionLocal()
