@@ -273,6 +273,16 @@ class RunExecutor:
             )
             if total > condition.max_mismatch_count:
                 return False
+        if condition.min_row_count is not None and prev_result.source_row_count < condition.min_row_count:
+            return False
+        if condition.max_row_count is not None and prev_result.source_row_count > condition.max_row_count:
+            return False
+        if condition.max_value_mismatches is not None and prev_result.value_mismatch_count > condition.max_value_mismatches:
+            return False
+        if condition.max_missing_in_target is not None and prev_result.missing_in_target_count > condition.max_missing_in_target:
+            return False
+        if condition.max_missing_in_source is not None and prev_result.missing_in_source_count > condition.max_missing_in_source:
+            return False
         return True
 
     def _poll_for_release(self, step_repo: RunStepRepository, step_index: int) -> str:
@@ -343,7 +353,13 @@ class RunExecutor:
                 raise RuntimeError(f"Health check failed: {messages}")
 
     def _job_to_definition(self, job) -> JobDefinition:
-        params = job.params or {}
+        params = dict(job.params or {})
+        rules_raw = params.pop("rules", [])
+        depends_on = params.pop("depends_on", [])
+        pass_condition_raw = params.pop("pass_condition", None)
+        from api.schemas import DQRule, PassCondition
+        rules = [DQRule.model_validate(r) for r in (rules_raw or [])]
+        pass_condition = PassCondition.model_validate(pass_condition_raw) if pass_condition_raw else None
         return JobDefinition(
             name=job.name,
             description=job.description,
@@ -356,7 +372,9 @@ class RunExecutor:
             target_env=job.target_env,
             params=params,
             enabled=job.enabled,
-            depends_on=params.get("depends_on", []),
+            rules=rules,
+            depends_on=depends_on,
+            pass_condition=pass_condition,
         )
 
     def _build_case(self, job: JobDefinition):
@@ -391,6 +409,8 @@ class RunExecutor:
             )
             if job.rules:
                 result = self._apply_dq_rules(result, job, source_engine)
+            if job.pass_condition:
+                result = self._apply_pass_condition(result, job, source_engine)
             return result
 
         max_retries = self._settings.max_retries
@@ -439,6 +459,64 @@ class RunExecutor:
             mismatches=new_mismatches,
             value_mismatch_count=result.value_mismatch_count + len(extra),
             status=new_status,
+        )
+
+    def _apply_pass_condition(
+        self, result: ReconciliationResult, job: JobDefinition, source_engine
+    ) -> ReconciliationResult:
+        c = job.pass_condition
+        if c is None:
+            return result
+
+        violations: list[str] = []
+
+        if c.min_row_count is not None and result.source_row_count < c.min_row_count:
+            violations.append(f"row_count {result.source_row_count} < min {c.min_row_count}")
+        if c.max_row_count is not None and result.source_row_count > c.max_row_count:
+            violations.append(f"row_count {result.source_row_count} > max {c.max_row_count}")
+        if c.max_value_mismatches is not None and result.value_mismatch_count > c.max_value_mismatches:
+            violations.append(f"value_mismatches {result.value_mismatch_count} > {c.max_value_mismatches}")
+        if c.max_missing_in_target is not None and result.missing_in_target_count > c.max_missing_in_target:
+            violations.append(f"missing_in_target {result.missing_in_target_count} > {c.max_missing_in_target}")
+        if c.max_missing_in_source is not None and result.missing_in_source_count > c.max_missing_in_source:
+            violations.append(f"missing_in_source {result.missing_in_source_count} > {c.max_missing_in_source}")
+
+        if c.require_status:
+            cur = result.status.value if hasattr(result.status, "value") else str(result.status)
+            if cur not in c.require_status:
+                violations.append(f"status {cur!r} not in {c.require_status}")
+
+        if c.pass_sql:
+            try:
+                df = source_engine.execute_query(c.pass_sql)
+                has_rows = not df.empty
+                if c.pass_sql_mode == "rows_mean_pass" and not has_rows:
+                    violations.append("pass_sql returned no rows")
+                elif c.pass_sql_mode == "rows_mean_fail" and has_rows:
+                    violations.append("pass_sql returned rows (expected none)")
+            except Exception as exc:
+                violations.append(f"pass_sql error: {exc}")
+
+        if not violations:
+            return result
+
+        extra = [
+            MismatchRecord(
+                key_values={"pass_condition": v},
+                column_name="",
+                source_value="FAIL",
+                target_value="PASS",
+                mismatch_type="pass_condition_violation",
+            )
+            for v in violations
+        ]
+        from dataclasses import replace as _replace
+        from etl_framework.runner.state import TestStatus as _TS
+        return _replace(
+            result,
+            mismatches=result.mismatches + extra,
+            value_mismatch_count=result.value_mismatch_count + len(extra),
+            status=_TS.FAILED,
         )
 
     def _build_case_bo_report(self, job: JobDefinition):
