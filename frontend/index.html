@@ -2330,11 +2330,6 @@
 
   <template x-if="reportRunId && reportLoaded && reportView === 'report'">
     <div>
-      <div class="flex gap-2 mb-3 flex-wrap">
-        <button @click="openReportTab(reportRunId)" class="btn-secondary btn-sm">Open Report</button>
-        <button @click="openRunTab(reportRunId, 'metrics')" class="btn-secondary btn-sm">Open Metrics</button>
-        <button @click="openRunTab(reportRunId, 'logs')" class="btn-secondary btn-sm">Open Logs</button>
-      </div>
       <div class="card p-0 overflow-hidden report-frame-card">
       <iframe :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
       </div>
