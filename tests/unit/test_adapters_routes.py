@@ -157,6 +157,49 @@ def test_create_job_from_automic_returns_201(client):
     assert data["params"]["job_name"] == "ETL_NIGHTLY_LOAD"
 
 
+def test_automic_client_search_jobs_returns_list():
+    from unittest.mock import patch
+    from etl_framework.automic.client import AutomicClient
+    from etl_framework.config.models import EnvironmentConfig
+
+    env = EnvironmentConfig(
+        name="test",
+        db_host="host",
+        db_password="pass",
+        automic_url="http://automic.test",
+        automic_user="user",
+        automic_password="pass",
+    )
+    client = AutomicClient(env)
+    mock_response = {
+        "data": [
+            {"name": "ETL_NIGHTLY", "status": "ENDED_OK"},
+            {"name": "ETL_WEEKLY", "status": "ACTIVE"},
+        ]
+    }
+    with patch.object(client, "_request", return_value=mock_response):
+        result = client.search_jobs("ETL_*")
+
+    assert len(result) == 2
+    assert result[0]["name"] == "ETL_NIGHTLY"
+    assert result[1]["status"] == "ACTIVE"
+
+
+def test_automic_client_search_jobs_empty_response():
+    from unittest.mock import patch
+    from etl_framework.automic.client import AutomicClient
+    from etl_framework.config.models import EnvironmentConfig
+
+    env = EnvironmentConfig(
+        name="test", db_host="host", db_password="pass",
+        automic_url="http://automic.test", automic_user="u", automic_password="p",
+    )
+    client = AutomicClient(env)
+    with patch.object(client, "_request", return_value={}):
+        result = client.search_jobs("NONEXISTENT_*")
+    assert result == []
+
+
 # ---------------------------------------------------------------------------
 # Router is registered in main.py
 # ---------------------------------------------------------------------------

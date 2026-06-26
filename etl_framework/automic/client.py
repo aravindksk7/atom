@@ -89,3 +89,8 @@ class AutomicClient:
 
     def get_statuses(self, identifiers: list[str], id_type: str = "run_id") -> dict[str, JobStatus]:
         return {ident: (self.get_status_by_run_id(ident) if id_type == "run_id" else self.get_status_by_job_name(ident)) for ident in identifiers}
+
+    def search_jobs(self, filter: str) -> list[dict]:
+        url = f"{self._base_url}/api/v1/jobs?filter={filter}&limit=100"
+        data = self._request("GET", url)
+        return data.get("data", [])
