@@ -31,6 +31,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
 - [Compare Tab](#compare-tab)
 - [API Usage](#api-usage)
+- [ETL Test Capabilities](#etl-test-capabilities)
 - [Testing](#testing)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
@@ -39,7 +40,10 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 
 - Reconcile source and target datasets with configurable key columns, excluded columns, float tolerance, null handling, hash precheck, chunking, and schema mismatch policy.
 - Run jobs in parallel or sequential execution mode with optional **retry policy** (max retries, exponential backoff).
-- Define **Data Quality (DQ) rules** per job — `not_null`, `unique`, `row_count_min/max/between`, `column_mean_between`, `match_regex`, `custom_sql`. Violations are captured as typed mismatches.
+- Define **Data Quality (DQ) rules** per job — 20 rule types across two categories:
+  - **Basic**: `not_null`, `unique`, `row_count_min`, `row_count_max`, `row_count_between`, `column_mean_between`, `match_regex`, `custom_sql`
+  - **Advanced**: `completeness_ratio`, `distinct_count_between`, `column_sum_between`, `column_std_dev_between`, `column_percentile`, `column_type_check`, `column_value_between`, `cross_column_consistency`, `pii_mask_check`, `no_whitespace`, `referential_check`, `custom_sql_assert`
+  - Violations are captured as typed mismatches with configurable `error`/`warn` severity.
 - Define **job dependencies** (`depends_on`) and resolve execution order with topological sort; jobs with failed upstreams are skipped automatically.
 - **Validate job queries** with a dry-run EXPLAIN check before launching a run.
 - Store runs as database-backed `TestRun` records with full result history.
@@ -63,6 +67,13 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
 - **Trend caching** — trend responses are memoised in-process with a short TTL; the cache is invalidated automatically when matching result rows change.
 - **dbt artifact adapter** — `dbt_artifact` job type parses `run_results.json` (and optionally `manifest.json`) and maps dbt test statuses to normal run results, with failing/error nodes recorded as mismatch details.
+- **Freshness checks** — `freshness` job type queries a timestamp column and fails if the most recent record is older than a configurable `max_age_hours` threshold.
+- **Column profiling** — `profile` job type computes per-column statistics (null rate, distinct count, min/max, mean, std dev, p25/p50/p75/p95) and optionally detects metric drift against the previous profile run.
+- **Schema snapshots** — `schema_snapshot` job type captures the column names and types for a query result and diffs them against the previous snapshot, flagging added, removed, or type-changed columns.
+- **Cross-job assertions** — `cross_job_assertion` job type compares a metric (e.g. row count or distinct count) from one job against another job's metric within a configurable absolute or percentage tolerance.
+- **Profile API** — `GET /api/jobs/{job}/profile` returns the latest column profile; `GET /api/jobs/{job}/profile/history?column=<col>` returns the metric history for a column; `POST /api/jobs/{job}/suggest-rules` auto-generates DQ rules from the latest profile.
+- **Schema history API** — `GET /api/jobs/{job}/schema-history?environment=source` returns all snapshots with per-snapshot diffs.
+- **Profile and Schema sub-tabs** — the History tab includes Profile and Schema sub-tabs for browsing stored statistics and snapshot diffs directly in the UI.
 
 ## Architecture
 
@@ -88,7 +99,9 @@ FastAPI app  (BearerTokenMiddleware on all /api/* routes)
   api/routes/tokens.py        — API token CRUD
   api/routes/notifications.py — webhook CRUD + test ping
   api/routes/schedules.py     — cron schedule CRUD + run-now
-  api/routes/lineage.py       — job lineage graph
+  api/routes/lineage.py          — job lineage graph
+  api/routes/profiles.py         — column profile + suggest-rules endpoints
+  api/routes/schema_snapshots.py — schema snapshot history endpoint
   api/routes/adapters.py
   api/routes/compare.py
   api/routes/health.py
@@ -101,9 +114,11 @@ Core framework
   etl_framework/repository       — ORM models, repositories (incl. AuditRepository)
   etl_framework/sap_bo
   etl_framework/automic
-  api/services/run_executor.py   — retry, DAG resolution, DQ evaluation, dbt adapter
-  api/services/audit_service.py  — actor extraction + AuditRepository facade
+  api/services/run_executor.py        — retry, DAG resolution, DQ evaluation, all job types
+  api/services/audit_service.py       — actor extraction + AuditRepository facade
   api/services/dbt_artifact_parser.py — parse run_results.json / manifest.json
+  api/services/profile_service.py     — compute_profile(), detect_drift()
+  api/services/schema_snapshot_service.py — capture_schema(), diff_schemas()
   api/services/notifier.py       — webhook fire-and-forget
   api/services/scheduler.py      — APScheduler wrapper
       |
@@ -464,6 +479,8 @@ The repository layer stores:
 | `scheduled_runs` | Cron-driven job sequences |
 | `job_lineage_edges` | Job-to-job dependency edges (synced from `depends_on`) |
 | `audit_events` | Immutable log of all mutating API actions with actor, action, resource, and diff |
+| `column_profiles` | Per-column statistics captured by `profile` job runs (null rate, distinct count, percentiles, etc.) |
+| `schema_snapshots` | Column-name-and-type snapshots captured by `schema_snapshot` job runs, with environment tag |
 
 Startup calls `init_db()`, creates missing tables, and applies lightweight SQLite column additions for existing local databases.
 
@@ -508,12 +525,16 @@ Use this tab to:
 - Start a run.
 - **Schedules sub-tab** — create, edit, enable, disable, and manually trigger cron-scheduled runs.
 
-The generic job editor supports `reconciliation`, `bo_report`, `automic_job`, and `dbt_artifact` jobs:
+The generic job editor supports `reconciliation`, `bo_report`, `automic_job`, `dbt_artifact`, `freshness`, `profile`, `schema_snapshot`, and `cross_job_assertion` jobs:
 
 - Reconciliation jobs require SQL and key columns.
 - BO report jobs require a BO document ID and BO report/page ID, plus optional output format.
 - Automic jobs require either an Automic job name or run ID.
 - dbt artifact jobs require a `run_results.json` path and can optionally include a `manifest.json` path for friendly node names.
+- Freshness jobs require a SQL query and a timestamp column name; optionally set `max_age_hours` (default 24).
+- Profile jobs require a SQL query; optionally name columns (blank = all) and set a `drift_threshold_pct` for drift alerts.
+- Schema snapshot jobs require a SQL query and an environment label (`source`, `target`, or `both`).
+- Cross-job assertion jobs require a source job, source metric, target job, target metric, and a tolerance value with type (`absolute` or `pct`).
 - Validate Query is shown only for reconciliation jobs.
 
 Default seed jobs are returned if the database has no saved jobs.
@@ -544,8 +565,9 @@ Use this tab to:
   - Delete a run.
 - **Trends sub-tab** — select a job and metric (`mismatch_rate`, `row_count_delta`, `duration_seconds`, `total_issues`), choose a rolling window, and view a line chart. Drift is flagged in red when the latest point is more than 2σ above the mean.
 - **Lineage sub-tab** — view the job dependency DAG as an SVG diagram. Nodes are job boxes; arrows show `depends_on` relationships.
-
-The History tab also includes an Audit sub-tab for filtering audit events by resource type and resource ID.
+- **Audit sub-tab** — filter audit events by resource type and resource ID.
+- **Profile sub-tab** — select a job that has run a `profile` job type to view the latest column statistics table (null rate, distinct count, min/max, mean, std dev, p25–p95). Click **Suggest DQ Rules** to auto-generate rule JSON from the observed distribution.
+- **Schema sub-tab** — select a job and environment to browse all schema snapshots with per-snapshot diffs showing added, removed, and type-changed columns.
 
 ### Adapters
 
@@ -834,6 +856,75 @@ Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/lineage/jobs/orders_rec
 Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/lineage/jobs/orders_reconciliation/downstream"
 ```
 
+### Column Profile
+
+```powershell
+# Latest profile for a job
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/payments_reconciliation/profile"
+
+# Column metric history
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/payments_reconciliation/profile/history?column=amount"
+
+# Auto-suggest DQ rules from the latest profile
+Invoke-RestMethod -Method Post -Headers $h "http://127.0.0.1:8000/api/jobs/payments_reconciliation/suggest-rules"
+```
+
+### Schema Snapshot History
+
+```powershell
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/payments_reconciliation/schema-history?environment=source"
+```
+
+Returns a list of snapshots, each with `columns` (`[{name, dtype}]`) and a `diff` showing `added`, `removed`, and `changed` column names since the previous snapshot.
+
+### Create A Freshness Job
+
+```powershell
+$job = @{
+  name = "payments_freshness"
+  job_type = "freshness"
+  query = "SELECT * FROM payments"
+  params = @{ timestamp_column = "updated_at"; max_age_hours = 6 }
+  key_columns = @(); tags = @("freshness"); enabled = $true
+} | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/jobs" -Body $job -ContentType "application/json" -Headers $h
+```
+
+### Create A Profile Job
+
+```powershell
+$job = @{
+  name = "payments_profile"
+  job_type = "profile"
+  query = "SELECT * FROM payments"
+  params = @{ columns = @("amount", "status", "created_at"); drift_threshold_pct = 20 }
+  key_columns = @(); tags = @("profile"); enabled = $true
+} | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/jobs" -Body $job -ContentType "application/json" -Headers $h
+```
+
+### Create A Cross-Job Assertion
+
+```powershell
+$job = @{
+  name = "orders_payments_count_check"
+  job_type = "cross_job_assertion"
+  params = @{
+    source_job = "orders_reconciliation"
+    source_metric = "count"
+    target_job = "payments_reconciliation"
+    target_metric = "count"
+    tolerance = 5
+    tolerance_type = "pct"
+  }
+  key_columns = @(); tags = @("assertion"); enabled = $true
+} | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/jobs" -Body $job -ContentType "application/json" -Headers $h
+```
+
 ### Other Run Endpoints
 
 ```powershell
@@ -860,6 +951,42 @@ Invoke-WebRequest -Headers $h "http://127.0.0.1:8000/api/runs/<run_id>/export" -
 Invoke-RestMethod -Method Delete -Headers $h "http://127.0.0.1:8000/api/runs/<run_id>"
 ```
 
+## ETL Test Capabilities
+
+The following DQ rule types are supported in job definitions:
+
+| Rule Type | Parameters | Description |
+|---|---|---|
+| `not_null` | `column` | Fails if any value in the column is null |
+| `unique` | `column` | Fails if the column has duplicate values |
+| `row_count_min` | `min_value` | Fails if total row count is below threshold |
+| `row_count_max` | `max_value` | Fails if total row count is above threshold |
+| `row_count_between` | `min_value`, `max_value` | Fails if row count is outside the range |
+| `column_mean_between` | `column`, `min_value`, `max_value` | Fails if column mean is outside the range |
+| `match_regex` | `column`, `pattern` | Fails if any value does not match the pattern |
+| `custom_sql` | `column`, `pattern` (SQL fragment) | Custom WHERE condition; fails if any row matches |
+| `completeness_ratio` | `column`, `min_value` | Fails if non-null ratio is below threshold (0–1) |
+| `distinct_count_between` | `column`, `min_value`, `max_value` | Fails if distinct count is outside the range |
+| `column_sum_between` | `column`, `min_value`, `max_value` | Fails if column sum is outside the range |
+| `column_std_dev_between` | `column`, `min_value`, `max_value` | Fails if standard deviation is outside the range |
+| `column_percentile` | `column`, `percentile`, `min_value`, `max_value` | Fails if the Nth percentile value is outside the range |
+| `column_type_check` | `column`, `expected_type` | Fails if any value does not parse as `int`/`float`/`date`/`uuid` |
+| `column_value_between` | `column`, `min_value`, `max_value` | Fails if any value is outside the numeric range |
+| `cross_column_consistency` | `column`, `column_b`, `operator` | Fails if `column <op> column_b` is not universally true |
+| `pii_mask_check` | `column`, `pattern` | Fails if any value matches the pattern (detects unmasked PII) |
+| `no_whitespace` | `column` | Fails if any value has leading or trailing whitespace |
+| `referential_check` | `column`, `lookup_query` | Fails if any value is not in the lookup query result set (DB engine required) |
+| `custom_sql_assert` | `column`, `operator`, `min_value` | Runs a custom SQL query; fails if result is not a single `(1, 1)` true assertion |
+
+The following special job types are supported in addition to the standard `reconciliation` type:
+
+| Job Type | Required Params | Description |
+|---|---|---|
+| `freshness` | `timestamp_column`, `max_age_hours` | Checks that the most recent timestamp in the column is within `max_age_hours` of the run time |
+| `profile` | (optional) `columns`, `drift_threshold_pct` | Computes column statistics and compares with the previous profile run to detect drift |
+| `schema_snapshot` | `environment` | Captures column names and types; diffs against the previous snapshot |
+| `cross_job_assertion` | `source_job`, `source_metric`, `target_job`, `target_metric`, `tolerance`, `tolerance_type` | Asserts that a metric from one job matches another within a tolerance |
+
 ## Testing
 
 Run all tests:
@@ -878,6 +1005,12 @@ Run integration tests:
 
 ```powershell
 python -m pytest tests/integration/ -q
+```
+
+Run property-based tests (requires `hypothesis`):
+
+```powershell
+python -m pytest tests/property/ -q
 ```
 
 Run focused tests:
