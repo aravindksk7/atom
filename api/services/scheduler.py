@@ -65,6 +65,15 @@ def start() -> None:
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.start()
 
+    from apscheduler.triggers.interval import IntervalTrigger
+    _scheduler.add_job(
+        _escalate_contracts,
+        trigger=IntervalTrigger(minutes=15),
+        id="contract_escalation",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
     db = SessionLocal()
     try:
         schedules = ScheduleRepository(db).list_enabled()
@@ -119,3 +128,43 @@ def reload_job(sched) -> None:
 
 def is_available() -> bool:
     return _APSCHEDULER_AVAILABLE
+
+
+def _escalate_contracts() -> None:
+    """Escalate overdue contract breaches and fire webhooks. Runs every 15 minutes."""
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.contract_repository import ContractRepository
+    from etl_framework.repository.repository import NotificationRepository
+    from api.services.notifier import notify
+
+    db = SessionLocal()
+    try:
+        repo = ContractRepository(db)
+        escalated = repo.escalate_overdue()
+        if not escalated:
+            return
+        hooks = NotificationRepository(db).list_enabled_for_event("contract.escalated")
+        for breach, contract in escalated:
+            notify(
+                breach.run_id,
+                "contract.escalated",
+                extra={
+                    "contract": contract.name,
+                    "source_job": contract.source_job,
+                    "owner": contract.owner,
+                    "sla_hours": contract.sla_hours,
+                    "breach_id": breach.id,
+                },
+                hooks=hooks,
+                db_session=db,
+            )
+            logger.warning(
+                "Contract '%s' escalated (SLA %.1fh exceeded, breach %s)",
+                contract.name,
+                contract.sla_hours,
+                breach.id,
+            )
+    except Exception as exc:
+        logger.exception("Contract escalation check failed: %s", exc)
+    finally:
+        db.close()
