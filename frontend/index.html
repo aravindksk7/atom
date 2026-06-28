@@ -24,7 +24,7 @@
     <div class="flex gap-1 flex-1">
       <template x-for="tab in tabs" :key="tab.id">
         <button
-          @click="currentView = tab.id"
+          @click="currentView = tab.id; if (tab.id === 'contracts') loadContracts()"
           :class="currentView === tab.id ? 'active' : ''"
           class="tab-btn"
           x-text="tab.label">
@@ -3053,6 +3053,161 @@
     </div>
   </template>
 </div>
+
+
+<!-- ====================================================================
+     TAB 8 - CONTRACTS
+     ==================================================================== -->
+<div x-show="currentView === 'contracts'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Data Contracts</div>
+      <div class="section-sub">Manage data contracts, track breach history, and enforce SLAs</div>
+    </div>
+    <button @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
+  </div>
+
+  <div x-show="contractsLoading" class="text-slate-400 text-sm py-4">Loading contracts…</div>
+
+  <div x-show="!contractsLoading" class="flex gap-4 mt-4">
+    <!-- Contract list -->
+    <div class="card" style="min-width:280px;max-width:320px;flex-shrink:0">
+      <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Contracts (<span x-text="contracts.length"></span>)</div>
+      <div x-show="contracts.length === 0" class="text-slate-400 text-sm py-2">No contracts yet.</div>
+      <template x-for="c in contracts" :key="c.name">
+        <div @click="selectContract(c)"
+             :class="selectedContract && selectedContract.name === c.name ? 'bg-indigo-50 border-indigo-300' : 'hover:bg-slate-50 border-transparent'"
+             class="flex items-center justify-between p-2 rounded border cursor-pointer mb-1 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-slate-800" x-text="c.name"></div>
+            <div class="text-xs text-slate-500" x-text="'&rarr; ' + c.source_job"></div>
+          </div>
+          <span :class="{
+            'text-emerald-700 bg-emerald-50': (contractStatusMap[c.name] || {}).status === 'OK',
+            'text-rose-700 bg-rose-50': (contractStatusMap[c.name] || {}).status === 'BREACHED',
+            'text-orange-700 bg-orange-50': (contractStatusMap[c.name] || {}).status === 'OVERDUE',
+            'text-slate-500 bg-slate-100': !['OK','BREACHED','OVERDUE'].includes((contractStatusMap[c.name] || {}).status),
+          }" class="text-xs font-semibold px-2 py-0.5 rounded" x-text="(contractStatusMap[c.name] || {}).status || '...'"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Contract detail -->
+    <div class="flex-1" x-show="selectedContract">
+      <template x-if="selectedContract">
+        <div class="space-y-4">
+          <!-- Header -->
+          <div class="card">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="text-base font-semibold text-slate-900" x-text="selectedContract.name"></div>
+                <div class="text-xs text-slate-500 mt-0.5">
+                  Source job: <span class="font-medium text-slate-700" x-text="selectedContract.source_job"></span>
+                  &nbsp;&middot;&nbsp; Owner: <span class="font-medium text-slate-700" x-text="selectedContract.owner"></span>
+                  &nbsp;&middot;&nbsp; SLA: <span class="font-medium text-slate-700" x-text="selectedContract.sla_hours + 'h'"></span>
+                  &nbsp;&middot;&nbsp; v<span x-text="selectedContract.version"></span>
+                </div>
+                <div class="text-xs text-slate-400 mt-0.5">
+                  Consumers: <span x-text="(selectedContract.consumers || []).join(', ') || 'none'"></span>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button @click="openEditContractModal(selectedContract)" class="btn-outline btn-sm text-xs">Edit</button>
+                <button @click="deleteContract(selectedContract.name)" class="btn-danger btn-sm text-xs">Delete</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Breach history -->
+          <div class="card">
+            <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Breach History</div>
+            <div x-show="contractBreachLoading" class="text-slate-400 text-sm">Loading...</div>
+            <div x-show="!contractBreachLoading && contractBreachHistory.length === 0" class="text-slate-400 text-sm">No breaches recorded.</div>
+            <template x-for="b in contractBreachHistory" :key="b.id">
+              <div class="flex items-center gap-3 py-1.5 border-b border-slate-100 text-xs">
+                <span :class="b.resolved_at ? 'text-slate-400' : 'text-rose-600'" class="font-medium w-20 flex-shrink-0" x-text="b.resolved_at ? 'Resolved' : 'Open'"></span>
+                <span class="text-slate-600" x-text="b.breach_type"></span>
+                <span class="text-slate-400 flex-1" x-text="b.opened_at ? new Date(b.opened_at).toLocaleString() : ''"></span>
+                <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
+                <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Version bump -->
+          <div class="card">
+            <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Bump Version</div>
+            <div class="flex gap-2 items-center">
+              <select x-model="contractBumpType" class="field-input field-select text-sm" style="width:120px">
+                <option value="minor">Minor</option>
+                <option value="major">Major</option>
+              </select>
+              <input x-model="contractBumpNote" type="text" placeholder="Note (optional)" class="field-input text-sm flex-1" />
+              <button @click="bumpContractVersion(selectedContract.name)" :disabled="contractBumpLoading" class="btn-primary btn-sm text-xs">Bump</button>
+            </div>
+            <div x-show="contractVersionHistory.length > 0" class="mt-3">
+              <div class="text-xs text-slate-500 mb-1">Version history</div>
+              <template x-for="v in contractVersionHistory" :key="v.id">
+                <div class="flex items-center gap-3 text-xs py-0.5 border-b border-slate-100">
+                  <span class="font-medium text-slate-700 w-10" x-text="v.version"></span>
+                  <span class="text-slate-400" x-text="v.bump_type"></span>
+                  <span class="text-slate-500 flex-1" x-text="v.note || ''"></span>
+                  <span class="text-slate-400" x-text="v.bumped_at ? new Date(v.bumped_at).toLocaleString() : ''"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="flex-1 flex items-center justify-center text-slate-400 text-sm" x-show="!selectedContract">
+      Select a contract to view details
+    </div>
+  </div>
+</div>
+
+<!-- Contract create/edit modal -->
+<template x-if="showContractModal">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+      <div class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></div>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Name</label>
+          <input x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" />
+        </div>
+        <div>
+          <label class="field-label">Source Job</label>
+          <input x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" />
+        </div>
+        <div>
+          <label class="field-label">Owner (email)</label>
+          <input x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" />
+        </div>
+        <div>
+          <label class="field-label">SLA Hours</label>
+          <input x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Consumers (comma-separated)</label>
+          <input x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" />
+        </div>
+        <div>
+          <label class="field-label">Breach Severity</label>
+          <select x-model="contractModal.breach_severity" class="field-input field-select">
+            <option value="error">Error</option>
+            <option value="warn">Warn</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
+        <button @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
+      </div>
+    </div>
+  </div>
+</template>
 
 
 <!-- ====================================================================
