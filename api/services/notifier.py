@@ -47,6 +47,9 @@ EVENTS = {
     "run.completed",
     "run.held",
     "run.cancelled",
+    "contract.breached",
+    "contract.resolved",
+    "contract.escalated",
 }
 
 
