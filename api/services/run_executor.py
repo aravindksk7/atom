@@ -1045,6 +1045,11 @@ class RunExecutor:
             error=error,
         )
         self._fire_webhooks(final_status, passed=passed, failed=failed, error=error)
+        self._check_contracts(states)
+
+    def _check_contracts(self, states: list[TestCaseState]) -> None:
+        from api.services.contract_breach_checker import ContractBreachChecker
+        ContractBreachChecker().check(states, self._run_id, self._db)
 
     def _fire_webhooks(self, status: str, **extra) -> None:
         try:
