@@ -18,6 +18,7 @@ class Base(DeclarativeBase):
 
 def init_db() -> None:
     from etl_framework.repository import models  # noqa: F401 — registers all ORM models
+    from etl_framework.repository import contract_models  # noqa: F401 — registers contract ORM models
     Base.metadata.create_all(bind=engine)
     _ensure_compare_columns(engine)
 
@@ -205,6 +206,60 @@ def _ensure_compare_columns(bind) -> None:
         ))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_schema_snapshots_job_name ON schema_snapshots (job_name)"
+        ))
+
+        # --- Data Contracts tables ---
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS contracts ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name VARCHAR(255) NOT NULL UNIQUE, "
+            "version VARCHAR(50) NOT NULL DEFAULT '1.0', "
+            "source_job VARCHAR(255) NOT NULL, "
+            "owner VARCHAR(255) NOT NULL, "
+            "sla_hours REAL NOT NULL, "
+            "consumers TEXT NOT NULL DEFAULT '[]', "
+            "breach_severity VARCHAR(10) NOT NULL DEFAULT 'error', "
+            "active BOOLEAN NOT NULL DEFAULT 1, "
+            "created_at DATETIME, "
+            "updated_at DATETIME)"
+        ))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_contracts_name ON contracts (name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_contracts_source_job ON contracts (source_job)"))
+
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS contract_versions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "contract_id INTEGER NOT NULL REFERENCES contracts(id), "
+            "version VARCHAR(50) NOT NULL, "
+            "bump_type VARCHAR(10) NOT NULL, "
+            "note TEXT, "
+            "bumped_at DATETIME NOT NULL)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_contract_versions_contract_id "
+            "ON contract_versions (contract_id)"
+        ))
+
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS contract_breaches ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "contract_id INTEGER NOT NULL REFERENCES contracts(id), "
+            "run_id VARCHAR(36) NOT NULL, "
+            "breach_type VARCHAR(30) NOT NULL, "
+            "opened_at DATETIME NOT NULL, "
+            "resolved_at DATETIME, "
+            "resolution_run_id VARCHAR(36), "
+            "escalated BOOLEAN NOT NULL DEFAULT 0, "
+            "escalated_at DATETIME, "
+            "duration_hours REAL)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_contract_breaches_contract_id "
+            "ON contract_breaches (contract_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_contract_breaches_run_id "
+            "ON contract_breaches (run_id)"
         ))
 
 
