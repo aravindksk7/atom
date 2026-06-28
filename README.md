@@ -1,6 +1,6 @@
 # ETL Test Framework
 
-ETL Test Framework is a FastAPI and Alpine.js application for running ETL reconciliation tests, comparing BusinessObjects reports, monitoring execution, reviewing mismatches, accepting known differences, browsing themed reports and metrics, and enforcing data quality rules across environments.
+ETL Test Framework is a FastAPI and Alpine.js application for running ETL reconciliation tests, comparing BusinessObjects reports, monitoring execution, reviewing mismatches, accepting known differences, browsing themed reports and metrics, enforcing data quality rules across environments, and managing **Data Contracts** with SLA tracking and automated breach notifications.
 
 The application can run entirely in local simulation mode for development, or it can connect to live SQL Server, SAP BusinessObjects, and Automic environments when configured.
 
@@ -30,6 +30,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - [Using The Web UI](#using-the-web-ui)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
 - [Compare Tab](#compare-tab)
+- [Data Contracts](#data-contracts)
 - [API Usage](#api-usage)
 - [ETL Test Capabilities](#etl-test-capabilities)
 - [Testing](#testing)
@@ -74,6 +75,14 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - **Profile API** — `GET /api/jobs/{job}/profile` returns the latest column profile; `GET /api/jobs/{job}/profile/history?column=<col>` returns the metric history for a column; `POST /api/jobs/{job}/suggest-rules` auto-generates DQ rules from the latest profile.
 - **Schema history API** — `GET /api/jobs/{job}/schema-history?environment=source` returns all snapshots with per-snapshot diffs.
 - **Profile and Schema sub-tabs** — the History tab includes Profile and Schema sub-tabs for browsing stored statistics and snapshot diffs directly in the UI.
+- **Data Contracts** — define named contracts that point at a source job and enforce ownership, SLA, and data quality expectations:
+  - Contracts are stored in `/api/contracts` as first-class entities with `name`, `source_job`, `owner`, `sla_hours`, `consumers`, and `breach_severity`.
+  - When a source job run **fails**, a breach opens automatically and a `contract.breached` webhook fires to configured endpoints.
+  - When the source job **passes**, open breaches auto-resolve with `duration_hours` computed and a `contract.resolved` webhook fires.
+  - Breaches that remain open past `sla_hours` are **escalated** by a background APScheduler job (every 15 minutes) and a `contract.escalated` webhook fires.
+  - Contracts carry a semantic **version** (`1.0` by default); bump minor or major with `POST /api/contracts/{name}/bump`.
+  - The **Contracts tab** in the UI lists all contracts with live OK / BREACHED / OVERDUE status badges, breach history, and inline version bump.
+  - Derived endpoints expose the source job's DQ rules (`/rules`) and latest schema snapshot (`/schema`) without duplicating configuration.
 
 ## Architecture
 
@@ -87,7 +96,7 @@ Additional runtime capabilities:
 ```text
 Browser
   Alpine.js SPA
-  Tabs: Config, Launch, Monitor, History, Adapters, Reports, Compare
+  Tabs: Config, Launch, Monitor, History, Adapters, Reports, Compare, Contracts
       |
       | HTTP / JSON / HTML
       v
@@ -102,6 +111,7 @@ FastAPI app  (BearerTokenMiddleware on all /api/* routes)
   api/routes/lineage.py          — job lineage graph
   api/routes/profiles.py         — column profile + suggest-rules endpoints
   api/routes/schema_snapshots.py — schema snapshot history endpoint
+  api/routes/contracts.py        — data contract CRUD, status, breaches, versions, rules, schema
   api/routes/adapters.py
   api/routes/compare.py
   api/routes/health.py
@@ -111,16 +121,17 @@ Core framework
   etl_framework/reconciliation   — ReconciliationEngine, DQEngine, polars/pandas backends
   etl_framework/runner
   etl_framework/reporting
-  etl_framework/repository       — ORM models, repositories (incl. AuditRepository)
+  etl_framework/repository       — ORM models, repositories (incl. AuditRepository, ContractRepository)
   etl_framework/sap_bo
   etl_framework/automic
-  api/services/run_executor.py        — retry, DAG resolution, DQ evaluation, all job types
-  api/services/audit_service.py       — actor extraction + AuditRepository facade
-  api/services/dbt_artifact_parser.py — parse run_results.json / manifest.json
-  api/services/profile_service.py     — compute_profile(), detect_drift()
+  api/services/run_executor.py          — retry, DAG resolution, DQ evaluation, all job types
+  api/services/contract_breach_checker.py — post-run hook: open/resolve contract breaches
+  api/services/audit_service.py         — actor extraction + AuditRepository facade
+  api/services/dbt_artifact_parser.py   — parse run_results.json / manifest.json
+  api/services/profile_service.py       — compute_profile(), detect_drift()
   api/services/schema_snapshot_service.py — capture_schema(), diff_schemas()
-  api/services/notifier.py       — webhook fire-and-forget
-  api/services/scheduler.py      — APScheduler wrapper
+  api/services/notifier.py       — webhook fire-and-forget (incl. contract.breached/resolved/escalated)
+  api/services/scheduler.py      — APScheduler wrapper (incl. 15-min contract escalation job)
       |
       v
 SQLite by default, or SQLAlchemy-compatible database via ETL_DATABASE_URL
@@ -481,6 +492,9 @@ The repository layer stores:
 | `audit_events` | Immutable log of all mutating API actions with actor, action, resource, and diff |
 | `column_profiles` | Per-column statistics captured by `profile` job runs (null rate, distinct count, percentiles, etc.) |
 | `schema_snapshots` | Column-name-and-type snapshots captured by `schema_snapshot` job runs, with environment tag |
+| `contracts` | Named data contracts with source job, owner, SLA hours, consumers, version, and active flag |
+| `contract_versions` | Immutable version bump history for each contract (minor/major, note, timestamp) |
+| `contract_breaches` | Per-contract breach records with open/resolved timestamps, escalation flag, and duration |
 
 Startup calls `init_db()`, creates missing tables, and applies lightweight SQLite column additions for existing local databases.
 
@@ -495,7 +509,7 @@ Startup calls `init_db()`, creates missing tables, and applies lightweight SQLit
 
 ## Using The Web UI
 
-The web UI has seven tabs.
+The web UI has eight tabs.
 
 ### Config
 
@@ -610,6 +624,19 @@ Use this tab for first-class comparison workflows.
 
 BO Report mode, Reconciliation (dual-env) mode, and Recon File Compare mode — see the [Compare Tab](#compare-tab) section.
 
+### Contracts
+
+Use this tab to manage data contracts.
+
+- **Contract list** on the left shows all active contracts with a live status badge: **OK**, **BREACHED**, or **OVERDUE**.
+- Click a contract to open its detail panel:
+  - **Header** — name, source job, owner, SLA hours, version, and consumers.
+  - **Breach History** — full breach log with type, opened timestamp, resolved timestamp, duration, and escalation flag.
+  - **Version Bump** — choose minor or major, add an optional note, and click Bump to increment the semantic version and record the history.
+- **+ New Contract** button opens a modal to create a contract; select source job, set owner, SLA hours, and consumers.
+- Editing a contract updates owner, SLA hours, consumers, and breach severity.
+- Deleting soft-deletes the contract (sets `active = false`); breach history is retained.
+
 ## Reports, Metrics, And Logs
 
 ### Report
@@ -652,6 +679,85 @@ GET /api/compare/pairs/{pair_id}
 
 ```text
 POST /api/compare/recon-file
+```
+
+## Data Contracts
+
+Data Contracts are a governance layer that links a named contract to a source ETL job and enforces ownership, SLA, and breach notifications automatically.
+
+### Breach lifecycle
+
+```text
+source job run FAILS
+  → ContractBreachChecker opens a breach (idempotent)
+  → webhook fires: contract.breached
+
+source job run PASSES
+  → ContractBreachChecker resolves all open breaches for that job
+  → duration_hours computed; webhook fires: contract.resolved
+
+breach remains open ≥ sla_hours
+  → APScheduler (every 15 min) escalates the breach
+  → webhook fires: contract.escalated
+```
+
+### Webhook event types
+
+| Event | When |
+|---|---|
+| `contract.breached` | Source job fails and a breach is opened |
+| `contract.resolved` | Source job passes and a breach is closed |
+| `contract.escalated` | Breach open time exceeds the contract SLA |
+
+Contracts reuse the existing webhook notification hooks. Add `contract.breached` (and/or the other two events) to any hook's event filter in **Notifications** to receive alerts.
+
+### Contracts API quick reference
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+
+# List all contracts
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts
+
+# Create a contract
+$body = @{
+  name            = "orders_v1"
+  source_job      = "orders_reconciliation"
+  owner           = "data-platform@co.com"
+  sla_hours       = 4.0
+  consumers       = @("finance", "ops")
+  breach_severity = "error"
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/contracts" -Body $body -ContentType "application/json" -Headers $h
+
+# Get a contract
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1
+
+# Update a contract
+$body = @{ owner = "new-team@co.com"; sla_hours = 6.0 } | ConvertTo-Json
+Invoke-RestMethod -Method Put -Uri "http://127.0.0.1:8000/api/contracts/orders_v1" -Body $body -ContentType "application/json" -Headers $h
+
+# Check contract status (OK / BREACHED / OVERDUE)
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/status
+
+# List breach history
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/breaches
+
+# Bump version (minor or major)
+$body = @{ bump_type = "minor"; note = "added freshness rule" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/contracts/orders_v1/bump" -Body $body -ContentType "application/json" -Headers $h
+
+# List version history
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/versions
+
+# Derived: DQ rules from source job
+Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/rules
+
+# Derived: latest schema snapshot from source job
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/contracts/orders_v1/schema?environment=source"
+
+# Delete (soft)
+Invoke-RestMethod -Method Delete -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1
 ```
 
 ## API Usage
@@ -1027,6 +1133,25 @@ python -m pytest tests/unit/test_api.py -q
 python -m pytest tests/unit/test_new_schemas.py -q
 python -m pytest tests/unit/test_runs_extensions.py -q
 python -m pytest tests/integration/test_api_frontend_smoke.py -q
+```
+
+Data Contracts test suite:
+
+```powershell
+# Unit: ContractRepository CRUD + breach lifecycle (20 tests)
+python -m pytest tests/unit/test_contracts.py -q
+
+# Unit: contract webhook event types (4 tests, extends test_notifier.py)
+python -m pytest tests/unit/test_notifier.py -q
+
+# Unit: ContractBreachChecker + RunExecutor wiring (3 tests, extends test_run_executor.py)
+python -m pytest tests/unit/test_run_executor.py -q
+
+# Integration: CRUD lifecycle, breach lifecycle, version bump (3 tests)
+python -m pytest tests/integration/test_contracts_integration.py -q
+
+# Property-based: breach math invariants via Hypothesis (5 tests)
+python -m pytest tests/property/test_contracts_property.py -q
 ```
 
 Check JavaScript syntax:
