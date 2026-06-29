@@ -25,6 +25,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - [Configuration](#configuration)
 - [Development Deployment](#development-deployment)
 - [Production Deployment](#production-deployment)
+- [On-Premises Deployment](#on-premises-deployment)
 - [Docker Or Service Deployment](#docker-or-service-deployment)
 - [Database And Storage](#database-and-storage)
 - [Using The Web UI](#using-the-web-ui)
@@ -144,6 +145,11 @@ The frontend is served by FastAPI from `frontend/`:
 - `frontend/index.html`
 - `frontend/app.js`
 - `frontend/styles.css`
+- `frontend/vendor/tailwind.css` — pre-built Tailwind CSS (tree-shaken from actual class usage)
+- `frontend/vendor/alpine.min.js` — Alpine.js v3.14.1
+- `frontend/vendor/chart.umd.min.js` — Chart.js v4.4.3
+
+All frontend assets are self-contained. The UI makes no requests to CDNs or external hosts and is safe to deploy in air-gapped corporate networks.
 
 The default database is SQLite at `./etl_framework.db`. Existing SQLite databases are updated at startup — new columns and tables are added automatically.
 
@@ -450,6 +456,185 @@ C:\atom
 ```text
 ETL_DATABASE_URL=sqlite:///C:/atom/etl_framework.db
 ```
+
+## On-Premises Deployment
+
+This application is designed to work in air-gapped and corporate network environments where browser access to the internet is blocked. The UI has no runtime dependency on any CDN, external font service, or third-party host.
+
+### What Is Self-Contained
+
+All frontend libraries are vendored and committed to the repository. The browser only ever loads files served by the FastAPI process itself:
+
+| File | Library | Size |
+|---|---|---|
+| `frontend/vendor/tailwind.css` | Tailwind CSS v3 (tree-shaken) | ~17 KB |
+| `frontend/vendor/alpine.min.js` | Alpine.js v3.14.1 | ~44 KB |
+| `frontend/vendor/chart.umd.min.js` | Chart.js v4.4.3 | ~201 KB |
+
+There are no Google Fonts requests, no `jsdelivr.net` requests, and no `cdn.tailwindcss.com` requests. The font stack falls back to the OS system font (`system-ui`, `Segoe UI`, `sans-serif`).
+
+The Python API itself has no outbound internet dependencies at runtime. All pip packages are installed from your internal PyPI mirror or from a pre-built wheel cache.
+
+### Server Requirements
+
+No Node.js is required on the deployment server. The vendored files are pre-built and committed. Only Python is needed:
+
+- Python 3.11 or later
+- pip (to install the application)
+- Microsoft ODBC Driver 17 or 18 for SQL Server (if using live database connections)
+
+### Deployment Steps
+
+**1. Transfer the code to the on-premises server**
+
+Either clone directly from your internal Git mirror, or copy the archive:
+
+```powershell
+# From an internal Git mirror
+git clone https://git.internal.corp/etl-framework.git C:\atom
+
+# Or copy a zip and extract
+Expand-Archive -Path etl-framework.zip -DestinationPath C:\atom
+```
+
+**2. Create and activate a virtual environment**
+
+```powershell
+cd C:\atom
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+**3. Install from a local PyPI mirror or pre-downloaded wheels**
+
+If the server has access to an internal PyPI mirror (Artifactory, Nexus, etc.):
+
+```powershell
+pip install -e . --index-url https://pypi.internal.corp/simple/
+```
+
+If working completely offline with pre-downloaded wheels:
+
+```powershell
+# On a machine with internet access, download all wheels first:
+pip download -e . -d ./wheels/
+
+# Transfer ./wheels/ to the server, then install offline:
+pip install -e . --no-index --find-links=./wheels/
+```
+
+**4. Set required environment variables**
+
+```powershell
+$env:ETL_DATABASE_URL = "sqlite:///C:/atom/etl_framework.db"
+```
+
+**5. Start the server**
+
+```powershell
+C:\atom\.venv\Scripts\python.exe -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+**6. Open the UI**
+
+Navigate to `http://<server-hostname>:8000` from a browser on the corporate network. The UI loads entirely from the server — no internet access is required on either the server or the client browser.
+
+### Verifying No External Requests
+
+To confirm the browser is not calling any external hosts, open the browser developer tools (F12), go to the **Network** tab, reload the page, and filter by domain. All requests should resolve to your server hostname only. You should see:
+
+- `GET /` → `index.html`
+- `GET /vendor/tailwind.css`
+- `GET /vendor/alpine.min.js`
+- `GET /vendor/chart.umd.min.js`
+- `GET /styles.css`
+- `GET /app.js`
+- `GET /api/health`
+
+No requests to `cdn.tailwindcss.com`, `cdn.jsdelivr.net`, `fonts.googleapis.com`, or any other external host.
+
+### Updating Vendor Files After UI Changes
+
+The vendored files are committed to source control so the server never needs Node.js or internet access. If you modify the HTML or JS and add new Tailwind utility classes, regenerate the CSS on a developer machine that has Node.js:
+
+```powershell
+# One-time: install dev dependencies
+npm install
+
+# Rebuild Tailwind CSS from current HTML/JS class usage
+npm run build:css
+# Outputs: frontend/vendor/tailwind.css
+
+# Commit the updated file
+git add frontend/vendor/tailwind.css
+git commit -m "rebuild tailwind css"
+```
+
+The Alpine.js and Chart.js files only need to be regenerated when upgrading their versions. To update them:
+
+```powershell
+npm install alpinejs@<version> chart.js@<version> --save-dev
+copy node_modules\alpinejs\dist\cdn.min.js frontend\vendor\alpine.min.js
+copy node_modules\chart.js\dist\chart.umd.js frontend\vendor\chart.umd.min.js
+git add frontend/vendor/
+git commit -m "bump alpinejs and chart.js vendor files"
+```
+
+### Reverse Proxy Configuration
+
+For production, place the application behind IIS, nginx, or your corporate reverse proxy. Example nginx upstream block:
+
+```nginx
+upstream etl_framework {
+    server 127.0.0.1:8000;
+}
+
+server {
+    listen 443 ssl;
+    server_name etl.internal.corp;
+
+    location / {
+        proxy_pass http://etl_framework;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Required for SSE (Server-Sent Events) on the Monitor tab
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600;
+    }
+}
+```
+
+The `proxy_buffering off` setting is required for the **Monitor** tab's live run stream (`GET /api/runs/{run_id}/stream`) to deliver progress events in real time.
+
+### Troubleshooting On-Premises
+
+**UI blank or unstyled after deployment**
+
+Check the browser Network tab for failed requests. If `vendor/tailwind.css`, `vendor/alpine.min.js`, or `vendor/chart.umd.min.js` return 404, the vendor files were not included in the deployment package. Verify `frontend/vendor/` is present on disk:
+
+```powershell
+Get-ChildItem C:\atom\frontend\vendor\
+```
+
+Expected output:
+```
+alpine.min.js         44 KB
+chart.umd.min.js     201 KB
+tailwind.css          17 KB
+```
+
+**SSE progress stream not updating (Monitor tab)**
+
+If progress events do not arrive in real time, a reverse proxy is buffering the SSE response. Add `proxy_buffering off` (nginx) or equivalent IIS response buffering configuration. The UI falls back to 5-second polling automatically if the SSE connection drops.
+
+**pip install fails with no network**
+
+Use the offline wheel approach described in step 3 above. Alternatively, install from an internal Artifactory or Nexus PyPI mirror by setting `--index-url`.
+
+**SQL Server connection error**
+
+Install Microsoft ODBC Driver 17 or 18 for SQL Server from your internal software distribution. Verify the installed driver name matches `db_driver` in your saved config (default: `ODBC Driver 17 for SQL Server`).
 
 ## Docker Or Service Deployment
 
@@ -1265,6 +1450,21 @@ Install Microsoft ODBC Driver for SQL Server and ensure `db_driver` exactly matc
 ### Runs Stuck In PENDING
 
 Background execution happens in the API process. If the process exits mid-run, status can remain `PENDING` or `RUNNING`. Restart the server and trigger a new run.
+
+### UI Does Not Load (On-Premises / Air-Gap Networks)
+
+The API works but the browser shows a blank or unstyled page when deployed behind a corporate firewall that blocks internet access. This happens when an older deployment still references CDN URLs.
+
+Check your `frontend/index.html` — the `<head>` should contain only local paths:
+
+```html
+<link rel="stylesheet" href="vendor/tailwind.css" />
+<script defer src="vendor/alpine.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css" />
+```
+
+If it still has `https://cdn.tailwindcss.com`, `cdn.jsdelivr.net`, or `fonts.googleapis.com` references, pull the latest code — the vendor files have been committed and CDN references removed. See [On-Premises Deployment](#on-premises-deployment) for the full checklist.
 
 ### Static UI Not Updating
 

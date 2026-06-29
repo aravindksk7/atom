@@ -1,5 +1,15 @@
 {
+  "scripts": {
+    "build:css": "tailwindcss -i tailwind.input.css -o frontend/vendor/tailwind.css --minify",
+    "build:vendor": "npm run build:css && node scripts/copy-vendor.js",
+    "watch:css": "tailwindcss -i tailwind.input.css -o frontend/vendor/tailwind.css --watch"
+  },
   "dependencies": {
     "headroom-ai": "^0.22.4"
+  },
+  "devDependencies": {
+    "alpinejs": "^3.14.1",
+    "chart.js": "^4.4.3",
+    "tailwindcss": "^3.4.19"
   }
 }
