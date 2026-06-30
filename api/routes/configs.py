@@ -17,7 +17,7 @@ from api.schemas import (
 )
 from api.dependencies import get_session
 from etl_framework.config.loader import ConfigLoader
-from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.models import EnvironmentConfig, resolve_connection
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
 from api.services.audit_service import AuditService
@@ -30,7 +30,20 @@ _MASK = "********"
 
 def _mask(data: dict) -> dict:
     """Replace sensitive credential values with a fixed mask before returning to callers."""
-    return {k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v) for k, v in data.items()}
+    result = {
+        k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v)
+        for k, v in data.items()
+        if k != "connections"
+    }
+    if "connections" in data and isinstance(data["connections"], dict):
+        result["connections"] = {
+            conn_name: {
+                k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v)
+                for k, v in entry.items()
+            }
+            for conn_name, entry in data["connections"].items()
+        }
+    return result
 
 
 @router.get("", response_model=list[ConfigOut])
@@ -63,7 +76,7 @@ def create_config(body: ConfigCreate, request: Request, db: Session = Depends(ge
 def validate_config(body: ConfigValidationRequest):
     try:
         env_config = EnvironmentConfig.model_validate(
-            {"name": body.env_name, **body.config_data}
+            {"name": body.env_name, **{k: v for k, v in body.config_data.items() if k != "connections"}}
         )
     except ValidationError as exc:
         errors = [
@@ -76,6 +89,21 @@ def validate_config(body: ConfigValidationRequest):
             for err in exc.errors()
         ]
         return ConfigValidationOut(ok=False, env_name=body.env_name, errors=errors)
+
+    connection_errors: list[FrameworkErrorOut] = []
+    for conn_name in (body.config_data.get("connections") or {}):
+        try:
+            resolve_connection(body.config_data, conn_name, env_name=body.env_name)
+        except Exception as exc:
+            connection_errors.append(FrameworkErrorOut(
+                error_type="validation_error",
+                message=str(exc),
+                field_name=f"connections.{conn_name}",
+                details={},
+            ))
+    if connection_errors:
+        return ConfigValidationOut(ok=False, env_name=body.env_name, errors=connection_errors)
+
     return ConfigValidationOut(
         ok=True,
         env_name=body.env_name,
@@ -208,12 +236,11 @@ def delete_config(config_id: int, request: Request, db: Session = Depends(get_se
     )
 
 
-def _build_env(cfg) -> EnvironmentConfig:
-    default_keys = EnvironmentConfig(name="t", db_host="localhost", db_password="").model_dump(exclude={"name"})
-    full_data = {**default_keys, **(cfg.config_json or {})}
-    return EnvironmentConfig(
-        name=cfg.env_name or cfg.name,
-        **{k: v for k, v in full_data.items() if k != "name"},
+def _build_env(cfg, connection_name: str | None = None) -> EnvironmentConfig:
+    return resolve_connection(
+        cfg.config_json or {},
+        connection_name,
+        env_name=cfg.env_name or cfg.name,
     )
 
 
