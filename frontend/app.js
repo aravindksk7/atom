@@ -759,8 +759,10 @@ function app() {
     },
 
     openNewJobModal() {
+      const _pendingQuery = sessionStorage.getItem('etl_pending_query') || '';
+      sessionStorage.removeItem('etl_pending_query');
       this.jobModal = {
-        name: '', description: '', job_type: 'reconciliation', query: '',
+        name: '', description: '', job_type: 'reconciliation', query: _pendingQuery,
         key_columns_raw: 'id', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
@@ -780,6 +782,10 @@ function app() {
         cja_source_job: '', cja_source_metric: 'count', cja_source_col: '',
         cja_target_job: '', cja_target_metric: 'count', cja_target_col: '',
         cja_tolerance: 0, cja_tolerance_type: 'absolute',
+        previewConfigId: String(this.launchSettings.config_id || ''),
+        previewLoading: false,
+        previewResult: null,
+        previewError: '',
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
@@ -824,12 +830,45 @@ function app() {
         cja_target_col: job.params?.target_column || '',
         cja_tolerance: job.params?.tolerance ?? 0,
         cja_tolerance_type: job.params?.tolerance_type || 'absolute',
+        previewConfigId: String(job.config_id || this.launchSettings.config_id || ''),
+        previewLoading: false,
+        previewResult: null,
+        previewError: '',
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
       this.jobModalTab = 'basic';  // Task 8: reset tab
       this.showJobModal = true;
+    },
+
+    async previewJobQuery() {
+      const query = this.jobModal.query?.trim();
+      const configId = this.jobModal.previewConfigId;
+      if (!query || !configId) {
+        this.jobModal.previewError = !configId ? 'Select a config to preview against.' : 'Enter a query first.';
+        return;
+      }
+      this.jobModal.previewLoading = true;
+      this.jobModal.previewResult = null;
+      this.jobModal.previewError = '';
+      try {
+        const resp = await fetch(`/api/configs/${configId}/preview-query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+          body: JSON.stringify({ query, limit: 50 }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          this.jobModal.previewError = err.detail || `Error ${resp.status}`;
+        } else {
+          this.jobModal.previewResult = await resp.json();
+        }
+      } catch (e) {
+        this.jobModal.previewError = e.message || 'Network error';
+      } finally {
+        this.jobModal.previewLoading = false;
+      }
     },
 
     addDQRule() {
