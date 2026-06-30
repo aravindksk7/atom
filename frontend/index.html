@@ -537,6 +537,28 @@
           </select>
         </div>
       </div>
+      <template x-if="launchConfigConnections().length > 0">
+        <div class="grid grid-cols-2 gap-4 mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <div>
+            <label class="field-label text-emerald-700">Source Connection</label>
+            <select x-model="launchSettings.source_connection" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in launchConfigConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="field-label text-emerald-700">Target Connection</label>
+            <select x-model="launchSettings.target_connection" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in launchConfigConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Task 5: Execution Settings group -->

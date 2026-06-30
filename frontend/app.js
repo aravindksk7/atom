@@ -125,6 +125,8 @@ function app() {
       notes: '',
       max_retries: 0,
       retry_delay_seconds: 30,
+      source_connection: null,
+      target_connection: null,
     },
     isLaunching: false,
     validateJobLoading: false,
@@ -513,6 +515,10 @@ function app() {
       this.loadCompareTemplates();
       // --- Task 19: Init keyboard shortcuts ---
       this.initKeyboardShortcuts();
+      this.$watch('launchSettings.config_id', () => {
+        this.launchSettings.source_connection = null;
+        this.launchSettings.target_connection = null;
+      });
     },
 
     // ===========================================================
@@ -1122,6 +1128,12 @@ function app() {
       });
     },
 
+    launchConfigConnections() {
+      const cfg = this.configs.find(c => String(c.id) === String(this.launchSettings.config_id));
+      if (!cfg || !cfg.config_data || !cfg.config_data.connections) return [];
+      return Object.keys(cfg.config_data.connections);
+    },
+
     async runTests() {
       if (!this.selectedJobs.length) return;
       this.isLaunching = true;
@@ -1136,6 +1148,8 @@ function app() {
           config_id: cfg ? cfg.id : null,
           run_settings: this._runSettingsPayload(),
           config_data: cfg ? cfg.config_data : {},
+          source_connection: this.launchSettings.source_connection || null,
+          target_connection: this.launchSettings.target_connection || null,
         });
         this.activeRuns.unshift(run);
         this.startRunStream(run);
