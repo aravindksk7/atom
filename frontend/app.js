@@ -319,6 +319,14 @@ function app() {
     fileCompareLoading: false,
     fileCompareResult: null,
 
+    // Schema Explorer (Config tab)
+    schemaExplorerId: null,
+    schemaExplorerData: [],
+    schemaExplorerLoading: false,
+    schemaExpandedSchemas: {},
+    schemaExpandedTables: {},
+    schemaTablePreviews: {},
+
     pastPairs: [],
     pastPairsLoading: false,
 
@@ -1519,6 +1527,64 @@ function app() {
         src.fileName = file.name;
       };
       reader.readAsArrayBuffer(file);
+    },
+
+    async openSchemaExplorer(cfg) {
+      if (this.schemaExplorerId === cfg.id) {
+        this.closeSchemaExplorer();
+        return;
+      }
+      this.schemaExplorerId = cfg.id;
+      this.schemaExplorerData = [];
+      this.schemaExpandedSchemas = {};
+      this.schemaExpandedTables = {};
+      this.schemaTablePreviews = {};
+      this.schemaExplorerLoading = true;
+      try {
+        this.schemaExplorerData = await api('GET', `/api/configs/${cfg.id}/schema`);
+        const schemas = [...new Set(this.schemaExplorerData.map(t => t.schema))];
+        this.schemaExpandedSchemas = Object.fromEntries(schemas.map(s => [s, true]));
+      } catch (e) {
+        this.toast('error', 'Schema load failed', e.message);
+        this.schemaExplorerId = null;
+      } finally {
+        this.schemaExplorerLoading = false;
+      }
+    },
+
+    closeSchemaExplorer() {
+      this.schemaExplorerId = null;
+      this.schemaExplorerData = [];
+      this.schemaTablePreviews = {};
+    },
+
+    toggleSchemaGroup(schema) {
+      this.schemaExpandedSchemas[schema] = !this.schemaExpandedSchemas[schema];
+    },
+
+    toggleSchemaTable(key) {
+      this.schemaExpandedTables[key] = !this.schemaExpandedTables[key];
+    },
+
+    async previewSchemaTable(configId, schema, table) {
+      const key = `${schema}.${table}`;
+      this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: 'loading' };
+      try {
+        const result = await api('POST', `/api/configs/${configId}/preview-query`, {
+          query: `SELECT * FROM [${schema}].[${table}]`,
+          limit: 50,
+        });
+        this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: result };
+      } catch (e) {
+        this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: `error:${e.message}` };
+      }
+    },
+
+    useTableInJob(schema, table) {
+      sessionStorage.setItem('etl_pending_query', `SELECT * FROM [${schema}].[${table}]`);
+      this.activeTab = 'launch';
+      this.$nextTick(() => this.openNewJobModal());
+      this.toast('info', 'Query pre-filled', 'Finish the job setup');
     },
 
     handleReconFileUpload(event, side) {
