@@ -99,10 +99,107 @@
         <div class="flex gap-2 flex-shrink-0">
           <button @click="editConfig(cfg)" class="btn-secondary btn-sm">Edit</button>
           <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm">Delete</button>
+          <button @click="openSchemaExplorer(cfg)" class="btn-secondary btn-sm"
+                  :class="schemaExplorerId === cfg.id ? 'ring-2 ring-indigo-400' : ''">
+            Browse Schema <span x-text="schemaExplorerId === cfg.id ? '▲' : '▼'"></span>
+          </button>
         </div>
       </div>
     </template>
   </div>
+
+  <!-- Schema Explorer Panel -->
+  <template x-if="schemaExplorerId !== null">
+    <div class="card mt-3">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">
+          Schema Explorer —
+          <span x-text="configs.find(c => c.id === schemaExplorerId)?.name ?? ''"></span>
+        </div>
+        <button @click="closeSchemaExplorer()" class="text-muted hover:text-slate-700 text-sm">✕ Close</button>
+      </div>
+
+      <div x-show="schemaExplorerLoading" class="text-muted text-sm">Loading schema…</div>
+
+      <template x-if="!schemaExplorerLoading && schemaExplorerData.length === 0">
+        <div class="text-muted text-sm">No tables found or connection failed.</div>
+      </template>
+
+      <template x-if="!schemaExplorerLoading && schemaExplorerData.length > 0">
+        <div>
+          <template x-for="schemaGroup in [...new Set(schemaExplorerData.map(t => t.schema))]" :key="schemaGroup">
+            <div class="mb-2">
+              <button @click="toggleSchemaGroup(schemaGroup)"
+                      class="flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-indigo-600 w-full text-left">
+                <span x-text="schemaExpandedSchemas[schemaGroup] ? '▼' : '▶'"></span>
+                <span x-text="schemaGroup"></span>
+                <span class="text-muted font-normal ml-1"
+                      x-text="'(' + schemaExplorerData.filter(t => t.schema === schemaGroup).length + ' tables)'"></span>
+              </button>
+              <template x-if="schemaExpandedSchemas[schemaGroup]">
+                <div class="ml-4 mt-1 space-y-1">
+                  <template x-for="tbl in schemaExplorerData.filter(t => t.schema === schemaGroup)" :key="tbl.schema + '.' + tbl.table">
+                    <div>
+                      <div class="flex items-center gap-2 py-0.5">
+                        <button @click="toggleSchemaTable(tbl.schema + '.' + tbl.table)"
+                                class="text-xs text-slate-600 hover:text-indigo-600 font-mono">
+                          <span x-text="schemaExpandedTables[tbl.schema + '.' + tbl.table] ? '▼' : '▶'"></span>
+                          <span x-text="tbl.table"></span>
+                        </button>
+                        <button @click="previewSchemaTable(schemaExplorerId, tbl.schema, tbl.table)"
+                                class="btn-secondary btn-sm text-xs">▶ Preview</button>
+                        <button @click="useTableInJob(tbl.schema, tbl.table)"
+                                class="btn-secondary btn-sm text-xs">Use in Job</button>
+                      </div>
+                      <template x-if="schemaExpandedTables[tbl.schema + '.' + tbl.table]">
+                        <div class="ml-6 text-xs text-muted font-mono flex flex-wrap gap-x-3 mt-0.5">
+                          <template x-for="col in tbl.columns" :key="col.name">
+                            <span><span x-text="col.name"></span> <span class="text-slate-400" x-text="'(' + col.type + ')'"></span></span>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table]">
+                        <div class="mt-1 ml-4">
+                          <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'loading'">
+                            <div class="text-xs text-muted">Loading preview…</div>
+                          </template>
+                          <template x-if="typeof schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'string' && schemaTablePreviews[tbl.schema + '.' + tbl.table].startsWith('error:')">
+                            <div class="text-xs text-red-500" x-text="schemaTablePreviews[tbl.schema + '.' + tbl.table].replace('error:', '')"></div>
+                          </template>
+                          <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table] && typeof schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'object'">
+                            <div class="overflow-x-auto border rounded" style="max-height:200px;overflow-y:auto">
+                              <table class="data-table text-xs">
+                                <thead>
+                                  <tr>
+                                    <template x-for="col in schemaTablePreviews[tbl.schema + '.' + tbl.table].columns" :key="col">
+                                      <th x-text="col"></th>
+                                    </template>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <template x-for="(row, ri) in schemaTablePreviews[tbl.schema + '.' + tbl.table].rows" :key="ri">
+                                    <tr>
+                                      <template x-for="(cell, ci) in row" :key="ci">
+                                        <td x-text="cell ?? '—'"></td>
+                                      </template>
+                                    </tr>
+                                  </template>
+                                </tbody>
+                              </table>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
 
   <!-- YAML Import card -->
   <div class="card mt-4">
