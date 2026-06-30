@@ -67,6 +67,7 @@ class CompareService:
                 engine_a, engine_b,
                 key_columns=key_columns,
                 exclude_columns=req.exclude_columns or [],
+                mismatch_row_limit=5000,
             )
             result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
 
@@ -176,6 +177,7 @@ class CompareService:
             engine_a, engine_b,
             key_columns=key_columns,
             exclude_columns=req.exclude_columns or [],
+            mismatch_row_limit=5000,
         )
         result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")
         tr = self._repo.add_test_result(run_id, result)

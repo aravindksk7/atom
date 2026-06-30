@@ -1826,17 +1826,35 @@ function app() {
       if (!runId) return;
       const cur = this.fileExpandedDiffs[name];
       if (cur) {
-        // Already fetched — just toggle visibility
         this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { ...cur, open: !cur.open } };
         return;
       }
-      // First expand: fetch mismatches from API
-      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: true, data: [], error: '' } };
+      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: true, loadingMore: false, data: [], page: 0, hasMore: false, resultId: r.id, error: '' } };
       try {
-        const data = await api('GET', `/api/runs/${runId}/results/${r.id}/mismatches?limit=500`);
-        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, data: data || [], error: '' } };
+        const data = await api('GET', `/api/runs/${runId}/results/${r.id}/mismatches?limit=100&offset=0`);
+        const rows = data || [];
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, loadingMore: false, data: rows, page: 0, hasMore: rows.length === 100, resultId: r.id, error: '' } };
       } catch (e) {
-        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, data: [], error: e.message || 'Failed to load diff details' } };
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, loadingMore: false, data: [], page: 0, hasMore: false, resultId: r.id, error: e.message || 'Failed to load diff details' } };
+      }
+    },
+
+    async loadMoreFileDiffs(name) {
+      const runId = this.fileCompareResult?.run_id;
+      const cur = this.fileExpandedDiffs[name];
+      if (!runId || !cur || cur.loadingMore) return;
+      const nextPage = cur.page + 1;
+      const offset = nextPage * 100;
+      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { ...cur, loadingMore: true } };
+      try {
+        const data = await api('GET', `/api/runs/${runId}/results/${cur.resultId}/mismatches?limit=100&offset=${offset}`);
+        const rows = data || [];
+        this.fileExpandedDiffs = {
+          ...this.fileExpandedDiffs,
+          [name]: { ...cur, loadingMore: false, data: [...cur.data, ...rows], page: nextPage, hasMore: rows.length === 100 },
+        };
+      } catch (e) {
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { ...cur, loadingMore: false, error: e.message || 'Failed to load more' } };
       }
     },
 

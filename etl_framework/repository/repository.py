@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
@@ -189,16 +190,22 @@ class RunRepository:
     def add_mismatch_details(
         self, test_result_id: int, mismatches: list[MismatchRecord]
     ) -> None:
-        for m in mismatches:
-            detail = MismatchDetail(
-                test_result_id=test_result_id,
-                key_values=m.key_values,
-                column_name=m.column_name,
-                source_value=str(m.source_value) if m.source_value is not None else None,
-                target_value=str(m.target_value) if m.target_value is not None else None,
-                mismatch_type=m.mismatch_type,
-            )
-            self._db.add(detail)
+        if not mismatches:
+            return
+        self._db.execute(
+            insert(MismatchDetail),
+            [
+                {
+                    "test_result_id": test_result_id,
+                    "key_values": m.key_values,
+                    "column_name": m.column_name,
+                    "source_value": str(m.source_value) if m.source_value is not None else None,
+                    "target_value": str(m.target_value) if m.target_value is not None else None,
+                    "mismatch_type": m.mismatch_type,
+                }
+                for m in mismatches
+            ],
+        )
         self._db.commit()
 
     def count_completed_results(self, run_id: str) -> int:
