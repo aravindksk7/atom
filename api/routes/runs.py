@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -127,6 +128,16 @@ def _validate_connection_name(cfg, name: str | None, field: str) -> None:
         )
 
 
+def _resolve_connection_or_422(source: dict, name: str | None, env_name: str, field: str):
+    try:
+        return _resolve_connection(source, name, env_name=env_name)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": f"{field} '{name}' failed validation", "errors": exc.errors()},
+        ) from exc
+
+
 def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     cfg_data = dict(body.config_data or {})
     cfg = ConfigRepository(db).get(body.config_id) if body.config_id is not None else None
@@ -146,10 +157,11 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     if "source_credentials" not in snapshot:
         _validate_connection_name(cfg, body.source_connection, "source_connection")
         if body.source_connection:
-            src = _resolve_connection(
+            src = _resolve_connection_or_422(
                 cfg.config_json if cfg else cfg_data,
                 body.source_connection,
-                env_name=body.source_env,
+                body.source_env,
+                "source_connection",
             )
             snapshot["source_credentials"] = {**src.model_dump(), "name": body.source_env}
         else:
@@ -160,10 +172,11 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     if "target_credentials" not in snapshot:
         _validate_connection_name(cfg, body.target_connection, "target_connection")
         if body.target_connection:
-            tgt = _resolve_connection(
+            tgt = _resolve_connection_or_422(
                 cfg.config_json if cfg else cfg_data,
                 body.target_connection,
-                env_name=body.target_env,
+                body.target_env,
+                "target_connection",
             )
             snapshot["target_credentials"] = {**tgt.model_dump(), "name": body.target_env}
         else:
