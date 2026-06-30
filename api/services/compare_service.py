@@ -177,7 +177,7 @@ class CompareService:
                     passed += 1
                 else:
                     failed += 1
-                from etl_framework.reconciliation.models import ReconciliationResult
+                from etl_framework.reconciliation.models import ReconciliationResult, MismatchRecord
                 from etl_framework.runner.state import TestStatus as TS
                 synthetic = ReconciliationResult(
                     query_name=name,
@@ -194,7 +194,21 @@ class CompareService:
                     executed_at=datetime.now(timezone.utc),
                     duration_seconds=0.0,
                 )
-                self._repo.add_test_result(run_id, synthetic)
+                tr = self._repo.add_test_result(run_id, synthetic)
+                if status != "PASSED":
+                    _mm = [
+                        MismatchRecord(
+                            key_values={"test_name": name},
+                            column_name=metric,
+                            source_value=str(a.get(metric)) if a.get(metric) is not None else "",
+                            target_value=str(b.get(metric)) if b.get(metric) is not None else "",
+                            mismatch_type="stat_diff",
+                        )
+                        for metric in compared_metrics
+                        if a.get(metric) != b.get(metric)
+                    ]
+                    if _mm:
+                        self._repo.add_mismatch_details(tr.id, _mm)
                 results.append(synthetic)
 
             overall = "PASSED" if failed == 0 else "FAILED"
