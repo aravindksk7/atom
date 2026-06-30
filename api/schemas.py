@@ -185,6 +185,8 @@ class RunStepReleaseRequest(BaseModel):
 class RunTrigger(BaseModel):
     source_env: str
     target_env: str
+    source_connection: str | None = None
+    target_connection: str | None = None
     job_names: list[str] = Field(default_factory=list)
     job_sequence: list[str | SequenceStep] = Field(default_factory=list)
     config_id: int | None = None
@@ -541,6 +543,8 @@ class SQLCompareRequest(BaseModel):
     query_b: str
     label_a: str = "Source A"
     label_b: str = "Source B"
+    connection_a: str | None = None
+    connection_b: str | None = None
     key_columns: list[str] = Field(default_factory=list)
     exclude_columns: list[str] = Field(default_factory=list)
 
