@@ -29,8 +29,15 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - [Docker Or Service Deployment](#docker-or-service-deployment)
 - [Database And Storage](#database-and-storage)
 - [Using The Web UI](#using-the-web-ui)
+  - [Job Launcher — Step-By-Step](#job-launcher--step-by-step)
+  - [Creating And Managing Jobs](#creating-and-managing-jobs)
+  - [Job Types Reference](#job-types-reference)
+  - [Run Settings Reference](#run-settings-reference)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
 - [Compare Tab](#compare-tab)
+  - [BO Report Compare](#bo-report-compare)
+  - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
+  - [Recon File Compare](#recon-file-compare)
 - [Data Contracts](#data-contracts)
 - [API Usage](#api-usage)
 - [ETL Test Capabilities](#etl-test-capabilities)
@@ -58,6 +65,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - Compare SAP BusinessObjects report sources from live BO, file paths, or uploads.
 - Launch dual-environment reconciliation runs and compare the paired results.
 - Compare a stored reconciliation run or HTML report against a production HTML report.
+- Define **multiple named DB connections within a single saved config** (e.g. `hr_db`, `finance_db` sharing one environment's BO/Automic settings) and pick which one a run or SQL compare uses at launch time.
 - Browse generated HTML reports, metrics dashboards, and searchable logs in a dark-themed UI.
 - Use SAP BO and Automic adapters from the UI and API.
 - Use the REST API directly with OpenAPI documentation at `/docs`.
@@ -350,35 +358,48 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/configs" -Body $body -ContentType "application/json" -Headers $headers
 ```
 
+### Named Connections (Multiple DB Connections Per Environment)
+
+A single saved config can define more than one database connection under a `connections` map, so one environment entry (with one set of BO/Automic settings) can target several databases — e.g. `hr_db` and `finance_db` inside the same `prod` config.
+
+```json
+{
+  "name": "prod-main",
+  "env_name": "prod",
+  "config_data": {
+    "db_host": "sql-prod.internal",
+    "db_name": "default_db",
+    "db_user": "etl_user",
+    "db_password": "secret",
+    "connections": {
+      "hr_db": { "db_host": "hr-sql-prod.internal", "db_name": "HR" },
+      "finance_db": { "db_host": "fin-sql-prod.internal", "db_name": "FIN" }
+    }
+  }
+}
+```
+
+**How it resolves:**
+
+- Each entry under `connections` may override any subset of `db_host`, `db_port`, `db_name`, `db_user`, `db_password`, `db_driver`, `db_pool_size`, `db_pool_overflow`, `db_pool_timeout`, `db_pool_recycle`, `db_connect_timeout`. Fields left out fall back to the top-level config values.
+- The merged result is validated as a strict `EnvironmentConfig` — if a required field (e.g. `db_host`, `db_password`) is missing after merging, the request fails with `422` and field-level detail.
+- Picking no named connection behaves exactly as before — the run or compare uses the top-level config values directly.
+- An unknown connection name is rejected with `422` at request time, before any query runs.
+
+**Where it's used:**
+
+- **Run trigger** (`POST /api/runs`) — `source_connection` / `target_connection` select a named connection from the config used for `source_env` / `target_env` respectively.
+- **SQL Direct Compare** (`POST /api/compare/sql`) — `connection_a` / `connection_b` select a named connection from `config_id_a` / `config_id_b` respectively.
+- **Web UI** — the Config modal has a **Named Connections** section for adding, editing, and removing connections on a saved config. The Launch tab's Run Settings panel and the Compare tab's SQL Direct Compare cards show a connection picker dropdown whenever the selected config has named connections.
+- Secrets in `connections` entries are masked the same way as top-level config fields when a config is read back via the API or UI (`db_password`, etc. are never returned in plaintext after creation).
+
 ### YAML Import
 
 Configs can also be imported as YAML through `/api/configs/import-yaml`. The YAML should describe one or more named environments. Keep secrets out of source control.
 
 ### Run Settings
 
-Every run can include `run_settings`:
-
-| Setting | Default | Description |
-|---|---:|---|
-| `use_live_connections` | `false` | Use live SQL/adapter connections instead of simulation paths. |
-| `execution_mode` | `parallel` | `parallel` or `sequential`. |
-| `max_workers` | `4` | Worker count for parallel execution. |
-| `max_duration_seconds` | `0` | SLO threshold. `0` disables duration thresholding. |
-| `float_tolerance` | `1e-9` | Numeric comparison tolerance. |
-| `schema_mismatch_policy` | `warn` | `warn` records schema diff and compares common columns; `error` fails the test. |
-| `null_equals_null` | `true` | Treat two null values as equal. |
-| `chunk_size` | `0` | Chunk size for chunked reconciliation. `0` disables chunking. |
-| `use_hash_precheck` | `true` | Use hash shortcut before expensive value comparison where possible. |
-| `comparison_backend` | `pandas` | `pandas` or `polars`. Both backends are included in the base install. |
-| `mismatch_row_limit` | `1000` | Maximum mismatch rows stored per result. |
-| `exclude_columns` | `[]` | Global columns to ignore. |
-| `key_columns` | `[]` | Global key columns. Job-specific keys can also be stored on jobs. |
-| `health_check` | `false` | Run health checks before execution. |
-| `metrics_enabled` | `true` | Write metrics JSON to `logs/metrics_<run_id>.json`. |
-| `notes` | `""` | Free-form run notes. |
-| `max_retries` | `0` | Retry a failed job up to this many times (exponential backoff). |
-| `retry_delay_seconds` | `30` | Initial delay before first retry; doubles each attempt. |
-| `retry_on` | `["error"]` | Conditions that trigger a retry: `"error"` and/or `"timeout"`. |
+Every run accepts a `run_settings` block. See [Run Settings Reference](#run-settings-reference) for the full table of options and their defaults.
 
 ## Development Deployment
 
@@ -702,6 +723,7 @@ Use this tab to:
 
 - Create saved environment configs.
 - Edit connection details.
+- **Named Connections** — add, expand/collapse, and remove multiple named DB connections within a single config (e.g. `hr_db`, `finance_db`), each overriding only the DB fields it needs while sharing the config's BO/Automic settings. See [Named Connections](#named-connections-multiple-db-connections-per-environment).
 - Validate config values.
 - Store SAP BO and Automic credentials for adapter workflows.
 - **Import YAML** — expand the "Import YAML" card, paste a YAML block defining one or more named environments, and click Import to create all configs in one step.
@@ -710,31 +732,407 @@ Use this tab to:
 
 ### Launch
 
-Use this tab to:
+Use this tab to configure and start ETL test runs, manage the job catalog, and set up recurring schedules.
 
-- Select source and target environment labels.
-- Choose a saved config.
-- Pick run settings including **retry policy** (max retries, retry delay).
-- Select jobs from the catalog.
-- **Create, edit, or delete jobs directly** — use the "+ New Job" button in the Job Catalog card.
-  - Set `Depends On` to create job dependencies; the run executor will topologically sort and execute in order.
-  - Add **DQ Rules** per job (not_null, unique, row_count checks, regex, mean range).
-  - Use **Validate Query** (edit mode) to EXPLAIN the query against both environments before running.
-- Order jobs in the execution sequence.
-- Start a run.
-- **Schedules sub-tab** — create, edit, enable, disable, and manually trigger cron-scheduled runs.
+---
 
-The generic job editor supports `reconciliation`, `bo_report`, `automic_job`, `dbt_artifact`, `freshness`, `profile`, `schema_snapshot`, and `cross_job_assertion` jobs:
+### Job Launcher — Step-By-Step
 
-- Reconciliation jobs require SQL and key columns.
-- BO report jobs require a BO document ID and BO report/page ID, plus optional output format.
-- Automic jobs require either an Automic job name or run ID.
-- dbt artifact jobs require a `run_results.json` path and can optionally include a `manifest.json` path for friendly node names.
-- Freshness jobs require a SQL query and a timestamp column name; optionally set `max_age_hours` (default 24).
-- Profile jobs require a SQL query; optionally name columns (blank = all) and set a `drift_threshold_pct` for drift alerts.
-- Schema snapshot jobs require a SQL query and an environment label (`source`, `target`, or `both`).
-- Cross-job assertion jobs require a source job, source metric, target job, target metric, and a tolerance value with type (`absolute` or `pct`).
-- Validate Query is shown only for reconciliation jobs.
+**1. Set environment labels**
+
+Enter `Source Env` and `Target Env` text labels (e.g. `dev` and `prod`). These labels are stored with each run and appear in History and reports. They are arbitrary strings — they identify the pair, not live connection credentials.
+
+**2. Select a saved config**
+
+Choose a saved config from the dropdown. A config bundles all connection details (SQL Server host, SAP BO URL, Automic URL, and credentials). If no config is selected the run uses simulation data (safe for development). To use live connections, select a config **and** enable `Use Live Connections` in Run Settings.
+
+If the selected config has [named connections](#named-connections-multiple-db-connections-per-environment), a **Source Connection** / **Target Connection** picker appears so you can target a specific named DB connection instead of the config's top-level defaults. Leaving both unset uses the top-level config values.
+
+**3. Configure Run Settings**
+
+Expand the **Run Settings** panel to tune execution behaviour before starting a run. See the [Run Settings Reference](#run-settings-reference) section for all options.
+
+**4. Select jobs**
+
+The **Job Catalog** card lists all saved jobs (or seed jobs if the database is empty). Check the box next to each job you want to include. You can also reorder jobs in the execution sequence by dragging rows or using up/down controls.
+
+- Only `enabled` jobs appear in the catalog by default.
+- Use the tag filter to narrow the list by tag (e.g. `daily`, `payments`).
+
+**5. Start the run**
+
+Click **Run Tests**. The page switches to the **Monitor** tab automatically and streams live progress via Server-Sent Events. When complete, results appear in **History**.
+
+**Schedules sub-tab**
+
+Create, edit, enable, disable, and manually trigger cron-scheduled runs without opening the Launch form each time. Each schedule stores the full run configuration (env labels, config, job list, run settings) and fires at the configured interval.
+
+| Field | Description |
+|---|---|
+| Name | Human-readable label for the schedule |
+| Cron expression | Standard 5-field cron (e.g. `0 6 * * 1-5` = weekdays at 06:00) |
+| Source / Target Env | Environment pair labels used for every triggered run |
+| Config | Saved config to use |
+| Job names | Comma-separated or JSON list of jobs |
+| Run Settings | Full run settings block |
+| Enabled | Toggle without deleting the schedule |
+| Run Now | Trigger immediately outside the normal schedule |
+
+---
+
+### Creating And Managing Jobs
+
+All job management is available from the **Job Catalog** card in the Launch tab or via the REST API.
+
+#### Create a new job (UI)
+
+1. Click **+ New Job** in the Job Catalog card.
+2. Enter a **Name** (unique, required).
+3. Enter an optional **Description** and comma-separated **Tags**.
+4. Select a **Job Type** — see [Job Types Reference](#job-types-reference) for full details on each type and its required settings.
+5. Fill in the type-specific fields that appear (SQL query, key columns, BO report IDs, etc.).
+6. Optionally set **Depends On** — enter one or more job names whose results must be available before this job can run. The run executor resolves the execution order with a topological sort; jobs with failed upstreams are skipped automatically.
+7. Optionally add **DQ Rules** — click **+ Add Rule**, pick a rule type, and fill in the parameters. Multiple rules can be stacked on a single job.
+8. Optionally set a **Pass Condition** — override whether the job is considered passed based on row counts, mismatch thresholds, or a custom SQL assertion (see `PassCondition` fields below).
+9. For reconciliation jobs, click **Validate Query** to run a dry-run EXPLAIN against both the source and target databases before saving.
+10. Click **Save**.
+
+#### Edit or delete a job
+
+Click the pencil icon on any catalog row to open the edit form. Click the trash icon to delete. Deletion is permanent; the job will not appear in future runs but historical run results are retained.
+
+#### Bulk import jobs (API)
+
+POST a JSON array to `/api/jobs/import`. Existing jobs with the same name are updated (upsert).
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+$jobs = @(
+  @{ name = "sales_recon"; job_type = "reconciliation"; query = "SELECT * FROM sales"; key_columns = @("id") }
+  @{ name = "nightly_load"; job_type = "automic_job"; params = @{ job_name = "ETL_NIGHTLY_LOAD" } }
+) | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/jobs/import" -Body $jobs -ContentType "application/json" -Headers $h
+```
+
+#### Pass Condition fields
+
+A `pass_condition` block lets you define custom pass/fail logic that runs after reconciliation. All fields are optional; only the ones you supply are checked.
+
+| Field | Type | Description |
+|---|---|---|
+| `min_row_count` | int | Fail if source row count is below this threshold |
+| `max_row_count` | int | Fail if source row count is above this threshold |
+| `max_value_mismatches` | int | Fail if value mismatch count exceeds this |
+| `max_missing_in_target` | int | Fail if missing-in-target count exceeds this |
+| `max_missing_in_source` | int | Fail if missing-in-source count exceeds this |
+| `require_status` | list[str] | Fail if the reconciliation status is not in this list (e.g. `["PASSED"]`) |
+| `pass_sql` | str | Custom SQL query; evaluated after reconciliation |
+| `pass_sql_mode` | str | `rows_mean_pass` (rows returned = pass) or `rows_mean_fail` (rows returned = fail) |
+
+#### Sequence steps (advanced)
+
+When triggering a run via the API you can specify `job_sequence` as a list of structured `SequenceStep` objects instead of plain job names. This enables step-level gating and controlled pauses.
+
+| Field | Default | Description |
+|---|---|---|
+| `job_name` | required | Name of the job to run at this step |
+| `hold_after` | `false` | Pause execution after this step until released manually via the Monitor tab |
+| `condition` | `null` | Gate the **next** step on this step's result (see condition fields below) |
+| `wait_seconds` | `0` | Sleep this many seconds before running this step |
+
+**Condition fields** (`StepCondition`):
+
+| Field | Description |
+|---|---|
+| `require_status` | Proceed only if the previous job had one of these statuses (default `["PASSED"]`) |
+| `max_mismatch_count` | Cancel remaining steps if total mismatches exceed this |
+| `min_row_count` | Cancel if source row count is below this |
+| `max_row_count` | Cancel if source row count exceeds this |
+| `max_value_mismatches` | Cancel if value-mismatch count exceeds this |
+| `max_missing_in_target` | Cancel if missing-in-target count exceeds this |
+| `max_missing_in_source` | Cancel if missing-in-source count exceeds this |
+
+---
+
+### Job Types Reference
+
+The framework supports eight job types. Each type has its own required parameters and behaviour. Choose the job type that matches what you want to test or monitor.
+
+#### `reconciliation` (default)
+
+Compares two SQL queries (one per environment) row-by-row. This is the most common job type for ETL validation.
+
+**Required fields:**
+
+| Field | Description |
+|---|---|
+| `query` | SQL query executed against both source and target environments |
+| `key_columns` | One or more columns that uniquely identify a row (used to join the two result sets) |
+
+**Optional fields:**
+
+| Field | Default | Description |
+|---|---|---|
+| `exclude_columns` | `[]` | Columns to ignore during comparison (e.g. `last_updated`, audit timestamps) |
+| `rules` | `[]` | DQ rules evaluated against the source result set |
+| `depends_on` | `[]` | Job names that must complete (and pass) before this job runs |
+| `pass_condition` | `null` | Custom threshold overrides for pass/fail logic |
+
+**How it works:**
+
+1. The query is run against the source and target databases.
+2. Rows are matched on `key_columns`.
+3. Value differences, rows missing from target, and rows missing from source are recorded as mismatch details.
+4. DQ rules (if configured) are applied to the source result set and any violations are added as additional mismatches.
+5. Status is `PASSED` if there are zero issues (or if `pass_condition` thresholds are all met), otherwise `FAILED`.
+
+Use `Validate Query` in the editor to run a dry-run EXPLAIN before saving; this checks SQL syntax against both environments without fetching any data.
+
+---
+
+#### `bo_report`
+
+Monitors a SAP BusinessObjects WebIntelligence report execution status. When `use_live_connections` is enabled, the executor authenticates to the BO REST API and checks the report/document state.
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `report_id` | The BO report or page ID within the document |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `doc_id` | — | BO document (WebI) ID; overrides any document-level config |
+| `format` | `xlsx` | Output format for download: `csv`, `xlsx`, or `xls` |
+| `mode` | `api` | `api` = live BO REST call; any other value uses simulation |
+
+**How it works (live mode):**
+
+1. The executor authenticates with the BO RESTful Web Services API at the URL in the saved config (`bo_url`, `bo_user`, `bo_password`).
+2. It fetches the report data for the given document and report ID.
+3. The report data is converted to a DataFrame and compared against the target environment's equivalent report (or simulation data in offline mode).
+4. Mismatches are recorded normally.
+
+**Adding BO jobs from the Adapters tab:**
+
+The **Adapters → SAP BO** section lets you browse documents, expand report tabs, and click **Add to Catalog** to create a `bo_report` job without manually entering IDs.
+
+---
+
+#### `automic_job`
+
+Checks the execution status of an Automic (UC4) job or workflow run. Used to verify that upstream ETL processes completed successfully before running reconciliation.
+
+**Required params (one of):**
+
+| Param | Description |
+|---|---|
+| `job_name` | Automic job name (e.g. `ETL_NIGHTLY_LOAD`); the executor looks up the most recent run |
+| `run_id` | Specific Automic run ID; used when you want to pin the check to a particular execution |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `run_id` | — | Use alongside `job_name` to check a specific run rather than the latest |
+
+**How it works:**
+
+1. The executor queries the Automic REST API (configured via `automic_url`, `automic_user`, `automic_password` in the saved config).
+2. If `job_name` is provided, it fetches the most recent run for that job name.
+3. If `run_id` is provided, it fetches that specific run.
+4. The job status (`ENDED_OK`, `ENDED_NOT_OK`, `RUNNING`, etc.) is mapped to `PASSED`/`FAILED`.
+5. In simulation mode (no live connection), the job returns a simulated PASSED result.
+
+**Bulk import from the Adapters tab:**
+
+- **Import from File** — upload a `.json` array or `.csv` with columns `name, job_type, job_name, run_id, tags, description`.
+- **Browse & Import from Automic** — enter a filter pattern (e.g. `ETL_*`) to search for matching jobs and import them in bulk.
+
+---
+
+#### `dbt_artifact`
+
+Parses dbt's `run_results.json` (and optionally `manifest.json`) and maps dbt test outcomes to standard run results. Use this to bring dbt test failures into the same history and mismatch tracking workflow as your other ETL jobs.
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `run_results_path` | Absolute or relative path to dbt's `target/run_results.json` |
+
+**Optional params:**
+
+| Param | Description |
+|---|---|
+| `manifest_json_path` | Path to `target/manifest.json`; when provided, node names are resolved to friendly model names |
+
+**How it works:**
+
+1. The executor reads `run_results.json` and maps each node's status (`pass`, `fail`, `error`, `skip`) to the framework's status values.
+2. Failing or erroring nodes are recorded as mismatch details with the node name and error message.
+3. If `manifest.json` is also provided, the unique node ID is resolved to the human-readable model name.
+4. The overall job status is `PASSED` only if all nodes passed or were skipped.
+
+---
+
+#### `freshness`
+
+Checks that the most recent timestamp in a table column is within an acceptable age. Use this to verify that source data is being loaded on schedule.
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `timestamp_column` | Name of the column containing the most recent load timestamp |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `max_age_hours` | `24` | Maximum acceptable age of the most recent record in hours |
+
+**Required fields:**
+
+| Field | Description |
+|---|---|
+| `query` | SQL query that returns the table to check (the executor finds the MAX of `timestamp_column`) |
+
+**How it works:**
+
+1. The query is run against the source environment.
+2. The MAX value of `timestamp_column` is extracted.
+3. If the most recent record is older than `max_age_hours` from the run time, the job fails.
+4. The result is stored as a standard test result; no row-level mismatches are produced.
+
+---
+
+#### `profile`
+
+Computes per-column statistics (null rate, distinct count, min, max, mean, std dev, p25/p50/p75/p95) for a query result and optionally detects drift against the previous profile run.
+
+**Required fields:**
+
+| Field | Description |
+|---|---|
+| `query` | SQL query whose result set is profiled |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `columns` | all | List of column names to profile; leave empty to profile all columns |
+| `drift_threshold_pct` | none | If set, drift is flagged when a numeric metric changes by more than this percentage vs the previous run |
+
+**How it works:**
+
+1. The query is run against the source environment.
+2. Per-column statistics are computed and stored in `column_profiles`.
+3. If a previous profile exists for this job, drift is detected column-by-column.
+4. Drift violations are recorded as mismatch details; overall status is `FAILED` if any metric drifts beyond the threshold.
+
+**Profile API:**
+
+```powershell
+# Latest profile statistics
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/my_profile_job/profile"
+
+# History for a specific column
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/my_profile_job/profile/history?column=amount"
+
+# Auto-suggest DQ rules based on observed distribution
+Invoke-RestMethod -Method Post -Headers $h "http://127.0.0.1:8000/api/jobs/my_profile_job/suggest-rules"
+```
+
+Profile results are browsable in the **History → Profile** sub-tab.
+
+---
+
+#### `schema_snapshot`
+
+Captures the column names and data types for a query result and diffs them against the previous snapshot. Use this to detect schema drift (added, removed, or type-changed columns) between releases.
+
+**Required fields:**
+
+| Field | Description |
+|---|---|
+| `query` | SQL query whose schema is captured |
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `environment` | Which side to snapshot: `source`, `target`, or `both` |
+
+**How it works:**
+
+1. The query is executed (or EXPLAINed) against the specified environment(s).
+2. Column names and inferred types are stored in `schema_snapshots`.
+3. The diff against the previous snapshot is computed: `added`, `removed`, and `changed` (type mismatch) columns.
+4. Any schema change causes the job to fail; a clean run (no diff) passes.
+
+**Schema history API:**
+
+```powershell
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/jobs/my_schema_job/schema-history?environment=source"
+```
+
+Schema snapshots are browsable in the **History → Schema** sub-tab.
+
+---
+
+#### `cross_job_assertion`
+
+Asserts that a numeric metric from one job's latest result matches another job's metric within a configurable tolerance. Use this to enforce cross-table consistency (e.g. orders count should match payments count within 5%).
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `source_job` | Name of the job whose metric is the left-hand side |
+| `source_metric` | Metric to read from the source job: `count`, `mismatch_count`, `missing_in_target`, `missing_in_source` |
+| `target_job` | Name of the job whose metric is the right-hand side |
+| `target_metric` | Same options as `source_metric` |
+| `tolerance` | Numeric tolerance value |
+| `tolerance_type` | `absolute` (raw difference) or `pct` (percentage difference) |
+
+**How it works:**
+
+1. The executor reads the latest stored result for `source_job` and `target_job`.
+2. The specified metrics are extracted.
+3. The absolute or percentage difference is computed.
+4. If the difference exceeds `tolerance`, the job fails.
+5. No SQL query is needed — the assertion runs purely against stored results.
+
+---
+
+### Run Settings Reference
+
+Run settings are configured in the **Run Settings** panel in the Launch tab or passed as `run_settings` in the API payload. All fields are optional; defaults are shown.
+
+| Setting | Default | Description |
+|---|---:|---|
+| `use_live_connections` | `false` | When `true`, the run connects to the actual SQL Server, SAP BO, and Automic systems using the selected config. When `false`, the run uses built-in simulation data (safe for development and testing). |
+| `execution_mode` | `parallel` | `parallel` runs all jobs concurrently up to `max_workers`; `sequential` runs jobs one at a time in the listed order. |
+| `max_workers` | `4` | Number of parallel threads when `execution_mode` is `parallel`. Increase for large job sets; reduce if database connections are limited. |
+| `max_duration_seconds` | `0` | SLO threshold in seconds per job. A job that takes longer than this is marked `SLOW` even if it passes. `0` disables the threshold. |
+| `float_tolerance` | `1e-9` | Floating-point comparison tolerance. Two numeric values are considered equal if their absolute difference is less than this. Increase for currency columns with rounding differences. |
+| `schema_mismatch_policy` | `warn` | `warn` records column count or name differences as a warning and compares only common columns. `error` immediately fails the job when schemas differ. |
+| `null_equals_null` | `true` | When `true`, a null in source and a null in target are treated as equal. Set to `false` to flag null-to-null pairs as mismatches. |
+| `chunk_size` | `0` | Chunk large tables by fetching `chunk_size` rows at a time. `0` fetches the entire result set in one query. Useful for very large tables to reduce peak memory. |
+| `use_hash_precheck` | `true` | Before comparing values column-by-column, hash the entire source and target rows. If the hashes match, the row is immediately marked clean. Speeds up runs with many passing rows. |
+| `comparison_backend` | `pandas` | Data comparison engine: `pandas` (default, broad compatibility) or `polars` (faster for large result sets). Both are included in the base install. |
+| `mismatch_row_limit` | `1000` | Maximum number of mismatch rows stored per job result. Rows beyond this limit are still counted but not stored in detail. |
+| `exclude_columns` | `[]` | Global list of column names to skip during comparison. Applies to all jobs in the run. Job-level `exclude_columns` are merged with this list. |
+| `key_columns` | `[]` | Global key columns used as a fallback when a job does not specify its own `key_columns`. Job-level `key_columns` take precedence. |
+| `health_check` | `false` | When `true`, connectivity to both environments is verified before any job runs. The run aborts early if a health check fails. |
+| `metrics_enabled` | `true` | Write a per-run metrics JSON sidecar to `logs/metrics_<run_id>.json`. |
+| `notes` | `""` | Free-form text attached to the run record; visible in History. |
+| `max_retries` | `0` | Retry a failed job up to this many times using exponential backoff. Maximum is `10`. |
+| `retry_delay_seconds` | `30` | Initial delay before the first retry. Doubles on each subsequent attempt (30s, 60s, 120s, …). |
+| `retry_on` | `["error"]` | Which failure conditions trigger a retry. Options: `"error"` (exception during execution) and/or `"timeout"` (job exceeded `max_duration_seconds`). |
 
 Default seed jobs are returned if the database has no saved jobs.
 
@@ -846,24 +1244,224 @@ GET /api/runs/{run_id}/logs?format=json&q=schema_check&level=ERROR&limit=500
 
 ## Compare Tab
 
-### BO Report Compare API
+The **Compare** tab provides three first-class comparison modes for ad-hoc analysis that does not fit the standard job-driven run workflow. Each mode produces a standard `TestRun` record (visible in History with full mismatch details, export, and baseline support).
 
-```text
-POST /api/compare/bo-report
+---
+
+### BO Report Compare
+
+Compare two SAP BusinessObjects report outputs side-by-side. Use this when you want to verify that a report produces identical data in two different environments (or between two report versions) without setting up a full reconciliation job.
+
+**Source types**
+
+Each side (Source A, Source B) can be any combination of:
+
+| Source Type | When to use | Required inputs |
+|---|---|---|
+| `live` | Fetch the report directly from a live SAP BO server | Saved config (with BO URL/credentials), Document ID, Report/Page ID, Download format (`csv`/`xlsx`/`xls`) |
+| `path` | Read a previously downloaded file from a file system path | Absolute file path on the server |
+| `upload` | Upload a file directly from your browser | File contents (CSV, XLSX, or XLS) |
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **BO Report**.
+2. For **Source A**: select the source type, then fill in the required fields.
+   - For `live`: pick a saved config, enter the Document ID and Report ID, choose the download format.
+   - For `path`: enter the full server-side path to the report file.
+   - For `upload`: click **Browse** and select a CSV/XLSX/XLS file from your computer.
+3. Repeat for **Source B**.
+4. Optionally enter **Key Columns** — the columns used to join the two report outputs. If left blank, the engine attempts to infer a key column from common ID-like column names (`id`, `employee_id`, `order_id`, etc.). If no key can be inferred automatically, key columns are required.
+5. Optionally enter **Exclude Columns** — columns present in both outputs that should not be compared (e.g. report run timestamps or page numbers).
+6. Optionally set **Label A** and **Label B** — human-readable names shown in History and mismatch details.
+7. Click **Compare**. The comparison runs and the result is stored as a run with `run_type = bo_comparison`.
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `key_columns` | Join columns; auto-inferred from well-known names if omitted |
+| `exclude_columns` | Columns to skip during value comparison |
+| `label_a` / `label_b` | Display names for each source in mismatch details |
+| `doc_id` | Document-level BO ID (can be set once at the top instead of per-source) |
+| `report_id` | Report/page-level BO ID (same as above) |
+
+**API:**
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+$body = @{
+  source_a = @{
+    source_type = "live"
+    config_id   = 1
+    doc_id      = "FI_DOC_001"
+    report_id   = "RPT_SALES_SUMMARY_001"
+    format      = "xlsx"
+  }
+  source_b = @{
+    source_type = "path"
+    file_path   = "C:\reports\sales_prod_20240101.xlsx"
+  }
+  key_columns     = @("region", "product_category")
+  exclude_columns = @("report_generated_at")
+  label_a         = "Dev BO"
+  label_b         = "Prod File"
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report" -Body $body -ContentType "application/json" -Headers $h
 ```
 
-### Dual-Environment Compare API
+---
 
-```text
-POST /api/compare/dual-env
-GET /api/compare/pairs
-GET /api/compare/pairs/{pair_id}
+### Reconciliation Dual-Environment Compare
+
+Launch two reconciliation runs (each against a different config/environment pair) simultaneously and compare their results side-by-side. Use this when you want to validate that the same job produces equivalent outcomes across two entirely different database environments (e.g. two staging instances, or a staging-vs-DR pair).
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **Dual-Environment Reconciliation**.
+2. For **Environment A**: select the saved config, enter Source Env label and Target Env label.
+3. For **Environment B**: select a different saved config, enter its Source Env and Target Env labels.
+4. Select the shared job list — only jobs present in the catalog are available.
+5. Optionally adjust **Run Settings** (same options as the main Launch tab).
+6. Click **Run Dual Compare**. Two runs are created in parallel and linked by a `pair_id`.
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `config_id_a` / `config_id_b` | Saved config IDs for the two environment pairs |
+| `source_env_a` / `target_env_a` | Env pair labels for run A |
+| `source_env_b` / `target_env_b` | Env pair labels for run B |
+| `job_names` | Shared job list; both runs execute the same jobs |
+| `run_settings` | Full run settings block (applied to both runs) |
+
+**Viewing results:**
+
+After both runs complete, the **Pair** view shows:
+
+- Status of each run side-by-side.
+- Per-job comparison: which tests improved, regressed, stayed the same, were added, or were removed.
+- Links to each individual run for full mismatch drill-down.
+
+**API:**
+
+```powershell
+# Launch a dual-environment run
+$body = @{
+  config_id_a   = 1
+  config_id_b   = 2
+  source_env_a  = "staging-a"
+  target_env_a  = "prod-a"
+  source_env_b  = "staging-b"
+  target_env_b  = "prod-b"
+  job_names     = @("orders_reconciliation", "customers_reconciliation")
+  run_settings  = @{ execution_mode = "parallel"; max_workers = 4 }
+} | ConvertTo-Json -Depth 6
+$resp = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/dual-env" -Body $body -ContentType "application/json" -Headers $h
+# $resp.pair_id, $resp.run_id_a, $resp.run_id_b
+
+# List all paired runs
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/compare/pairs"
+
+# Get a specific pair result
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/compare/pairs/$($resp.pair_id)"
 ```
 
-### Reconciliation File Compare API
+---
 
-```text
-POST /api/compare/recon-file
+### Recon File Compare
+
+Compare a stored reconciliation run result (or an HTML report file) against a production HTML report or any other tabular file. Use this to validate a historical run against a new production extract, or to compare two external files (CSV/XLSX) without running a live query.
+
+**Source types for each side:**
+
+| Source | How to specify |
+|---|---|
+| Stored run | `stored_run_id` — a run ID from History |
+| File on disk | `file_a_path` / `file_b_path` — server-side absolute path |
+| Browser upload | `file_a_content_b64` / `file_b_content_b64` — base64-encoded file content (set `file_a_name` / `file_b_name` for format detection) |
+
+Exactly one source must be provided for each side.
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **Recon File Compare**.
+2. For **Source A**: choose a stored run from the dropdown, or upload/path a file.
+3. For **Source B**: choose a stored run, or upload/path a production file.
+4. Optionally specify **Key Columns**. If omitted, the engine tries to auto-detect an ID column; if no key column is identifiable, it falls back to positional (row-number) comparison.
+5. Optionally specify **Exclude Columns**.
+6. Optionally set display **Labels** for both sides.
+7. Click **Compare**.
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `stored_run_id` / `stored_run_id_b` | IDs of previously stored runs to use as input |
+| `file_a_path` / `file_b_path` | Server file paths |
+| `file_a_content_b64` / `file_b_content_b64` | Base64-encoded file contents for browser uploads |
+| `file_a_name` / `file_b_name` | File names (used for format detection, e.g. `.xlsx`, `.csv`) |
+| `key_columns` | Join columns; falls back to row-position if none are found |
+| `exclude_columns` | Columns to skip |
+| `label_a` / `label_b` | Display names |
+
+**Supported file formats:** CSV (auto-delimited), XLSX, XLS.
+
+**Positional fallback:** When no key column can be inferred and `key_columns` is not specified, the engine inserts a synthetic `__row__` column (1-based row number) and uses it as the key. This ensures every row is compared even for files without a natural identifier (e.g. summary reports).
+
+**API:**
+
+```powershell
+# Compare a stored run against a file upload
+$fileBytes = [System.IO.File]::ReadAllBytes("C:\reports\prod_export.xlsx")
+$fileB64   = [Convert]::ToBase64String($fileBytes)
+
+$body = @{
+  stored_run_id      = "abc123"
+  file_b_content_b64 = $fileB64
+  file_b_name        = "prod_export.xlsx"
+  key_columns        = @("order_id")
+  exclude_columns    = @("export_timestamp")
+  label_a            = "Stored Run"
+  label_b            = "Production Extract"
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/recon-file" -Body $body -ContentType "application/json" -Headers $h
+```
+
+---
+
+### SQL Direct Compare
+
+Compare two SQL queries run against two different saved configs and diff the result sets directly. This mode is useful for ad-hoc cross-database queries without creating a saved job.
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `config_id_a` / `config_id_b` | Saved config IDs for the two databases |
+| `query_a` / `query_b` | SQL queries; may differ (different table names, filters, etc.) |
+| `key_columns` | Join columns for the diff |
+| `exclude_columns` | Columns to skip |
+| `label_a` / `label_b` | Display names |
+| `connection_a` / `connection_b` | Optional [named connection](#named-connections-multiple-db-connections-per-environment) on `config_id_a` / `config_id_b` to use instead of the config's top-level DB values |
+
+If `config_id_a` or `config_id_b` has named connections, the UI shows a connection picker on the corresponding Source A / Source B card.
+
+**API:**
+
+```powershell
+$body = @{
+  config_id_a     = 1
+  config_id_b     = 2
+  query_a         = "SELECT id, amount, status FROM orders WHERE created_date = '2024-01-01'"
+  query_b         = "SELECT id, amount, status FROM dbo.orders WHERE created_date = '2024-01-01'"
+  key_columns     = @("id")
+  exclude_columns = @()
+  label_a         = "Dev DB"
+  label_b         = "Prod DB"
+  connection_a    = "hr_db"
+  connection_b    = "hr_db"
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/sql" -Body $body -ContentType "application/json" -Headers $h
 ```
 
 ## Data Contracts
@@ -1066,6 +1664,9 @@ $run = @{
   target_env = "prod"
   job_sequence = @("orders_reconciliation", "customers_reconciliation")
   config_data = @{}
+  config_id = 1
+  source_connection = "hr_db"
+  target_connection = "hr_db"
   run_settings = @{
     execution_mode = "parallel"
     max_workers = 4
@@ -1078,6 +1679,8 @@ $run = @{
 
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/runs" -Body $run -ContentType "application/json" -Headers $h
 ```
+
+`source_connection` / `target_connection` are optional — set them to pick a [named connection](#named-connections-multiple-db-connections-per-environment) from the config instead of its top-level DB values. Omit them to use the config's defaults (unchanged behavior).
 
 ### Check Run Status
 
