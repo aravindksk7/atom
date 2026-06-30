@@ -73,9 +73,16 @@ def read_tabular(
             return _read_csv_bytes(raw)
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(io.BytesIO(raw))
+        if ext == ".json":
+            try:
+                return pd.read_json(io.BytesIO(raw))
+            except ValueError:
+                return pd.read_json(io.BytesIO(raw), orient="records")
+        if ext in (".tsv", ".txt"):
+            return pd.read_csv(io.BytesIO(raw), sep="\t")
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file format '{ext}'. Use .csv or .xlsx",
+            detail=f"Unsupported file format '{ext}'. Use .csv, .xlsx, .json, or .tsv",
         )
 
     if _UPLOAD_BASE is None:
@@ -95,9 +102,16 @@ def read_tabular(
             return _read_csv_bytes(p.read_bytes())
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(p)
+        if ext == ".json":
+            try:
+                return pd.read_json(p)
+            except ValueError:
+                return pd.read_json(p, orient="records")
+        if ext in (".tsv", ".txt"):
+            return pd.read_csv(p, sep="\t")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     raise HTTPException(
         status_code=400,
-        detail=f"Unsupported file format '{ext}'. Use .csv or .xlsx",
+        detail=f"Unsupported file format '{ext}'. Use .csv, .xlsx, .json, or .tsv",
     )
