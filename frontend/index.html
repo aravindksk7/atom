@@ -782,6 +782,43 @@
               </svg>
             </button>
           </div>
+          <!-- Task 11: Query preview bar -->
+          <div class="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+            <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+              <span class="text-xs font-medium text-slate-600">Preview against config</span>
+              <input type="number" x-model="jobModal.previewConfigId" class="field-input text-xs w-24 py-0.5" placeholder="Config ID" />
+              <button @click="previewJobQuery()"
+                      :disabled="jobModal.previewLoading || !jobModal.query?.trim()"
+                      class="btn-sm btn-secondary text-xs px-3 py-1 disabled:opacity-40">
+                <span x-show="!jobModal.previewLoading">Run Preview</span>
+                <span x-show="jobModal.previewLoading">Loading…</span>
+              </button>
+            </div>
+            <p x-show="jobModal.previewError" x-text="jobModal.previewError" class="text-xs text-red-600 px-3 py-2"></p>
+            <div x-show="jobModal.previewResult" class="overflow-x-auto max-h-48">
+              <table class="text-xs w-full">
+                <thead class="bg-slate-100 sticky top-0">
+                  <tr>
+                    <template x-for="col in (jobModal.previewResult?.columns || [])" :key="col">
+                      <th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap border-r border-slate-200 last:border-r-0"></th>
+                    </template>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(row, ri) in (jobModal.previewResult?.rows || [])" :key="ri">
+                    <tr :class="ri % 2 === 0 ? 'bg-white' : 'bg-slate-50'">
+                      <template x-for="(cell, ci) in row" :key="ci">
+                        <td x-text="cell ?? 'NULL'" class="px-2 py-1 border-r border-slate-100 last:border-r-0 whitespace-nowrap max-w-xs truncate"
+                            :class="cell === null ? 'text-slate-400 italic' : ''"></td>
+                      </template>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <p x-show="jobModal.previewResult && jobModal.previewResult.rows?.length === 0"
+                 class="text-xs text-slate-500 px-3 py-2">No rows returned.</p>
+            </div>
+          </div>
         </div>
         <div x-show="['reconciliation','bo_report'].includes(jobModal.job_type)">
           <label class="field-label">Key Columns (comma-separated)</label>
