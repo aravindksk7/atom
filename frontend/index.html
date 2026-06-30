@@ -411,6 +411,32 @@
           <div><label class="field-label">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" /></div>
         </div>
         <div class="divider"></div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="field-label">NAMED CONNECTIONS</span>
+              <span class="text-xs text-slate-400 ml-2">Override DB credentials per connection. Unset fields inherit from defaults above.</span>
+            </div>
+            <button @click="addNamedConnection()" type="button" class="btn-secondary btn-sm text-xs">+ Add Connection</button>
+          </div>
+          <template x-for="(conn, idx) in configModal.connections" :key="idx">
+            <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                <input x-model="conn.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="connection_name" />
+                <span class="text-xs text-slate-400 flex-1" x-text="namedConnectionSummary(conn)"></span>
+                <button @click="toggleNamedConnection(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="conn.expanded ? '▲' : '▼'"></button>
+                <button @click="removeNamedConnection(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
+              </div>
+              <div x-show="conn.expanded" class="p-3 grid-2">
+                <div><label class="field-label">DB Host</label><input x-model="conn.db_host" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" /></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="divider"></div>
         <div class="grid-2">
           <div><label class="field-label">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" /></div>
           <div><label class="field-label">BO User</label><input x-model="configModal.bo_user" class="field-input" /></div>

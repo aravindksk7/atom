@@ -662,6 +662,7 @@ function app() {
         db_connect_timeout: 15,
         bo_url: '', bo_user: '', bo_password: '', bo_timeout: 60,
         automic_url: '', automic_user: '', automic_password: '',
+        connections: [],
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -678,6 +679,14 @@ function app() {
         bo_timeout: d.bo_timeout || 60,
         automic_url: d.automic_url || '', automic_user: d.automic_user || '',
         automic_password: d.automic_password || '',
+        connections: Object.entries(d.connections || {}).map(([name, entry]) => ({
+          name,
+          db_host: entry.db_host || '',
+          db_name: entry.db_name || '',
+          db_user: entry.db_user || '',
+          db_password: entry.db_password || '',
+          expanded: false,
+        })),
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -685,7 +694,7 @@ function app() {
 
     _configDataFromModal() {
       const m = this.configModal;
-      return {
+      const data = {
         db_host: m.db_host || 'localhost',
         db_port: Number(m.db_port) || 1433,
         db_name: m.db_name || '',
@@ -702,6 +711,41 @@ function app() {
         automic_password: m.automic_password || '',
         automic_timeout: 30, automic_max_retries: 3,
       };
+      if (m.connections && m.connections.length > 0) {
+        data.connections = Object.fromEntries(
+          m.connections
+            .filter(c => c.name.trim())
+            .map(c => [c.name.trim(), {
+              ...(c.db_host ? { db_host: c.db_host } : {}),
+              ...(c.db_name ? { db_name: c.db_name } : {}),
+              ...(c.db_user ? { db_user: c.db_user } : {}),
+              ...(c.db_password ? { db_password: c.db_password } : {}),
+            }])
+        );
+      }
+      return data;
+    },
+
+    addNamedConnection() {
+      const idx = this.configModal.connections.length + 1;
+      this.configModal.connections.push({
+        name: `connection_${idx}`,
+        db_host: '', db_name: '', db_user: '', db_password: '',
+        expanded: true,
+      });
+    },
+
+    removeNamedConnection(idx) {
+      this.configModal.connections.splice(idx, 1);
+    },
+
+    toggleNamedConnection(idx) {
+      this.configModal.connections[idx].expanded = !this.configModal.connections[idx].expanded;
+    },
+
+    namedConnectionSummary(conn) {
+      const parts = [conn.db_host, conn.db_name].filter(Boolean);
+      return parts.length ? parts.join(' / ') : 'not configured';
     },
 
     async validateConfig() {
