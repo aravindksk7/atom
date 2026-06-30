@@ -1,8 +1,9 @@
+import json
 import os
 import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 import yaml
 from sqlalchemy.orm import Session
 from api.schemas import (
@@ -205,3 +206,71 @@ def delete_config(config_id: int, request: Request, db: Session = Depends(get_se
         config_id,
         {"name": cfg.name if cfg else None, "env_name": cfg.env_name if cfg else None},
     )
+
+
+def _build_env(cfg) -> EnvironmentConfig:
+    default_keys = EnvironmentConfig(name="t", db_host="localhost", db_password="").model_dump(exclude={"name"})
+    full_data = {**default_keys, **(cfg.config_json or {})}
+    return EnvironmentConfig(
+        name=cfg.env_name or cfg.name,
+        **{k: v for k, v in full_data.items() if k != "name"},
+    )
+
+
+@router.get("/{config_id}/schema")
+def get_db_schema(config_id: int, db: Session = Depends(get_session)):
+    """Return all tables and columns visible to this config's database credentials."""
+    repo = ConfigRepository(db)
+    cfg = repo.get(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    try:
+        env = _build_env(cfg)
+        from etl_framework.db.engine import DBEngine
+        engine = DBEngine(env)
+        df = engine.execute_query(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
+            "FROM INFORMATION_SCHEMA.COLUMNS "
+            "ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+        )
+        engine.dispose()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"DB connection failed: {exc}")
+
+    tables: dict[tuple, list] = {}
+    for _, row in df.iterrows():
+        key = (str(row["TABLE_SCHEMA"]), str(row["TABLE_NAME"]))
+        if key not in tables:
+            tables[key] = []
+        tables[key].append({"name": str(row["COLUMN_NAME"]), "type": str(row["DATA_TYPE"])})
+
+    return [{"schema": k[0], "table": k[1], "columns": cols} for k, cols in tables.items()]
+
+
+class _PreviewRequest(BaseModel):
+    query: str
+    limit: int = 50
+
+
+@router.post("/{config_id}/preview-query")
+def preview_query(config_id: int, body: _PreviewRequest, db: Session = Depends(get_session)):
+    """Execute a SQL query against this config's database and return the first N rows."""
+    repo = ConfigRepository(db)
+    cfg = repo.get(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    limit = max(1, min(200, body.limit))
+    safe_sql = f"SELECT TOP {limit} * FROM ({body.query}) AS _preview"
+
+    try:
+        env = _build_env(cfg)
+        from etl_framework.db.engine import DBEngine
+        engine = DBEngine(env)
+        df = engine.execute_query(safe_sql)
+        engine.dispose()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Query failed: {exc}")
+
+    rows = json.loads(df.to_json(orient="values", date_format="iso"))
+    return {"columns": list(df.columns), "rows": rows}
