@@ -145,20 +145,32 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
 
     if "source_credentials" not in snapshot:
         _validate_connection_name(cfg, body.source_connection, "source_connection")
-        src = _resolve_connection(
-            cfg.config_json if cfg else cfg_data,
-            body.source_connection,
-            env_name=body.source_env,
-        )
-        snapshot["source_credentials"] = {**src.model_dump(), "name": body.source_env}
+        if body.source_connection:
+            src = _resolve_connection(
+                cfg.config_json if cfg else cfg_data,
+                body.source_connection,
+                env_name=body.source_env,
+            )
+            snapshot["source_credentials"] = {**src.model_dump(), "name": body.source_env}
+        else:
+            snapshot["source_credentials"] = {
+                "name": body.source_env,
+                **{k: v for k, v in cfg_data.items() if k != "connections"},
+            }
     if "target_credentials" not in snapshot:
         _validate_connection_name(cfg, body.target_connection, "target_connection")
-        tgt = _resolve_connection(
-            cfg.config_json if cfg else cfg_data,
-            body.target_connection,
-            env_name=body.target_env,
-        )
-        snapshot["target_credentials"] = {**tgt.model_dump(), "name": body.target_env}
+        if body.target_connection:
+            tgt = _resolve_connection(
+                cfg.config_json if cfg else cfg_data,
+                body.target_connection,
+                env_name=body.target_env,
+            )
+            snapshot["target_credentials"] = {**tgt.model_dump(), "name": body.target_env}
+        else:
+            snapshot["target_credentials"] = {
+                "name": body.target_env,
+                **{k: v for k, v in cfg_data.items() if k != "connections"},
+            }
     if "bo_credentials" not in snapshot:
         snapshot["bo_credentials"] = {"name": "bo", **cfg_data}
     if "automic_credentials" not in snapshot:
