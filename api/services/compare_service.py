@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import base64
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -151,6 +152,33 @@ class CompareService:
                 },
             )
 
+    def _run_tabular_file_compare(
+        self, req: ReconFileCompareRequest, run_id: str,
+        df_a: "pd.DataFrame", df_b: "pd.DataFrame",
+    ) -> None:
+        """Compare two DataFrames via ReconciliationEngine and store results."""
+        key_columns = req.key_columns or self._infer_key_columns(df_a, df_b)
+        self._validate_key_columns(df_a, df_b, key_columns)
+        engine_a = _FrameEngine(df_a, req.label_a)
+        engine_b = _FrameEngine(df_b, req.label_b)
+        reconciler = ReconciliationEngine(
+            engine_a, engine_b,
+            key_columns=key_columns,
+            exclude_columns=req.exclude_columns or [],
+        )
+        result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")
+        tr = self._repo.add_test_result(run_id, result)
+        if result.mismatches:
+            self._repo.add_mismatch_details(tr.id, result.mismatches)
+        MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
+        passed = 1 if result.status == TestStatus.PASSED else 0
+        failed = 0 if passed else 1
+        self._repo.update_run_status(
+            run_id, "PASSED" if passed else "FAILED",
+            completed_at=datetime.now(timezone.utc),
+            total_tests=1, passed=passed, failed=failed,
+        )
+
     # ------------------------------------------------------------------
     # Reconciliation file comparison
     # ------------------------------------------------------------------
@@ -161,6 +189,18 @@ class CompareService:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
             stats_a = self._load_recon_source(req, "a")
             stats_b = self._load_recon_source(req, "b")
+
+            import pandas as pd
+            _is_df_a = isinstance(stats_a, pd.DataFrame)
+            _is_df_b = isinstance(stats_b, pd.DataFrame)
+            if _is_df_a != _is_df_b:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Both sources must be the same type (both tabular files or both HTML/stored runs)",
+                )
+            if _is_df_a:
+                self._run_tabular_file_compare(req, run_id, stats_a, stats_b)
+                return
 
             all_names = sorted(set(stats_a) | set(stats_b))
             passed = failed = 0
@@ -223,10 +263,17 @@ class CompareService:
             self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)
             raise
 
-    def _load_recon_source(self, req: ReconFileCompareRequest, side: str) -> dict:
+    def _load_recon_source(self, req: ReconFileCompareRequest, side: str):
+        """Load one side of a recon-file compare.
+
+        Returns dict[str, dict] for stored-run and HTML sources,
+        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .tsv, .txt).
+        """
         stored_run_id = req.stored_run_id if side == "a" else req.stored_run_id_b
         file_path = req.file_a_path if side == "a" else req.file_b_path
         file_content_b64 = req.file_a_content_b64 if side == "a" else req.file_b_content_b64
+        file_name = req.file_a_name if side == "a" else req.file_b_name
+
         if stored_run_id:
             run = self._repo.get_run(stored_run_id)
             if run is None:
@@ -240,6 +287,13 @@ class CompareService:
                 }
                 for r in run.results
             }
+
+        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".tsv", ".txt"}
+        name = file_name or file_path or ""
+        ext = Path(name).suffix.lower() if name else ""
+        if ext in _TABULAR_EXTS:
+            return read_tabular(path=file_path, content_b64=file_content_b64, file_name=name)
+
         return self._load_recon_html(file_path, file_content_b64)
 
     @staticmethod
