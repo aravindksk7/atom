@@ -440,6 +440,63 @@ def list_result_mismatches(
     ]
 
 
+@router.get("/{run_id}/mismatches/download")
+def download_mismatches(
+    run_id: str,
+    format: str = "csv",
+    db: Session = Depends(get_session),
+):
+    """Download all mismatch details for a run as CSV, XLSX, or HTML report."""
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if format == "html":
+        service = ArtifactService(repository=repo)
+        report_path = service.generate_html_report(run_id)
+        return FileResponse(
+            report_path,
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="report_{run_id}.html"'},
+        )
+
+    _FIELDS = ["test_name", "key_values", "column_name", "source_value", "target_value", "mismatch_type"]
+    rows = []
+    for result in run.results:
+        for m in repo.list_mismatches(result_id=result.id, limit=100_000):
+            rows.append({
+                "test_name": result.query_name,
+                "key_values": json.dumps(m.key_values) if isinstance(m.key_values, dict) else str(m.key_values or ""),
+                "column_name": m.column_name or "",
+                "source_value": m.source_value or "",
+                "target_value": m.target_value or "",
+                "mismatch_type": m.mismatch_type or "",
+            })
+
+    if format == "xlsx":
+        import pandas as pd
+        buf = io.BytesIO()
+        pd.DataFrame(rows, columns=_FIELDS).to_excel(buf, index=False)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="mismatches_{run_id}.xlsx"'},
+        )
+
+    buf_str = io.StringIO()
+    writer = csv.DictWriter(buf_str, fieldnames=_FIELDS)
+    writer.writeheader()
+    writer.writerows(rows)
+    buf_str.seek(0)
+    return StreamingResponse(
+        iter([buf_str.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="mismatches_{run_id}.csv"'},
+    )
+
+
 @router.patch(
     "/{run_id}/results/{result_id}/mismatches/{mismatch_id}/accept",
     response_model=MismatchAcceptOut,
