@@ -518,6 +518,10 @@ class ReconFileCompareRequest(BaseModel):
     file_b_content_b64: str | None = None
     label_a: str = "Run / File A"
     label_b: str = "Production Report"
+    file_a_name: str | None = None
+    file_b_name: str | None = None
+    key_columns: list[str] | None = None
+    exclude_columns: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_sources(self) -> "ReconFileCompareRequest":
