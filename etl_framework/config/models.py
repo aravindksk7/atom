@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, field_validator, ConfigDict
 
 
@@ -74,3 +76,36 @@ class EnvironmentConfig(BaseModel):
         if v < 0:
             raise ValueError(f"must be >= 0, got {v}")
         return v
+
+
+class ConnectionEntry(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    db_host: str | None = None
+    db_port: int | None = None
+    db_name: str | None = None
+    db_user: str | None = None
+    db_password: str | None = None
+    db_driver: str | None = None
+    db_pool_size: int | None = None
+    db_pool_overflow: int | None = None
+    db_pool_timeout: int | None = None
+    db_pool_recycle: int | None = None
+    db_connect_timeout: int | None = None
+
+
+def resolve_connection(
+    config_json: dict,
+    name: str | None,
+    env_name: str = "",
+) -> EnvironmentConfig:
+    """Return an EnvironmentConfig for a named connection, merging with top-level defaults."""
+    base = {k: v for k, v in config_json.items() if k != "connections"}
+    connections = config_json.get("connections") or {}
+    if name is not None and name in connections:
+        entry = connections[name]
+        override = {k: v for k, v in entry.items() if v is not None}
+        base.update(override)
+        resolved_name = f"{env_name}/{name}" if env_name else name
+    else:
+        resolved_name = env_name
+    return EnvironmentConfig(name=resolved_name, **base)
