@@ -2605,6 +2605,7 @@
   <div class="compare-subtabs mb-4">
     <button @click="compareSubTab = 'bo'" :class="compareSubTab === 'bo' ? 'sub-tab active' : 'sub-tab'">BO Report</button>
     <button @click="compareSubTab = 'recon'" :class="compareSubTab === 'recon' ? 'sub-tab active' : 'sub-tab'">Reconciliation</button>
+    <button @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
   </div>
 
   <!-- Task 13: Compare Template Bar -->
@@ -3087,6 +3088,119 @@
         </div>
       </template>
     </div>
+  </div>
+
+  <!-- SQL Compare panel -->
+  <div x-show="compareSubTab === 'sql'" class="space-y-4">
+    <div class="compare-source-grid">
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source A</div>
+        <input x-model="sqlLabelA" class="field-input mb-2" placeholder="Source A label" />
+        <label class="field-label">Config</label>
+        <select x-model="sqlConfigA" class="field-input field-select mb-3">
+          <option value="">Select config</option>
+          <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+        </select>
+        <label class="field-label">SQL Query</label>
+        <textarea x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+      </div>
+
+      <div class="vs-divider">VS</div>
+
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source B</div>
+        <input x-model="sqlLabelB" class="field-input mb-2" placeholder="Source B label" />
+        <label class="field-label">Config</label>
+        <select x-model="sqlConfigB" class="field-input field-select mb-3">
+          <option value="">Select config</option>
+          <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+        </select>
+        <label class="field-label">SQL Query</label>
+        <textarea x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+      </div>
+    </div>
+
+    <div class="card space-y-3">
+      <div class="grid-2">
+        <div>
+          <label class="field-label">Key Columns <span class="text-slate-400 font-normal">(comma-separated; auto-inferred if blank)</span></label>
+          <input x-model="sqlKeyColumns" class="field-input" placeholder="id, account_id" />
+        </div>
+        <div>
+          <label class="field-label">Exclude Columns</label>
+          <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" />
+        </div>
+      </div>
+      <button @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
+        <span x-show="!sqlCompareLoading">Run SQL Compare</span>
+        <span x-show="sqlCompareLoading">Comparing...</span>
+      </button>
+    </div>
+
+    <template x-if="sqlCompareResult">
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-slate-700">SQL Comparison Results</div>
+          <button @click="reportRunId = sqlCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+        </div>
+        <div class="flex gap-2 flex-wrap mb-3">
+          <span class="badge" :class="statusBadgeClass(sqlCompareResult.status)" x-text="sqlCompareResult.status"></span>
+          <span class="compare-chip chip-improved" x-text="(sqlCompareResult.passed || 0) + ' matched'"></span>
+          <span class="compare-chip chip-regressed" x-text="(sqlCompareResult.failed || 0) + ' differ'"></span>
+        </div>
+        <template x-if="sqlCompareResult.results && sqlCompareResult.results.length">
+          <div class="space-y-1">
+            <template x-for="r in sqlCompareResult.results" :key="r.id">
+              <div class="border border-slate-200 rounded-lg overflow-hidden">
+                <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
+                     @click="r.status !== 'PASSED' && toggleSQLDiff(r)">
+                  <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
+                  <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
+                  <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
+                        x-text="(r.value_mismatch_count ? r.value_mismatch_count + ' diff' : '') + (r.missing_in_target_count ? '  ' + r.missing_in_target_count + ' missing→' : '') + (r.missing_in_source_count ? '  ' + r.missing_in_source_count + ' missing←' : '')"></span>
+                  <span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span>
+                  <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs"
+                        x-text="sqlExpandedDiffs[r.query_name]?.loading ? '…' : (sqlExpandedDiffs[r.query_name]?.open ? '▲' : '▼')"></span>
+                </div>
+                <div x-show="r.status !== 'PASSED' && sqlExpandedDiffs[r.query_name]?.open" class="border-t border-slate-200">
+                  <div x-show="sqlExpandedDiffs[r.query_name]?.loading" class="px-3 py-2 text-xs text-slate-400">Loading diff details…</div>
+                  <div x-show="sqlExpandedDiffs[r.query_name]?.error" x-text="sqlExpandedDiffs[r.query_name]?.error" class="px-3 py-2 text-xs text-red-500"></div>
+                  <template x-if="sqlExpandedDiffs[r.query_name]?.data?.length">
+                    <div class="overflow-x-auto max-h-64">
+                      <table class="text-xs w-full">
+                        <thead class="bg-slate-100 sticky top-0">
+                          <tr>
+                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Key</th>
+                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Column</th>
+                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source A</th>
+                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source B</th>
+                            <th class="px-2 py-1 text-left text-slate-600">Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="(m, mi) in sqlExpandedDiffs[r.query_name].data" :key="m.id">
+                            <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
+                              <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate" x-text="JSON.stringify(m.key_values)"></td>
+                              <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
+                              <td class="px-2 py-1 text-emerald-700 border-r border-slate-100 max-w-xs truncate" x-text="m.source_value ?? 'NULL'"></td>
+                              <td class="px-2 py-1 text-red-700 border-r border-slate-100 max-w-xs truncate" x-text="m.target_value ?? 'NULL'"></td>
+                              <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                  <template x-if="!sqlExpandedDiffs[r.query_name]?.loading && !sqlExpandedDiffs[r.query_name]?.data?.length && !sqlExpandedDiffs[r.query_name]?.error">
+                    <p class="text-xs text-slate-500 px-3 py-2">No row-level diff details available.</p>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </template>
   </div>
 </div>
 

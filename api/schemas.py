@@ -534,6 +534,17 @@ class ReconFileCompareRequest(BaseModel):
         return self
 
 
+class SQLCompareRequest(BaseModel):
+    config_id_a: int
+    config_id_b: int
+    query_a: str
+    query_b: str
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+    key_columns: list[str] = Field(default_factory=list)
+    exclude_columns: list[str] = Field(default_factory=list)
+
+
 class MismatchAcceptRequest(BaseModel):
     note: str = Field(min_length=1)
     accepted_by: str | None = None

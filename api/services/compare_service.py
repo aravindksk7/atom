@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from api.schemas import BOCompareRequest, ReconFileCompareRequest
+from api.schemas import BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest
 from api.services.file_source import read_tabular
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.repository import ConfigRepository, RunRepository
@@ -191,6 +191,50 @@ class CompareService:
             completed_at=datetime.now(timezone.utc),
             total_tests=1, passed=passed, failed=failed,
         )
+
+    # ------------------------------------------------------------------
+    # SQL-to-SQL comparison
+    # ------------------------------------------------------------------
+
+    def run_sql_comparison(self, req: SQLCompareRequest, run_id: str) -> None:
+        """Execute two SQL queries against their respective DB configs and diff the results."""
+        from etl_framework.db.engine import DBEngine
+        from etl_framework.config.models import EnvironmentConfig
+
+        try:
+            self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
+
+            cfg_a = self._config_repo.get(req.config_id_a)
+            if cfg_a is None:
+                raise HTTPException(status_code=404, detail="Config A not found")
+            cfg_b = self._config_repo.get(req.config_id_b)
+            if cfg_b is None:
+                raise HTTPException(status_code=404, detail="Config B not found")
+
+            env_a = EnvironmentConfig(name=cfg_a.env_name, **cfg_a.config_json)
+            env_b = EnvironmentConfig(name=cfg_b.env_name, **cfg_b.config_json)
+            engine_a = DBEngine(env_a)
+            engine_b = DBEngine(env_b)
+            try:
+                df_a = engine_a.execute_query(req.query_a)
+                df_b = engine_b.execute_query(req.query_b)
+            finally:
+                engine_a.dispose()
+                engine_b.dispose()
+
+            recon_req = ReconFileCompareRequest(
+                file_a_path="__sql__",
+                file_b_path="__sql__",
+                label_a=req.label_a,
+                label_b=req.label_b,
+                key_columns=req.key_columns or None,
+                exclude_columns=req.exclude_columns,
+            )
+            self._run_tabular_file_compare(recon_req, run_id, df_a, df_b)
+        except Exception:
+            logger.exception("SQL comparison failed for run %s", run_id)
+            self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)
+            raise
 
     # ------------------------------------------------------------------
     # Reconciliation file comparison

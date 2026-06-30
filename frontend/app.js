@@ -324,6 +324,18 @@ function app() {
     fileCompareKeyColumns: '',
     fileCompareExcludeColumns: '',
 
+    sqlConfigA: '',
+    sqlConfigB: '',
+    sqlQueryA: 'SELECT * FROM ',
+    sqlQueryB: 'SELECT * FROM ',
+    sqlLabelA: 'Source A',
+    sqlLabelB: 'Source B',
+    sqlKeyColumns: '',
+    sqlExcludeColumns: '',
+    sqlCompareLoading: false,
+    sqlCompareResult: null,
+    sqlExpandedDiffs: {},
+
     // Schema Explorer (Config tab)
     schemaExplorerId: null,
     schemaExplorerData: [],
@@ -1817,6 +1829,66 @@ function app() {
       } catch (e) {
         this.toast('error', 'File compare failed', e.message);
         this.fileCompareLoading = false;
+      }
+    },
+
+    async runSQLComparison() {
+      if (!this.sqlConfigA) { this.toast('warn', 'Config A required', 'Select a config for Source A'); return; }
+      if (!this.sqlConfigB) { this.toast('warn', 'Config B required', 'Select a config for Source B'); return; }
+      if (!this.sqlQueryA.trim()) { this.toast('warn', 'Query A required', 'Enter a SQL query for Source A'); return; }
+      if (!this.sqlQueryB.trim()) { this.toast('warn', 'Query B required', 'Enter a SQL query for Source B'); return; }
+      this.sqlCompareLoading = true;
+      this.sqlCompareResult = null;
+      this.sqlExpandedDiffs = {};
+      try {
+        const payload = {
+          config_id_a: parseInt(this.sqlConfigA),
+          config_id_b: parseInt(this.sqlConfigB),
+          query_a: this.sqlQueryA.trim(),
+          query_b: this.sqlQueryB.trim(),
+          label_a: this.sqlLabelA || 'Source A',
+          label_b: this.sqlLabelB || 'Source B',
+          key_columns: this.sqlKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
+          exclude_columns: this.sqlExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
+        };
+        const run = await api('POST', '/api/compare/sql', payload);
+        const poll = setInterval(async () => {
+          try {
+            const st = await api('GET', `/api/runs/${run.run_id}/status`);
+            if (this._isTerminalStatus(st.status)) {
+              clearInterval(poll);
+              this.sqlCompareResult = await api('GET', `/api/runs/${run.run_id}`);
+              this.sqlCompareLoading = false;
+              await this.loadRuns();
+            }
+          } catch (e) {
+            clearInterval(poll);
+            this.sqlCompareLoading = false;
+          }
+        }, 3000);
+      } catch (e) {
+        this.toast('error', 'SQL compare failed', e.message);
+        this.sqlCompareLoading = false;
+      }
+    },
+
+    async toggleSQLDiff(r) {
+      const name = r.query_name;
+      const runId = this.sqlCompareResult?.run_id;
+      if (!runId) return;
+      const cur = this.sqlExpandedDiffs[name];
+      if (cur) {
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { ...cur, open: !cur.open } };
+        return;
+      }
+      this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: true, data: [], error: null, hasMore: false, offset: 0 } };
+      try {
+        const details = await api('GET', `/api/runs/${runId}/mismatches?result_name=${encodeURIComponent(name)}&limit=100&offset=0`);
+        const rows = Array.isArray(details) ? details : (details.items || []);
+        const hasMore = Array.isArray(details) ? false : (details.has_more ?? false);
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, data: rows, error: null, hasMore, offset: rows.length } };
+      } catch (e) {
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, data: [], error: e.message, hasMore: false, offset: 0 } };
       }
     },
 

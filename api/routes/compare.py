@@ -15,6 +15,7 @@ from api.schemas import (
     PairSummaryOut,
     ReconFileCompareRequest,
     RunStatusOut,
+    SQLCompareRequest,
 )
 from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
@@ -105,6 +106,24 @@ def _run_recon_file_bg(req: ReconFileCompareRequest, run_id: str) -> None:
         svc.run_recon_file_compare(req, run_id)
     except Exception:
         logger.exception("Recon-file comparison background task failed for run_id=%s", run_id)
+    finally:
+        set_run_id("")
+        db.close()
+
+
+def _run_sql_bg(req: SQLCompareRequest, run_id: str) -> None:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
+    db = SessionLocal()
+    try:
+        from api.services.compare_service import CompareService
+        from etl_framework.repository.repository import ConfigRepository
+        svc = CompareService(db, ConfigRepository(db))
+        svc.run_sql_comparison(req, run_id)
+    except Exception:
+        logger.exception("SQL comparison background task failed for run_id=%s", run_id)
     finally:
         set_run_id("")
         db.close()
@@ -247,6 +266,33 @@ def launch_dual_env(
         {"run_id_a": run_id_a, "run_id_b": run_id_b, "job_names": body.job_names},
     )
     return DualEnvLaunchOut(pair_id=pair_id, run_id_a=run_id_a, run_id_b=run_id_b)
+
+
+@router.post("/sql", response_model=RunStatusOut, status_code=202)
+def compare_sql(
+    body: SQLCompareRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RunStatusOut:
+    run_id = str(uuid.uuid4())
+    repo = RunRepository(db)
+    repo.create_run(
+        run_id=run_id,
+        source_env=body.label_a,
+        target_env=body.label_b,
+        run_type="sql_comparison",
+    )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {"run_type": "sql_comparison", "label_a": body.label_a, "label_b": body.label_b},
+    )
+    background_tasks.add_task(_run_sql_bg, body, run_id)
+    run = repo.get_run(run_id)
+    return _status_out(run)
 
 
 @router.post("/recon-file", response_model=RunStatusOut, status_code=202)
