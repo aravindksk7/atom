@@ -37,6 +37,7 @@ from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
 from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
+from etl_framework.config.models import resolve_connection as _resolve_connection
 
 router = APIRouter(tags=["runs"])
 
@@ -112,6 +113,20 @@ def _metrics_from_run(run) -> dict:
     }
 
 
+def _validate_connection_name(cfg, name: str | None, field: str) -> None:
+    if name is None or cfg is None:
+        return
+    available = list((cfg.config_json or {}).get("connections", {}).keys())
+    if name not in available:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"{field} '{name}' not found in config connections",
+                "available": available,
+            },
+        )
+
+
 def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     cfg_data = dict(body.config_data or {})
     cfg = ConfigRepository(db).get(body.config_id) if body.config_id is not None else None
@@ -129,9 +144,21 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
         })
 
     if "source_credentials" not in snapshot:
-        snapshot["source_credentials"] = {"name": body.source_env, **cfg_data}
+        _validate_connection_name(cfg, body.source_connection, "source_connection")
+        src = _resolve_connection(
+            cfg.config_json if cfg else cfg_data,
+            body.source_connection,
+            env_name=body.source_env,
+        )
+        snapshot["source_credentials"] = {**src.model_dump(), "name": body.source_env}
     if "target_credentials" not in snapshot:
-        snapshot["target_credentials"] = {"name": body.target_env, **cfg_data}
+        _validate_connection_name(cfg, body.target_connection, "target_connection")
+        tgt = _resolve_connection(
+            cfg.config_json if cfg else cfg_data,
+            body.target_connection,
+            env_name=body.target_env,
+        )
+        snapshot["target_credentials"] = {**tgt.model_dump(), "name": body.target_env}
     if "bo_credentials" not in snapshot:
         snapshot["bo_credentials"] = {"name": "bo", **cfg_data}
     if "automic_credentials" not in snapshot:
