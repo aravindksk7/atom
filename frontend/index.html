@@ -2946,8 +2946,8 @@
           </template>
           <template x-if="fileSourceAType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'a')" class="field-input" />
-              <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1">HTML loaded</div>
+              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+              <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1" x-text="fileNameA ? fileNameA + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
         </div>
@@ -2976,15 +2976,25 @@
           </template>
           <template x-if="fileSourceBType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm" @change="handleReconFileUpload($event, 'b')" class="field-input" />
-              <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1">HTML loaded</div>
+              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+              <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1" x-text="fileNameB ? fileNameB + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
         </div>
       </div>
-      <div class="card">
+      <div class="card space-y-3">
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Key Columns <span class="text-slate-400 font-normal">(comma-separated, tabular files only)</span></label>
+            <input x-model="fileCompareKeyColumns" class="field-input" placeholder="id, order_id" />
+          </div>
+          <div>
+            <label class="field-label">Exclude Columns</label>
+            <input x-model="fileCompareExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" />
+          </div>
+        </div>
         <button @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
-          <span x-show="!fileCompareLoading">Compare Reports</span>
+          <span x-show="!fileCompareLoading">Compare Files</span>
           <span x-show="fileCompareLoading">Comparing...</span>
         </button>
       </div>
@@ -2992,7 +3002,11 @@
         <div class="card">
           <div class="flex items-center justify-between mb-3">
             <div class="font-semibold text-slate-700">File Comparison Results</div>
-            <button @click="reportRunId = fileCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+            <div class="flex gap-2 items-center">
+              <button @click="downloadCompareResults('csv')" class="btn-secondary btn-sm text-xs">⬇ CSV</button>
+              <button @click="downloadCompareResults('xlsx')" class="btn-secondary btn-sm text-xs">⬇ Excel</button>
+              <button @click="reportRunId = fileCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+            </div>
           </div>
           <div class="flex gap-2 flex-wrap mb-3">
             <span class="badge" :class="statusBadgeClass(fileCompareResult.status)" x-text="fileCompareResult.status"></span>
@@ -3000,19 +3014,50 @@
             <span class="compare-chip chip-regressed" x-text="(fileCompareResult.failed || 0) + ' differ'"></span>
           </div>
           <template x-if="fileCompareResult.results && fileCompareResult.results.length">
-            <table class="data-table">
-              <thead><tr><th>Test</th><th>Rows A</th><th>Rows B</th><th>Match</th></tr></thead>
-              <tbody>
-                <template x-for="r in fileCompareResult.results" :key="r.id">
-                  <tr>
-                    <td class="font-mono text-xs" x-text="r.query_name"></td>
-                    <td x-text="r.source_row_count ?? '—'"></td>
-                    <td x-text="r.target_row_count ?? '—'"></td>
-                    <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span></td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+            <div class="space-y-1">
+              <template x-for="r in fileCompareResult.results" :key="r.id">
+                <div class="border border-slate-200 rounded-lg overflow-hidden">
+                  <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
+                       @click="r.status !== 'PASSED' && toggleFileDiff(r.query_name)">
+                    <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
+                    <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
+                    <span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span>
+                    <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs" x-text="fileExpandedDiffs[r.query_name] ? '▲' : '▼'"></span>
+                  </div>
+                  <div x-show="r.status !== 'PASSED' && fileExpandedDiffs[r.query_name]" class="border-t border-slate-200">
+                    <template x-if="r.mismatches && r.mismatches.length">
+                      <div class="overflow-x-auto max-h-56">
+                        <table class="text-xs w-full">
+                          <thead class="bg-slate-100 sticky top-0">
+                            <tr>
+                              <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Key</th>
+                              <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Column</th>
+                              <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source A</th>
+                              <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source B</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Type</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="(m, mi) in r.mismatches" :key="mi">
+                              <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
+                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100" x-text="JSON.stringify(m.key_values)"></td>
+                                <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
+                                <td class="px-2 py-1 text-emerald-700 border-r border-slate-100" x-text="m.source_value ?? 'NULL'"></td>
+                                <td class="px-2 py-1 text-red-700 border-r border-slate-100" x-text="m.target_value ?? 'NULL'"></td>
+                                <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                    <template x-if="!r.mismatches || !r.mismatches.length">
+                      <p class="text-xs text-slate-500 px-3 py-2">No row-level diff details stored. Download CSV/Excel for full report.</p>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
           </template>
         </div>
       </template>

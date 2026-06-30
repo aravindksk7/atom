@@ -314,10 +314,15 @@ function app() {
     fileRunIdB: '',
     filePathA: '',
     fileB64A: '',
+    fileNameA: '',
     filePathB: '',
     fileB64B: '',
+    fileNameB: '',
     fileCompareLoading: false,
     fileCompareResult: null,
+    fileExpandedDiffs: {},
+    fileCompareKeyColumns: '',
+    fileCompareExcludeColumns: '',
 
     // Schema Explorer (Config tab)
     schemaExplorerId: null,
@@ -1631,16 +1636,24 @@ function app() {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (e) => {
-        const b64 = btoa(unescape(encodeURIComponent(e.target.result || '')));
+        const arr = new Uint8Array(e.target.result);
+        let b64 = '';
+        const CHUNK = 8192;
+        for (let i = 0; i < arr.length; i += CHUNK) {
+          b64 += String.fromCharCode(...arr.subarray(i, i + CHUNK));
+        }
+        b64 = btoa(b64);
         if (side === 'a') {
           this.fileB64A = b64;
+          this.fileNameA = file.name;
           this.fileSourceAType = 'upload';
         } else {
           this.fileB64B = b64;
+          this.fileNameB = file.name;
           this.fileSourceBType = 'upload';
         }
       };
-      reader.readAsText(file);
+      reader.readAsArrayBuffer(file);
     },
 
     _buildBOSource(type, src) {
@@ -1757,27 +1770,35 @@ function app() {
     async runFileCompare() {
       this.fileCompareLoading = true;
       this.fileCompareResult = null;
+      this.fileExpandedDiffs = {};
       try {
         const payload = {
           label_a: this.fileLabelA || 'Source A',
           label_b: this.fileLabelB || 'Production Report',
         };
-        const applySource = (side, type, runId, path, content) => {
+        if (this.fileCompareKeyColumns.trim()) {
+          payload.key_columns = this.fileCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (this.fileCompareExcludeColumns.trim()) {
+          payload.exclude_columns = this.fileCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
+        }
+        const applySource = (side, type, runId, path, content, fname) => {
           const label = side === 'a' ? 'Source A' : 'Source B';
           const suffix = side === 'a' ? '' : '_b';
           if (type === 'run') {
             if (!runId) throw new Error(`${label}: select a stored run`);
             payload[`stored_run_id${suffix}`] = runId;
           } else if (type === 'path') {
-            if (!(path || '').trim()) throw new Error(`${label}: enter a server HTML path`);
+            if (!(path || '').trim()) throw new Error(`${label}: enter a file path`);
             payload[`file_${side}_path`] = path.trim();
           } else {
-            if (!content) throw new Error(`${label}: upload an HTML report`);
+            if (!content) throw new Error(`${label}: upload a file`);
             payload[`file_${side}_content_b64`] = content;
+            if (fname) payload[`file_${side}_name`] = fname;
           }
         };
-        applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A);
-        applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B);
+        applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A, this.fileNameA);
+        applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B, this.fileNameB);
         const run = await api('POST', '/api/compare/recon-file', payload);
         const poll = setInterval(async () => {
           try {
@@ -1797,6 +1818,22 @@ function app() {
         this.toast('error', 'File compare failed', e.message);
         this.fileCompareLoading = false;
       }
+    },
+
+    toggleFileDiff(testName) {
+      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [testName]: !this.fileExpandedDiffs[testName] };
+    },
+
+    downloadCompareResults(format) {
+      const runId = this.fileCompareResult?.id;
+      if (!runId) return;
+      const url = `/api/runs/${runId}/mismatches/download?format=${format}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.setAttribute('download', `compare_results_${runId}.${format === 'xlsx' ? 'xlsx' : format}`);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     },
 
     toggleAcceptForm(mismatchId) {
