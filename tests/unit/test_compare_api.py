@@ -245,3 +245,70 @@ def test_list_pairs(client, monkeypatch):
     resp = client.get("/api/compare/pairs")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
+
+
+_SQL_CFG_JSON = {
+    "db_host": "server",
+    "db_port": 1433,
+    "db_name": "db",
+    "db_user": "u",
+    "db_password": "p",
+    "db_driver": "ODBC Driver 17 for SQL Server",
+    "db_pool_size": 5,
+    "db_pool_overflow": 10,
+    "db_pool_timeout": 30,
+    "db_pool_recycle": 3600,
+    "db_connect_timeout": 15,
+    "automic_url": "",
+    "automic_user": "",
+    "automic_password": "",
+    "automic_timeout": 30,
+    "automic_max_retries": 3,
+    "bo_url": "",
+    "bo_user": "",
+    "bo_password": "",
+    "bo_timeout": 60,
+    "connections": {"hr_db": {"db_host": "hr-server", "db_name": "HR",
+                              "db_user": "u", "db_password": "p"}},
+}
+
+
+def test_sql_compare_unknown_connection_returns_422(client, monkeypatch):
+    """connection_a that does not exist in config.connections must return 422."""
+    import api.routes.compare as compare_module
+    monkeypatch.setattr(compare_module, "_run_sql_bg", lambda *a, **kw: None)
+
+    c = client.post("/api/configs", json={
+        "name": "sql-cfg", "env_name": "prod", "config_data": _SQL_CFG_JSON,
+    })
+    cid = c.json()["id"]
+
+    resp = client.post("/api/compare/sql", json={
+        "config_id_a": cid,
+        "config_id_b": cid,
+        "query_a": "SELECT 1",
+        "query_b": "SELECT 1",
+        "connection_a": "does_not_exist",
+    })
+    assert resp.status_code == 422
+
+
+def test_sql_compare_valid_connection_accepted(client, monkeypatch):
+    """A valid named connection_a should result in 202, not 422."""
+    import api.routes.compare as compare_module
+    monkeypatch.setattr(compare_module, "_run_sql_bg", lambda *a, **kw: None)
+
+    c = client.post("/api/configs", json={
+        "name": "sql-cfg2", "env_name": "prod", "config_data": _SQL_CFG_JSON,
+    })
+    cid = c.json()["id"]
+
+    resp = client.post("/api/compare/sql", json={
+        "config_id_a": cid,
+        "config_id_b": cid,
+        "query_a": "SELECT 1",
+        "query_b": "SELECT 1",
+        "connection_a": "hr_db",
+        "connection_b": "hr_db",
+    })
+    assert resp.status_code == 202

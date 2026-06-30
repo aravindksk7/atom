@@ -19,7 +19,7 @@ from api.schemas import (
 )
 from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
-from etl_framework.repository.repository import RunRepository
+from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["compare"])
@@ -268,6 +268,29 @@ def launch_dual_env(
     return DualEnvLaunchOut(pair_id=pair_id, run_id_a=run_id_a, run_id_b=run_id_b)
 
 
+def _check_sql_connection_names(body: SQLCompareRequest, db: Session) -> None:
+    """Raise 422 early if connection_a/b name is not in the config's connections dict."""
+    cfg_repo = ConfigRepository(db)
+    for cid, conn_name, field in (
+        (body.config_id_a, body.connection_a, "connection_a"),
+        (body.config_id_b, body.connection_b, "connection_b"),
+    ):
+        if conn_name is None:
+            continue
+        cfg = cfg_repo.get(cid)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail=f"Config for {field} not found")
+        available = list((cfg.config_json or {}).get("connections", {}).keys())
+        if conn_name not in available:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": f"{field} '{conn_name}' not found in config connections",
+                    "available": available,
+                },
+            )
+
+
 @router.post("/sql", response_model=RunStatusOut, status_code=202)
 def compare_sql(
     body: SQLCompareRequest,
@@ -275,6 +298,7 @@ def compare_sql(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
+    _check_sql_connection_names(body, db)
     run_id = str(uuid.uuid4())
     repo = RunRepository(db)
     repo.create_run(
