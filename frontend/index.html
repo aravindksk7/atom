@@ -3018,14 +3018,19 @@
               <template x-for="r in fileCompareResult.results" :key="r.id">
                 <div class="border border-slate-200 rounded-lg overflow-hidden">
                   <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
-                       @click="r.status !== 'PASSED' && toggleFileDiff(r.query_name)">
+                       @click="r.status !== 'PASSED' && toggleFileDiff(r)">
                     <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
                     <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
+                    <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
+                          x-text="(r.value_mismatch_count ? r.value_mismatch_count + ' diff' : '') + (r.missing_in_target_count ? '  ' + r.missing_in_target_count + ' missing→' : '') + (r.missing_in_source_count ? '  ' + r.missing_in_source_count + ' missing←' : '')"></span>
                     <span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span>
-                    <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs" x-text="fileExpandedDiffs[r.query_name] ? '▲' : '▼'"></span>
+                    <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs"
+                          x-text="fileExpandedDiffs[r.query_name]?.loading ? '…' : (fileExpandedDiffs[r.query_name]?.open ? '▲' : '▼')"></span>
                   </div>
-                  <div x-show="r.status !== 'PASSED' && fileExpandedDiffs[r.query_name]" class="border-t border-slate-200">
-                    <template x-if="r.mismatches && r.mismatches.length">
+                  <div x-show="r.status !== 'PASSED' && fileExpandedDiffs[r.query_name]?.open" class="border-t border-slate-200">
+                    <div x-show="fileExpandedDiffs[r.query_name]?.loading" class="px-3 py-2 text-xs text-slate-400">Loading diff details…</div>
+                    <div x-show="fileExpandedDiffs[r.query_name]?.error" x-text="fileExpandedDiffs[r.query_name]?.error" class="px-3 py-2 text-xs text-red-500"></div>
+                    <template x-if="fileExpandedDiffs[r.query_name]?.data?.length">
                       <div class="overflow-x-auto max-h-56">
                         <table class="text-xs w-full">
                           <thead class="bg-slate-100 sticky top-0">
@@ -3038,7 +3043,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <template x-for="(m, mi) in r.mismatches" :key="mi">
+                            <template x-for="(m, mi) in fileExpandedDiffs[r.query_name].data" :key="m.id">
                               <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
                                 <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100" x-text="JSON.stringify(m.key_values)"></td>
                                 <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
@@ -3051,8 +3056,8 @@
                         </table>
                       </div>
                     </template>
-                    <template x-if="!r.mismatches || !r.mismatches.length">
-                      <p class="text-xs text-slate-500 px-3 py-2">No row-level diff details stored. Download CSV/Excel for full report.</p>
+                    <template x-if="!fileExpandedDiffs[r.query_name]?.loading && !fileExpandedDiffs[r.query_name]?.data?.length && !fileExpandedDiffs[r.query_name]?.error">
+                      <p class="text-xs text-slate-500 px-3 py-2">No row-level diff details available. Download CSV/Excel for the full report.</p>
                     </template>
                   </div>
                 </div>

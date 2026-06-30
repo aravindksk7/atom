@@ -1820,8 +1820,24 @@ function app() {
       }
     },
 
-    toggleFileDiff(testName) {
-      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [testName]: !this.fileExpandedDiffs[testName] };
+    async toggleFileDiff(r) {
+      const name = r.query_name;
+      const runId = this.fileCompareResult?.run_id;
+      if (!runId) return;
+      const cur = this.fileExpandedDiffs[name];
+      if (cur) {
+        // Already fetched — just toggle visibility
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { ...cur, open: !cur.open } };
+        return;
+      }
+      // First expand: fetch mismatches from API
+      this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: true, data: [], error: '' } };
+      try {
+        const data = await api('GET', `/api/runs/${runId}/results/${r.id}/mismatches?limit=500`);
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, data: data || [], error: '' } };
+      } catch (e) {
+        this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { open: true, loading: false, data: [], error: e.message || 'Failed to load diff details' } };
+      }
     },
 
     downloadCompareResults(format) {
