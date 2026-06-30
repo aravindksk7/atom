@@ -3149,6 +3149,17 @@
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
+        <template x-if="sqlConfigAConnections().length > 0">
+          <div class="mb-3">
+            <label class="field-label">Connection</label>
+            <select x-model="sqlConnectionA" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in sqlConfigAConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+        </template>
         <label class="field-label">SQL Query</label>
         <textarea x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
       </div>
@@ -3163,6 +3174,17 @@
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
+        <template x-if="sqlConfigBConnections().length > 0">
+          <div class="mb-3">
+            <label class="field-label">Connection</label>
+            <select x-model="sqlConnectionB" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in sqlConfigBConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+        </template>
         <label class="field-label">SQL Query</label>
         <textarea x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
       </div>

@@ -328,6 +328,8 @@ function app() {
 
     sqlConfigA: '',
     sqlConfigB: '',
+    sqlConnectionA: null,
+    sqlConnectionB: null,
     sqlQueryA: 'SELECT * FROM ',
     sqlQueryB: 'SELECT * FROM ',
     sqlLabelA: 'Source A',
@@ -519,6 +521,8 @@ function app() {
         this.launchSettings.source_connection = null;
         this.launchSettings.target_connection = null;
       });
+      this.$watch('sqlConfigA', () => { this.sqlConnectionA = null; });
+      this.$watch('sqlConfigB', () => { this.sqlConnectionB = null; });
     },
 
     // ===========================================================
@@ -1890,6 +1894,18 @@ function app() {
       }
     },
 
+    sqlConfigAConnections() {
+      const cfg = this.configs.find(c => String(c.id) === String(this.sqlConfigA));
+      if (!cfg || !cfg.config_data || !cfg.config_data.connections) return [];
+      return Object.keys(cfg.config_data.connections);
+    },
+
+    sqlConfigBConnections() {
+      const cfg = this.configs.find(c => String(c.id) === String(this.sqlConfigB));
+      if (!cfg || !cfg.config_data || !cfg.config_data.connections) return [];
+      return Object.keys(cfg.config_data.connections);
+    },
+
     async runSQLComparison() {
       if (!this.sqlConfigA) { this.toast('warn', 'Config A required', 'Select a config for Source A'); return; }
       if (!this.sqlConfigB) { this.toast('warn', 'Config B required', 'Select a config for Source B'); return; }
@@ -1906,6 +1922,8 @@ function app() {
           query_b: this.sqlQueryB.trim(),
           label_a: this.sqlLabelA || 'Source A',
           label_b: this.sqlLabelB || 'Source B',
+          connection_a: this.sqlConnectionA || null,
+          connection_b: this.sqlConnectionB || null,
           key_columns: this.sqlKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
           exclude_columns: this.sqlExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
         };
