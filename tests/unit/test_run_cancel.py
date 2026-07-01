@@ -128,3 +128,64 @@ def test_cancel_endpoint_idempotent_when_called_twice(client):
     run_id = resp.json()["run_id"]
     assert client.post(f"/api/runs/{run_id}/cancel").status_code == 202
     assert client.post(f"/api/runs/{run_id}/cancel").status_code == 202
+
+
+# --- executor cooperative cancellation ---
+
+from unittest.mock import patch
+from api.schemas import RunSettings
+from api.services.run_executor import RunExecutor
+from etl_framework.repository.repository import JobRepository
+
+
+def _session() -> Session:  # noqa: F811 — redefine for local use
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return Session(engine)
+
+
+def _create_job(db: Session, name: str) -> None:
+    JobRepository(db).create({
+        "name": name,
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": f"SELECT * FROM {name}",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None,
+        "target_env": None,
+        "params": {"source_rows": [{"id": 1}], "target_rows": [{"id": 1}]},
+        "enabled": True,
+    })
+
+
+def test_executor_stops_after_current_step_when_cancel_requested():
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-x", None, None)
+    repo.update_run_status("run-x", "RUNNING")
+    _create_job(db, "job-a")
+    _create_job(db, "job-b")
+
+    call_count = {"n": 0}
+
+    def fake_is_cancel(self, run_id):
+        call_count["n"] += 1
+        return call_count["n"] >= 1  # True from first call onward
+
+    with patch.object(RunRepository, "is_cancel_requested", fake_is_cancel):
+        RunExecutor(
+            db=db,
+            run_id="run-x",
+            source_env="dev",
+            target_env="prod",
+            job_sequence=["job-a", "job-b"],
+            run_settings=RunSettings(metrics_enabled=False),
+        ).execute()
+
+    assert RunRepository(db).get_run("run-x").status == "CANCELLED"

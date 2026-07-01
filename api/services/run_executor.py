@@ -211,6 +211,11 @@ class RunExecutor:
                     job_outcome = state.status.value if hasattr(state.status, "value") else str(state.status)
                     step_repo.update_status(self._run_id, i, job_outcome)
 
+                    if self._run_repo.is_cancel_requested(self._run_id):
+                        step_repo.cancel_remaining(self._run_id, from_index=i + 1)
+                        cancelled = True
+                        break
+
                     if seq_step.hold_after:
                         step_repo.update_status(
                             self._run_id, i, "HELD",
