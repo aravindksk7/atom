@@ -44,7 +44,6 @@ class AutomicClient:
         response = self._session.request(method, url, timeout=self._timeout)
         if response.status_code >= 400:
             raise AutomicAPIError(
-                f"Automic API Error: {response.status_code} - {response.text}",
                 http_status=response.status_code,
                 response_body=response.text,
                 url=url
@@ -56,7 +55,6 @@ class AutomicClient:
             return self._request_with_retry(method, url)
         except requests.RequestException as e:
             raise AutomicTimeoutError(
-                f"Automic API Timeout after {self._max_retries} attempts: {url}",
                 url=url,
                 attempts=self._max_retries,
                 timeout_seconds=self._timeout

@@ -2110,7 +2110,7 @@ function app() {
     },
 
     downloadCompareResults(format) {
-      const runId = this.fileCompareResult?.id;
+      const runId = this.fileCompareResult?.run_id;
       if (!runId) return;
       const url = `/api/runs/${runId}/mismatches/download?format=${format}`;
       const a = document.createElement('a');

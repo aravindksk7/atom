@@ -3054,6 +3054,7 @@
             <div class="flex gap-2 items-center">
               <button @click="downloadCompareResults('csv')" class="btn-secondary btn-sm text-xs">⬇ CSV</button>
               <button @click="downloadCompareResults('xlsx')" class="btn-secondary btn-sm text-xs">⬇ Excel</button>
+              <button @click="downloadCompareResults('html')" class="btn-secondary btn-sm text-xs">⬇ HTML Report</button>
               <button @click="reportRunId = fileCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
             </div>
           </div>

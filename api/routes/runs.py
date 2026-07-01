@@ -527,9 +527,76 @@ def download_mismatches(
             })
 
     if format == "xlsx":
-        import pandas as pd
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment
+
+        FILLS = {
+            "value_mismatch":    PatternFill("solid", fgColor="FEF3C7"),  # amber
+            "missing_in_target": PatternFill("solid", fgColor="FEE2E2"),  # rose
+            "missing_in_source": PatternFill("solid", fgColor="EDE9FE"),  # violet
+        }
+        HEADER_FILL = PatternFill("solid", fgColor="1E293B")
+        HEADER_FONT = Font(bold=True, color="F1F5F9")
+
+        wb = openpyxl.Workbook()
+
+        # ── Summary sheet ────────────────────────────────────────────────
+        ws_sum = wb.active
+        ws_sum.title = "Summary"
+        ws_sum.append(["Run ID", run_id])
+        ws_sum.append(["Status", run.status])
+        ws_sum.append(["Started", str(run.started_at or "")])
+        ws_sum.append(["Completed", str(run.completed_at or "")])
+        ws_sum.append(["Source Env", run.source_env or ""])
+        ws_sum.append(["Target Env", run.target_env or ""])
+        ws_sum.append([])
+        ws_sum.append(["Test Name", "Status", "Source Rows", "Target Rows",
+                        "Value Mismatches", "Missing in Target", "Missing in Source"])
+        for cell in ws_sum[ws_sum.max_row]:
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+        for result in run.results:
+            ws_sum.append([
+                result.query_name,
+                result.status,
+                result.source_row_count,
+                result.target_row_count,
+                result.value_mismatch_count,
+                result.missing_in_target_count,
+                result.missing_in_source_count,
+            ])
+        ws_sum.column_dimensions["A"].width = 36
+        ws_sum.column_dimensions["B"].width = 16
+
+        # ── Mismatches sheet ─────────────────────────────────────────────
+        ws = wb.create_sheet("Mismatches")
+        ws.append(["Test Name", "Key Values", "Column", "Source Value", "Target Value", "Mismatch Type"])
+        for cell in ws[1]:
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal="center")
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = "A1:F1"
+
+        for row_data in rows:
+            ws.append([
+                row_data["test_name"],
+                row_data["key_values"],
+                row_data["column_name"],
+                row_data["source_value"],
+                row_data["target_value"],
+                row_data["mismatch_type"],
+            ])
+            fill = FILLS.get(row_data["mismatch_type"])
+            if fill:
+                for cell in ws[ws.max_row]:
+                    cell.fill = fill
+
+        for col, width in [("A", 30), ("B", 28), ("C", 22), ("D", 30), ("E", 30), ("F", 22)]:
+            ws.column_dimensions[col].width = width
+
         buf = io.BytesIO()
-        pd.DataFrame(rows, columns=_FIELDS).to_excel(buf, index=False)
+        wb.save(buf)
         buf.seek(0)
         return StreamingResponse(
             buf,

@@ -312,3 +312,77 @@ def test_sql_compare_valid_connection_accepted(client, monkeypatch):
         "connection_b": "hr_db",
     })
     assert resp.status_code == 202
+
+
+# ---------------------------------------------------------------------------
+# _load_in_chunks unit tests
+# ---------------------------------------------------------------------------
+
+def test_load_in_chunks_issues_paginated_queries():
+    """When chunk_size and key_cols are provided, queries are issued in pages."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+    from api.services.compare_service import _load_in_chunks
+
+    chunk1 = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    chunk2 = pd.DataFrame({"id": [4, 5, 6], "val": ["d", "e", "f"]})
+    empty = pd.DataFrame({"id": [], "val": []})
+
+    mock_engine = MagicMock()
+    mock_engine.execute_query.side_effect = [chunk1, chunk2, empty]
+
+    result = _load_in_chunks(mock_engine, "SELECT * FROM t", ["id"], chunk_size=3)
+
+    assert len(result) == 6
+    assert list(result["id"]) == [1, 2, 3, 4, 5, 6]
+    assert mock_engine.execute_query.call_count == 3
+
+
+def test_load_in_chunks_stops_early_on_partial_chunk():
+    """A chunk smaller than chunk_size signals the last page — no extra query needed."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+    from api.services.compare_service import _load_in_chunks
+
+    chunk1 = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    chunk2 = pd.DataFrame({"id": [4, 5], "val": ["d", "e"]})  # 2 < 3 → last page
+
+    mock_engine = MagicMock()
+    mock_engine.execute_query.side_effect = [chunk1, chunk2]
+
+    result = _load_in_chunks(mock_engine, "SELECT * FROM t", ["id"], chunk_size=3)
+
+    assert len(result) == 5
+    assert mock_engine.execute_query.call_count == 2
+
+
+def test_load_in_chunks_falls_back_without_key_columns():
+    """With no key columns, chunking is skipped and a single full query is issued."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+    from api.services.compare_service import _load_in_chunks
+
+    full = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    mock_engine = MagicMock()
+    mock_engine.execute_query.return_value = full
+
+    result = _load_in_chunks(mock_engine, "SELECT * FROM t", [], chunk_size=1000)
+
+    mock_engine.execute_query.assert_called_once_with("SELECT * FROM t")
+    assert len(result) == 2
+
+
+def test_load_in_chunks_falls_back_when_chunk_size_zero():
+    """chunk_size=0 disables chunking regardless of key columns."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+    from api.services.compare_service import _load_in_chunks
+
+    full = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    mock_engine = MagicMock()
+    mock_engine.execute_query.return_value = full
+
+    result = _load_in_chunks(mock_engine, "SELECT * FROM t", ["id"], chunk_size=0)
+
+    mock_engine.execute_query.assert_called_once_with("SELECT * FROM t")
+    assert len(result) == 2

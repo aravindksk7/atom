@@ -547,6 +547,7 @@ class SQLCompareRequest(BaseModel):
     connection_b: str | None = None
     key_columns: list[str] = Field(default_factory=list)
     exclude_columns: list[str] = Field(default_factory=list)
+    chunk_size: int = Field(default=10_000, ge=0)
 
 
 class MismatchAcceptRequest(BaseModel):

@@ -333,34 +333,40 @@ class ReconciliationEngine:
             if src_col not in both.columns or tgt_col not in both.columns:
                 continue
 
-            is_float = pd.api.types.is_float_dtype(df_source[col])
+            src_na = both[src_col].isna()
+            tgt_na = both[tgt_col].isna()
+            both_na = src_na & tgt_na
+            neither_na = ~src_na & ~tgt_na
 
-            for _, row in both.iterrows():
-                a = row[src_col]
-                b = row[tgt_col]
-                if not self._values_match(a, b, is_float):
-                    count += 1
-                    key_values = {k: row.get(k) for k in self._key_columns}
+            if pd.api.types.is_float_dtype(df_source[col]):
+                val_eq = pd.Series(False, index=both.index, dtype=bool)
+                if neither_na.any():
+                    val_eq[neither_na] = np.isclose(
+                        both.loc[neither_na, src_col].to_numpy(dtype=float),
+                        both.loc[neither_na, tgt_col].to_numpy(dtype=float),
+                        rtol=0,
+                        atol=self._float_tolerance,
+                    )
+            else:
+                val_eq = both[src_col].eq(both[tgt_col]).fillna(False)
+
+            match = (both_na & self._null_equals_null) | (neither_na & val_eq)
+            mismatch_mask = ~match
+            col_count = int(mismatch_mask.sum())
+            count += col_count
+
+            if col_count and len(records) < self._mismatch_row_limit:
+                budget = self._mismatch_row_limit - len(records)
+                for _, row in both.loc[mismatch_mask].iloc[:budget].iterrows():
                     records.append(MismatchRecord(
-                        key_values=key_values,
+                        key_values={k: row.get(k) for k in self._key_columns},
                         column_name=col,
-                        source_value=a,
-                        target_value=b,
+                        source_value=row[src_col],
+                        target_value=row[tgt_col],
                         mismatch_type="value_diff",
                     ))
 
         return records, count
-
-    def _values_match(self, a: object, b: object, is_float: bool) -> bool:
-        a_na = _is_na(a)
-        b_na = _is_na(b)
-        if a_na and b_na:
-            return self._null_equals_null
-        if a_na or b_na:
-            return False
-        if is_float:
-            return bool(np.isclose(float(a), float(b), rtol=0, atol=self._float_tolerance))
-        return a == b
 
     def _apply_slo(
         self,

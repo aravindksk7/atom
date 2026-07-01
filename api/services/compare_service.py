@@ -4,15 +4,44 @@ import base64
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest
 from api.services.file_source import read_tabular
+from etl_framework.reconciliation.chunker import build_chunk_query
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
+
+
+def _load_in_chunks(
+    db_engine: "DBEngine",
+    query: str,
+    key_cols: list[str],
+    chunk_size: int,
+) -> pd.DataFrame:
+    """Read a SQL query in paginated OFFSET/FETCH chunks.
+
+    Falls back to a single full-table read when chunk_size is 0 or key_cols
+    are not available (ORDER BY is required for deterministic pagination).
+    """
+    if not chunk_size or not key_cols:
+        return db_engine.execute_query(query)
+    parts: list[pd.DataFrame] = []
+    offset = 0
+    while True:
+        q = build_chunk_query(query, key_cols, offset, chunk_size)
+        chunk = db_engine.execute_query(q)
+        if chunk.empty:
+            break
+        parts.append(chunk)
+        if len(chunk) < chunk_size:
+            break
+        offset += chunk_size
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 logger = logging.getLogger("api.services.compare_service")
 
@@ -215,9 +244,10 @@ class CompareService:
             env_b = resolve_connection(cfg_b.config_json or {}, req.connection_b, env_name=cfg_b.env_name or "")
             engine_a = DBEngine(env_a)
             engine_b = DBEngine(env_b)
+            key_cols = req.key_columns or []
             try:
-                df_a = engine_a.execute_query(req.query_a)
-                df_b = engine_b.execute_query(req.query_b)
+                df_a = _load_in_chunks(engine_a, req.query_a, key_cols, req.chunk_size)
+                df_b = _load_in_chunks(engine_b, req.query_b, key_cols, req.chunk_size)
             finally:
                 engine_a.dispose()
                 engine_b.dispose()
