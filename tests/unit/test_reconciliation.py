@@ -385,3 +385,10 @@ def test_composite_keys_missing_row_detected():
     assert result.missing_in_target_count == 1
     missing = [m for m in result.mismatches if m.mismatch_type == "missing_in_target"]
     assert missing[0].key_values == {"a": 1, "b": 2}
+
+
+def test_executed_at_is_timezone_aware():
+    df = pd.DataFrame({"id": [1], "val": ["x"]})
+    engine = _make_engine(df, df.copy())
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.executed_at.tzinfo is not None

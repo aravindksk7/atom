@@ -74,7 +74,7 @@ class ReconciliationEngine:
     ) -> ReconciliationResult:
         with _span("reconciliation.reconcile", attributes={"query_name": query_name}):
             t0 = time.monotonic()
-            executed_at = datetime.now()
+            executed_at = datetime.now(timezone.utc)
 
             if self._chunk_size > 0:
                 # Hash pre-check: if enabled, run a lightweight hash query first;
