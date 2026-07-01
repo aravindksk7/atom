@@ -34,6 +34,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
   - [Job Types Reference](#job-types-reference)
   - [Run Settings Reference](#run-settings-reference)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
+  - [Global Logs Tab](#global-logs-tab)
 - [Compare Tab](#compare-tab)
   - [BO Report Compare](#bo-report-compare)
   - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
@@ -1246,6 +1247,21 @@ GET /api/runs/{run_id}/logs
 GET /api/runs/{run_id}/logs?format=json&q=schema_check&level=ERROR&limit=500
 ```
 
+### Global Logs Tab
+
+The **Logs** tab in the UI shows the server-wide application log — not scoped to any single run — and auto-refreshes every 5 seconds. Use it for troubleshooting things that aren't tied to a specific run: startup errors, scheduler activity, auth failures, unhandled exceptions, and uvicorn request errors (uvicorn's own logger is routed into the same log file, so tracebacks that used to only appear on the console now show up here too).
+
+It supports the same search box, level chips (ALL/ERROR/WARN/INFO/DEBUG), and an optional "Filter to a run ID" field to narrow down to one run without leaving the tab.
+
+Backing endpoint:
+
+```text
+GET /api/logs
+GET /api/logs?run_id=<run_id>&q=schema_check&level=ERROR&limit=500
+```
+
+`run_id` is optional — omit it to see everything.
+
 ## Compare Tab
 
 The **Compare** tab provides three first-class comparison modes for ad-hoc analysis that does not fit the standard job-driven run workflow. Each mode produces a standard `TestRun` record (visible in History with full mismatch details, export, and baseline support).
@@ -2225,6 +2241,8 @@ Main log:
 logs/etl_framework.log
 ```
 
+This file contains both the application's own logging (`etl_framework.*` loggers) and uvicorn's logging (`uvicorn`, `uvicorn.error`, `uvicorn.access`) — unhandled exceptions, request errors, and startup/shutdown/reload messages all land here regardless of how the server is launched. View it in-app via the **Logs** tab (see [Global Logs Tab](#global-logs-tab)), or tail it directly on disk.
+
 ### Metrics
 
 ```text
@@ -2327,6 +2345,10 @@ If it still has `https://cdn.tailwindcss.com`, `cdn.jsdelivr.net`, or `fonts.goo
 ### Static UI Not Updating
 
 Hard-refresh the browser or open dev tools and disable cache.
+
+### Where To Look First When Something Breaks
+
+Open the **Logs** tab — it shows the live, server-wide log (including uvicorn tracebacks and request errors), auto-refreshing every 5 seconds, with search and level filtering. See [Global Logs Tab](#global-logs-tab). No need to shell into the server or tail `logs/etl_framework.log` by hand unless the UI itself is unreachable.
 
 ## Minimal First Run
 
