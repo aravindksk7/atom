@@ -140,6 +140,7 @@ function app() {
       { id: 'reports',  label: '📊 Reports' },
       { id: 'compare',  label: '\u21c4 Compare' },
       { id: 'contracts', label: '\u{1F4CB} Contracts' },
+      { id: 'logs', label: '🪵 Logs' },
     ],
     apiOk: false,
 
@@ -320,6 +321,16 @@ function app() {
     allLogEventsLoading: false,
     logFilterQuery: '',
     logFilterLevel: '',
+
+    // -----------------------------------------------------------
+    // Global Logs tab (server-wide, no run_id required)
+    // -----------------------------------------------------------
+    globalLogEvents: [],
+    globalLogsLoading: false,
+    globalLogFilterQuery: '',
+    globalLogFilterLevel: '',
+    globalLogRunId: '',
+    globalLogsPollTimer: null,
 
     // -----------------------------------------------------------
     // Mismatch drawer
@@ -2679,6 +2690,58 @@ function app() {
       if (!query.trim()) return safe;
       const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
+    },
+
+    async loadGlobalLogs() {
+      const isFirstLoad = this.globalLogEvents.length === 0;
+      if (isFirstLoad) this.globalLogsLoading = true;
+      const params = new URLSearchParams({ limit: '1000' });
+      if (this.globalLogRunId.trim()) params.set('run_id', this.globalLogRunId.trim());
+      const logList = document.querySelector('.global-log-list');
+      const wasAtBottom = logList
+        ? logList.scrollHeight - logList.scrollTop - logList.clientHeight < 16
+        : true;
+      try {
+        const data = await api('GET', `/api/logs?${params.toString()}`);
+        this.globalLogEvents = data.lines || [];
+        if (wasAtBottom) {
+          this.$nextTick(() => {
+            if (logList) logList.scrollTop = logList.scrollHeight;
+          });
+        }
+      } catch (e) {
+        if (isFirstLoad) this.toast('error', 'Failed to load logs', e.message);
+        // Swallow errors on background poll ticks — the next poll recovers.
+      } finally {
+        this.globalLogsLoading = false;
+      }
+    },
+
+    filteredGlobalLogEvents() {
+      let events = this.globalLogEvents;
+      if (this.globalLogFilterLevel) {
+        events = events.filter(e => e.level === this.globalLogFilterLevel);
+      }
+      if (this.globalLogFilterQuery.trim()) {
+        const q = this.globalLogFilterQuery.toLowerCase();
+        events = events.filter(e => (e.text || '').toLowerCase().includes(q));
+      }
+      return events;
+    },
+
+    startGlobalLogsPolling() {
+      this.loadGlobalLogs();
+      if (this.globalLogsPollTimer) return;
+      this.globalLogsPollTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') this.loadGlobalLogs();
+      }, 5000);
+    },
+
+    stopGlobalLogsPolling() {
+      if (this.globalLogsPollTimer) {
+        clearInterval(this.globalLogsPollTimer);
+        this.globalLogsPollTimer = null;
+      }
     },
 
     navigateToRunArtifact(runId, view) {

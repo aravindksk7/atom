@@ -22,7 +22,7 @@
     <div class="flex gap-1 flex-1">
       <template x-for="tab in tabs" :key="tab.id">
         <button
-          @click="currentView = tab.id; if (tab.id === 'contracts') loadContracts()"
+          @click="currentView = tab.id; if (tab.id === 'contracts') loadContracts(); if (tab.id === 'logs') startGlobalLogsPolling(); else stopGlobalLogsPolling();"
           :class="currentView === tab.id ? 'active' : ''"
           class="tab-btn"
           x-text="tab.label">
@@ -3732,6 +3732,71 @@
     </template>
   </div>
 
+</div>
+
+<!-- ====================================================================
+     TAB - GLOBAL LOGS
+     ==================================================================== -->
+<div x-show="currentView === 'logs'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Logs</div>
+      <div class="section-sub">Server-wide application log, auto-refreshing every 5 seconds.</div>
+    </div>
+  </div>
+
+  <div class="space-y-4">
+    <div class="card">
+      <div class="flex flex-col gap-3">
+        <input
+          x-model="globalLogRunId"
+          @change="loadGlobalLogs()"
+          class="field-input"
+          placeholder="Filter to a run ID… (optional)"
+        />
+        <input
+          x-model="globalLogFilterQuery"
+          class="field-input"
+          placeholder="Search logs… (live)"
+        />
+        <div class="flex gap-2 flex-wrap items-center">
+          <button class="level-chip" :class="globalLogFilterLevel === '' ? 'chip-active-ALL' : ''" @click="globalLogFilterLevel = ''">ALL</button>
+          <button class="level-chip" :class="globalLogFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'ERROR' ? '' : 'ERROR'">ERROR</button>
+          <button class="level-chip" :class="globalLogFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'WARNING' ? '' : 'WARNING'">WARN</button>
+          <button class="level-chip" :class="globalLogFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
+          <button class="level-chip" :class="globalLogFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
+          <span class="text-muted text-xs ml-2" x-text="filteredGlobalLogEvents().length + ' / ' + globalLogEvents.length + ' events'"></span>
+        </div>
+      </div>
+    </div>
+
+    <template x-if="globalLogsLoading">
+      <div class="card empty-state"><div class="empty-state-title">Loading logs…</div></div>
+    </template>
+
+    <template x-if="!globalLogsLoading && globalLogEvents.length === 0">
+      <div class="card empty-state"><div class="empty-state-title">No log events yet.</div></div>
+    </template>
+
+    <template x-if="!globalLogsLoading && globalLogEvents.length > 0">
+      <div class="card p-0 overflow-hidden">
+        <div class="log-list global-log-list">
+          <template x-if="filteredGlobalLogEvents().length === 0">
+            <div class="empty-state"><div class="empty-state-title">No events match the current filter.</div></div>
+          </template>
+          <template x-for="line in filteredGlobalLogEvents()" :key="line.number">
+            <div class="log-entry" :class="logLevelClass(line.level)">
+              <div class="log-entry-meta">
+                <span class="font-mono" x-text="'#' + line.number"></span>
+                <span class="badge" x-text="line.level"></span>
+              </div>
+              <pre x-html="highlightMatch(line.text, globalLogFilterQuery)"></pre>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
 </div>
 
 
