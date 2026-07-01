@@ -119,6 +119,49 @@
       .container { padding: 18px; }
       table { display: block; overflow-x: auto; }
     }
+    /* Summary stats filled by JS */
+    #stat-total-mm, #stat-duration { transition: opacity 0.3s; }
+
+    /* Analytics section */
+    .analytics-row { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:20px; }
+    .analytics-panel { flex:1; min-width:260px; background:rgba(255,255,255,0.04); border:1px solid var(--line); border-radius:8px; padding:14px; }
+    .analytics-title { font-size:0.75em; text-transform:uppercase; color:var(--muted); letter-spacing:0.05em; margin-bottom:10px; }
+
+    /* Filter toolbar */
+    #filter-toolbar { position:sticky; top:0; z-index:10; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,0.25); }
+    #filter-toolbar select, #filter-search { background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:5px 9px; font-size:0.85em; }
+    #filter-toolbar select:focus, #filter-search:focus { outline:none; border-color:var(--cyan); }
+    #filter-count { margin-left:auto; font-size:0.8em; color:var(--muted); }
+    .filter-clear-btn { background:rgba(255,255,255,0.07); border:1px solid var(--line); color:var(--soft); padding:4px 10px; border-radius:6px; cursor:pointer; font-size:0.82em; }
+    .filter-clear-btn:hover { background:rgba(255,255,255,0.12); }
+
+    /* Mismatch diff panels */
+    .diff-values-cell { padding:6px 8px !important; }
+    .diff-panels { display:flex; gap:8px; }
+    .diff-panel { flex:1; min-width:0; background:rgba(255,255,255,0.04); border-radius:6px; padding:8px 10px; position:relative; }
+    .diff-panel-src { border-left:3px solid var(--rose); }
+    .diff-panel-tgt { border-left:3px solid var(--emerald); }
+    .diff-panel-label { display:block; font-size:0.7em; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin-bottom:4px; }
+    .diff-panel-val { font-family:monospace; font-size:0.88em; word-break:break-all; color:var(--soft); }
+    .diff-del { background:rgba(251,113,133,0.30); color:#fda4af; border-radius:2px; padding:0 1px; }
+    .diff-ins { background:rgba(52,211,153,0.28); color:#86efac; border-radius:2px; padding:0 1px; }
+    .null-val { color:var(--muted); font-style:italic; }
+    .copy-btn { position:absolute; top:6px; right:6px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.85em; opacity:0; transition:opacity 0.15s; }
+    .diff-panel:hover .copy-btn { opacity:1; }
+
+    /* Navigation pill */
+    #nav-pill { position:fixed; bottom:24px; right:24px; display:flex; align-items:center; gap:8px; background:var(--panel-2); border:1px solid var(--line); border-radius:999px; padding:8px 16px; box-shadow:0 4px 20px rgba(0,0,0,0.4); z-index:100; }
+    .nav-btn { background:rgba(255,255,255,0.08); border:1px solid var(--line); color:var(--soft); padding:4px 12px; border-radius:999px; cursor:pointer; font-size:0.82em; }
+    .nav-btn:hover { background:rgba(34,211,238,0.15); color:var(--cyan); }
+    #nav-pos { color:var(--muted); font-size:0.8em; min-width:50px; text-align:center; }
+
+    /* Row highlight on nav */
+    @keyframes nav-pulse { 0%,100%{background:transparent} 40%{background:rgba(34,211,238,0.15)} }
+    .nav-active { animation: nav-pulse 1s ease; }
+
+    /* Expand/collapse buttons */
+    .expand-all-btn { background:rgba(255,255,255,0.07); border:1px solid var(--line); color:var(--soft); padding:4px 12px; border-radius:6px; cursor:pointer; font-size:0.82em; margin-right:6px; }
+    .expand-all-btn:hover { background:rgba(255,255,255,0.12); }
   </style>
 </head>
 <body>
@@ -147,12 +190,31 @@
 
     <div id="summary">
       <h2>Summary</h2>
-      <p>
-        <strong>Total Tests:</strong> {{ suite.test_cases | length }} &nbsp;|&nbsp;
-        <strong>Passed:</strong> <span style="color: #86efac; font-weight: bold;">{{ suite.total_passed }}</span> &nbsp;|&nbsp;
-        <strong>Failed/Error:</strong> <span style="color: #fda4af; font-weight: bold;">{{ suite.total_failed }}</span> &nbsp;|&nbsp;
-        <strong>Skipped:</strong> {{ suite.total_skipped }}
-      </p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        <div style="flex:1;min-width:120px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:12px 16px">
+          <div style="font-size:1.8em;font-weight:700;color:#34d399">{{ suite.total_passed }}</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Passed</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:rgba(251,113,133,0.12);border:1px solid rgba(251,113,133,0.3);border-radius:8px;padding:12px 16px">
+          <div style="font-size:1.8em;font-weight:700;color:#fb7185">{{ suite.total_failed }}</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Failed</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:12px 16px">
+          <div id="stat-total-mm" style="font-size:1.8em;font-weight:700;color:#fbbf24">…</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Mismatches</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:12px 16px">
+          <div id="stat-duration" style="font-size:1.8em;font-weight:700;color:#60a5fa">…</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Total Duration</div>
+        </div>
+      </div>
+      {% if suite.test_cases | length > 0 %}
+      <div style="background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:10px;margin-bottom:6px">
+        <div style="height:100%;background:linear-gradient(90deg,#34d399,#22d3ee);width:{{ (suite.total_passed / (suite.test_cases | length) * 100) | round | int }}%;transition:width 0.5s ease"></div>
+      </div>
+      <div style="font-size:0.8em;color:var(--muted)">{{ (suite.total_passed / (suite.test_cases | length) * 100) | round | int }}% pass rate</div>
+      {% endif %}
+      <hr>
     </div>
 
     <div id="recon">
