@@ -37,6 +37,7 @@ dev = [
     "hypothesis>=6.0",
     "pytest-cov",
     "python-json-logger>=2.0",
+    "httpx2>=2.5",
 ]
 
 [tool.setuptools.packages.find]

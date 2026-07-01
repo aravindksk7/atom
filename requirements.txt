@@ -32,3 +32,4 @@ prometheus_client>=0.17
 pytest>=7.0
 pytest-cov
 hypothesis>=6.0
+httpx2>=2.5
