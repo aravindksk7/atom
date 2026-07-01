@@ -229,6 +229,27 @@
     </div>
 
     <div id="recon">
+      <div id="filter-toolbar">
+        <select id="filter-test" onchange="filterState.test=this.value;applyFilters()">
+          <option value="">All tests</option>
+          {% for result in suite.reconciliation_results %}
+          <option value="{{ result.query_name }}">{{ result.query_name }}</option>
+          {% endfor %}
+        </select>
+        <select id="filter-col" onchange="filterState.col=this.value;applyFilters()">
+          <option value="">All columns</option>
+        </select>
+        <select id="filter-type" onchange="filterState.type=this.value;applyFilters()">
+          <option value="">All types</option>
+          <option value="value_mismatch">Value diff</option>
+          <option value="missing_in_target">Missing →</option>
+          <option value="missing_in_source">Missing ←</option>
+        </select>
+        <input id="filter-search" type="text" placeholder="Search key values… (/ to focus)"
+               oninput="filterState.search=this.value;applyFilters()">
+        <button class="filter-clear-btn" onclick="clearFilters()">✕ Clear</button>
+        <span id="filter-count"></span>
+      </div>
       <h2>Reconciliation Results</h2>
       <table>
         <thead>
