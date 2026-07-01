@@ -31,8 +31,10 @@ from api.schemas import (
     TestCompareOut,
     TestResultOut,
     TestResultOverrideRequest,
+    TestSuiteTrigger,
 )
 from api.services.run_executor import RunExecutor
+from api.services.pytest_runner import PytestRunExecutor
 from etl_framework.repository.repository import ConfigRepository, RunRepository, RunStepRepository
 from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
@@ -220,6 +222,22 @@ def _execute_run(
         db.close()
 
 
+def _run_pytest(
+    run_id: str,
+    pytest_args: list[str],
+    session_factory=None,
+) -> None:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
+    db = (session_factory or SessionLocal)()
+    try:
+        PytestRunExecutor(db=db, run_id=run_id, pytest_args=pytest_args).execute()
+    finally:
+        db.close()
+
+
 @router.get("", response_model=list[RunStatusOut])
 def list_runs(
     limit: int = 50,
@@ -246,6 +264,23 @@ def list_runs(
         )
         for r in runs
     ]
+
+
+@router.post("/test-suite", response_model=RunStatusOut, status_code=202)
+def trigger_test_suite(
+    body: TestSuiteTrigger,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
+    run_id = str(uuid.uuid4())
+    RunRepository(db).create_run(
+        run_id=run_id,
+        source_env=None,
+        target_env=None,
+        run_type="test_suite",
+    )
+    background_tasks.add_task(_run_pytest, run_id, body.pytest_args)
+    return RunStatusOut(run_id=run_id, status="PENDING", run_type="test_suite")
 
 
 @router.post("", response_model=RunStatusOut, status_code=202)

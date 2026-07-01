@@ -225,6 +225,10 @@ class RunStatusOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TestSuiteTrigger(BaseModel):
+    pytest_args: list[str] = []
+
+
 class ExecutionProgressOut(BaseModel):
     run_id: str
     status: str

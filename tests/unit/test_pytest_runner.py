@@ -4,14 +4,44 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from etl_framework.repository.database import Base
+from etl_framework.repository.database import Base, get_db
+from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401
-from etl_framework.repository.repository import RunRepository
+from etl_framework.repository.repository import RunRepository, TokenRepository
+from api.main import app
+from api.routes import runs as runs_module
 from api.services.pytest_runner import PytestRunExecutor
+
+
+@pytest.fixture
+def client(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    monkeypatch.setattr(runs_module, "_execute_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runs_module, "_run_pytest", lambda *args, **kwargs: None)
+    app.dependency_overrides[get_db] = override_get_db
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test")
+
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
+        yield c
+    app.dependency_overrides.clear()
 
 
 def _session() -> Session:
@@ -158,3 +188,19 @@ def test_cancel_terminates_process():
 
     proc.terminate.assert_called_once()
     assert RunRepository(db).get_run("run-p1").status == "CANCELLED"
+
+
+# --- test-suite endpoint ---
+
+def test_trigger_test_suite_returns_202(client):
+    resp = client.post("/api/runs/test-suite", json={"pytest_args": ["tests/unit/"]})
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "PENDING"
+    assert data["run_type"] == "test_suite"
+    assert "run_id" in data
+
+
+def test_trigger_test_suite_empty_args(client):
+    resp = client.post("/api/runs/test-suite", json={})
+    assert resp.status_code == 202
