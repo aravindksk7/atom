@@ -2999,7 +2999,9 @@ function app() {
     // ===========================================================
     fmtDate(iso) {
       if (!iso) return '—';
-      const d = new Date(iso);
+      // Treat bare ISO strings (no timezone suffix) as UTC so toLocale* shows local time correctly
+      const ts = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
+      const d = new Date(ts);
       return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 
