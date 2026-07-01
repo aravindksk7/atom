@@ -173,6 +173,12 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE INDEX IF NOT EXISTS ix_test_runs_is_baseline ON test_runs (is_baseline)"
         ))
 
+        # --- Run cancellation: cancel_requested column on test_runs ---
+        if "cancel_requested" not in test_run_cols:
+            conn.execute(text(
+                "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0"
+            ))
+
         # --- ETL Capabilities: column_profiles + schema_snapshots tables ---
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS column_profiles ("
