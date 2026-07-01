@@ -62,7 +62,7 @@ def test_uvicorn_error_logger_writes_to_the_same_file(tmp_path):
     configure_logging(level="INFO", log_file=log_file, log_format="text")
     logging.getLogger("uvicorn.error").error("boom from uvicorn")
     content = (tmp_path / "unify.log").read_text()
-    assert "boom from uvicorn" in content
+    assert content.count("boom from uvicorn") == 1
 
 
 def test_uvicorn_access_logger_writes_to_the_same_file(tmp_path):
@@ -70,4 +70,4 @@ def test_uvicorn_access_logger_writes_to_the_same_file(tmp_path):
     configure_logging(level="INFO", log_file=log_file, log_format="text")
     logging.getLogger("uvicorn.access").info("127.0.0.1 GET /api/health 200")
     content = (tmp_path / "unify_access.log").read_text()
-    assert "127.0.0.1 GET /api/health 200" in content
+    assert content.count("127.0.0.1 GET /api/health 200") == 1

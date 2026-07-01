@@ -63,6 +63,11 @@ def configure_logging(
         uvicorn_logger.addHandler(stream_handler)
         uvicorn_logger.addHandler(file_handler)
         uvicorn_logger.setLevel(root.level)
+        # uvicorn.error/uvicorn.access are child loggers of uvicorn and
+        # propagate to it by default; since all three share the same
+        # handlers here, leaving propagation on would double-log every
+        # record (once on the child, once again on the parent).
+        uvicorn_logger.propagate = False
 
 
 def get_logger(name: str) -> logging.Logger:
