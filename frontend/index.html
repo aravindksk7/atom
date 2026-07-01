@@ -3236,29 +3236,81 @@
                   <div x-show="sqlExpandedDiffs[r.query_name]?.loading" class="px-3 py-2 text-xs text-slate-400">Loading diff details…</div>
                   <div x-show="sqlExpandedDiffs[r.query_name]?.error" x-text="sqlExpandedDiffs[r.query_name]?.error" class="px-3 py-2 text-xs text-red-500"></div>
                   <template x-if="sqlExpandedDiffs[r.query_name]?.data?.length">
-                    <div class="overflow-x-auto max-h-64">
-                      <table class="text-xs w-full">
-                        <thead class="bg-slate-100 sticky top-0">
-                          <tr>
-                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Key</th>
-                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Column</th>
-                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source A</th>
-                            <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source B</th>
-                            <th class="px-2 py-1 text-left text-slate-600">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <template x-for="(m, mi) in sqlExpandedDiffs[r.query_name].data" :key="m.id">
-                            <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
-                              <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate" x-text="JSON.stringify(m.key_values)"></td>
-                              <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
-                              <td class="px-2 py-1 text-emerald-700 border-r border-slate-100 max-w-xs truncate" x-text="m.source_value ?? 'NULL'"></td>
-                              <td class="px-2 py-1 text-red-700 border-r border-slate-100 max-w-xs truncate" x-text="m.target_value ?? 'NULL'"></td>
-                              <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
-                            </tr>
+                    <div>
+                      <!-- Column summary mini-chart -->
+                      <div class="col-summary" x-show="colSummary(sqlExpandedDiffs[r.query_name]?.data).length > 1">
+                        <div class="col-summary-label">Mismatches by column</div>
+                        <template x-for="item in colSummary(sqlExpandedDiffs[r.query_name]?.data)" :key="item.col">
+                          <div class="col-bar-row"
+                               @click="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col = item.col">
+                            <span class="col-bar-name" x-text="item.col"></span>
+                            <div class="col-bar-track">
+                              <div class="col-bar-fill" :style="`width:${item.pct}%`"></div>
+                            </div>
+                            <span class="col-bar-count" x-text="item.count"></span>
+                          </div>
+                        </template>
+                      </div>
+                      <!-- Filter bar -->
+                      <div class="diff-filter-bar" x-show="(sqlExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
+                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
+                          <option value="">All types</option>
+                          <option value="value_mismatch">Value diff</option>
+                          <option value="missing_in_target">Missing →</option>
+                          <option value="missing_in_source">Missing ←</option>
+                        </select>
+                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col">
+                          <option value="">All columns</option>
+                          <template x-for="item in colSummary(sqlExpandedDiffs[r.query_name]?.data)" :key="item.col">
+                            <option :value="item.col" x-text="item.col"></option>
                           </template>
-                        </tbody>
-                      </table>
+                        </select>
+                        <input type="text"
+                               x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
+                               placeholder="Search key values…"
+                               class="diff-filter-search">
+                        <span class="diff-filter-count"
+                              x-text="filteredDiff(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter).length + ' shown'">
+                        </span>
+                      </div>
+                      <!-- Diff table -->
+                      <div class="overflow-x-auto max-h-64">
+                        <table class="text-xs w-full">
+                          <thead class="bg-slate-100 sticky top-0">
+                            <tr>
+                              <th class="px-2 py-1 text-left text-slate-600">Key</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Column</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Source</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Target</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Type</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="(m, mi) in filteredDiff(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter)" :key="m.id">
+                              <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
+                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate"
+                                    x-text="JSON.stringify(m.key_values)"></td>
+                                <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
+                                <td class="px-2 py-1 text-emerald-700 border-r border-slate-100">
+                                  <span x-html="renderSrc(m.source_value, m.target_value)"
+                                        :class="expandedCell[m.id+'_src'] ? '' : 'diff-val-truncated'"></span>
+                                  <button x-show="(String(m.source_value||'')).length > 60 && !expandedCell[m.id+'_src']"
+                                          @click="expandedCell = {...expandedCell, [m.id+'_src']: true}"
+                                          class="diff-expand-btn">…more</button>
+                                </td>
+                                <td class="px-2 py-1 text-red-700 border-r border-slate-100">
+                                  <span x-html="renderTgt(m.source_value, m.target_value)"
+                                        :class="expandedCell[m.id+'_tgt'] ? '' : 'diff-val-truncated'"></span>
+                                  <button x-show="(String(m.target_value||'')).length > 60 && !expandedCell[m.id+'_tgt']"
+                                          @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
+                                          class="diff-expand-btn">…more</button>
+                                </td>
+                                <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </template>
                   <template x-if="!sqlExpandedDiffs[r.query_name]?.loading && !sqlExpandedDiffs[r.query_name]?.data?.length && !sqlExpandedDiffs[r.query_name]?.error">
