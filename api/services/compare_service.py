@@ -87,7 +87,16 @@ class CompareService:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
             df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id)
             df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id)
-            key_columns = req.key_columns or self._infer_key_columns(df_a, df_b)
+            key_columns = req.key_columns
+            if not key_columns:
+                try:
+                    key_columns = self._infer_key_columns(df_a, df_b)
+                except HTTPException:
+                    df_a = df_a.copy()
+                    df_b = df_b.copy()
+                    df_a.insert(0, "__row__", range(1, len(df_a) + 1))
+                    df_b.insert(0, "__row__", range(1, len(df_b) + 1))
+                    key_columns = ["__row__"]
             self._validate_key_columns(df_a, df_b, key_columns)
 
             engine_a = _FrameEngine(df_a, req.label_a)
