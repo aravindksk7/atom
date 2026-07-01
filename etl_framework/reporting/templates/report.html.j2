@@ -273,6 +273,11 @@
       </table>
     </div>
 
+    <div id="mismatches-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <h2 style="margin:0">Mismatch Details</h2>
+      <button class="expand-all-btn" onclick="setAllDetails(true)">Expand All</button>
+      <button class="expand-all-btn" onclick="setAllDetails(false)">Collapse All</button>
+    </div>
     <div id="mismatches">
       {% for result in suite.reconciliation_results %}
         {% if result.mismatches %}
@@ -284,18 +289,37 @@
                   <th>Mismatch Type</th>
                   <th>Column</th>
                   <th>Row Key Values</th>
-                  <th>Source Value</th>
-                  <th>Target Value</th>
+                  <th colspan="2">Values ({{ suite.source_env }} → {{ suite.target_env }})</th>
                 </tr>
               </thead>
               <tbody>
                 {% for mm in result.mismatches %}
-                <tr>
-                  <td><span class="badge badge-gray">{{ mm.mismatch_type }}</span></td>
+                <tr data-mismatch
+                    data-test="{{ result.query_name }}"
+                    data-column="{{ mm.column_name }}"
+                    data-type="{{ mm.mismatch_type }}"
+                    data-key="{{ mm.key_values | tojson }}"
+                    data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
+                    data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}">
+                  <td><span class="badge {% if mm.mismatch_type == 'value_mismatch' %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
-                  <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values }}</td>
-                  <td style="color: #fda4af;">{{ mm.source_value }}</td>
-                  <td style="color: #86efac;">{{ mm.target_value }}</td>
+                  <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values | tojson }}</td>
+                  <td class="diff-values-cell" colspan="2">
+                    <div class="diff-panels">
+                      <div class="diff-panel diff-panel-src">
+                        <span class="diff-panel-label">{{ suite.source_env }}</span>
+                        <span class="diff-panel-val" data-role="src-diff"
+                              data-raw="{{ mm.source_value if mm.source_value is not none else '' }}">{{ mm.source_value if mm.source_value is not none else 'NULL' }}</span>
+                        <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.src)" title="Copy source value">⎘</button>
+                      </div>
+                      <div class="diff-panel diff-panel-tgt">
+                        <span class="diff-panel-label">{{ suite.target_env }}</span>
+                        <span class="diff-panel-val" data-role="tgt-diff"
+                              data-raw="{{ mm.target_value if mm.target_value is not none else '' }}">{{ mm.target_value if mm.target_value is not none else 'NULL' }}</span>
+                        <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.tgt)" title="Copy target value">⎘</button>
+                      </div>
+                    </div>
+                  </td>
                 </tr>
                 {% if mm.accepted %}
                 <tr style="background: rgba(52,211,153,0.12);">
