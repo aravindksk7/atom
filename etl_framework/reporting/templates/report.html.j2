@@ -357,5 +357,264 @@
       {% endfor %}
     </div>
   </div>
+
+  <!-- Navigation pill -->
+  <div id="nav-pill">
+    <button class="nav-btn" onclick="navTo(-1)">↑ Prev</button>
+    <span id="nav-pos">0 / 0</span>
+    <button class="nav-btn" onclick="navTo(1)">Next ↓</button>
+  </div>
+
+  <script>
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s==null?'':s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Char diff (LCS O(n*m)) ────────────────────────────────────────────────
+  function charDiff(a, b) {
+    var n=a.length, m=b.length;
+    if(n===0) return b.split('').map(function(c){return {text:c,op:'+'};});
+    if(m===0) return a.split('').map(function(c){return {text:c,op:'-'};});
+    var dp=[];
+    for(var i=0;i<=n;i++) dp[i]=new Uint16Array(m+1);
+    for(var i=1;i<=n;i++) for(var j=1;j<=m;j++)
+      dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
+    var ops=[];
+    var i=n,j=m;
+    while(i>0||j>0){
+      if(i>0&&j>0&&a[i-1]===b[j-1]){ops.push({text:a[i-1],op:'='});i--;j--;}
+      else if(j>0&&(i===0||dp[i][j-1]>=dp[i-1][j])){ops.push({text:b[j-1],op:'+'});j--;}
+      else{ops.push({text:a[i-1],op:'-'});i--;}
+    }
+    ops.reverse();
+    var m2=[];
+    for(var k=0;k<ops.length;k++){
+      var o=ops[k];
+      if(m2.length&&m2[m2.length-1].op===o.op)m2[m2.length-1].text+=o.text;
+      else m2.push({text:o.text,op:o.op});
+    }
+    return m2;
+  }
+
+  function renderSrc(a,b){
+    if(a==null&&b==null) return '<span class="null-val">NULL</span>';
+    if(a==null) return '<span class="null-val">NULL</span>';
+    if(b==null) return escHtml(String(a));
+    if(!isNaN(a)&&!isNaN(b)&&isFinite(a)&&isFinite(b)) return escHtml(String(a));
+    var sa=String(a),sb=String(b);
+    if(sa.length>500||sb.length>500) return escHtml(sa.slice(0,500))+'…';
+    return charDiff(sa,sb).map(function(o){
+      return o.op==='-'?'<span class="diff-del">'+escHtml(o.text)+'</span>':o.op==='='?escHtml(o.text):'';
+    }).join('');
+  }
+
+  function renderTgt(a,b){
+    if(a==null&&b==null) return '<span class="null-val">NULL</span>';
+    if(b==null) return '<span class="null-val">NULL</span>';
+    if(a==null) return escHtml(String(b));
+    if(!isNaN(a)&&!isNaN(b)&&isFinite(a)&&isFinite(b)) return escHtml(String(b));
+    var sa=String(a),sb=String(b);
+    if(sa.length>500||sb.length>500) return escHtml(sb.slice(0,500))+'…';
+    return charDiff(sa,sb).map(function(o){
+      return o.op==='+'?'<span class="diff-ins">'+escHtml(o.text)+'</span>':o.op==='='?escHtml(o.text):'';
+    }).join('');
+  }
+
+  // ── Apply diff to rendered mismatch rows ─────────────────────────────────
+  function applyDiff() {
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr) {
+      var src = tr.dataset.src, tgt = tr.dataset.tgt;
+      tr.querySelectorAll('[data-role="src-diff"]').forEach(function(el){ el.innerHTML = renderSrc(src,tgt); });
+      tr.querySelectorAll('[data-role="tgt-diff"]').forEach(function(el){ el.innerHTML = renderTgt(src,tgt); });
+    });
+  }
+
+  // ── Filter ────────────────────────────────────────────────────────────────
+  var filterState = {test:'',col:'',type:'',search:''};
+
+  function applyFilters() {
+    var rows = document.querySelectorAll('tr[data-mismatch]');
+    var shown=0;
+    rows.forEach(function(tr) {
+      var ok = (
+        (!filterState.test   || tr.dataset.test===filterState.test) &&
+        (!filterState.col    || tr.dataset.column===filterState.col) &&
+        (!filterState.type   || tr.dataset.type===filterState.type) &&
+        (!filterState.search || tr.dataset.key.toLowerCase().includes(filterState.search.toLowerCase()))
+      );
+      tr.style.display = ok ? '' : 'none';
+      if(ok) shown++;
+    });
+    var count = document.getElementById('filter-count');
+    if(count) count.textContent = shown + ' of ' + rows.length + ' mismatches';
+    navIndex=-1; buildNavList();
+  }
+
+  function clearFilters() {
+    filterState.test=filterState.col=filterState.type=filterState.search='';
+    ['filter-test','filter-col','filter-type'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+    var fs=document.getElementById('filter-search'); if(fs) fs.value='';
+    applyFilters();
+  }
+
+  function populateColFilter() {
+    var cols = new Set();
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){cols.add(tr.dataset.column);});
+    var sel=document.getElementById('filter-col'); if(!sel) return;
+    cols.forEach(function(col){
+      if(!col) return;
+      var opt=document.createElement('option'); opt.value=col; opt.textContent=col; sel.appendChild(opt);
+    });
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
+  var navList=[], navIndex=-1;
+
+  function buildNavList(){
+    navList=[].slice.call(document.querySelectorAll('tr[data-mismatch]')).filter(function(tr){return tr.style.display!=='none';});
+    var pos=document.getElementById('nav-pos');
+    if(pos) pos.textContent=(navIndex<0?0:navIndex+1)+' / '+navList.length;
+  }
+
+  function navTo(delta){
+    if(!navList.length) buildNavList();
+    var prev=navIndex;
+    navIndex=Math.max(0,Math.min(navList.length-1, navIndex+delta));
+    if(prev>=0&&navList[prev]) navList[prev].classList.remove('nav-active');
+    if(navList[navIndex]){
+      navList[navIndex].scrollIntoView({behavior:'smooth',block:'center'});
+      navList[navIndex].classList.add('nav-active');
+      var det=navList[navIndex].closest('details');
+      if(det&&!det.open) det.open=true;
+    }
+    var pos=document.getElementById('nav-pos');
+    if(pos) pos.textContent=(navIndex+1)+' / '+navList.length;
+  }
+
+  // ── Expand / Collapse all ─────────────────────────────────────────────────
+  function setAllDetails(open){
+    document.querySelectorAll('#mismatches details').forEach(function(d){d.open=open;});
+  }
+
+  // ── Copy to clipboard ─────────────────────────────────────────────────────
+  function copyVal(btn, val){
+    navigator.clipboard.writeText(val||'').then(function(){
+      var orig=btn.textContent; btn.textContent='✓';
+      setTimeout(function(){btn.textContent=orig;}, 1200);
+    }).catch(function(){});
+  }
+
+  // ── Column heat map ──────────────────────────────────────────────────────
+  function buildHeatmap(){
+    var counts={};
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+      var c=tr.dataset.column||'(none)';
+      counts[c]=(counts[c]||0)+1;
+    });
+    var sorted=Object.entries(counts).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+    if(!sorted.length) return;
+    var maxC=sorted[0][1];
+    var barH=20,gap=5,labelW=130,trackW=180,numW=28,svgW=labelW+trackW+numW+16;
+    var svgH=sorted.length*(barH+gap);
+    var bars=sorted.map(function(entry,i){
+      var col=entry[0], count=entry[1];
+      var y=i*(barH+gap);
+      var fw=Math.round(count/maxC*trackW);
+      var ce=escHtml(col);
+      var cs=col.replace(/'/g,"\\'");
+      return '<g style="cursor:pointer" onclick="filterByCol(\''+cs+'\')">'+
+        '<text x="'+(labelW-4)+'" y="'+(y+barH*0.72)+'" text-anchor="end" font-size="12" fill="#c7d0dc">'+ce+'</text>'+
+        '<rect x="'+labelW+'" y="'+y+'" width="'+trackW+'" height="'+barH+'" fill="rgba(255,255,255,0.06)" rx="3"/>'+
+        '<rect x="'+labelW+'" y="'+y+'" width="'+fw+'" height="'+barH+'" fill="#fb7185" rx="3"/>'+
+        '<text x="'+(labelW+trackW+4)+'" y="'+(y+barH*0.72)+'" font-size="12" fill="#8491a3">'+count+'</text>'+
+        '</g>';
+    }).join('');
+    var container=document.getElementById('col-heatmap');
+    if(container) container.innerHTML='<svg width="'+svgW+'" height="'+svgH+'" xmlns="http://www.w3.org/2000/svg">'+bars+'</svg>';
+    var total=Object.values(counts).reduce(function(a,b){return a+b;},0);
+    document.getElementById('stat-total-mm').textContent=total;
+  }
+
+  function filterByCol(col){
+    var sel=document.getElementById('filter-col'); if(sel) sel.value=col;
+    filterState.col=col; applyFilters();
+  }
+
+  // ── Mismatch type donut ───────────────────────────────────────────────────
+  function buildDonut(){
+    var counts={value_mismatch:0,missing_in_target:0,missing_in_source:0};
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+      var t=tr.dataset.type; if(t in counts) counts[t]++; else counts.value_mismatch++;
+    });
+    var total=Object.values(counts).reduce(function(a,b){return a+b;},0);
+    if(!total) return;
+    var colors={value_mismatch:'#fbbf24',missing_in_target:'#38bdf8',missing_in_source:'#a78bfa'};
+    var labels={value_mismatch:'Value diff',missing_in_target:'Missing →',missing_in_source:'Missing ←'};
+    var cx=80,cy=80,r=60,ir=36;
+    var angle=-Math.PI/2, paths='';
+    Object.entries(counts).forEach(function(entry){
+      var key=entry[0], count=entry[1];
+      if(!count) return;
+      var slice=(count/total)*2*Math.PI, end=angle+slice;
+      var x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
+      var x2=cx+r*Math.cos(end),y2=cy+r*Math.sin(end);
+      var ix1=cx+ir*Math.cos(angle),iy1=cy+ir*Math.sin(angle);
+      var ix2=cx+ir*Math.cos(end),iy2=cy+ir*Math.sin(end);
+      var lg=slice>Math.PI?1:0;
+      paths+='<path d="M'+ix1+','+iy1+'L'+x1+','+y1+'A'+r+','+r+' 0 '+lg+',1 '+x2+','+y2+'L'+ix2+','+iy2+'A'+ir+','+ir+' 0 '+lg+',0 '+ix1+','+iy1+'" fill="'+colors[key]+'" opacity="0.85"/>';
+      angle=end;
+    });
+    var legend=Object.entries(counts).filter(function(e){return e[1]>0;}).map(function(entry){
+      var key=entry[0], count=entry[1];
+      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'+
+        '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+colors[key]+'"></span>'+
+        '<span style="font-size:12px;color:#c7d0dc">'+labels[key]+': <strong>'+count+'</strong> ('+Math.round(count/total*100)+'%)</span>'+
+        '</div>';
+    }).join('');
+    var html='<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">'+
+      '<svg width="160" height="160" xmlns="http://www.w3.org/2000/svg">'+
+      paths+
+      '<text x="'+cx+'" y="'+(cy-6)+'" text-anchor="middle" font-size="22" font-weight="bold" fill="#f4f7fb">'+total+'</text>'+
+      '<text x="'+cx+'" y="'+(cy+14)+'" text-anchor="middle" font-size="11" fill="#8491a3">mismatches</text>'+
+      '</svg><div>'+legend+'</div></div>';
+    var container=document.getElementById('type-donut');
+    if(container) container.innerHTML=html;
+  }
+
+  // ── Duration stat ─────────────────────────────────────────────────────────
+  function fillDuration(){
+    var total=0;
+    document.querySelectorAll('#recon tbody tr td:nth-child(3)').forEach(function(td){
+      var match=td.textContent.match(/[\d.]+/);
+      if(match) total+=parseFloat(match[0]);
+    });
+    var el=document.getElementById('stat-duration');
+    if(el) el.textContent = total>0 ? total.toFixed(1)+'s' : '—';
+  }
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  document.addEventListener('keydown', function(e){
+    if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+    if(e.key==='n'||e.key==='ArrowDown'){e.preventDefault();navTo(1);}
+    if(e.key==='p'||e.key==='ArrowUp'){e.preventDefault();navTo(-1);}
+    if(e.key==='/'){e.preventDefault();var fs=document.getElementById('filter-search');if(fs)fs.focus();}
+    if(e.key==='Escape') clearFilters();
+  });
+
+  // ── Initialise on DOM ready ───────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function(){
+    populateColFilter();
+    applyDiff();
+    buildHeatmap();
+    buildDonut();
+    fillDuration();
+    buildNavList();
+    var rows=document.querySelectorAll('tr[data-mismatch]').length;
+    var fc=document.getElementById('filter-count');
+    if(fc) fc.textContent=rows+' of '+rows+' mismatches';
+  });
+  </script>
 </body>
 </html>
