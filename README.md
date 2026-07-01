@@ -75,6 +75,8 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - View the **job lineage DAG** (job → job dependency graph) in the History tab.
 - **Audit log** — every create, update, delete, and mismatch-accept action is recorded with actor, action, resource type, resource ID, and a JSON diff. Queryable via `GET /api/audit`.
 - **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
+- **Run cancellation** — send `POST /api/runs/{run_id}/cancel` at any time to cooperatively stop an active ETL run. The executor finishes its current job step, cancels all remaining steps, and sets the run to `CANCELLED`. Safe to call on already-terminal runs (returns `cancel_requested: false`).
+- **Pytest suite runner** — trigger the project's pytest suite as a tracked run with `POST /api/runs/test-suite`. Progress (collected count, passed/failed/error counters) streams via the same SSE endpoint; the run appears in History with `run_type=test_suite`. Supports the cancel endpoint to terminate a running test process.
 - **Trend caching** — trend responses are memoised in-process with a short TTL; the cache is invalidated automatically when matching result rows change.
 - **dbt artifact adapter** — `dbt_artifact` job type parses `run_results.json` (and optionally `manifest.json`) and maps dbt test statuses to normal run results, with failing/error nodes recorded as mismatch details.
 - **Freshness checks** — `freshness` job type queries a timestamp column and fails if the most recent record is older than a configurable `max_age_hours` threshold.
@@ -112,7 +114,7 @@ Browser
 FastAPI app  (BearerTokenMiddleware on all /api/* routes)
   api/routes/configs.py
   api/routes/jobs.py          — CRUD, DQ rules, depends_on, EXPLAIN validate
-  api/routes/runs.py          — runs, SSE stream, trends, badges, baseline, mismatch-distribution
+  api/routes/runs.py          — runs, SSE stream, trends, badges, baseline, mismatch-distribution, cancel, test-suite
   api/routes/audit.py         — GET /api/audit event log
   api/routes/tokens.py        — API token CRUD
   api/routes/notifications.py — webhook CRUD + test ping
@@ -133,7 +135,8 @@ Core framework
   etl_framework/repository       — ORM models, repositories (incl. AuditRepository, ContractRepository)
   etl_framework/sap_bo
   etl_framework/automic
-  api/services/run_executor.py          — retry, DAG resolution, DQ evaluation, all job types
+  api/services/run_executor.py          — retry, DAG resolution, DQ evaluation, all job types; cooperative cancel check after each step
+  api/services/pytest_runner.py         — spawn pytest subprocess, parse output, stream progress, support cancel
   api/services/contract_breach_checker.py — post-run hook: open/resolve contract breaches
   api/services/audit_service.py         — actor extraction + AuditRepository facade
   api/services/dbt_artifact_parser.py   — parse run_results.json / manifest.json
@@ -1140,17 +1143,18 @@ Default seed jobs are returned if the database has no saved jobs.
 
 Use this tab to:
 
-- Watch active runs.
+- Watch active runs, including pytest test suite runs (`run_type=test_suite`).
 - View run progress.
 - See passed, failed, slow, and error counters.
 - Track the current job where progress data is available.
 - Receive live updates through `GET /api/runs/{run_id}/stream`; the browser falls back to 5-second polling if SSE is unavailable.
+- **Cancel** an active ETL run or pytest suite run via `POST /api/runs/{run_id}/cancel` (see [Cancel A Run](#cancel-a-run)).
 
 ### History
 
 Use this tab to:
 
-- **Runs sub-tab** — browse previous runs with status and run-type filters.
+- **Runs sub-tab** — browse previous runs with status and run-type filters (includes `test_suite` runs from the pytest runner).
   - Open run details with per-test results.
   - Expand mismatch rows with Load More paging.
   - Accept mismatches with a note.
@@ -1706,6 +1710,25 @@ GET /api/runs/{run_id}/stream
 
 Returns a `text/event-stream` response with `progress` events while the run is active and a final `done` event when it reaches a terminal status.
 
+### Cancel A Run
+
+```powershell
+Invoke-RestMethod -Method Post -Headers $h "http://127.0.0.1:8000/api/runs/<run_id>/cancel"
+# → { "run_id": "...", "cancel_requested": true }
+```
+
+Cooperative cancellation: the executor finishes its current job step, then stops and sets the run to `CANCELLED`. Calling cancel on a run that is already in a terminal status (`PASSED`, `FAILED`, `ERROR`, `CANCELLED`, etc.) returns `cancel_requested: false` with HTTP 202 (not an error).
+
+### Trigger A Pytest Suite Run
+
+```powershell
+$body = @{ pytest_args = @("tests/unit/", "-q") } | ConvertTo-Json
+$resp = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/runs/test-suite" -Body $body -ContentType "application/json" -Headers $h
+# $resp.run_id — stream progress with GET /api/runs/{run_id}/stream
+```
+
+The run appears in History with `run_type=test_suite`. `pytest_args` is optional; omitting it runs the full suite. Progress events include collected test count and rolling passed/failed/error counters. Exit codes map to: `0 → PASSED`, `1 → COMPLETED` (some tests failed), anything else `→ ERROR`. Send `POST /api/runs/{run_id}/cancel` to terminate the subprocess early.
+
 ### Audit Events
 
 ```powershell
@@ -1905,6 +1928,19 @@ Run property-based tests (requires `hypothesis`):
 
 ```powershell
 python -m pytest tests/property/ -q
+```
+
+Run cancellation and pytest-runner tests:
+
+```powershell
+# Unit: repository cancel methods, cancel endpoint (9 tests)
+python -m pytest tests/unit/test_run_cancel.py -q
+
+# Unit: PytestRunExecutor output parsing and cancel (10 tests)
+python -m pytest tests/unit/test_pytest_runner.py -q
+
+# Integration: two-thread cancel flow (1 test)
+python -m pytest tests/integration/test_cancel_flow.py -q
 ```
 
 Run focused tests:
