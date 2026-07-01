@@ -9,6 +9,11 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
+)
+
+
 class SavedConfig(Base):
     __tablename__ = "saved_configs"
 
@@ -58,6 +63,7 @@ class TestRun(Base):
     run_type = Column(String(50), nullable=False, default="reconciliation")
     pair_id  = Column(String(36), nullable=True, index=True)
     is_baseline = Column(Boolean, nullable=False, default=False, index=True)
+    cancel_requested = Column(Boolean, default=False, nullable=False)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")

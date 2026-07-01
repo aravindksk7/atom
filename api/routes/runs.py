@@ -39,11 +39,11 @@ from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
 from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
 from etl_framework.config.models import resolve_connection as _resolve_connection
+from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
 
 router = APIRouter(tags=["runs"])
 
 
-_TERMINAL = {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
 _TREND_CACHE_TTL_SECONDS = 30
 _TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
 
