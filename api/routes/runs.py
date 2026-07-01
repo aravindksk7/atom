@@ -297,6 +297,15 @@ def trigger_run(
     return RunStatusOut(run_id=run_id, status="PENDING")
 
 
+@router.post("/{run_id}/cancel", status_code=202)
+def cancel_run(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    accepted = repo.request_cancel(run_id)
+    return {"run_id": run_id, "cancel_requested": accepted}
+
+
 @router.get("/{run_id}/status", response_model=RunStatusOut)
 def get_run_status(run_id: str, db: Session = Depends(get_session)):
     repo = RunRepository(db)

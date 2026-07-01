@@ -1,12 +1,42 @@
 from __future__ import annotations
 
+import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from etl_framework.repository.database import Base
+from etl_framework.repository.database import Base, get_db
+from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401
-from etl_framework.repository.repository import RunRepository
+from etl_framework.repository.repository import RunRepository, TokenRepository
+from api.main import app
+from api.routes import runs as runs_module
+
+
+@pytest.fixture
+def client(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    def override_get_db():
+        with Session(engine) as session:
+            yield session
+
+    monkeypatch.setattr(runs_module, "_execute_run", lambda *args, **kwargs: None)
+    app.dependency_overrides[get_db] = override_get_db
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test")
+
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
+        yield c
+    app.dependency_overrides.clear()
 
 
 def _session() -> Session:
@@ -64,3 +94,37 @@ def test_is_cancel_requested_true_after_request():
     repo = RunRepository(db)
     repo.request_cancel("run-001")
     assert repo.is_cancel_requested("run-001") is True
+
+
+# --- cancel endpoint ---
+
+def test_cancel_endpoint_returns_202(client):
+    resp = client.post("/api/runs", json={
+        "source_env": "dev",
+        "target_env": "prod",
+        "job_names": [],
+    })
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    cancel_resp = client.post(f"/api/runs/{run_id}/cancel")
+    assert cancel_resp.status_code == 202
+    data = cancel_resp.json()
+    assert data["run_id"] == run_id
+    assert "cancel_requested" in data
+
+
+def test_cancel_endpoint_404_for_unknown_run(client):
+    resp = client.post("/api/runs/no-such-id/cancel")
+    assert resp.status_code == 404
+
+
+def test_cancel_endpoint_idempotent_when_called_twice(client):
+    resp = client.post("/api/runs", json={
+        "source_env": "dev",
+        "target_env": "prod",
+        "job_names": [],
+    })
+    run_id = resp.json()["run_id"]
+    assert client.post(f"/api/runs/{run_id}/cancel").status_code == 202
+    assert client.post(f"/api/runs/{run_id}/cancel").status_code == 202
