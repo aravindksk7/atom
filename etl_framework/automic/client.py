@@ -1,6 +1,6 @@
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from etl_framework.config.models import EnvironmentConfig
@@ -70,20 +70,20 @@ class AutomicClient:
         return JobStatus(
             identifier=run_id, identifier_type="run_id",
             status=status, environment=self._env_name,
-            checked_at=datetime.now(), raw_response=data
+            checked_at=datetime.now(timezone.utc), raw_response=data
         )
 
     def get_status_by_job_name(self, job_name: str) -> JobStatus:
         url = f"{self._base_url}/api/v1/jobs/{job_name}/executions?limit=1&sort=start_time:desc"
         data = self._request("GET", url)
         executions = data.get("data", [])
-        
+
         if not executions:
-            return JobStatus(identifier=job_name, identifier_type="job_name", status=TestStatus.FAILED, environment=self._env_name, checked_at=datetime.now(), raw_response=data)
+            return JobStatus(identifier=job_name, identifier_type="job_name", status=TestStatus.FAILED, environment=self._env_name, checked_at=datetime.now(timezone.utc), raw_response=data)
 
         latest = executions[0]
         status = self._normalise_status(latest.get("status", "NOT_FOUND"))
-        return JobStatus(identifier=job_name, identifier_type="job_name", status=status, environment=self._env_name, checked_at=datetime.now(), raw_response=latest)
+        return JobStatus(identifier=job_name, identifier_type="job_name", status=status, environment=self._env_name, checked_at=datetime.now(timezone.utc), raw_response=latest)
 
     def get_statuses(self, identifiers: list[str], id_type: str = "run_id") -> dict[str, JobStatus]:
         return {ident: (self.get_status_by_run_id(ident) if id_type == "run_id" else self.get_status_by_job_name(ident)) for ident in identifiers}
