@@ -18,6 +18,7 @@ pyarrow>=14.0
 # API
 fastapi>=0.111
 uvicorn[standard]>=0.29
+apscheduler>=3.10,<4.0
 
 # Logging
 python-json-logger>=2.0

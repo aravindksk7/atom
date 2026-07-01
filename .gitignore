@@ -27,6 +27,8 @@ reports/
 __pycache__/
 *.py[cod]
 node_modules/
+.hypothesis/
+*.egg-info/
 
 # Local-only validation and planning material
 tests/

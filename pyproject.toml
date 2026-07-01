@@ -21,6 +21,7 @@ dependencies = [
     "cryptography>=41.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
+    "apscheduler>=3.10,<4.0",
     "beautifulsoup4>=4.12",
     "polars>=1.0",
     "pyarrow>=14.0",
