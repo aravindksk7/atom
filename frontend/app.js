@@ -50,6 +50,81 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// ── Char-level diff utility ───────────────────────────────────────────────
+function _escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function _charDiff(a, b) {
+  const n = a.length, m = b.length;
+  if (n === 0) return b.split('').map(c => ({ text: c, op: '+' }));
+  if (m === 0) return a.split('').map(c => ({ text: c, op: '-' }));
+  const dp = [];
+  for (let i = 0; i <= n; i++) { dp[i] = new Uint16Array(m + 1); }
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1] + 1
+        : Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  const ops = [];
+  let i = n, j = m;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+      ops.push({ text: a[i-1], op: '=' }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      ops.push({ text: b[j-1], op: '+' }); j--;
+    } else {
+      ops.push({ text: a[i-1], op: '-' }); i--;
+    }
+  }
+  ops.reverse();
+  const merged = [];
+  for (const { text, op } of ops) {
+    if (merged.length && merged[merged.length-1].op === op) merged[merged.length-1].text += text;
+    else merged.push({ text, op });
+  }
+  return merged;
+}
+
+function renderSrc(rawA, rawB) {
+  if (rawA == null && rawB == null) return '<span class="null-val">NULL</span>';
+  if (rawA == null) return '<span class="null-val">NULL</span>';
+  if (rawB == null) return _escHtml(String(rawA));
+  if (!isNaN(rawA) && !isNaN(rawB) && isFinite(rawA) && isFinite(rawB)) {
+    return _escHtml(String(rawA));
+  }
+  const sa = String(rawA), sb = String(rawB);
+  if (sa.length > 500 || sb.length > 500) return _escHtml(sa.slice(0, 500)) + '…';
+  const ops = _charDiff(sa, sb);
+  return ops.map(({ text, op }) =>
+    op === '-' ? `<span class="diff-del">${_escHtml(text)}</span>` :
+    op === '=' ? _escHtml(text) : ''
+  ).join('');
+}
+
+function renderTgt(rawA, rawB) {
+  if (rawA == null && rawB == null) return '<span class="null-val">NULL</span>';
+  if (rawB == null) return '<span class="null-val">NULL</span>';
+  if (rawA == null) return _escHtml(String(rawB));
+  if (!isNaN(rawA) && !isNaN(rawB) && isFinite(rawA) && isFinite(rawB)) {
+    return _escHtml(String(rawB));
+  }
+  const sa = String(rawA), sb = String(rawB);
+  if (sa.length > 500 || sb.length > 500) return _escHtml(sb.slice(0, 500)) + '…';
+  const ops = _charDiff(sa, sb);
+  return ops.map(({ text, op }) =>
+    op === '+' ? `<span class="diff-ins">${_escHtml(text)}</span>` :
+    op === '=' ? _escHtml(text) : ''
+  ).join('');
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function app() {
   return {
     // -----------------------------------------------------------
@@ -339,6 +414,9 @@ function app() {
     sqlCompareLoading: false,
     sqlCompareResult: null,
     sqlExpandedDiffs: {},
+    sqlDiffFilter: {},
+    fileDiffFilter: {},
+    expandedCell: {},
 
     // Schema Explorer (Config tab)
     schemaExplorerId: null,
@@ -1946,6 +2024,31 @@ function app() {
         this.toast('error', 'SQL compare failed', e.message);
         this.sqlCompareLoading = false;
       }
+    },
+
+    filteredDiff(diffs, filterKey, filterState) {
+      const f = filterState[filterKey] || {};
+      if (!f.type && !f.col && !f.search) return diffs;
+      return (diffs || []).filter(m => {
+        if (f.type && m.mismatch_type !== f.type) return false;
+        if (f.col  && m.column_name !== f.col)   return false;
+        if (f.search) {
+          const key = JSON.stringify(m.key_values || {}).toLowerCase();
+          if (!key.includes(f.search.toLowerCase())) return false;
+        }
+        return true;
+      });
+    },
+
+    colSummary(diffs) {
+      const counts = {};
+      (diffs || []).forEach(m => {
+        const c = m.column_name || '(none)';
+        counts[c] = (counts[c] || 0) + 1;
+      });
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const max = sorted[0]?.[1] || 1;
+      return sorted.map(([col, count]) => ({ col, count, pct: Math.round(count / max * 100) }));
     },
 
     async toggleSQLDiff(r) {
