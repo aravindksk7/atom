@@ -53,6 +53,17 @@ def configure_logging(
         file_handler.setFormatter(text_formatter)
     root.addHandler(file_handler)
 
+    # Route uvicorn's own logger (unhandled exceptions, request errors,
+    # startup/shutdown/reload messages) through the same handlers, so
+    # everything lands in one file instead of being silently lost to
+    # whatever console the process happens to be attached to.
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.addHandler(stream_handler)
+        uvicorn_logger.addHandler(file_handler)
+        uvicorn_logger.setLevel(root.level)
+
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"etl_framework.{name}")
