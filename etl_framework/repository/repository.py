@@ -6,7 +6,7 @@ from etl_framework.reconciliation.models import MismatchRecord, ReconciliationRe
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
-    RunStep,
+    RunStep, TERMINAL_STATUSES,
 )
 
 
@@ -167,6 +167,21 @@ class RunRepository:
         self._db.commit()
         self._db.refresh(run)
         return run
+
+    def request_cancel(self, run_id: str) -> bool:
+        """Signal cancellation. Returns False if run not found or already terminal."""
+        run = self.get_run(run_id)
+        if run is None or run.status in TERMINAL_STATUSES:
+            return False
+        run.cancel_requested = True
+        self._db.commit()
+        return True
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        """Re-fetch from DB (bypass identity-map cache) and return cancel flag."""
+        self._db.expire_all()
+        run = self.get_run(run_id)
+        return bool(run and run.cancel_requested)
 
     def add_test_result(self, run_id: str, result: ReconciliationResult) -> TestResult:
         status_val = result.status.value if hasattr(result.status, "value") else str(result.status)
