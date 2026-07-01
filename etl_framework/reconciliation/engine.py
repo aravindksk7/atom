@@ -3,7 +3,9 @@ from __future__ import annotations
 import dataclasses
 import logging
 import time
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -29,10 +31,18 @@ class ReconciliationEngine:
         float_tolerance: float = 1e-9,
         mismatch_row_limit: int = 1000,
         schema_mismatch_policy: str = "warn",   # "warn" | "error"
-        null_equals_null: bool = True,           # Task 7
-        chunk_size: int = 0,                     # Task 9
-        use_hash_precheck: bool = True,          # Task 9
-        backend: ComparisonBackend | None = None,  # Task 14
+        null_equals_null: bool = True,
+        chunk_size: int = 0,
+        use_hash_precheck: bool = True,
+        backend: ComparisonBackend | None = None,
+        column_tolerances: dict[str, float] | None = None,
+        datetime_tolerance_seconds: float = 0.0,
+        case_insensitive_columns: list[str] | None = None,
+        whitespace_normalize_columns: list[str] | None = None,
+        change_tracking_column: str | None = None,
+        since: datetime | None = None,
+        parallel_columns: bool = False,
+        parallel_workers: int = 4,
     ):
         self._source_engine = source_engine
         self._target_engine = target_engine
@@ -45,7 +55,15 @@ class ReconciliationEngine:
         self._chunk_size = chunk_size
         self._use_hash_precheck = use_hash_precheck
         self._backend = backend
+        self._column_tolerances: dict[str, float] = column_tolerances or {}
+        self._datetime_tolerance = timedelta(seconds=datetime_tolerance_seconds)
         self._normalizer = TypeNormalizer()
+        self._case_insensitive_columns: frozenset[str] = frozenset(case_insensitive_columns or [])
+        self._whitespace_normalize_columns: frozenset[str] = frozenset(whitespace_normalize_columns or [])
+        self._change_tracking_column: str | None = change_tracking_column
+        self._since: datetime | None = since
+        self._parallel_columns: bool = parallel_columns
+        self._parallel_workers: int = parallel_workers
 
     def reconcile(
         self,
@@ -126,8 +144,11 @@ class ReconciliationEngine:
                     self._target_engine.execute_query(query, params)
                 )
 
+            df_source, df_target = self._filter_incremental(df_source, df_target)
             schema_diff = self._validate_schemas(df_source, df_target, query_name)
             df_source_norm, df_target_norm = self._align_columns(df_source, df_target, schema_diff)
+
+            df_source_norm, df_target_norm = self._preprocess_for_compare(df_source_norm, df_target_norm)
 
             if self._backend is not None:
                 mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
@@ -160,6 +181,70 @@ class ReconciliationEngine:
                                        schema_diff)
             result = dataclasses.replace(result, duration_seconds=time.monotonic() - t0)
             return self._apply_slo(result, max_duration_seconds)
+
+    # ------------------------------------------------------------------
+    # Incremental filtering
+    # ------------------------------------------------------------------
+
+    def _filter_incremental(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Keep only rows modified at or after ``self._since``.
+
+        Filters both sides by ``change_tracking_column >= since`` so the
+        comparison only covers recently changed data.  Rows where the
+        change-tracking column is NULL are always included (conservative).
+        """
+        col = self._change_tracking_column
+        since = self._since
+        if col is None or since is None:
+            return df_source, df_target
+
+        def _apply(df: pd.DataFrame) -> pd.DataFrame:
+            if col not in df.columns:
+                logger.warning(
+                    "change_tracking_column '%s' not in DataFrame; incremental filter skipped.", col
+                )
+                return df
+            dt_col = pd.to_datetime(df[col], errors="coerce", utc=True)
+            since_utc = pd.Timestamp(since, tz="UTC") if since.tzinfo is None else pd.Timestamp(since).tz_convert("UTC")
+            mask = dt_col.isna() | (dt_col >= since_utc)
+            return df[mask].reset_index(drop=True)
+
+        src_filtered = _apply(df_source)
+        tgt_filtered = _apply(df_target)
+        logger.info(
+            "Incremental filter since %s: source %d→%d rows, target %d→%d rows",
+            since.isoformat(), len(df_source), len(src_filtered),
+            len(df_target), len(tgt_filtered),
+        )
+        return src_filtered, tgt_filtered
+
+    # ------------------------------------------------------------------
+    # Pre-compare normalisation (case / whitespace)
+    # ------------------------------------------------------------------
+
+    def _preprocess_for_compare(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        if not self._case_insensitive_columns and not self._whitespace_normalize_columns:
+            return df_source, df_target
+        df_source = df_source.copy()
+        df_target = df_target.copy()
+        for col in self._case_insensitive_columns | self._whitespace_normalize_columns:
+            for df in (df_source, df_target):
+                if col not in df.columns:
+                    continue
+                if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+                    if col in self._whitespace_normalize_columns:
+                        df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
+                    if col in self._case_insensitive_columns:
+                        df[col] = df[col].str.lower()
+        return df_source, df_target
 
     # ------------------------------------------------------------------
     # Schema helpers
@@ -313,59 +398,96 @@ class ReconciliationEngine:
             ))
         return records
 
+    def _compare_column(
+        self,
+        col: str,
+        both: pd.DataFrame,
+        df_source: pd.DataFrame,
+    ) -> tuple[list[MismatchRecord], int]:
+        """Return (mismatch_records, total_count) for a single value column."""
+        src_col = f"{col}_src" if f"{col}_src" in both.columns else col
+        tgt_col = f"{col}_tgt" if f"{col}_tgt" in both.columns else col
+        if src_col not in both.columns or tgt_col not in both.columns:
+            return [], 0
+
+        src_na = both[src_col].isna()
+        tgt_na = both[tgt_col].isna()
+        both_na = src_na & tgt_na
+        neither_na = ~src_na & ~tgt_na
+        col_tol = self._column_tolerances.get(col, self._float_tolerance)
+
+        if pd.api.types.is_datetime64_any_dtype(df_source[col]) and self._datetime_tolerance.total_seconds() > 0:
+            val_eq = pd.Series(False, index=both.index, dtype=bool)
+            if neither_na.any():
+                delta_ns = (both.loc[neither_na, src_col] - both.loc[neither_na, tgt_col]).abs()
+                tol_ns = int(self._datetime_tolerance.total_seconds() * 1e9)
+                val_eq[neither_na] = delta_ns <= pd.Timedelta(nanoseconds=tol_ns)
+        elif pd.api.types.is_float_dtype(df_source[col]):
+            val_eq = pd.Series(False, index=both.index, dtype=bool)
+            if neither_na.any():
+                val_eq[neither_na] = np.isclose(
+                    both.loc[neither_na, src_col].to_numpy(dtype=float),
+                    both.loc[neither_na, tgt_col].to_numpy(dtype=float),
+                    rtol=0,
+                    atol=col_tol,
+                )
+        else:
+            val_eq = both[src_col].eq(both[tgt_col]).fillna(False)
+
+        mismatch_mask = ~((both_na & self._null_equals_null) | (neither_na & val_eq))
+        col_count = int(mismatch_mask.sum())
+        records: list[MismatchRecord] = []
+        if col_count:
+            for _, row in both.loc[mismatch_mask].iterrows():
+                sv, tv = row[src_col], row[tgt_col]
+                delta: float | None = None
+                rel_delta: float | None = None
+                try:
+                    delta = float(tv) - float(sv)
+                    rel_delta = delta / float(sv) if float(sv) != 0 else None
+                except (TypeError, ValueError):
+                    pass
+                records.append(MismatchRecord(
+                    key_values={k: row.get(k) for k in self._key_columns},
+                    column_name=col,
+                    source_value=sv,
+                    target_value=tv,
+                    mismatch_type="value_diff",
+                    delta=delta,
+                    relative_delta=rel_delta,
+                ))
+        return records, col_count
+
     def _find_value_mismatches(
         self,
         both: pd.DataFrame,
         df_source: pd.DataFrame,
     ) -> tuple[list[MismatchRecord], int]:
-        records: list[MismatchRecord] = []
-        count = 0
-
         compare_cols = [
             c for c in df_source.columns
             if c not in self._key_columns and c not in self._exclude_columns
         ]
 
-        for col in compare_cols:
-            src_col = f"{col}_src" if f"{col}_src" in both.columns else col
-            tgt_col = f"{col}_tgt" if f"{col}_tgt" in both.columns else col
+        if self._parallel_columns and len(compare_cols) > 1:
+            indexed: list[tuple[list[MismatchRecord], int] | None] = [None] * len(compare_cols)
+            with ThreadPoolExecutor(max_workers=self._parallel_workers) as pool:
+                futures = {
+                    pool.submit(self._compare_column, col, both, df_source): i
+                    for i, col in enumerate(compare_cols)
+                }
+                for fut in as_completed(futures):
+                    indexed[futures[fut]] = fut.result()
+            col_results = indexed
+        else:
+            col_results = [self._compare_column(col, both, df_source) for col in compare_cols]
 
-            if src_col not in both.columns or tgt_col not in both.columns:
-                continue
-
-            src_na = both[src_col].isna()
-            tgt_na = both[tgt_col].isna()
-            both_na = src_na & tgt_na
-            neither_na = ~src_na & ~tgt_na
-
-            if pd.api.types.is_float_dtype(df_source[col]):
-                val_eq = pd.Series(False, index=both.index, dtype=bool)
-                if neither_na.any():
-                    val_eq[neither_na] = np.isclose(
-                        both.loc[neither_na, src_col].to_numpy(dtype=float),
-                        both.loc[neither_na, tgt_col].to_numpy(dtype=float),
-                        rtol=0,
-                        atol=self._float_tolerance,
-                    )
-            else:
-                val_eq = both[src_col].eq(both[tgt_col]).fillna(False)
-
-            match = (both_na & self._null_equals_null) | (neither_na & val_eq)
-            mismatch_mask = ~match
-            col_count = int(mismatch_mask.sum())
+        records: list[MismatchRecord] = []
+        count = 0
+        for col_records, col_count in col_results:  # type: ignore[misc]
             count += col_count
-
-            if col_count and len(records) < self._mismatch_row_limit:
-                budget = self._mismatch_row_limit - len(records)
-                for _, row in both.loc[mismatch_mask].iloc[:budget].iterrows():
-                    records.append(MismatchRecord(
-                        key_values={k: row.get(k) for k in self._key_columns},
-                        column_name=col,
-                        source_value=row[src_col],
-                        target_value=row[tgt_col],
-                        mismatch_type="value_diff",
-                    ))
-
+            remaining = self._mismatch_row_limit - len(records)
+            if remaining > 0:
+                records.extend(col_records[:remaining])
         return records, count
 
     def _apply_slo(

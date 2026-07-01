@@ -12,6 +12,8 @@ class MismatchRecord:
     source_value: Any
     target_value: Any
     mismatch_type: str  # "value_diff" | "missing_in_target" | "missing_in_source"
+    delta: float | None = None           # target_value - source_value (numeric only)
+    relative_delta: float | None = None  # delta / source_value (numeric only, None when source is 0)
 
 
 @dataclass
@@ -36,3 +38,11 @@ class ReconciliationResult:
         return (self.missing_in_target_count
                 + self.missing_in_source_count
                 + self.value_mismatch_count)
+
+    @property
+    def mismatch_by_column(self) -> dict[str, int]:
+        """Count of mismatches grouped by column name."""
+        counts: dict[str, int] = {}
+        for m in self.mismatches:
+            counts[m.column_name] = counts.get(m.column_name, 0) + 1
+        return counts

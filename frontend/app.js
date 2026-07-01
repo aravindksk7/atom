@@ -418,6 +418,57 @@ function app() {
     fileDiffFilter: {},
     expandedCell: {},
 
+    // Advanced compare options (shared shape for BO, File, SQL)
+    boAdvancedOpen: false,
+    boFloatTolerance: '1e-9',
+    boColumnTolerances: '',
+    boDatetimeTolerance: 0,
+    boCaseInsensitiveColumns: '',
+    boWhitespaceNormalizeColumns: '',
+    boBackend: 'pandas',
+    boSampleFrac: '',
+    boParallelColumns: false,
+
+    fileAdvancedOpen: false,
+    fileFloatTolerance: '1e-9',
+    fileColumnTolerances: '',
+    fileDatetimeTolerance: 0,
+    fileCaseInsensitiveColumns: '',
+    fileWhitespaceNormalizeColumns: '',
+    fileBackend: 'pandas',
+    fileSampleFrac: '',
+    fileParallelColumns: false,
+
+    sqlAdvancedOpen: false,
+    sqlFloatTolerance: '1e-9',
+    sqlColumnTolerances: '',
+    sqlDatetimeTolerance: 0,
+    sqlCaseInsensitiveColumns: '',
+    sqlWhitespaceNormalizeColumns: '',
+    sqlBackend: 'pandas',
+    sqlSampleFrac: '',
+    sqlParallelColumns: false,
+
+    // Column Stats
+    colStatsSourceAType: 'upload',
+    colStatsSourceBType: 'upload',
+    colStatsSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A' },
+    colStatsSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B' },
+    colStatsQueryName: 'stats_compare',
+    colStatsFloatTol: '1e-9',
+    colStatsRowCountTol: 0,
+    colStatsLoading: false,
+    colStatsResult: null,
+
+    // Mismatch Diff
+    mismatchDiffRunIdA: '',
+    mismatchDiffRunIdB: '',
+    mismatchDiffQueryName: '',
+    mismatchDiffRunLabelA: 'Run A',
+    mismatchDiffRunLabelB: 'Run B',
+    mismatchDiffLoading: false,
+    mismatchDiffResult: null,
+
     // Schema Explorer (Config tab)
     schemaExplorerId: null,
     schemaExplorerData: [],
@@ -1708,7 +1759,7 @@ function app() {
       }
     },
 
-    handleBOFileUpload(event, side) {
+    handleBOFileUpload(event, side, namespace) {
       const file = event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
@@ -1718,7 +1769,12 @@ function app() {
         for (let i = 0; i < bytes.length; i += 8192) {
           binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
         }
-        const src = side === 'a' ? this.boSourceA : this.boSourceB;
+        let src;
+        if (namespace === 'colStats') {
+          src = side === 'a' ? this.colStatsSourceA : this.colStatsSourceB;
+        } else {
+          src = side === 'a' ? this.boSourceA : this.boSourceB;
+        }
         src.fileB64 = btoa(binary);
         src.fileName = file.name;
       };
@@ -1822,6 +1878,32 @@ function app() {
       return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
     },
 
+    _parseColumnTolerances(raw) {
+      const out = {};
+      (raw || '').split(',').forEach(part => {
+        const [col, val] = part.trim().split(':');
+        if (col && val && !isNaN(parseFloat(val))) out[col.trim()] = parseFloat(val.trim());
+      });
+      return out;
+    },
+
+    _buildAdvanced(prefix) {
+      const p = prefix;
+      const adv = {
+        float_tolerance: parseFloat(this[`${p}FloatTolerance`]) || 1e-9,
+        column_tolerances: this._parseColumnTolerances(this[`${p}ColumnTolerances`]),
+        datetime_tolerance_seconds: parseFloat(this[`${p}DatetimeTolerance`]) || 0,
+        case_insensitive_columns: (this[`${p}CaseInsensitiveColumns`] || '').split(',').map(s => s.trim()).filter(Boolean),
+        whitespace_normalize_columns: (this[`${p}WhitespaceNormalizeColumns`] || '').split(',').map(s => s.trim()).filter(Boolean),
+        comparison_backend: this[`${p}Backend`] || 'pandas',
+        parallel_columns: Boolean(this[`${p}ParallelColumns`]),
+        parallel_workers: 4,
+      };
+      const sf = parseFloat(this[`${p}SampleFrac`]);
+      if (sf > 0 && sf <= 1) adv.sample_frac = sf;
+      return adv;
+    },
+
     async runBOComparison() {
       this.boCompareLoading = true;
       this.boCompareResult = null;
@@ -1834,6 +1916,7 @@ function app() {
           exclude_columns: this.boExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
           label_a: this.boSourceA.label || 'Source A',
           label_b: this.boSourceB.label || 'Source B',
+          advanced: this._buildAdvanced('bo'),
         };
         const run = await api('POST', '/api/compare/bo-report', payload);
         this.boCompareRunId = run.run_id;
@@ -1951,6 +2034,7 @@ function app() {
         };
         applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A, this.fileNameA);
         applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B, this.fileNameB);
+        payload.advanced = this._buildAdvanced('file');
         const run = await api('POST', '/api/compare/recon-file', payload);
         const poll = setInterval(async () => {
           try {
@@ -2004,6 +2088,7 @@ function app() {
           connection_b: this.sqlConnectionB || null,
           key_columns: this.sqlKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
           exclude_columns: this.sqlExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
+          advanced: this._buildAdvanced('sql'),
         };
         const run = await api('POST', '/api/compare/sql', payload);
         const poll = setInterval(async () => {
@@ -2106,6 +2191,52 @@ function app() {
         };
       } catch (e) {
         this.fileExpandedDiffs = { ...this.fileExpandedDiffs, [name]: { ...cur, loadingMore: false, error: e.message || 'Failed to load more' } };
+      }
+    },
+
+    async runColumnStats() {
+      this.colStatsLoading = true;
+      this.colStatsResult = null;
+      try {
+        const payload = {
+          source_a: this._buildBOSource(this.colStatsSourceAType, this.colStatsSourceA),
+          source_b: this._buildBOSource(this.colStatsSourceBType, this.colStatsSourceB),
+          label_a: this.colStatsSourceA.label || 'Source A',
+          label_b: this.colStatsSourceB.label || 'Source B',
+          query_name: this.colStatsQueryName || 'stats_compare',
+          float_tolerance: parseFloat(this.colStatsFloatTol) || 1e-9,
+          row_count_tolerance: parseInt(this.colStatsRowCountTol) || 0,
+        };
+        if (this.colStatsSourceA.docId) payload.doc_id = this.colStatsSourceA.docId;
+        if (this.colStatsSourceA.reportId) payload.report_id = this.colStatsSourceA.reportId;
+        this.colStatsResult = await api('POST', '/api/compare/column-stats', payload);
+      } catch (e) {
+        this.toast('error', 'Column stats failed', e.message);
+      } finally {
+        this.colStatsLoading = false;
+      }
+    },
+
+    async runMismatchDiff() {
+      if (!this.mismatchDiffRunIdA || !this.mismatchDiffRunIdB) {
+        this.toast('warn', 'Run IDs required', 'Enter both Run A and Run B IDs');
+        return;
+      }
+      this.mismatchDiffLoading = true;
+      this.mismatchDiffResult = null;
+      try {
+        const payload = {
+          run_id_a: this.mismatchDiffRunIdA.trim(),
+          run_id_b: this.mismatchDiffRunIdB.trim(),
+          run_a_label: this.mismatchDiffRunLabelA || 'Run A',
+          run_b_label: this.mismatchDiffRunLabelB || 'Run B',
+        };
+        if (this.mismatchDiffQueryName.trim()) payload.query_name = this.mismatchDiffQueryName.trim();
+        this.mismatchDiffResult = await api('POST', '/api/compare/mismatch-diff', payload);
+      } catch (e) {
+        this.toast('error', 'Mismatch diff failed', e.message);
+      } finally {
+        this.mismatchDiffLoading = false;
       }
     },
 

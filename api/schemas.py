@@ -282,6 +282,8 @@ class MismatchOut(BaseModel):
     source_value: str | None = None
     target_value: str | None = None
     mismatch_type: str | None = None
+    delta: float | None = None
+    relative_delta: float | None = None
     accepted: bool = False
     accepted_note: str | None = None
     accepted_at: datetime | None = None
@@ -481,6 +483,19 @@ class SourceConfig(BaseModel):
         return self
 
 
+class AdvancedCompareOptions(BaseModel):
+    """Shared advanced options for all tabular comparison endpoints."""
+    float_tolerance: float = Field(default=1e-9, gt=0)
+    column_tolerances: dict[str, float] = Field(default_factory=dict)
+    datetime_tolerance_seconds: float = Field(default=0.0, ge=0)
+    case_insensitive_columns: list[str] = Field(default_factory=list)
+    whitespace_normalize_columns: list[str] = Field(default_factory=list)
+    comparison_backend: Literal["pandas", "polars", "duckdb"] = "pandas"
+    sample_frac: float | None = Field(default=None, ge=0.01, le=1.0)
+    parallel_columns: bool = False
+    parallel_workers: int = Field(default=4, ge=1, le=32)
+
+
 class BOCompareRequest(BaseModel):
     source_a: SourceConfig
     source_b: SourceConfig
@@ -490,6 +505,7 @@ class BOCompareRequest(BaseModel):
     exclude_columns: list[str] = Field(default_factory=list)
     label_a: str = "Source A"
     label_b: str = "Source B"
+    advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
 
 class DualEnvLaunchRequest(BaseModel):
@@ -528,6 +544,7 @@ class ReconFileCompareRequest(BaseModel):
     file_b_name: str | None = None
     key_columns: list[str] | None = None
     exclude_columns: list[str] = Field(default_factory=list)
+    advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
     @model_validator(mode="after")
     def validate_sources(self) -> "ReconFileCompareRequest":
@@ -552,6 +569,7 @@ class SQLCompareRequest(BaseModel):
     key_columns: list[str] = Field(default_factory=list)
     exclude_columns: list[str] = Field(default_factory=list)
     chunk_size: int = Field(default=10_000, ge=0)
+    advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
 
 class MismatchAcceptRequest(BaseModel):
@@ -566,3 +584,72 @@ class MismatchAcceptOut(BaseModel):
     accepted_at: datetime | None = None
     accepted_by: str | None = None
     result_status_updated: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Column Stats schemas
+# ---------------------------------------------------------------------------
+
+class ColumnStatsRequest(BaseModel):
+    source_a: SourceConfig
+    source_b: SourceConfig
+    doc_id: str | None = None
+    report_id: str | None = None
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+    query_name: str = "stats_compare"
+    float_tolerance: float = Field(default=1e-9, gt=0)
+    row_count_tolerance: int = Field(default=0, ge=0)
+
+
+class ColumnStatsDiffOut(BaseModel):
+    column: str
+    metric: str
+    source_value: Any
+    target_value: Any
+    delta: float | None = None
+
+
+class ColumnStatsOut(BaseModel):
+    query_name: str
+    source_env: str
+    target_env: str
+    executed_at: datetime
+    diffs: list[ColumnStatsDiffOut]
+    has_diffs: bool
+    diff_by_column: dict[str, list[ColumnStatsDiffOut]]
+
+
+# ---------------------------------------------------------------------------
+# Mismatch Diff schemas
+# ---------------------------------------------------------------------------
+
+class MismatchRecordOut(BaseModel):
+    """A MismatchRecord not yet persisted to DB (no id field)."""
+    column_name: str | None = None
+    key_values: dict | None = None
+    source_value: str | None = None
+    target_value: str | None = None
+    mismatch_type: str | None = None
+    delta: float | None = None
+    relative_delta: float | None = None
+
+
+class MismatchDiffRequest(BaseModel):
+    run_id_a: str
+    run_id_b: str
+    query_name: str | None = None
+    run_a_label: str = "Run A"
+    run_b_label: str = "Run B"
+
+
+class MismatchDiffOut(BaseModel):
+    query_name: str
+    run_a_label: str
+    run_b_label: str
+    compared_at: datetime
+    new: list[MismatchRecordOut]
+    resolved: list[MismatchRecordOut]
+    persistent: list[MismatchRecordOut]
+    summary: dict[str, int]
+    has_regressions: bool

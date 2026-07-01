@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 
 from api.schemas import (
     BOCompareRequest,
+    ColumnStatsOut,
+    ColumnStatsRequest,
     DualEnvLaunchOut,
     DualEnvLaunchRequest,
+    MismatchDiffOut,
+    MismatchDiffRequest,
     PairSummaryOut,
     ReconFileCompareRequest,
     RunStatusOut,
@@ -344,6 +348,26 @@ def compare_recon_file(
     background_tasks.add_task(_run_recon_file_bg, body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
+
+
+@router.post("/column-stats", response_model=ColumnStatsOut)
+def compare_column_stats(
+    body: ColumnStatsRequest,
+    db: Session = Depends(get_db),
+) -> ColumnStatsOut:
+    from api.services.compare_service import CompareService
+    svc = CompareService(db, ConfigRepository(db))
+    return svc.run_column_stats(body)
+
+
+@router.post("/mismatch-diff", response_model=MismatchDiffOut)
+def compare_mismatch_diff(
+    body: MismatchDiffRequest,
+    db: Session = Depends(get_db),
+) -> MismatchDiffOut:
+    from api.services.compare_service import CompareService
+    svc = CompareService(db, ConfigRepository(db))
+    return svc.run_mismatch_diff(body)
 
 
 @router.get("/pairs", response_model=list[PairSummaryOut])

@@ -224,6 +224,34 @@ def test_automic_client_search_jobs_empty_response():
     assert result == []
 
 
+def test_automic_client_timeout_raises_contextual_error():
+    import requests
+    from etl_framework.automic.client import AutomicClient
+    from etl_framework.config.models import EnvironmentConfig
+    from etl_framework.exceptions import AutomicTimeoutError
+
+    env = EnvironmentConfig(
+        name="test",
+        db_host="host",
+        db_password="pass",
+        automic_url="http://automic.test",
+        automic_user="u",
+        automic_password="p",
+        automic_timeout=1,
+        automic_max_retries=1,
+    )
+    client = AutomicClient(env)
+    client._session.request = MagicMock(side_effect=requests.Timeout("boom"))
+
+    with pytest.raises(AutomicTimeoutError) as exc_info:
+        client.search_jobs("ETL_*")
+
+    exc = exc_info.value
+    assert exc.url == "http://automic.test/api/v1/jobs?filter=ETL_*&limit=100"
+    assert exc.attempts == 1
+    assert exc.timeout_seconds == 1
+
+
 # ---------------------------------------------------------------------------
 # Router is registered in main.py
 # ---------------------------------------------------------------------------

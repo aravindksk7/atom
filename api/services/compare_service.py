@@ -8,7 +8,12 @@ import pandas as pd
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from api.schemas import BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest
+from api.schemas import (
+    BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest,
+    ColumnStatsRequest, ColumnStatsOut, ColumnStatsDiffOut,
+    MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
+    AdvancedCompareOptions,
+)
 from api.services.file_source import read_tabular
 from etl_framework.reconciliation.chunker import build_chunk_query
 from etl_framework.reconciliation.engine import ReconciliationEngine
@@ -71,6 +76,63 @@ class _FrameEngine:
         return self._df
 
 
+def _build_engine(
+    engine_a,
+    engine_b,
+    key_columns: list[str],
+    exclude_columns: list[str],
+    mismatch_row_limit: int,
+    adv: "AdvancedCompareOptions | None" = None,
+) -> "ReconciliationEngine":
+    """Construct a ReconciliationEngine, optionally with advanced options."""
+    from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, DuckDBBackend, SamplingBackend
+
+    if adv is None:
+        return ReconciliationEngine(
+            engine_a, engine_b,
+            key_columns=key_columns,
+            exclude_columns=exclude_columns,
+            mismatch_row_limit=mismatch_row_limit,
+        )
+
+    backend_name = adv.comparison_backend or "pandas"
+    common_kwargs = dict(
+        key_columns=key_columns,
+        float_tolerance=adv.float_tolerance,
+        column_tolerances=adv.column_tolerances or None,
+        datetime_tolerance_seconds=adv.datetime_tolerance_seconds,
+    )
+
+    if backend_name == "duckdb":
+        backend = DuckDBBackend(**common_kwargs)
+    elif backend_name == "polars":
+        backend = PolarsBackend(**common_kwargs)
+    else:
+        backend = PandasBackend(
+            **common_kwargs,
+            case_insensitive_columns=adv.case_insensitive_columns or None,
+            whitespace_normalize_columns=adv.whitespace_normalize_columns or None,
+        )
+
+    if adv.sample_frac is not None:
+        backend = SamplingBackend(backend, sample_frac=adv.sample_frac)
+
+    return ReconciliationEngine(
+        engine_a, engine_b,
+        key_columns=key_columns,
+        exclude_columns=exclude_columns,
+        mismatch_row_limit=mismatch_row_limit,
+        float_tolerance=adv.float_tolerance,
+        column_tolerances=adv.column_tolerances or None,
+        datetime_tolerance_seconds=adv.datetime_tolerance_seconds,
+        case_insensitive_columns=adv.case_insensitive_columns or None,
+        whitespace_normalize_columns=adv.whitespace_normalize_columns or None,
+        parallel_columns=adv.parallel_columns,
+        parallel_workers=adv.parallel_workers,
+        backend=backend,
+    )
+
+
 class CompareService:
     def __init__(self, db: Session, config_repo: ConfigRepository) -> None:
         self._db = db
@@ -101,11 +163,12 @@ class CompareService:
 
             engine_a = _FrameEngine(df_a, req.label_a)
             engine_b = _FrameEngine(df_b, req.label_b)
-            reconciler = ReconciliationEngine(
+            reconciler = _build_engine(
                 engine_a, engine_b,
                 key_columns=key_columns,
                 exclude_columns=req.exclude_columns or [],
                 mismatch_row_limit=5000,
+                adv=getattr(req, "advanced", None),
             )
             result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
 
@@ -211,11 +274,12 @@ class CompareService:
         self._validate_key_columns(df_a, df_b, key_columns)
         engine_a = _FrameEngine(df_a, req.label_a)
         engine_b = _FrameEngine(df_b, req.label_b)
-        reconciler = ReconciliationEngine(
+        reconciler = _build_engine(
             engine_a, engine_b,
             key_columns=key_columns,
             exclude_columns=req.exclude_columns or [],
             mismatch_row_limit=5000,
+            adv=getattr(req, "advanced", None),
         )
         result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")
         tr = self._repo.add_test_result(run_id, result)
@@ -268,6 +332,7 @@ class CompareService:
                 label_b=req.label_b,
                 key_columns=req.key_columns or None,
                 exclude_columns=req.exclude_columns,
+                advanced=req.advanced,
             )
             self._run_tabular_file_compare(recon_req, run_id, df_a, df_b)
         except Exception:
@@ -447,3 +512,114 @@ class CompareService:
                 detail="Cannot parse reconciliation report — not a framework-generated report",
             )
         return results
+
+    # ------------------------------------------------------------------
+    # Column Stats comparison
+    # ------------------------------------------------------------------
+
+    def run_column_stats(self, req: "ColumnStatsRequest") -> "ColumnStatsOut":
+        """Compute aggregate column stats for two sources and return drift diffs."""
+        from etl_framework.reconciliation.column_stats import ColumnStatsComparer
+        from datetime import timezone
+
+        df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id)
+        df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id)
+
+        comparer = ColumnStatsComparer(
+            float_tolerance=req.float_tolerance,
+            row_count_tolerance=req.row_count_tolerance,
+        )
+        result = comparer.compare(
+            df_a, df_b,
+            query_name=req.query_name,
+            source_env=req.label_a,
+            target_env=req.label_b,
+        )
+
+        diffs_out = [
+            ColumnStatsDiffOut(
+                column=d.column,
+                metric=d.metric,
+                source_value=d.source_value,
+                target_value=d.target_value,
+                delta=d.delta,
+            )
+            for d in result.diffs
+        ]
+        diff_by_col: dict[str, list] = {}
+        for d in diffs_out:
+            diff_by_col.setdefault(d.column, []).append(d)
+
+        return ColumnStatsOut(
+            query_name=result.query_name,
+            source_env=result.source_env,
+            target_env=result.target_env,
+            executed_at=result.executed_at,
+            diffs=diffs_out,
+            has_diffs=result.has_diffs,
+            diff_by_column=diff_by_col,
+        )
+
+    # ------------------------------------------------------------------
+    # Mismatch Diff (cross-run)
+    # ------------------------------------------------------------------
+
+    def run_mismatch_diff(self, req: "MismatchDiffRequest") -> "MismatchDiffOut":
+        """Diff the mismatch sets from two stored runs."""
+        from etl_framework.reconciliation.mismatch_diff import diff_mismatches
+        from etl_framework.reconciliation.models import MismatchRecord
+
+        run_a = self._repo.get_run(req.run_id_a)
+        if run_a is None:
+            raise HTTPException(status_code=404, detail="Run A not found")
+        run_b = self._repo.get_run(req.run_id_b)
+        if run_b is None:
+            raise HTTPException(status_code=404, detail="Run B not found")
+
+        def _load_mismatches(run, query_name_filter: str | None) -> list[MismatchRecord]:
+            records: list[MismatchRecord] = []
+            for tr in run.results:
+                if query_name_filter and tr.query_name != query_name_filter:
+                    continue
+                for mm in (tr.mismatches or []):
+                    records.append(MismatchRecord(
+                        key_values=mm.key_values or {},
+                        column_name=mm.column_name or "",
+                        source_value=str(mm.source_value) if mm.source_value is not None else None,
+                        target_value=str(mm.target_value) if mm.target_value is not None else None,
+                        mismatch_type=mm.mismatch_type or "value_diff",
+                    ))
+            return records
+
+        mismatches_a = _load_mismatches(run_a, req.query_name)
+        mismatches_b = _load_mismatches(run_b, req.query_name)
+
+        diff = diff_mismatches(
+            mismatches_a, mismatches_b,
+            query_name=req.query_name or "",
+            run_a_label=req.run_a_label,
+            run_b_label=req.run_b_label,
+        )
+
+        def _to_out(m: MismatchRecord) -> "MismatchRecordOut":
+            return MismatchRecordOut(
+                column_name=m.column_name,
+                key_values=m.key_values,
+                source_value=str(m.source_value) if m.source_value is not None else None,
+                target_value=str(m.target_value) if m.target_value is not None else None,
+                mismatch_type=m.mismatch_type,
+                delta=m.delta,
+                relative_delta=m.relative_delta,
+            )
+
+        return MismatchDiffOut(
+            query_name=diff.query_name,
+            run_a_label=diff.run_a_label,
+            run_b_label=diff.run_b_label,
+            compared_at=diff.compared_at,
+            new=[_to_out(m) for m in diff.new],
+            resolved=[_to_out(m) for m in diff.resolved],
+            persistent=[_to_out(m) for m in diff.persistent],
+            summary=diff.summary,
+            has_regressions=diff.has_regressions,
+        )

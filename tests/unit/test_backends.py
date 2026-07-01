@@ -74,6 +74,39 @@ def test_polars_backend_raises_when_polars_missing(monkeypatch):
         backend.compare(src, src)
 
 
+def test_pandas_backend_per_column_tolerance_passes_within_tolerance():
+    backend = PandasBackend(key_columns=["id"], float_tolerance=1e-9,
+                            column_tolerances={"price": 0.01})
+    src = pd.DataFrame({"id": [1], "price": [100.0]})
+    tgt = pd.DataFrame({"id": [1], "price": [100.005]})
+    assert backend.compare(src, tgt) == []
+
+
+def test_pandas_backend_per_column_tolerance_fails_outside_tolerance():
+    backend = PandasBackend(key_columns=["id"], float_tolerance=1e-9,
+                            column_tolerances={"price": 0.001})
+    src = pd.DataFrame({"id": [1], "price": [100.0]})
+    tgt = pd.DataFrame({"id": [1], "price": [100.005]})
+    mismatches = backend.compare(src, tgt)
+    assert len(mismatches) == 1
+    assert mismatches[0].column_name == "price"
+
+
+def test_pandas_backend_datetime_tolerance_passes_within_window():
+    backend = PandasBackend(key_columns=["id"], datetime_tolerance_seconds=2.0)
+    src = pd.DataFrame({"id": [1], "ts": [pd.Timestamp("2024-01-01 12:00:00")]})
+    tgt = pd.DataFrame({"id": [1], "ts": [pd.Timestamp("2024-01-01 12:00:01")]})
+    assert backend.compare(src, tgt) == []
+
+
+def test_pandas_backend_datetime_tolerance_fails_outside_window():
+    backend = PandasBackend(key_columns=["id"], datetime_tolerance_seconds=0.5)
+    src = pd.DataFrame({"id": [1], "ts": [pd.Timestamp("2024-01-01 12:00:00")]})
+    tgt = pd.DataFrame({"id": [1], "ts": [pd.Timestamp("2024-01-01 12:00:02")]})
+    mismatches = backend.compare(src, tgt)
+    assert len(mismatches) == 1
+
+
 def test_engine_accepts_backend_parameter():
     from unittest.mock import MagicMock
     import pandas as pd

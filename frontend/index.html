@@ -1628,12 +1628,13 @@
                               <th>Column</th>
                               <th>Source Value</th>
                               <th>Target Value</th>
+                              <th>Delta</th>
                               <th>Decision</th>
                             </tr>
                           </thead>
                           <tbody>
                             <template x-if="expandedMismatches[r.id].length === 0">
-                              <tr><td colspan="6" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
+                              <tr><td colspan="7" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
                             </template>
                             <template x-for="m in expandedMismatches[r.id]" :key="m.id">
                               <tr :class="(m.accepted ? 'diff-accepted ' : '') + (m.mismatch_type === 'missing_in_target' ? 'diff-missing-target' : m.mismatch_type === 'missing_in_source' ? 'diff-missing-source' : 'diff-value')">
@@ -1642,6 +1643,7 @@
                                 <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
                                 <td class="diff-src" x-text="m.source_value ?? '∅'"></td>
                                 <td class="diff-tgt" x-text="m.target_value ?? '∅'"></td>
+                                <td class="text-xs font-mono" x-text="m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) : '—'"></td>
                                 <td>
                                   <template x-if="m.accepted">
                                     <span class="accepted-badge">Accepted</span>
@@ -2654,6 +2656,8 @@
     <button @click="compareSubTab = 'bo'" :class="compareSubTab === 'bo' ? 'sub-tab active' : 'sub-tab'">BO Report</button>
     <button @click="compareSubTab = 'recon'" :class="compareSubTab === 'recon' ? 'sub-tab active' : 'sub-tab'">Reconciliation</button>
     <button @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
+    <button @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
+    <button @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
   </div>
 
   <!-- Task 13: Compare Template Bar -->
@@ -2762,6 +2766,52 @@
         <div>
           <label class="field-label">Exclude columns</label>
           <input x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" />
+        </div>
+      </div>
+      <!-- Advanced Options accordion -->
+      <div class="mb-3 border rounded">
+        <button @click="boAdvancedOpen = !boAdvancedOpen"
+                class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          <span>Advanced Options</span>
+          <span x-text="boAdvancedOpen ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="boAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+          <div>
+            <label class="field-label">Backend</label>
+            <select x-model="boBackend" class="field-input">
+              <option value="pandas">pandas</option>
+              <option value="polars">polars</option>
+              <option value="duckdb">duckdb</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Float Tolerance</label>
+            <input x-model="boFloatTolerance" class="field-input" placeholder="1e-9" />
+          </div>
+          <div>
+            <label class="field-label">Datetime Tolerance (s)</label>
+            <input x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+          </div>
+          <div>
+            <label class="field-label">Sample Fraction (0–1)</label>
+            <input x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
+          </div>
+          <div class="col-span-2">
+            <label class="field-label">Per-column tolerances (col:val, …)</label>
+            <input x-model="boColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+          </div>
+          <div>
+            <label class="field-label">Case-insensitive columns</label>
+            <input x-model="boCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+          </div>
+          <div>
+            <label class="field-label">Whitespace-normalize columns</label>
+            <input x-model="boWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+          </div>
+          <div class="col-span-2 flex items-center gap-2 mt-1">
+            <input type="checkbox" x-model="boParallelColumns" id="boParallelCols" class="rounded" />
+            <label for="boParallelCols">Parallel column comparison</label>
+          </div>
         </div>
       </div>
       <!-- Task 14: Save as Baseline + Swap Sides -->
@@ -3042,6 +3092,52 @@
             <input x-model="fileCompareExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" />
           </div>
         </div>
+        <!-- Advanced Options accordion -->
+        <div class="border rounded">
+          <button @click="fileAdvancedOpen = !fileAdvancedOpen"
+                  class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <span>Advanced Options</span>
+            <span x-text="fileAdvancedOpen ? '▲' : '▼'"></span>
+          </button>
+          <div x-show="fileAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+            <div>
+              <label class="field-label">Backend</label>
+              <select x-model="fileBackend" class="field-input">
+                <option value="pandas">pandas</option>
+                <option value="polars">polars</option>
+                <option value="duckdb">duckdb</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Float Tolerance</label>
+              <input x-model="fileFloatTolerance" class="field-input" placeholder="1e-9" />
+            </div>
+            <div>
+              <label class="field-label">Datetime Tolerance (s)</label>
+              <input x-model="fileDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+            </div>
+            <div>
+              <label class="field-label">Sample Fraction (0–1)</label>
+              <input x-model="fileSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
+            </div>
+            <div class="col-span-2">
+              <label class="field-label">Per-column tolerances (col:val, …)</label>
+              <input x-model="fileColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+            </div>
+            <div>
+              <label class="field-label">Case-insensitive columns</label>
+              <input x-model="fileCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+            </div>
+            <div>
+              <label class="field-label">Whitespace-normalize columns</label>
+              <input x-model="fileWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+            </div>
+            <div class="col-span-2 flex items-center gap-2 mt-1">
+              <input type="checkbox" x-model="fileParallelColumns" id="fileParallelCols" class="rounded" />
+              <label for="fileParallelCols">Parallel column comparison</label>
+            </div>
+          </div>
+        </div>
         <button @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
           <span x-show="!fileCompareLoading">Compare Files</span>
           <span x-show="fileCompareLoading">Comparing...</span>
@@ -3134,6 +3230,7 @@
                                 <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Column</th>
                                 <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source</th>
                                 <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Target</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Delta</th>
                                 <th class="px-2 py-1 text-left text-slate-600">Type</th>
                               </tr>
                             </thead>
@@ -3157,6 +3254,9 @@
                                             @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
                                             class="diff-expand-btn">…more</button>
                                   </td>
+                                  <td class="px-2 py-1 font-mono text-xs border-r border-slate-100"
+                                      :class="m.delta != null && m.delta !== 0 ? 'text-amber-600 font-semibold' : 'text-slate-400'"
+                                      x-text="m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) : '—'"></td>
                                   <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
                                 </tr>
                               </template>
@@ -3251,6 +3351,52 @@
           <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" />
         </div>
       </div>
+      <!-- Advanced Options accordion -->
+      <div class="border rounded">
+        <button @click="sqlAdvancedOpen = !sqlAdvancedOpen"
+                class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          <span>Advanced Options</span>
+          <span x-text="sqlAdvancedOpen ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+          <div>
+            <label class="field-label">Backend</label>
+            <select x-model="sqlBackend" class="field-input">
+              <option value="pandas">pandas</option>
+              <option value="polars">polars</option>
+              <option value="duckdb">duckdb</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Float Tolerance</label>
+            <input x-model="sqlFloatTolerance" class="field-input" placeholder="1e-9" />
+          </div>
+          <div>
+            <label class="field-label">Datetime Tolerance (s)</label>
+            <input x-model="sqlDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+          </div>
+          <div>
+            <label class="field-label">Sample Fraction (0–1)</label>
+            <input x-model="sqlSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
+          </div>
+          <div class="col-span-2">
+            <label class="field-label">Per-column tolerances (col:val, …)</label>
+            <input x-model="sqlColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+          </div>
+          <div>
+            <label class="field-label">Case-insensitive columns</label>
+            <input x-model="sqlCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+          </div>
+          <div>
+            <label class="field-label">Whitespace-normalize columns</label>
+            <input x-model="sqlWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+          </div>
+          <div class="col-span-2 flex items-center gap-2 mt-1">
+            <input type="checkbox" x-model="sqlParallelColumns" id="sqlParallelCols" class="rounded" />
+            <label for="sqlParallelCols">Parallel column comparison</label>
+          </div>
+        </div>
+      </div>
       <button @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
         <span x-show="!sqlCompareLoading">Run SQL Compare</span>
         <span x-show="sqlCompareLoading">Comparing...</span>
@@ -3332,6 +3478,7 @@
                               <th class="px-2 py-1 text-left text-slate-600">Column</th>
                               <th class="px-2 py-1 text-left text-slate-600">Source</th>
                               <th class="px-2 py-1 text-left text-slate-600">Target</th>
+                              <th class="px-2 py-1 text-left text-slate-600">Delta</th>
                               <th class="px-2 py-1 text-left text-slate-600">Type</th>
                             </tr>
                           </thead>
@@ -3355,6 +3502,9 @@
                                           @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
                                           class="diff-expand-btn">…more</button>
                                 </td>
+                                <td class="px-2 py-1 font-mono text-xs border-r border-slate-100"
+                                    :class="m.delta != null && m.delta !== 0 ? 'text-amber-600 font-semibold' : 'text-slate-400'"
+                                    x-text="m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) : '—'"></td>
                                 <td class="px-2 py-1 text-slate-500" x-text="m.mismatch_type"></td>
                               </tr>
                             </template>
@@ -3374,6 +3524,214 @@
       </div>
     </template>
   </div>
+
+  <!-- Column Stats panel -->
+  <div x-show="compareSubTab === 'colstats'" class="space-y-4">
+    <div class="card">
+      <h3 class="text-sm font-semibold text-slate-700 mb-3">Column Statistics Comparison</h3>
+      <p class="text-xs text-slate-500 mb-4">Compute aggregate stats (row count, null count, min/max/mean/std) per column and detect drift between two data sources — no row-level diff required.</p>
+      <div class="compare-source-grid">
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Source A</div>
+          <input x-model="colStatsSourceA.label" class="field-input mb-2" placeholder="Source A label" />
+          <label class="field-label">Source type</label>
+          <select x-model="colStatsSourceAType" class="field-input field-select mb-2">
+            <option value="upload">Upload file</option>
+            <option value="live">Live BO</option>
+            <option value="path">File path</option>
+          </select>
+          <template x-if="colStatsSourceAType === 'upload'">
+            <div>
+              <input type="file" accept=".csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
+              <div x-show="colStatsSourceA.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceA.fileName ? colStatsSourceA.fileName + ' loaded' : 'File loaded'"></div>
+            </div>
+          </template>
+          <template x-if="colStatsSourceAType === 'path'">
+            <input x-model="colStatsSourceA.filePath" class="field-input" placeholder="/path/to/file.csv" />
+          </template>
+          <template x-if="colStatsSourceAType === 'live'">
+            <div class="space-y-2">
+              <select x-model="colStatsSourceA.configId" class="field-input field-select">
+                <option value="">Select config</option>
+                <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+              </select>
+              <input x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
+              <input x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
+            </div>
+          </template>
+        </div>
+        <div class="vs-divider">VS</div>
+        <div class="card compare-source-card">
+          <div class="compare-card-title">Source B</div>
+          <input x-model="colStatsSourceB.label" class="field-input mb-2" placeholder="Source B label" />
+          <label class="field-label">Source type</label>
+          <select x-model="colStatsSourceBType" class="field-input field-select mb-2">
+            <option value="upload">Upload file</option>
+            <option value="live">Live BO</option>
+            <option value="path">File path</option>
+          </select>
+          <template x-if="colStatsSourceBType === 'upload'">
+            <div>
+              <input type="file" accept=".csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
+              <div x-show="colStatsSourceB.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceB.fileName ? colStatsSourceB.fileName + ' loaded' : 'File loaded'"></div>
+            </div>
+          </template>
+          <template x-if="colStatsSourceBType === 'path'">
+            <input x-model="colStatsSourceB.filePath" class="field-input" placeholder="/path/to/file.csv" />
+          </template>
+          <template x-if="colStatsSourceBType === 'live'">
+            <div class="space-y-2">
+              <select x-model="colStatsSourceB.configId" class="field-input field-select">
+                <option value="">Select config</option>
+                <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+              </select>
+              <input x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
+              <input x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="grid-2 mt-3">
+        <div>
+          <label class="field-label">Query/Report name</label>
+          <input x-model="colStatsQueryName" class="field-input" placeholder="stats_compare" />
+        </div>
+        <div>
+          <label class="field-label">Float Tolerance</label>
+          <input x-model="colStatsFloatTol" class="field-input" placeholder="1e-9" />
+        </div>
+        <div>
+          <label class="field-label">Row Count Tolerance</label>
+          <input x-model="colStatsRowCountTol" type="number" min="0" class="field-input" placeholder="0" />
+        </div>
+      </div>
+      <button @click="runColumnStats()" :disabled="colStatsLoading" class="btn-primary mt-3">
+        <span x-show="!colStatsLoading">Compute Column Stats</span>
+        <span x-show="colStatsLoading">Computing...</span>
+      </button>
+    </div>
+
+    <template x-if="colStatsResult">
+      <div class="card">
+        <div class="flex items-center gap-2 mb-3">
+          <h3 class="text-sm font-semibold text-slate-700">Column Stats Result</h3>
+          <span class="ml-2 badge" :class="colStatsResult.has_diffs ? 'badge-failed' : 'badge-passed'"
+                x-text="colStatsResult.has_diffs ? colStatsResult.diffs.length + ' drift(s) detected' : 'No drift'"></span>
+        </div>
+        <template x-if="!colStatsResult.has_diffs">
+          <p class="text-xs text-emerald-600">All column statistics match within tolerance.</p>
+        </template>
+        <template x-if="colStatsResult.has_diffs">
+          <table class="data-table text-xs">
+            <thead><tr><th>Column</th><th>Metric</th><th x-text="colStatsResult.source_env || 'Source'"></th><th x-text="colStatsResult.target_env || 'Target'"></th><th>Delta</th></tr></thead>
+            <tbody>
+              <template x-for="d in colStatsResult.diffs" :key="d.column + '_' + d.metric">
+                <tr>
+                  <td class="font-mono" x-text="d.column"></td>
+                  <td x-text="d.metric"></td>
+                  <td x-text="d.source_value != null ? String(d.source_value) : 'N/A'"></td>
+                  <td x-text="d.target_value != null ? String(d.target_value) : 'N/A'"></td>
+                  <td x-text="d.delta != null ? d.delta.toFixed(4) : '—'" :class="d.delta != null && d.delta !== 0 ? 'text-red-600 font-semibold' : ''"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- Mismatch Diff panel -->
+  <div x-show="compareSubTab === 'mmdiff'" class="space-y-4">
+    <div class="card">
+      <h3 class="text-sm font-semibold text-slate-700 mb-3">Cross-Run Mismatch Diff</h3>
+      <p class="text-xs text-slate-500 mb-4">Compare the mismatch sets from two stored runs to identify regressions (new issues), resolved issues, and persistent mismatches.</p>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">Run A (baseline)</label>
+          <input x-model="mismatchDiffRunIdA" class="field-input font-mono text-xs" placeholder="run UUID" />
+          <input x-model="mismatchDiffRunLabelA" class="field-input mt-1 text-xs" placeholder="Label (e.g. Yesterday)" />
+        </div>
+        <div>
+          <label class="field-label">Run B (current)</label>
+          <input x-model="mismatchDiffRunIdB" class="field-input font-mono text-xs" placeholder="run UUID" />
+          <input x-model="mismatchDiffRunLabelB" class="field-input mt-1 text-xs" placeholder="Label (e.g. Today)" />
+        </div>
+        <div class="col-span-2 mt-2">
+          <label class="field-label">Filter by query name <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input x-model="mismatchDiffQueryName" class="field-input" placeholder="Leave blank to diff all queries" />
+        </div>
+      </div>
+      <button @click="runMismatchDiff()" :disabled="mismatchDiffLoading" class="btn-primary mt-3">
+        <span x-show="!mismatchDiffLoading">Run Mismatch Diff</span>
+        <span x-show="mismatchDiffLoading">Diffing...</span>
+      </button>
+    </div>
+
+    <template x-if="mismatchDiffResult">
+      <div class="card space-y-4">
+        <div class="flex items-center gap-3 mb-1">
+          <h3 class="text-sm font-semibold text-slate-700">Mismatch Diff Results</h3>
+          <span x-show="mismatchDiffResult.has_regressions" class="badge badge-failed">Regressions found</span>
+          <span x-show="!mismatchDiffResult.has_regressions" class="badge badge-passed">No regressions</span>
+        </div>
+        <div class="flex gap-3 text-xs">
+          <div class="px-3 py-2 bg-red-50 border border-red-200 rounded text-center">
+            <div class="font-semibold text-red-700 text-lg" x-text="mismatchDiffResult.summary.new"></div>
+            <div class="text-red-500">New (regressions)</div>
+          </div>
+          <div class="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-center">
+            <div class="font-semibold text-emerald-700 text-lg" x-text="mismatchDiffResult.summary.resolved"></div>
+            <div class="text-emerald-500">Resolved (fixes)</div>
+          </div>
+          <div class="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-center">
+            <div class="font-semibold text-amber-700 text-lg" x-text="mismatchDiffResult.summary.persistent"></div>
+            <div class="text-amber-500">Persistent</div>
+          </div>
+        </div>
+        <template x-if="mismatchDiffResult.new.length">
+          <div>
+            <div class="text-xs font-semibold text-red-600 mb-1">New Regressions</div>
+            <table class="data-table text-xs">
+              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th><th>Delta</th></tr></thead>
+              <tbody>
+                <template x-for="(m, idx) in mismatchDiffResult.new.slice(0, 50)" :key="idx">
+                  <tr>
+                    <td class="font-mono" x-text="m.column_name"></td>
+                    <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
+                    <td x-text="m.source_value ?? 'NULL'"></td>
+                    <td x-text="m.target_value ?? 'NULL'"></td>
+                    <td x-text="m.delta != null ? m.delta.toFixed(4) : '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <p x-show="mismatchDiffResult.new.length > 50" class="text-xs text-slate-400 mt-1" x-text="'Showing 50 of ' + mismatchDiffResult.new.length"></p>
+          </div>
+        </template>
+        <template x-if="mismatchDiffResult.resolved.length">
+          <div>
+            <div class="text-xs font-semibold text-emerald-600 mb-1">Resolved Mismatches</div>
+            <table class="data-table text-xs">
+              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th></tr></thead>
+              <tbody>
+                <template x-for="(m, idx) in mismatchDiffResult.resolved.slice(0, 50)" :key="idx">
+                  <tr>
+                    <td class="font-mono" x-text="m.column_name"></td>
+                    <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
+                    <td x-text="m.source_value ?? 'NULL'"></td>
+                    <td x-text="m.target_value ?? 'NULL'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <p x-show="mismatchDiffResult.resolved.length > 50" class="text-xs text-slate-400 mt-1" x-text="'Showing 50 of ' + mismatchDiffResult.resolved.length"></p>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
 </div>
 
 
@@ -3495,6 +3853,10 @@
               </div>
               <template x-if="m.key_values">
                 <div class="mt-1 text-xs text-muted font-mono" x-text="JSON.stringify(m.key_values)"></div>
+              </template>
+              <template x-if="m.delta != null">
+                <div class="mt-1 text-xs font-mono" :class="m.delta > 0 ? 'text-amber-600' : 'text-red-600'"
+                     x-text="'delta: ' + (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) + (m.relative_delta != null ? '  (' + (m.relative_delta * 100).toFixed(2) + '%)' : '')"></div>
               </template>
               <div class="mt-2">
                 <template x-if="m.accepted">

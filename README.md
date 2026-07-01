@@ -1447,6 +1447,7 @@ Compare two SQL queries run against two different saved configs and diff the res
 | `exclude_columns` | Columns to skip |
 | `label_a` / `label_b` | Display names |
 | `connection_a` / `connection_b` | Optional [named connection](#named-connections-multiple-db-connections-per-environment) on `config_id_a` / `config_id_b` to use instead of the config's top-level DB values |
+| `advanced` | Optional [Advanced compare options](#advanced-compare-options) block |
 
 If `config_id_a` or `config_id_b` has named connections, the UI shows a connection picker on the corresponding Source A / Source B card.
 
@@ -1466,6 +1467,224 @@ $body = @{
   connection_b    = "hr_db"
 } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/sql" -Body $body -ContentType "application/json" -Headers $h
+```
+
+---
+
+### Advanced Compare Options
+
+All three tabular compare modes (BO Report, Recon File, SQL Direct) accept an optional `advanced` block that controls the comparison engine in detail. In the UI these options appear in an **Advanced Options** accordion on each compare panel.
+
+| Option | Default | Description |
+|---|---|---|
+| `comparison_backend` | `"pandas"` | Which backend computes the row diff. `"pandas"` — vectorised Pandas merge (default, works everywhere). `"polars"` — Polars FULL OUTER JOIN; faster on large datasets (`pip install polars`). `"duckdb"` — in-process DuckDB SQL; fastest for very wide tables (`pip install duckdb`). |
+| `float_tolerance` | `1e-9` | Global floating-point tolerance. Two numeric values are considered equal when `abs(a - b) <= float_tolerance`. |
+| `column_tolerances` | `{}` | Per-column tolerance overrides. Supersedes `float_tolerance` for the named column. Example: `{"price": 0.01, "weight_kg": 0.001}`. |
+| `datetime_tolerance_seconds` | `0.0` | Maximum allowed difference (in seconds) between two datetime values before they are flagged as mismatched. Useful when comparing timestamps that may differ by sub-second rounding. |
+| `case_insensitive_columns` | `[]` | String columns where comparison is case-insensitive. Values are lowercased before diffing. Example: `["status", "country_code"]`. **Pandas backend only.** |
+| `whitespace_normalize_columns` | `[]` | String columns where leading/trailing whitespace is stripped and runs of internal whitespace are collapsed to a single space before comparison. **Pandas backend only.** |
+| `sample_frac` | `null` | When set (0.01–1.0) both source and target DataFrames are randomly sampled to this fraction before comparison. Useful for quick smoke-tests on very large datasets. |
+| `parallel_columns` | `false` | When `true`, value comparison is distributed across `parallel_workers` threads — one thread per column. Speeds up wide tables (100+ columns). |
+| `parallel_workers` | `4` | Thread-pool size used when `parallel_columns` is `true`. |
+
+**Mismatch delta fields**
+
+When the comparison produces numeric value mismatches, each mismatch record now carries:
+
+| Field | Description |
+|---|---|
+| `delta` | `target_value − source_value` (numeric columns only; `null` for non-numeric or structural mismatches) |
+| `relative_delta` | `delta / abs(source_value)` — relative difference as a fraction (e.g. `0.02` = 2%) |
+
+Both fields are visible in the **mismatch drawer**, the **History** mismatch detail table, and the SQL/File compare expanded diff tables.
+
+**API example with advanced options:**
+
+```powershell
+$body = @{
+  source_a = @{ source_type = "upload"; file_content_b64 = $fileB64a; file_name = "source.csv" }
+  source_b = @{ source_type = "upload"; file_content_b64 = $fileB64b; file_name = "target.csv" }
+  key_columns = @("order_id")
+  advanced = @{
+    comparison_backend          = "polars"
+    float_tolerance             = 1e-6
+    column_tolerances           = @{ price = 0.01; tax = 0.005 }
+    datetime_tolerance_seconds  = 1.0
+    case_insensitive_columns    = @("status", "region")
+    whitespace_normalize_columns = @("product_name")
+    sample_frac                 = 0.25
+    parallel_columns            = $true
+    parallel_workers            = 8
+  }
+} | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report" -Body $body -ContentType "application/json" -Headers $h
+```
+
+---
+
+### Column Stats Compare
+
+The **Column Stats** sub-tab computes aggregate statistics for each column (row count, null count, distinct count, min, max, mean, std dev, sum) in two data sources and reports which metrics have drifted beyond tolerance. This is useful for very large tables where a full row-level diff is too expensive but distribution-level drift still needs to be detected.
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **Column Stats**.
+2. Configure **Source A** and **Source B** (same upload / path / live options as BO Compare).
+3. Set **Float Tolerance** (default `1e-9`) and **Row Count Tolerance** (default `0`, meaning exact row counts are required).
+4. Optionally set a **Query/Report name** for labelling.
+5. Click **Compute Column Stats**.
+
+**Result:** A table of differing metrics grouped by column, with the source value, target value, and numeric delta for each.
+
+**API:**
+
+```powershell
+$body = @{
+  source_a = @{ source_type = "upload"; file_content_b64 = $fileB64a; file_name = "source.csv" }
+  source_b = @{ source_type = "upload"; file_content_b64 = $fileB64b; file_name = "target.csv" }
+  label_a              = "Source"
+  label_b              = "Target"
+  query_name           = "orders_stats"
+  float_tolerance      = 1e-6
+  row_count_tolerance  = 0
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/column-stats" -Body $body -ContentType "application/json" -Headers $h
+```
+
+**Response shape:**
+
+```json
+{
+  "query_name": "orders_stats",
+  "source_env": "Source",
+  "target_env": "Target",
+  "executed_at": "2026-07-02T06:00:00Z",
+  "has_diffs": true,
+  "diffs": [
+    { "column": "amount", "metric": "mean",  "source_value": 152.4, "target_value": 154.1, "delta": 1.7 },
+    { "column": "amount", "metric": "sum",   "source_value": 15240.0, "target_value": 15410.0, "delta": 170.0 },
+    { "column": "status", "metric": "distinct_count", "source_value": 3, "target_value": 4, "delta": null }
+  ],
+  "diff_by_column": { "amount": [...], "status": [...] }
+}
+```
+
+---
+
+### Cross-Run Mismatch Diff
+
+The **Mismatch Diff** sub-tab compares the mismatch sets of two previously stored runs and classifies each mismatch into one of three categories:
+
+| Category | Meaning |
+|---|---|
+| **New** (regressions) | Mismatches present in Run B but not Run A — something broke |
+| **Resolved** (fixes) | Mismatches present in Run A but not Run B — something was fixed |
+| **Persistent** | Mismatches present in both runs — still unresolved |
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **Mismatch Diff**.
+2. Enter **Run A** (baseline run ID — e.g. yesterday's run) and **Run B** (current run ID — e.g. today's).
+3. Optionally set labels and a query name filter.
+4. Click **Run Mismatch Diff**.
+
+**Result:** Three collapsible tables (New, Resolved, Persistent) with a summary counter row.
+
+**API:**
+
+```powershell
+$body = @{
+  run_id_a    = "uuid-of-baseline-run"
+  run_id_b    = "uuid-of-current-run"
+  run_a_label = "2026-07-01 run"
+  run_b_label = "2026-07-02 run"
+  query_name  = "orders_reconciliation"   # optional — filter to one test
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/mismatch-diff" -Body $body -ContentType "application/json" -Headers $h
+```
+
+**Response shape:**
+
+```json
+{
+  "query_name": "orders_reconciliation",
+  "run_a_label": "2026-07-01 run",
+  "run_b_label": "2026-07-02 run",
+  "compared_at": "2026-07-02T06:05:00Z",
+  "summary": { "new": 3, "resolved": 7, "persistent": 12 },
+  "has_regressions": true,
+  "new": [...],
+  "resolved": [...],
+  "persistent": [...]
+}
+```
+
+---
+
+### Comparison Backends
+
+The framework supports three interchangeable comparison backends. All backends implement the same `ComparisonBackend` protocol: `compare(df_source, df_target) -> list[MismatchRecord]`.
+
+| Backend | Class | When to use | Requirement |
+|---|---|---|---|
+| **Pandas** | `PandasBackend` | Default — works everywhere, full feature set (case-insensitive, whitespace-normalize, per-column tolerance, datetime tolerance) | Always available |
+| **Polars** | `PolarsBackend` | Large datasets with many rows; FULL OUTER JOIN via Polars | `pip install polars` |
+| **DuckDB** | `DuckDBBackend` | Very wide tables (100+ columns); SQL-level FULL OUTER JOIN via DuckDB's C++ engine | `pip install duckdb` |
+| **Sampling** | `SamplingBackend` | Wraps any backend and samples N% of rows before comparison (quick smoke-tests) | Always available |
+
+**Using backends programmatically:**
+
+```python
+from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, DuckDBBackend, SamplingBackend
+from etl_framework.reconciliation.engine import ReconciliationEngine
+
+# DuckDB backend with per-column tolerances
+backend = DuckDBBackend(
+    key_columns=["order_id"],
+    column_tolerances={"price": 0.01, "tax": 0.005},
+    datetime_tolerance_seconds=1.0,
+)
+
+# Wrap with sampling for quick checks
+sampled = SamplingBackend(backend, sample_frac=0.10, seed=42)
+
+engine = ReconciliationEngine(
+    source_engine, target_engine,
+    key_columns=["order_id"],
+    backend=sampled,
+    parallel_columns=True,
+    parallel_workers=8,
+)
+result = engine.reconcile("SELECT * FROM orders", "orders")
+print(result.mismatch_by_column)  # {'price': 12, 'status': 3}
+```
+
+**Column stats (aggregate drift detection):**
+
+```python
+from etl_framework.reconciliation.column_stats import ColumnStatsComparer
+
+comparer = ColumnStatsComparer(float_tolerance=1e-6, row_count_tolerance=0)
+result = comparer.compare(df_source, df_target, query_name="orders", source_env="dev", target_env="prod")
+if result.has_diffs:
+    for diff in result.diffs:
+        print(f"{diff.column}.{diff.metric}: {diff.source_value} vs {diff.target_value}  (Δ {diff.delta})")
+```
+
+**Cross-run mismatch diff:**
+
+```python
+from etl_framework.reconciliation.mismatch_diff import diff_mismatches
+
+result = diff_mismatches(
+    mismatches_a,  # list[MismatchRecord] from run A
+    mismatches_b,  # list[MismatchRecord] from run B
+    query_name="orders_reconciliation",
+    run_a_label="yesterday",
+    run_b_label="today",
+)
+print(result.summary)          # {'new': 3, 'resolved': 7, 'persistent': 12}
+print(result.has_regressions)  # True
 ```
 
 ## Data Contracts

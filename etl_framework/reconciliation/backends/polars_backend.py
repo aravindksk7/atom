@@ -1,5 +1,7 @@
 from __future__ import annotations
 import math
+from datetime import timedelta
+
 import pandas as pd
 
 try:
@@ -18,11 +20,15 @@ class PolarsBackend:
         float_tolerance: float = 1e-9,
         null_equals_null: bool = True,
         mismatch_row_limit: int = 1000,
+        column_tolerances: dict[str, float] | None = None,
+        datetime_tolerance_seconds: float = 0.0,
     ) -> None:
         self._key_columns = key_columns
         self._float_tolerance = float_tolerance
         self._null_equals_null = null_equals_null
         self._mismatch_row_limit = mismatch_row_limit
+        self._column_tolerances: dict[str, float] = column_tolerances or {}
+        self._datetime_tolerance = timedelta(seconds=datetime_tolerance_seconds)
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
         if not _POLARS_AVAILABLE:
@@ -62,7 +68,9 @@ class PolarsBackend:
                     a = row.get(col)
                     b = row.get(f"{col}_tgt")
                     is_float = isinstance(a, float) or isinstance(b, float)
-                    if not self._values_match(a, b, is_float):
+                    is_dt = hasattr(a, "isoformat") or hasattr(b, "isoformat")
+                    tol = self._column_tolerances.get(col, self._float_tolerance)
+                    if not self._values_match(a, b, is_float=is_float, is_dt=is_dt, tolerance=tol):
                         mismatches.append(MismatchRecord(
                             key_values=key_vals, column_name=col,
                             source_value=a, target_value=b,
@@ -73,13 +81,20 @@ class PolarsBackend:
 
         return mismatches
 
-    def _values_match(self, a, b, is_float: bool) -> bool:
+    def _values_match(self, a, b, is_float: bool, is_dt: bool = False, tolerance: float | None = None) -> bool:
         a_na = a is None or (isinstance(a, float) and math.isnan(a))
         b_na = b is None or (isinstance(b, float) and math.isnan(b))
         if a_na and b_na:
             return self._null_equals_null
         if a_na or b_na:
             return False
+        if is_dt and self._datetime_tolerance.total_seconds() > 0:
+            try:
+                import pandas as _pd
+                return abs((_pd.Timestamp(a) - _pd.Timestamp(b)).total_seconds()) <= self._datetime_tolerance.total_seconds()
+            except Exception:
+                return a == b
         if is_float:
-            return abs(float(a) - float(b)) <= self._float_tolerance
+            atol = tolerance if tolerance is not None else self._float_tolerance
+            return abs(float(a) - float(b)) <= atol
         return a == b
