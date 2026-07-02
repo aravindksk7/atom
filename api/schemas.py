@@ -405,6 +405,17 @@ class BOTestRequest(BaseModel):
     config_id: int
 
 
+class RestApiTestRequest(BaseModel):
+    config_id: int
+    endpoint_name: str
+
+
+class RestApiPreviewRequest(BaseModel):
+    config_id: int
+    endpoint_name: str
+    limit: int = 50
+
+
 class AutomicLookupRequest(BaseModel):
     config_id: int
     identifier: str
