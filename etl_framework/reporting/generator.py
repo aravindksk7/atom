@@ -5,6 +5,14 @@ from jinja2 import Environment, FileSystemLoader
 
 logger = logging.getLogger("etl_framework.reporting.generator")
 
+
+def to_local(value):
+    """Jinja filter: render an aware UTC datetime as local wall-clock time with a zone abbreviation."""
+    if value is None:
+        return ""
+    return value.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
+
 class ReportGenerator:
     TEMPLATE_NAME = "report.html.j2"
     DEFAULT_OUTPUT_DIR = "./reports"
@@ -21,6 +29,7 @@ class ReportGenerator:
         template_dir = Path(__file__).parent / "templates"
         loader = FileSystemLoader(template_dir)
         self._jinja_env = Environment(loader=loader, autoescape=True)
+        self._jinja_env.filters["to_local"] = to_local
 
     def generate(self, suite_result) -> str:
         """

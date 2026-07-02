@@ -345,7 +345,7 @@
                 {% if mm.accepted %}
                 <tr style="background: rgba(52,211,153,0.12);">
                   <td colspan="5" class="accepted-note">
-                    ✓ Accepted{% if mm.accepted_by %} by {{ mm.accepted_by }}{% endif %}{% if mm.accepted_at %} on {{ mm.accepted_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% if mm.accepted_note %} — {{ mm.accepted_note }}{% endif %}
+                    ✓ Accepted{% if mm.accepted_by %} by {{ mm.accepted_by }}{% endif %}{% if mm.accepted_at %} on {{ mm.accepted_at | to_local }}{% endif %}{% if mm.accepted_note %} — {{ mm.accepted_note }}{% endif %}
                   </td>
                 </tr>
                 {% endif %}

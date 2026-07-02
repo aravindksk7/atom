@@ -114,3 +114,14 @@ class TestReportTemplateSmoke:
         html = _render(_make_suite([mm]), tmp_path)
         assert "dev" in html
         assert "prod" in html
+
+
+def test_accepted_at_rendered_via_to_local_filter(tmp_path):
+    accepted_dt = datetime(2026, 7, 1, 18, 30, 0, tzinfo=timezone.utc)
+    mm = _make_mm("amount", "100.00", "100.01")
+    mm.accepted = True
+    mm.accepted_by = "alice"
+    mm.accepted_at = accepted_dt
+    html = _render(_make_suite([mm]), tmp_path)
+    expected = accepted_dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    assert expected in html
