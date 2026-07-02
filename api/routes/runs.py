@@ -575,6 +575,7 @@ def download_mismatches(
         from openpyxl.styles import PatternFill, Font, Alignment
 
         FILLS = {
+            "value_diff":        PatternFill("solid", fgColor="FEF3C7"),  # amber
             "value_mismatch":    PatternFill("solid", fgColor="FEF3C7"),  # amber
             "missing_in_target": PatternFill("solid", fgColor="FEE2E2"),  # rose
             "missing_in_source": PatternFill("solid", fgColor="EDE9FE"),  # violet
@@ -583,9 +584,28 @@ def download_mismatches(
         HEADER_FONT = Font(bold=True, color="F1F5F9")
 
         wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Mismatches"
+        ws.append(_FIELDS)
+        for cell in ws[1]:
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal="center")
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = "A1:F1"
+
+        for row_data in rows:
+            ws.append([row_data[field] for field in _FIELDS])
+            fill = FILLS.get(row_data["mismatch_type"])
+            if fill:
+                for cell in ws[ws.max_row]:
+                    cell.fill = fill
+
+        for col, width in [("A", 30), ("B", 28), ("C", 22), ("D", 30), ("E", 30), ("F", 22)]:
+            ws.column_dimensions[col].width = width
 
         # ── Summary sheet ────────────────────────────────────────────────
-        ws_sum = wb.active
+        ws_sum = wb.create_sheet("Summary")
         ws_sum.title = "Summary"
         ws_sum.append(["Run ID", run_id])
         ws_sum.append(["Status", run.status])
@@ -611,33 +631,6 @@ def download_mismatches(
             ])
         ws_sum.column_dimensions["A"].width = 36
         ws_sum.column_dimensions["B"].width = 16
-
-        # ── Mismatches sheet ─────────────────────────────────────────────
-        ws = wb.create_sheet("Mismatches")
-        ws.append(["Test Name", "Key Values", "Column", "Source Value", "Target Value", "Mismatch Type"])
-        for cell in ws[1]:
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-            cell.alignment = Alignment(horizontal="center")
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = "A1:F1"
-
-        for row_data in rows:
-            ws.append([
-                row_data["test_name"],
-                row_data["key_values"],
-                row_data["column_name"],
-                row_data["source_value"],
-                row_data["target_value"],
-                row_data["mismatch_type"],
-            ])
-            fill = FILLS.get(row_data["mismatch_type"])
-            if fill:
-                for cell in ws[ws.max_row]:
-                    cell.fill = fill
-
-        for col, width in [("A", 30), ("B", 28), ("C", 22), ("D", 30), ("E", 30), ("F", 22)]:
-            ws.column_dimensions[col].width = width
 
         buf = io.BytesIO()
         wb.save(buf)
