@@ -7,6 +7,17 @@ from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 
 logger = logging.getLogger("etl_framework.sap_bo.client")
 
+
+def _as_list(value) -> list:
+    """SAP BO's biprws collapses a single-element JSON collection into a bare
+    object instead of a one-element array. Normalize both shapes to a list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
@@ -76,7 +87,7 @@ class BORestClient:
             raise BOAPIError(report_id=report_id, http_status=response.status_code, response_body=response.text)
         
         data = response.json()
-        return pd.DataFrame(data.get("dataset", data.get("reports", [data])))
+        return pd.DataFrame(_as_list(data.get("dataset", data.get("reports", data))))
 
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""
@@ -96,7 +107,7 @@ class BORestClient:
                 response_body=response.text,
             )
         data = response.json()
-        raw = data.get("documents", data.get("entries", []))
+        raw = _as_list(data.get("documents", data.get("entries", [])))
         return [
             {
                 "id": str(d.get("id", "")),
@@ -132,7 +143,7 @@ class BORestClient:
                 "name": r.get("name", ""),
                 "reportIndex": r.get("reportIndex", 0),
             }
-            for r in data.get("reports", [])
+            for r in _as_list(data.get("reports", []))
         ]
 
     _MIME_MAP: dict[str, str] = {

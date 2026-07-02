@@ -40,4 +40,5 @@ docs/*
 !docs/superpowers
 test_*.py
 !tests/integration/test_sqlserver_live_reconciliation.py
+!tests/integration/test_sapbo_mock_container.py
 upgrade.md
