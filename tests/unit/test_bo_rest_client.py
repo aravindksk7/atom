@@ -30,6 +30,30 @@ def authenticated_client(env_config):
     return client
 
 
+def test_client_applies_proxy_and_ssl_verification_config(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    cfg = env_config.model_copy(
+        update={
+            "bo_proxy_url": "http://proxy.example.com:8080",
+            "bo_verify_ssl": False,
+        }
+    )
+    client = BORestClient(cfg)
+
+    assert client._session.proxies["https"] == "http://proxy.example.com:8080"
+    assert client._session.proxies["http"] == "http://proxy.example.com:8080"
+    assert client._verify_ssl is False
+
+
+def test_client_requires_url_scheme(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    cfg = env_config.model_copy(update={"bo_url": "bo.example.com"})
+    with pytest.raises(ValueError, match="must include http:// or https://"):
+        BORestClient(cfg)
+
+
 # ---------------------------------------------------------------------------
 # list_documents
 # ---------------------------------------------------------------------------

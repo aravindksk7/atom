@@ -1,6 +1,7 @@
 import logging
 import requests
 import pandas as pd
+from urllib.parse import urlparse
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 
@@ -12,11 +13,17 @@ class BORestClient:
 
     def __init__(self, env_config: EnvironmentConfig):
         self._base_url = env_config.bo_url.rstrip("/")
+        if self._base_url and not urlparse(self._base_url).scheme:
+            raise ValueError("SAP BO URL must include http:// or https://")
         self._user = env_config.bo_user
         self._password = env_config.bo_password
         self._timeout = env_config.bo_timeout
         self._token = None
         self._session = requests.Session()
+        self._verify_ssl = env_config.bo_verify_ssl
+        proxy_url = env_config.bo_proxy_url.strip()
+        if proxy_url:
+            self._session.proxies.update({"http": proxy_url, "https": proxy_url})
 
     def authenticate(self) -> None:
         url = f"{self._base_url}{self.LOGON_ENDPOINT}"
@@ -28,7 +35,13 @@ class BORestClient:
             "userName": self._user
         }
         logger.debug("Authenticating with SAP BO REST API")
-        response = self._session.post(url, json=payload, headers=headers, timeout=self._timeout)
+        response = self._session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
         
         if response.status_code >= 400:
             raise BOAPIError(
@@ -49,7 +62,12 @@ class BORestClient:
         full_url = f"{self._base_url}{url}"
         
         logger.debug(f"Fetching report data for: {report_id}")
-        response = self._session.get(full_url, headers={"Accept": "application/json"}, timeout=self._timeout)
+        response = self._session.get(
+            full_url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
         
         if response.status_code == 404:
             raise ReportNotFoundError(report_id=report_id, env_name=self._base_url)
@@ -64,7 +82,12 @@ class BORestClient:
         if not self._token:
             self.authenticate()
         url = f"{self._base_url}/biprws/raylight/v1/documents"
-        response = self._session.get(url, headers={"Accept": "application/json"}, timeout=self._timeout)
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
         if response.status_code >= 400:
             raise BOAPIError(
                 report_id=None,
@@ -87,7 +110,12 @@ class BORestClient:
         if not self._token:
             self.authenticate()
         url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports"
-        response = self._session.get(url, headers={"Accept": "application/json"}, timeout=self._timeout)
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
         if response.status_code == 404:
             raise ReportNotFoundError(report_id=doc_id, env_name=self._base_url)
         if response.status_code >= 400:
@@ -121,7 +149,12 @@ class BORestClient:
             f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
             f"/reports/{report_id}/content"
         )
-        response = self._session.get(url, headers={"Accept": accept}, timeout=self._timeout)
+        response = self._session.get(
+            url,
+            headers={"Accept": accept},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
         if response.status_code >= 400:
             raise BOAPIError(
                 report_id=report_id,
@@ -132,6 +165,10 @@ class BORestClient:
 
     def logout(self) -> None:
         if self._token:
-            self._session.post(f"{self._base_url}/biprws/logoff", timeout=self._timeout)
+            self._session.post(
+                f"{self._base_url}/biprws/logoff",
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
             self._session.headers.pop("X-SAP-LogonToken", None)
             self._token = None

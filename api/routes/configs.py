@@ -46,6 +46,34 @@ def _mask(data: dict) -> dict:
     return result
 
 
+def _preserve_masked_secrets(incoming: dict, existing: dict | None) -> dict:
+    """Keep stored secret values when the client submits the display mask."""
+    if not existing:
+        return incoming
+    result = dict(incoming)
+    for key in _SENSITIVE_KEYS:
+        if result.get(key) == _MASK:
+            result[key] = existing.get(key, "")
+
+    incoming_connections = result.get("connections")
+    existing_connections = existing.get("connections")
+    if isinstance(incoming_connections, dict) and isinstance(existing_connections, dict):
+        merged_connections = {}
+        for conn_name, entry in incoming_connections.items():
+            if not isinstance(entry, dict):
+                merged_connections[conn_name] = entry
+                continue
+            merged_entry = dict(entry)
+            existing_entry = existing_connections.get(conn_name, {})
+            if isinstance(existing_entry, dict):
+                for key in _SENSITIVE_KEYS:
+                    if merged_entry.get(key) == _MASK:
+                        merged_entry[key] = existing_entry.get(key, "")
+            merged_connections[conn_name] = merged_entry
+        result["connections"] = merged_connections
+    return result
+
+
 @router.get("", response_model=list[ConfigOut])
 def list_configs(db: Session = Depends(get_session)):
     repo = ConfigRepository(db)
@@ -198,7 +226,10 @@ def update_config(config_id: int, body: ConfigUpdate, request: Request, db: Sess
         }
     kwargs = {}
     if body.config_data is not None:
-        kwargs["config_data"] = body.config_data
+        kwargs["config_data"] = _preserve_masked_secrets(
+            body.config_data,
+            before.config_json if before is not None else None,
+        )
     if body.name is not None:
         kwargs["name"] = body.name
     if body.env_name is not None:

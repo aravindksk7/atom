@@ -57,6 +57,19 @@ def test_test_bo_connection_failure_returns_ok_false(service):
     assert "Auth failed" in result.message
 
 
+def test_test_bo_connection_network_error_mentions_backend_route(service):
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.authenticate.side_effect = RuntimeError(
+            "Max retries exceeded with url: /biprws (host='bo.example.com', port=443)"
+        )
+        result = service.test_bo_connection(config_id=1)
+
+    assert result.ok is False
+    assert "bo.example.com:443" in result.message
+    assert "application server" in result.message
+    assert "proxy" in result.message
+
+
 def test_test_bo_connection_404_config_raises(service, mock_config_repo):
     mock_config_repo.get.return_value = None
     from fastapi import HTTPException

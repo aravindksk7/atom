@@ -811,6 +811,7 @@ function app() {
         db_host: 'localhost', db_port: 1433, db_name: '', db_user: '', db_password: '',
         db_connect_timeout: 15,
         bo_url: '', bo_user: '', bo_password: '', bo_timeout: 60,
+        bo_proxy_url: '', bo_verify_ssl: true,
         automic_url: '', automic_user: '', automic_password: '',
         connections: [],
       };
@@ -827,6 +828,8 @@ function app() {
         db_connect_timeout: d.db_connect_timeout || 15,
         bo_url: d.bo_url || '', bo_user: d.bo_user || '', bo_password: d.bo_password || '',
         bo_timeout: d.bo_timeout || 60,
+        bo_proxy_url: d.bo_proxy_url || '',
+        bo_verify_ssl: d.bo_verify_ssl !== false,
         automic_url: d.automic_url || '', automic_user: d.automic_user || '',
         automic_password: d.automic_password || '',
         connections: Object.entries(d.connections || {}).map(([name, entry]) => ({
@@ -857,6 +860,8 @@ function app() {
         bo_url: m.bo_url || '', bo_user: m.bo_user || '',
         bo_password: m.bo_password || '',
         bo_timeout: Number(m.bo_timeout) || 60,
+        bo_proxy_url: m.bo_proxy_url || '',
+        bo_verify_ssl: m.bo_verify_ssl !== false,
         automic_url: m.automic_url || '', automic_user: m.automic_user || '',
         automic_password: m.automic_password || '',
         automic_timeout: 30, automic_max_retries: 3,
