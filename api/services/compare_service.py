@@ -228,11 +228,25 @@ class CompareService:
                 )
             finally:
                 client.logout()
+        if src.source_type == "api":
+            return self._load_api_source(src)
         return read_tabular(
             path=src.file_path,
             content_b64=src.file_content_b64,
             file_name=src.file_name,
         )
+
+    def _load_api_source(self, src) -> pd.DataFrame:
+        cfg = self._config_repo.get(src.config_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="Config not found")
+        from etl_framework.config.models import resolve_api_endpoint
+        from etl_framework.rest_api.client import APIEndpointClient
+        try:
+            entry = resolve_api_endpoint(cfg.config_json or {}, src.api_endpoint_name or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return APIEndpointClient(entry).fetch_dataframe()
 
     @staticmethod
     def _infer_key_columns(df_a, df_b) -> list[str]:
