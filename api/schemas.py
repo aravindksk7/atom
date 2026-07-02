@@ -464,7 +464,7 @@ class RunCompareOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SourceConfig(BaseModel):
-    source_type: Literal["live", "path", "upload"]
+    source_type: Literal["live", "path", "upload", "api"]
     config_id: int | None = None
     doc_id: str | None = None
     report_id: str | None = None
@@ -472,6 +472,7 @@ class SourceConfig(BaseModel):
     file_path: str | None = None
     file_content_b64: str | None = None
     file_name: str | None = None
+    api_endpoint_name: str | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":
@@ -481,6 +482,8 @@ class SourceConfig(BaseModel):
             raise ValueError("file_path required for path source")
         if self.source_type == "upload" and not self.file_content_b64:
             raise ValueError("file_content_b64 required for upload source")
+        if self.source_type == "api" and (self.config_id is None or not self.api_endpoint_name):
+            raise ValueError("config_id and api_endpoint_name required for api source")
         return self
 
 

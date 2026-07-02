@@ -751,3 +751,21 @@ def test_automic_bulk_import_response_defaults_errors_to_empty():
     from api.schemas import AutomicBulkImportResponse
     r = AutomicBulkImportResponse(imported=[])
     assert r.errors == {}
+
+
+# --- SourceConfig api source_type ---
+
+def test_source_config_api_requires_config_id_and_endpoint_name():
+    from pydantic import ValidationError
+    from api.schemas import SourceConfig
+    with pytest.raises(ValidationError):
+        SourceConfig(source_type="api", config_id=1)  # missing api_endpoint_name
+    with pytest.raises(ValidationError):
+        SourceConfig(source_type="api", api_endpoint_name="orders")  # missing config_id
+
+
+def test_source_config_api_accepts_config_id_and_endpoint_name():
+    from api.schemas import SourceConfig
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders")
+    assert src.source_type == "api"
+    assert src.api_endpoint_name == "orders"
