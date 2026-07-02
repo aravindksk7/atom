@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import io
-import logging
+from urllib.parse import urlparse
 
 import pandas as pd
 import requests
 
 from etl_framework.config.models import ApiEndpointEntry
 from etl_framework.exceptions import APIRequestError
-
-logger = logging.getLogger("etl_framework.rest_api.client")
 
 
 class APIEndpointClient:
@@ -45,7 +43,6 @@ class APIEndpointClient:
                 cursor_value = self._extract_cursor(response)
                 if not cursor_value:
                     break
-                from urllib.parse import urlparse
                 if urlparse(cursor_value).scheme:
                     url = cursor_value
                     query_params = {}
