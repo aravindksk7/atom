@@ -108,3 +108,44 @@ def test_fetch_dataframe_no_auth_sends_no_auth_tuple():
         client.fetch_dataframe()
     assert captured["auth"] is None
     assert "Authorization" not in captured["headers"]
+
+
+def test_fetch_dataframe_parses_csv():
+    entry = _entry(response_format="csv")
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(text="id,name\n1,a\n2,b\n")):
+        df = client.fetch_dataframe()
+    assert list(df.columns) == ["id", "name"]
+    assert len(df) == 2
+
+
+def test_fetch_dataframe_raises_when_root_path_missing():
+    entry = _entry(json_root_path="missing.path")
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(json_data={"data": []})):
+        with pytest.raises(APIRequestError, match="did not resolve to a list"):
+            client.fetch_dataframe()
+
+
+def test_fetch_dataframe_raises_when_root_path_resolves_to_non_list():
+    entry = _entry(json_root_path="data")
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(json_data={"data": {"not": "a list"}})):
+        with pytest.raises(APIRequestError, match="did not resolve to a list"):
+            client.fetch_dataframe()
+
+
+def test_fetch_dataframe_empty_json_list_returns_empty_dataframe():
+    entry = _entry(json_root_path="items")
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(json_data={"items": []})):
+        df = client.fetch_dataframe()
+    assert df.empty
+
+
+def test_fetch_dataframe_raises_on_unparsable_json():
+    entry = _entry()
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(text="not json")):
+        with pytest.raises(APIRequestError, match="Cannot parse API response as json"):
+            client.fetch_dataframe()
