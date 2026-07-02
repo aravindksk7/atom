@@ -441,6 +441,15 @@
           <div><label class="field-label">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" /></div>
           <div><label class="field-label">BO User</label><input x-model="configModal.bo_user" class="field-input" /></div>
           <div><label class="field-label">BO Password</label><input x-model="configModal.bo_password" type="password" class="field-input" /></div>
+          <div>
+            <label class="field-label">BO Auth Type</label>
+            <select x-model="configModal.bo_auth_type" class="field-input">
+              <option value="secEnterprise">Enterprise</option>
+              <option value="secWinAD">Windows AD (on-premises)</option>
+              <option value="secLDAP">LDAP</option>
+              <option value="secSAPR3">SAP R/3</option>
+            </select>
+          </div>
           <div><label class="field-label">BO Timeout (s)</label><input x-model="configModal.bo_timeout" type="number" class="field-input" placeholder="60" /></div>
           <div><label class="field-label">BO Proxy URL</label><input x-model="configModal.bo_proxy_url" class="field-input" placeholder="http://proxy.company:8080" /></div>
           <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">

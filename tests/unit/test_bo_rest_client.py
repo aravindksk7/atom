@@ -55,6 +55,40 @@ def test_client_requires_url_scheme(env_config):
 
 
 # ---------------------------------------------------------------------------
+# authenticate
+# ---------------------------------------------------------------------------
+
+def test_authenticate_sends_configured_auth_type_for_on_premises_AD(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    cfg = env_config.model_copy(update={"bo_auth_type": "secWinAD"})
+    client = BORestClient(cfg)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"X-SAP-LogonToken": "tok"}
+    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+        client.authenticate()
+
+    sent_payload = mock_post.call_args[1]["json"]
+    assert sent_payload["auth"] == "secWinAD"
+
+
+def test_authenticate_defaults_to_secEnterprise(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"X-SAP-LogonToken": "tok"}
+    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+        client.authenticate()
+
+    assert mock_post.call_args[1]["json"]["auth"] == "secEnterprise"
+
+
+# ---------------------------------------------------------------------------
 # list_documents
 # ---------------------------------------------------------------------------
 

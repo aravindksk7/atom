@@ -26,6 +26,7 @@ class EnvironmentConfig(BaseModel):
     bo_url: str = ""
     bo_user: str = ""
     bo_password: str = ""
+    bo_auth_type: str = "secEnterprise"
     bo_timeout: int = 60
     bo_proxy_url: str = ""
     bo_verify_ssl: bool = True
@@ -63,6 +64,14 @@ class EnvironmentConfig(BaseModel):
     def validate_bo_timeout(cls, v: int) -> int:
         if v <= 0:
             raise ValueError(f"must be > 0, got {v}")
+        return v
+
+    @field_validator("bo_auth_type")
+    @classmethod
+    def validate_bo_auth_type(cls, v: str) -> str:
+        valid = {"secEnterprise", "secWinAD", "secLDAP", "secSAPR3"}
+        if v not in valid:
+            raise ValueError(f"must be one of {sorted(valid)}, got {v!r}")
         return v
 
     @field_validator("automic_timeout", "db_connect_timeout", "db_pool_timeout")
