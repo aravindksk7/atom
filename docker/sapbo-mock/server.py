@@ -55,6 +55,12 @@ DATASETS = {
 }
 
 
+def _collapse_single(items: list) -> list | dict:
+    """Mirror SAP BO biprws: a one-element collection serializes as a bare
+    object, not a one-element array."""
+    return items[0] if len(items) == 1 else items
+
+
 def _rows_for_doc(doc_id: str) -> list[dict]:
     reports = REPORTS.get(doc_id, [])
     if not reports:
@@ -184,7 +190,10 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"reports": REPORTS[doc_id], "dataset": _rows_for_doc(doc_id)},
+                {
+                    "reports": _collapse_single(REPORTS[doc_id]),
+                    "dataset": _rows_for_doc(doc_id),
+                },
             )
             return
 

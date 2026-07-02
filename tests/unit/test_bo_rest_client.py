@@ -128,6 +128,19 @@ def test_list_documents_http_error_raises(authenticated_client):
             authenticated_client.list_documents()
 
 
+def test_list_documents_handles_single_document_not_wrapped_in_list(authenticated_client):
+    """SAP BO's biprws collapses a single-element collection into a bare object
+    instead of a one-element JSON array (a known BI4 RESTful Web Services quirk)."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "documents": {"id": "101", "name": "Sales Report", "folder": "/Finance"}
+    }
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        docs = authenticated_client.list_documents()
+    assert docs == [{"id": "101", "name": "Sales Report", "folder": "/Finance"}]
+
+
 # ---------------------------------------------------------------------------
 # list_reports
 # ---------------------------------------------------------------------------
@@ -167,6 +180,49 @@ def test_list_reports_404_raises(authenticated_client):
     with patch.object(authenticated_client._session, "get", return_value=mock_response):
         with pytest.raises(ReportNotFoundError):
             authenticated_client.list_reports("MISSING_DOC")
+
+
+def test_list_reports_handles_single_report_not_wrapped_in_list(authenticated_client):
+    """Reproduces the on-premises 'str' object has no attribute 'get' crash: a
+    WebI document with exactly one report tab gets a bare object for 'reports'
+    instead of a one-element array, so the old code iterated over dict keys."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "reports": {"id": "1", "name": "Page 1", "reportIndex": 0}
+    }
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        reports = authenticated_client.list_reports("101")
+    assert reports == [{"id": "1", "name": "Page 1", "reportIndex": 0}]
+
+
+# ---------------------------------------------------------------------------
+# fetch_report_data
+# ---------------------------------------------------------------------------
+
+def test_fetch_report_data_multi_row_dataset_returns_dataframe(authenticated_client):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "dataset": [
+            {"sku": "A100", "amount": 25.5},
+            {"sku": "B200", "amount": 50.0},
+        ]
+    }
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        df = authenticated_client.fetch_report_data("rpt-sales")
+    assert list(df["sku"]) == ["A100", "B200"]
+
+
+def test_fetch_report_data_handles_single_row_dataset_not_wrapped_in_list(authenticated_client):
+    """Same biprws single-element collapse as list_reports, but for the dataset field."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"dataset": {"sku": "A100", "amount": 25.5}}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        df = authenticated_client.fetch_report_data("rpt-sales")
+    assert list(df["sku"]) == ["A100"]
+    assert list(df["amount"]) == [25.5]
 
 
 # ---------------------------------------------------------------------------
