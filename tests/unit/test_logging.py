@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import pytest
 from etl_framework.utils.logging import configure_logging
 from etl_framework.utils.context import set_run_id
@@ -71,3 +72,12 @@ def test_uvicorn_access_logger_writes_to_the_same_file(tmp_path):
     logging.getLogger("uvicorn.access").info("127.0.0.1 GET /api/health 200")
     content = (tmp_path / "unify_access.log").read_text()
     assert content.count("127.0.0.1 GET /api/health 200") == 1
+
+
+def test_json_log_timestamp_has_real_utc_offset_not_fake_z(tmp_path):
+    log_file = str(tmp_path / "json_tz.log")
+    configure_logging(level="INFO", log_file=log_file, log_format="json")
+    logging.getLogger("etl_framework.tz_test").info("tz message")
+    lines = (tmp_path / "json_tz.log").read_text().strip().splitlines()
+    record = json.loads(lines[-1])
+    assert re.search(r"[+-]\d{4}$", record["timestamp"]), record["timestamp"]

@@ -43,7 +43,7 @@ def configure_logging(
             from pythonjsonlogger import jsonlogger
             json_formatter = jsonlogger.JsonFormatter(
                 fmt="%(asctime)s %(levelname)s %(name)s %(run_id)s %(message)s",
-                datefmt="%Y-%m-%dT%H:%M:%SZ",
+                datefmt="%Y-%m-%dT%H:%M:%S%z",
                 rename_fields={"levelname": "level", "asctime": "timestamp"},
             )
             file_handler.setFormatter(json_formatter)
