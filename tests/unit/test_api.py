@@ -298,6 +298,49 @@ def test_trigger_run_rejects_invalid_backend(client):
     assert resp.status_code == 422
 
 
+def test_recon_file_compare_surfaces_error_message(client):
+    """An internal failure during recon-file compare must be visible on the run,
+    not just swallowed into a bare ERROR status (regression: previously only
+    run_bo_comparison persisted error_message; recon-file/sql compare did not)."""
+    resp = client.post(
+        "/api/compare/recon-file",
+        json={
+            "stored_run_id": "does-not-exist",
+            "file_b_path": "unused.csv",
+            "label_a": "Source A",
+            "label_b": "Source B",
+        },
+    )
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "ERROR"
+    assert detail["results"], "expected an error TestResult to be persisted"
+    assert "not found" in detail["results"][0]["error_message"].lower()
+
+
+def test_sql_compare_surfaces_error_message(client):
+    resp = client.post(
+        "/api/compare/sql",
+        json={
+            "config_id_a": 999999,
+            "config_id_b": 999999,
+            "query_a": "SELECT 1",
+            "query_b": "SELECT 1",
+            "label_a": "Source A",
+            "label_b": "Source B",
+        },
+    )
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "ERROR"
+    assert detail["results"], "expected an error TestResult to be persisted"
+    assert "not found" in detail["results"][0]["error_message"].lower()
+
+
 def test_trigger_run_rejects_negative_worker_count(client):
     resp = client.post(
         "/api/runs",

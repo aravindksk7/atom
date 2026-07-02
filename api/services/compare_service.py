@@ -357,9 +357,14 @@ class CompareService:
                 advanced=req.advanced,
             )
             self._run_tabular_file_compare(recon_req, run_id, df_a, df_b)
-        except Exception:
+        except Exception as exc:
             logger.exception("SQL comparison failed for run %s", run_id)
-            self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)
+            self._add_error_result(run_id, req.label_a or "sql_comparison", exc)
+            self._repo.update_run_status(
+                run_id, "ERROR",
+                completed_at=datetime.now(timezone.utc),
+                total_tests=1, error=1,
+            )
             raise
 
     # ------------------------------------------------------------------
@@ -441,9 +446,14 @@ class CompareService:
                 total_tests=len(all_names), passed=passed, failed=failed,
             )
             MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, results)
-        except Exception:
+        except Exception as exc:
             logger.exception("Recon file compare failed for run %s", run_id)
-            self._repo.update_run_status(run_id, "ERROR", completed_at=datetime.now(timezone.utc), error=1)
+            self._add_error_result(run_id, req.label_a or "recon_file", exc)
+            self._repo.update_run_status(
+                run_id, "ERROR",
+                completed_at=datetime.now(timezone.utc),
+                total_tests=1, error=1,
+            )
             raise
 
     def _load_recon_source(self, req: ReconFileCompareRequest, side: str):
