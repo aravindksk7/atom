@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
+from api.routes.configs import _preserve_masked_secrets
 from api.schemas import (
     GeneratedArtifactOut,
     MismatchAcceptOut,
@@ -147,6 +148,10 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     if body.config_id is not None and cfg is None:
         raise HTTPException(status_code=404, detail="Config not found")
     if cfg is not None:
+        # config_data may be an echo of the masked GET /api/configs response
+        # (e.g. the Launch page's Saved Config dropdown) — restore the real
+        # stored secret wherever the client sent back the display mask.
+        cfg_data = _preserve_masked_secrets(cfg_data, cfg.config_json)
         cfg_data = {**(cfg.config_json or {}), **cfg_data}
 
     snapshot = dict(cfg_data)

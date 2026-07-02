@@ -238,6 +238,53 @@ def test_trigger_run_injects_saved_config_credentials(client):
     assert snapshot["automic_credentials"]["automic_user"] == "svc"
 
 
+def test_trigger_run_ignores_masked_secrets_from_stale_config_data(client):
+    """Regression test: the Launch page's Saved Config dropdown is populated
+    from GET /api/configs, which masks db_password/bo_password/automic_password
+    as "********" for display. The frontend then echoes that same masked object
+    back as config_data when triggering a live run. Previously the backend
+    merged {**cfg.config_json, **body.config_data} with body.config_data
+    winning, so the mask literal clobbered the real password and every live
+    run triggered via a Saved Config failed authentication."""
+    created = client.post(
+        "/api/configs",
+        json={
+            "name": "live2",
+            "env_name": "qa2",
+            "config_data": {
+                "db_host": "sql-live",
+                "db_password": "super-secret",
+                "bo_url": "https://bo-server",
+                "bo_password": "bo-secret",
+            },
+        },
+    ).json()
+
+    # Simulate the frontend: fetch the (masked) list, then send that back as
+    # config_data alongside config_id when launching a run.
+    listed = client.get("/api/configs").json()
+    masked_cfg = next(c for c in listed if c["id"] == created["id"])
+    assert masked_cfg["config_data"]["db_password"] == "********"
+
+    run = client.post(
+        "/api/runs",
+        json={
+            "source_env": "qa2",
+            "target_env": "prod",
+            "job_sequence": [],
+            "config_id": created["id"],
+            "config_data": masked_cfg["config_data"],
+            "run_settings": {"use_live_connections": True},
+        },
+    )
+    assert run.status_code == 202
+
+    detail = client.get(f"/api/runs/{run.json()['run_id']}")
+    snapshot = detail.json()["config_snapshot"]
+    assert snapshot["db_password"] == "super-secret"
+    assert snapshot["bo_credentials"]["bo_password"] == "bo-secret"
+
+
 def test_trigger_run_rejects_invalid_backend(client):
     resp = client.post(
         "/api/runs",
