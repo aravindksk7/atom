@@ -24,7 +24,10 @@ from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["configs"])
 
-_SENSITIVE_KEYS = {"db_password", "automic_password", "bo_password"}
+_SENSITIVE_KEYS = {
+    "db_password", "automic_password", "bo_password",
+    "api_key", "bearer_token", "basic_password",
+}
 _MASK = "********"
 
 
@@ -33,7 +36,7 @@ def _mask(data: dict) -> dict:
     result = {
         k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v)
         for k, v in data.items()
-        if k != "connections"
+        if k not in ("connections", "api_endpoints")
     }
     if "connections" in data and isinstance(data["connections"], dict):
         result["connections"] = {
@@ -42,6 +45,14 @@ def _mask(data: dict) -> dict:
                 for k, v in entry.items()
             }
             for conn_name, entry in data["connections"].items()
+        }
+    if "api_endpoints" in data and isinstance(data["api_endpoints"], dict):
+        result["api_endpoints"] = {
+            ep_name: {
+                k: (_MASK if k in _SENSITIVE_KEYS and v is not None else v)
+                for k, v in entry.items()
+            }
+            for ep_name, entry in data["api_endpoints"].items()
         }
     return result
 
@@ -71,6 +82,23 @@ def _preserve_masked_secrets(incoming: dict, existing: dict | None) -> dict:
                         merged_entry[key] = existing_entry.get(key, "")
             merged_connections[conn_name] = merged_entry
         result["connections"] = merged_connections
+
+    incoming_endpoints = result.get("api_endpoints")
+    existing_endpoints = existing.get("api_endpoints")
+    if isinstance(incoming_endpoints, dict) and isinstance(existing_endpoints, dict):
+        merged_endpoints = {}
+        for ep_name, entry in incoming_endpoints.items():
+            if not isinstance(entry, dict):
+                merged_endpoints[ep_name] = entry
+                continue
+            merged_entry = dict(entry)
+            existing_entry = existing_endpoints.get(ep_name, {})
+            if isinstance(existing_entry, dict):
+                for key in _SENSITIVE_KEYS:
+                    if merged_entry.get(key) == _MASK:
+                        merged_entry[key] = existing_entry.get(key, "")
+            merged_endpoints[ep_name] = merged_entry
+        result["api_endpoints"] = merged_endpoints
     return result
 
 

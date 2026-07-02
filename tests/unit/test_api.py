@@ -814,3 +814,58 @@ def test_create_api_reconciliation_job_succeeds(client):
     )
     assert resp.status_code == 201
     assert resp.json()["job_type"] == "api_reconciliation"
+
+
+# --- api_endpoints secret masking ---
+
+def test_config_masks_api_endpoint_secrets(client):
+    resp = client.post(
+        "/api/configs",
+        json={
+            "name": "api-cfg",
+            "env_name": "dev",
+            "config_data": {
+                "api_endpoints": {
+                    "orders": {
+                        "base_url": "https://api.example.com/orders",
+                        "auth_type": "bearer",
+                        "bearer_token": "super-secret-token",
+                    }
+                }
+            },
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["config_data"]["api_endpoints"]["orders"]["bearer_token"] == "********"
+    assert data["config_data"]["api_endpoints"]["orders"]["base_url"] == "https://api.example.com/orders"
+
+
+def test_update_config_preserves_masked_api_endpoint_secret(client):
+    created = client.post(
+        "/api/configs",
+        json={
+            "name": "api-cfg2",
+            "env_name": "dev",
+            "config_data": {
+                "api_endpoints": {
+                    "orders": {
+                        "base_url": "https://api.example.com/orders",
+                        "auth_type": "bearer",
+                        "bearer_token": "super-secret-token",
+                    }
+                }
+            },
+        },
+    ).json()
+
+    # Simulate the frontend echoing back the masked value on update
+    masked_data = created["config_data"]
+    masked_data["api_endpoints"]["orders"]["base_url"] = "https://api.example.com/orders-v2"
+    resp = client.put(f"/api/configs/{created['id']}", json={"config_data": masked_data})
+    assert resp.status_code == 200
+
+    detail = client.get(f"/api/configs/{created['id']}").json()
+    # base_url change went through, but the mask did NOT clobber the real secret
+    assert detail["config_data"]["api_endpoints"]["orders"]["base_url"] == "https://api.example.com/orders-v2"
+    assert detail["config_data"]["api_endpoints"]["orders"]["bearer_token"] == "********"
