@@ -927,3 +927,84 @@ def test_validate_config_rejects_non_dict_api_endpoint_entry(client):
     data = resp.json()
     assert data["ok"] is False
     assert any(err["field_name"] == "api_endpoints.orders" for err in data["errors"])
+
+
+# --- REST API adapter endpoints ---
+
+def test_rest_api_test_endpoint_success(client, monkeypatch):
+    cfg = client.post(
+        "/api/configs",
+        json={
+            "name": "api-adapter-cfg",
+            "env_name": "dev",
+            "config_data": {
+                "api_endpoints": {"orders": {"base_url": "https://api.example.com/orders"}},
+            },
+        },
+    ).json()
+
+    import pandas as pd
+    from api.services import adapter_service
+
+    class _FakeClient:
+        def __init__(self, entry):
+            pass
+
+        def fetch_dataframe(self, max_pages=None):
+            return pd.DataFrame({"id": [1, 2]})
+
+    monkeypatch.setattr(adapter_service, "APIEndpointClient", _FakeClient)
+
+    resp = client.post(
+        "/api/adapters/rest-api/test",
+        json={"config_id": cfg["id"], "endpoint_name": "orders"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_rest_api_test_endpoint_missing_endpoint_returns_ok_false(client):
+    cfg = client.post(
+        "/api/configs",
+        json={"name": "api-adapter-cfg2", "env_name": "dev", "config_data": {"api_endpoints": {}}},
+    ).json()
+    resp = client.post(
+        "/api/adapters/rest-api/test",
+        json={"config_id": cfg["id"], "endpoint_name": "missing"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is False
+
+
+def test_rest_api_preview_endpoint_returns_sample_rows(client, monkeypatch):
+    cfg = client.post(
+        "/api/configs",
+        json={
+            "name": "api-adapter-cfg3",
+            "env_name": "dev",
+            "config_data": {
+                "api_endpoints": {"orders": {"base_url": "https://api.example.com/orders"}},
+            },
+        },
+    ).json()
+
+    import pandas as pd
+    from api.services import adapter_service
+
+    class _FakeClient:
+        def __init__(self, entry):
+            pass
+
+        def fetch_dataframe(self, max_pages=None):
+            return pd.DataFrame({"id": [1, 2, 3], "amount": [10, 20, 30]})
+
+    monkeypatch.setattr(adapter_service, "APIEndpointClient", _FakeClient)
+
+    resp = client.post(
+        "/api/adapters/rest-api/preview",
+        json={"config_id": cfg["id"], "endpoint_name": "orders", "limit": 2},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["columns"] == ["id", "amount"]
+    assert len(data["rows"]) == 2

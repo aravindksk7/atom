@@ -17,6 +17,8 @@ from api.schemas import (
     BOReportOut,
     JobDefinition,
     BOTestRequest,
+    RestApiPreviewRequest,
+    RestApiTestRequest,
 )
 from api.services.adapter_service import AdapterService
 from etl_framework.repository.repository import ConfigRepository, JobRepository
@@ -104,6 +106,26 @@ def search_automic_jobs(
     service: AdapterService = Depends(get_adapter_service),
 ):
     return service.search_automic_jobs(config_id, filter)
+
+
+# ---------------------------------------------------------------------------
+# REST API endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/rest-api/test", response_model=AdapterTestOut)
+def test_rest_api_endpoint(
+    body: RestApiTestRequest,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.test_api_endpoint(body.config_id, body.endpoint_name)
+
+
+@router.post("/rest-api/preview")
+def preview_rest_api_endpoint(
+    body: RestApiPreviewRequest,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.preview_api_endpoint(body.config_id, body.endpoint_name, body.limit)
 
 
 # ---------------------------------------------------------------------------
