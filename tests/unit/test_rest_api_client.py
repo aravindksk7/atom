@@ -149,3 +149,40 @@ def test_fetch_dataframe_raises_on_unparsable_json():
     with patch.object(client._session, "request", return_value=_fake_response(text="not json")):
         with pytest.raises(APIRequestError, match="Cannot parse API response as json"):
             client.fetch_dataframe()
+
+
+def test_fetch_dataframe_page_pagination_stops_on_short_page():
+    entry = _entry(pagination_type="page", pagination_page_size=2, pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    pages = [
+        _fake_response(json_data=[{"id": 1}, {"id": 2}]),
+        _fake_response(json_data=[{"id": 3}]),
+    ]
+    with patch.object(client._session, "request", side_effect=pages):
+        df = client.fetch_dataframe()
+    assert list(df["id"]) == [1, 2, 3]
+
+
+def test_fetch_dataframe_page_pagination_sends_page_and_size_params():
+    entry = _entry(pagination_type="page", pagination_page_param="pg",
+                    pagination_size_param="sz", pagination_page_size=50, pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    captured_params = []
+
+    def fake_request(method, url, **kwargs):
+        captured_params.append(dict(kwargs["params"]))
+        return _fake_response(json_data=[])  # empty page stops the loop immediately
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        client.fetch_dataframe()
+    assert captured_params[0]["pg"] == 1
+    assert captured_params[0]["sz"] == 50
+
+
+def test_fetch_dataframe_page_pagination_stops_at_max_pages():
+    entry = _entry(pagination_type="page", pagination_page_size=2, pagination_max_pages=3)
+    client = APIEndpointClient(entry)
+    # Every page returns exactly page_size rows, so without the cap this would loop forever
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}, {"id": 2}])):
+        df = client.fetch_dataframe()
+    assert len(df) == 6  # 3 pages * 2 rows

@@ -19,8 +19,34 @@ class APIEndpointClient:
 
     def fetch_dataframe(self, max_pages: int | None = None) -> pd.DataFrame:
         entry = self._entry
-        response = self._request(entry.base_url, dict(entry.query_params))
-        return self._parse_response(response)
+        page_cap = max_pages if max_pages is not None else entry.pagination_max_pages
+        frames: list[pd.DataFrame] = []
+        query_params = dict(entry.query_params)
+        url = entry.base_url
+        page_number = 1
+
+        for _ in range(page_cap):
+            if entry.pagination_type == "page":
+                query_params[entry.pagination_page_param] = page_number
+                query_params[entry.pagination_size_param] = entry.pagination_page_size
+
+            response = self._request(url, query_params)
+            frame = self._parse_response(response)
+            frames.append(frame)
+
+            if entry.pagination_type == "none":
+                break
+            if entry.pagination_type == "page":
+                if len(frame) < entry.pagination_page_size:
+                    break
+                page_number += 1
+                continue
+            if entry.pagination_type == "cursor":
+                break  # cursor pagination implemented in Task 6
+
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
 
     def _auth_kwargs(self) -> dict:
         entry = self._entry
