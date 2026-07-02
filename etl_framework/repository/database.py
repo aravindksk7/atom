@@ -73,6 +73,8 @@ def _ensure_compare_columns(bind) -> None:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN override_by VARCHAR(255)"))
         if "override_at" not in test_result_cols:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN override_at DATETIME"))
+        if "sample_rows" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN sample_rows JSON"))
 
         # --- P0: new tables (created by create_all; ensure idempotent) ---
         conn.execute(text(

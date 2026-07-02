@@ -32,6 +32,7 @@ class ReconciliationResult:
     executed_at: datetime
     duration_seconds: float
     schema_diff: dict[str, list[str]] | None = None
+    sample_rows: list[dict] | None = None
 
     @property
     def total_issues(self) -> int:

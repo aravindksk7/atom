@@ -67,6 +67,7 @@ def _test_result_out(result) -> TestResultOut:
         override_reason=result.override_reason,
         overridden_by=result.override_by,
         override_at=result.override_at,
+        sample_rows=result.sample_rows,
     )
 
 

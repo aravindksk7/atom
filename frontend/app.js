@@ -368,6 +368,7 @@ function app() {
     expandingMismatch: {},       // result_id → bool
     expandedMismatchOffset: {},  // result_id → current offset
     outcomeOverrideForms: {},    // result_id → { open, reason, saving }
+    expandedSampleRows: {},      // result_id → bool
 
     // -----------------------------------------------------------
     // Compare runs
@@ -1676,6 +1677,20 @@ function app() {
       this.drawer.offset += 100;
       this.drawer.loading = true;
       await this._fetchMismatches();
+    },
+
+    // ===========================================================
+    // INLINE SAMPLE ROWS EXPAND (rows actually read from the source)
+    // ===========================================================
+    toggleSampleRowsExpand(resultId) {
+      this.expandedSampleRows = {
+        ...this.expandedSampleRows,
+        [resultId]: !this.expandedSampleRows[resultId],
+      };
+    },
+
+    sampleRowColumns(rows) {
+      return rows && rows.length ? Object.keys(rows[0]) : [];
     },
 
     // ===========================================================

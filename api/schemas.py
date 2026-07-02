@@ -271,6 +271,7 @@ class TestResultOut(BaseModel):
     override_reason: str | None = None
     overridden_by: str | None = None
     override_at: datetime | None = None
+    sample_rows: list[dict] | None = None
 
     model_config = {"from_attributes": True}
 
