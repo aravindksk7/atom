@@ -78,9 +78,61 @@ def test_test_bo_connection_404_config_raises(service, mock_config_repo):
     assert exc_info.value.status_code == 404
 
 
+def test_friendly_bo_error_includes_response_body():
+    from api.services.adapter_service import _friendly_error
+    from etl_framework.exceptions import BOAPIError
+
+    message = _friendly_error(BOAPIError("rpt-sales", 404, '{"error":"report not found"}'))
+
+    assert "SAP BO API error 404" in message
+    assert "report not found" in message
+
+
+def test_friendly_401_error_hints_at_auth_type_when_non_default():
+    from api.services.adapter_service import _friendly_error
+
+    message = _friendly_error(Exception("401 Client Error: Unauthorized"), auth_type="secWinAD")
+
+    assert "secWinAD" in message
+    assert "auth type" in message.lower()
+
+
+def test_friendly_401_error_default_message_when_secEnterprise():
+    from api.services.adapter_service import _friendly_error
+
+    message = _friendly_error(Exception("401 Client Error: Unauthorized"), auth_type="secEnterprise")
+
+    assert message == "Authentication failed - check username and password"
+
+
+def test_test_bo_connection_401_with_ad_auth_type_hints_at_configured_type(mock_config_repo, service):
+    cfg = _make_saved_config()
+    cfg.config_json["bo_auth_type"] = "secWinAD"
+    mock_config_repo.get.return_value = cfg
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.authenticate.side_effect = Exception("401 Client Error: Unauthorized")
+        result = service.test_bo_connection(config_id=1)
+
+    assert result.ok is False
+    assert "secWinAD" in result.message
+
+
 # ---------------------------------------------------------------------------
 # list_bo_documents
 # ---------------------------------------------------------------------------
+
+def test_list_bo_documents_401_with_ad_auth_type_hints_at_configured_type(mock_config_repo, service):
+    cfg = _make_saved_config()
+    cfg.config_json["bo_auth_type"] = "secWinAD"
+    mock_config_repo.get.return_value = cfg
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.authenticate.side_effect = Exception("401 Client Error: Unauthorized")
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            service.list_bo_documents(config_id=1)
+
+    assert "secWinAD" in exc_info.value.detail
+
 
 def test_list_bo_documents_returns_bo_doc_out_list(service):
     raw_docs = [

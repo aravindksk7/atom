@@ -330,6 +330,7 @@ Environment configs can be created in the Config tab or through `/api/configs`. 
 - `bo_url`
 - `bo_user`
 - `bo_password`
+- `bo_auth_type` — the SAP BO CMS security plugin to authenticate against: `secEnterprise` (default), `secWinAD`, `secLDAP`, or `secSAPR3`. On-premises SAP BO deployments that authenticate users against Active Directory must set this to `secWinAD` — logging on with `secEnterprise` against an AD-only account returns HTTP 401 ("Authentication failed") even with correct credentials.
 - `bo_timeout`
 - `automic_url`
 - `automic_user`
@@ -663,7 +664,7 @@ Install Microsoft ODBC Driver 17 or 18 for SQL Server from your internal softwar
 
 ## Docker Or Service Deployment
 
-There is no committed Dockerfile in this repository at the time of writing. A minimal container deployment should:
+There is no committed application Dockerfile in this repository at the time of writing. A minimal container deployment should:
 
 - Use Python 3.11 or later.
 - Copy the repository.
@@ -2158,6 +2159,27 @@ Run integration tests:
 ```powershell
 python -m pytest tests/integration/ -q
 ```
+
+Run the live SQL Server integration test with Docker Compose:
+
+```powershell
+docker compose -f docker-compose.integration.yml up -d sqlserver
+$env:RUN_LIVE_SQLSERVER_TESTS = "1"
+$env:LIVE_SQLSERVER_ODBC_DRIVER = "SQL Server"
+python -m pytest tests/integration/test_sqlserver_live_reconciliation.py -q
+docker compose -f docker-compose.integration.yml down -v
+```
+
+Run the SAP BO mock integration test with Docker Compose:
+
+```powershell
+docker compose -f docker-compose.integration.yml up -d --build sapbo
+$env:RUN_LIVE_SAPBO_TESTS = "1"
+python -m pytest tests/integration/test_sapbo_mock_container.py -q
+docker compose -f docker-compose.integration.yml down -v
+```
+
+The `sapbo` service is a local HTTPS mock of the SAP BO RESTful Web Services endpoints used by this project. It is not a SAP BusinessObjects distribution. Use `https://127.0.0.1:18443` with username `administrator`, password `Password1`, and SSL verification disabled for the mock's self-signed certificate.
 
 Run property-based tests (requires `hypothesis`):
 

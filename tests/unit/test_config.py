@@ -101,6 +101,50 @@ environments:
     assert envs["dev"].db_password == "secret123"
 
 
+def test_bo_auth_type_defaults_to_secEnterprise(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("""
+environments:
+  dev:
+    db_host: localhost
+    db_name: mydb
+    db_user: user
+    db_password: secret
+""")
+    envs = ConfigLoader().load(str(cfg))
+    assert envs["dev"].bo_auth_type == "secEnterprise"
+
+
+def test_bo_auth_type_accepts_secWinAD_for_on_premises_AD_login(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("""
+environments:
+  dev:
+    db_host: localhost
+    db_name: mydb
+    db_user: user
+    db_password: secret
+    bo_auth_type: secWinAD
+""")
+    envs = ConfigLoader().load(str(cfg))
+    assert envs["dev"].bo_auth_type == "secWinAD"
+
+
+def test_invalid_bo_auth_type_raises_configuration_error(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("""
+environments:
+  dev:
+    db_host: localhost
+    db_name: mydb
+    db_user: user
+    db_password: secret
+    bo_auth_type: bogus
+""")
+    with pytest.raises(ConfigurationError, match="bo_auth_type"):
+        ConfigLoader().load(str(cfg))
+
+
 def test_preserve_masked_top_level_secrets_on_config_update():
     incoming = {
         "db_password": "********",

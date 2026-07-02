@@ -17,6 +17,7 @@ class BORestClient:
             raise ValueError("SAP BO URL must include http:// or https://")
         self._user = env_config.bo_user
         self._password = env_config.bo_password
+        self._auth_type = env_config.bo_auth_type
         self._timeout = env_config.bo_timeout
         self._token = None
         self._session = requests.Session()
@@ -31,7 +32,7 @@ class BORestClient:
         payload = {
             "password": self._password,
             "clientType": "",
-            "auth": "secEnterprise",
+            "auth": self._auth_type,
             "userName": self._user
         }
         logger.debug("Authenticating with SAP BO REST API")

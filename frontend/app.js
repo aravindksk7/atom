@@ -22,11 +22,27 @@ async function api(method, path, body) {
   if (resp.status === 204) return null;
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    const error = new Error(err.detail || resp.statusText);
+    const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
     error.status = resp.status;
     throw error;
   }
   return resp.json();
+}
+
+function apiErrorMessage(detail, fallback = 'Request failed') {
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(item => apiErrorMessage(item, '')).filter(Boolean).join('; ') || fallback;
+  }
+  if (typeof detail === 'object') {
+    if (detail.message) return String(detail.message);
+    if (detail.error) return String(detail.error);
+    if (detail.error_type && detail.field_name) return `${detail.field_name}: ${detail.error_type}`;
+    if (detail.errors) return apiErrorMessage(detail.errors, fallback);
+    try { return JSON.stringify(detail); } catch (_) { return fallback; }
+  }
+  return String(detail);
 }
 
 async function apiBlob(path) {
@@ -34,7 +50,8 @@ async function apiBlob(path) {
   const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
   const resp = await fetch(API + path, { headers });
   if (!resp.ok) {
-    const error = new Error(resp.statusText);
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
     error.status = resp.status;
     throw error;
   }
@@ -810,7 +827,7 @@ function app() {
         id: null, name: '', env_name: 'dev',
         db_host: 'localhost', db_port: 1433, db_name: '', db_user: '', db_password: '',
         db_connect_timeout: 15,
-        bo_url: '', bo_user: '', bo_password: '', bo_timeout: 60,
+        bo_url: '', bo_user: '', bo_password: '', bo_auth_type: 'secEnterprise', bo_timeout: 60,
         bo_proxy_url: '', bo_verify_ssl: true,
         automic_url: '', automic_user: '', automic_password: '',
         connections: [],
@@ -827,6 +844,7 @@ function app() {
         db_name: d.db_name || '', db_user: d.db_user || '', db_password: d.db_password || '',
         db_connect_timeout: d.db_connect_timeout || 15,
         bo_url: d.bo_url || '', bo_user: d.bo_user || '', bo_password: d.bo_password || '',
+        bo_auth_type: d.bo_auth_type || 'secEnterprise',
         bo_timeout: d.bo_timeout || 60,
         bo_proxy_url: d.bo_proxy_url || '',
         bo_verify_ssl: d.bo_verify_ssl !== false,
@@ -859,6 +877,7 @@ function app() {
         db_connect_timeout: Number(m.db_connect_timeout) || 15,
         bo_url: m.bo_url || '', bo_user: m.bo_user || '',
         bo_password: m.bo_password || '',
+        bo_auth_type: m.bo_auth_type || 'secEnterprise',
         bo_timeout: Number(m.bo_timeout) || 60,
         bo_proxy_url: m.bo_proxy_url || '',
         bo_verify_ssl: m.bo_verify_ssl !== false,
@@ -2256,16 +2275,17 @@ function app() {
       }
     },
 
-    downloadCompareResults(format) {
+    async downloadCompareResults(format) {
       const runId = this.fileCompareResult?.run_id;
       if (!runId) return;
-      const url = `/api/runs/${runId}/mismatches/download?format=${format}`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.setAttribute('download', `compare_results_${runId}.${format === 'xlsx' ? 'xlsx' : format}`);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      try {
+        const { blob, disposition } = await apiBlob(`/api/runs/${runId}/mismatches/download?format=${format}`);
+        const fallback = `compare_results_${runId}.${format === 'xlsx' ? 'xlsx' : format}`;
+        const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
+        triggerDownload(blob, filename);
+      } catch (e) {
+        this.toast('error', 'Download failed', e.message);
+      }
     },
 
     toggleAcceptForm(mismatchId) {

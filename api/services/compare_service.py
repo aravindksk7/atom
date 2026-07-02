@@ -17,6 +17,7 @@ from api.schemas import (
 from api.services.file_source import read_tabular
 from etl_framework.reconciliation.chunker import build_chunk_query
 from etl_framework.reconciliation.engine import ReconciliationEngine
+from etl_framework.repository.models import TestResult
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
@@ -186,12 +187,33 @@ class CompareService:
             )
         except Exception as exc:
             logger.exception("BO comparison failed for run %s", run_id)
+            self._add_error_result(run_id, req.label_a or "bo_comparison", exc)
             self._repo.update_run_status(
                 run_id, "ERROR",
                 completed_at=datetime.now(timezone.utc),
+                total_tests=1,
                 error=1,
             )
             raise
+
+    def _add_error_result(self, run_id: str, query_name: str, exc: Exception) -> None:
+        from api.services.adapter_service import _friendly_error
+
+        result = TestResult(
+            run_id=run_id,
+            query_name=query_name,
+            status=TestStatus.ERROR.value,
+            duration_seconds=0.0,
+            source_row_count=0,
+            target_row_count=0,
+            value_mismatch_count=0,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            error_message=_friendly_error(exc),
+            executed_at=datetime.now(timezone.utc),
+        )
+        self._db.add(result)
+        self._db.commit()
 
     def _load_bo_source(self, src, fallback_doc_id: str | None, fallback_report_id: str | None):
         if src.source_type == "live":
