@@ -1949,7 +1949,7 @@ function app() {
           this.boComparePollInterval = null;
           this.boCompareResult = await api('GET', `/api/runs/${this.boCompareRunId}`);
           this.boCompareLoading = false;
-          if (this.boSaveAsBaseline && status.status === 'passed') {
+          if (this.boSaveAsBaseline && status.status === 'PASSED') {
             try { await api('POST', `/api/runs/${this.boCompareRunId}/set-baseline`); } catch (_) {}
           }
           await this.loadRuns();

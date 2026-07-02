@@ -49,6 +49,20 @@ def test_pandas_backend_detects_missing_in_target():
     assert len(missing) == 1
 
 
+def test_pandas_backend_supports_dunder_key_column():
+    """Positional-fallback key columns (e.g. '__row__') must not crash the
+    per-column value-mismatch pass — itertuples() renames leading-underscore
+    field names, so lookups must not rely on namedtuple attribute/dict access."""
+    backend = PandasBackend(key_columns=["__row__"], float_tolerance=1e-9,
+                            null_equals_null=True, mismatch_row_limit=1000)
+    src, tgt = _src_tgt({"__row__": [1, 2], "val": ["a", "b"]},
+                         {"__row__": [1, 2], "val": ["a", "changed"]})
+    mismatches = backend.compare(src, tgt)
+    assert len(mismatches) == 1
+    assert mismatches[0].column_name == "val"
+    assert mismatches[0].key_values == {"__row__": 2}
+
+
 def test_pandas_backend_respects_mismatch_limit():
     backend = PandasBackend(key_columns=["id"], float_tolerance=1e-9,
                             null_equals_null=True, mismatch_row_limit=2)
@@ -105,6 +119,34 @@ def test_pandas_backend_datetime_tolerance_fails_outside_window():
     tgt = pd.DataFrame({"id": [1], "ts": [pd.Timestamp("2024-01-01 12:00:02")]})
     mismatches = backend.compare(src, tgt)
     assert len(mismatches) == 1
+
+
+def test_duckdb_backend_detects_missing_rows_not_value_diffs():
+    """merged.itertuples() renames dunder fields (__in_src__/__in_tgt__), so
+    dict-style lookups via ._asdict() must not be used — otherwise every
+    missing-in-target/source row is silently misclassified as a value_diff."""
+    pytest.importorskip("duckdb")
+    from etl_framework.reconciliation.backends.duckdb_backend import DuckDBBackend
+
+    backend = DuckDBBackend(key_columns=["id"], mismatch_row_limit=1000)
+    src, tgt = _src_tgt({"id": [1, 2], "val": ["a", "b"]},
+                         {"id": [1], "val": ["a"]})
+    mismatches = backend.compare(src, tgt)
+    assert len(mismatches) == 1
+    assert mismatches[0].mismatch_type == "missing_in_target"
+
+
+def test_duckdb_backend_supports_dunder_key_column():
+    pytest.importorskip("duckdb")
+    from etl_framework.reconciliation.backends.duckdb_backend import DuckDBBackend
+
+    backend = DuckDBBackend(key_columns=["__row__"], mismatch_row_limit=1000)
+    src, tgt = _src_tgt({"__row__": [1, 2], "val": ["a", "b"]},
+                         {"__row__": [1, 2], "val": ["a", "changed"]})
+    mismatches = backend.compare(src, tgt)
+    assert len(mismatches) == 1
+    assert mismatches[0].column_name == "val"
+    assert mismatches[0].key_values == {"__row__": 2}
 
 
 def test_engine_accepts_backend_parameter():

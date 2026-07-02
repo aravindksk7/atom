@@ -184,6 +184,36 @@ def test_recon_stored_runs_compare_status_and_metrics(rows_b, expected_status):
     assert comparison_result.status.value == expected_status
 
 
+def test_recon_stored_runs_compare_reports_correct_target_row_count():
+    """The synthetic result's target_row_count must come from Source B's
+    target_row_count, not its source_row_count."""
+    from api.schemas import ReconFileCompareRequest
+    from api.services.compare_service import CompareService
+
+    result_a = SimpleNamespace(
+        query_name="orders", effective_status="PASSED",
+        source_row_count=10, target_row_count=10, total_issues=0,
+    )
+    result_b = SimpleNamespace(
+        query_name="orders", effective_status="PASSED",
+        source_row_count=10, target_row_count=8, total_issues=0,
+    )
+    repo = MagicMock()
+    repo.get_run.side_effect = [
+        SimpleNamespace(results=[result_a]),
+        SimpleNamespace(results=[result_b]),
+    ]
+    service = CompareService.__new__(CompareService)
+    service._repo = repo
+    request = ReconFileCompareRequest(stored_run_id="run-a", stored_run_id_b="run-b")
+
+    with patch("api.services.compare_service.MetricsWriter.write"):
+        service.run_recon_file_compare(request, "comparison-run")
+
+    comparison_result = repo.add_test_result.call_args.args[1]
+    assert comparison_result.target_row_count == 8
+
+
 def test_dual_env_launch_returns_pair(client, monkeypatch):
     import api.routes.compare as cmp_module
     monkeypatch.setattr(cmp_module, "_launch_dual_env_bg", lambda *a, **kw: None)

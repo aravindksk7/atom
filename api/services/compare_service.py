@@ -385,7 +385,7 @@ class CompareService:
                     source_env=req.label_a,
                     target_env=req.label_b,
                     source_row_count=a.get("source_row_count", 0),
-                    target_row_count=b.get("source_row_count", 0),
+                    target_row_count=b.get("target_row_count", 0),
                     matched_count=0,
                     missing_in_target_count=0,
                     missing_in_source_count=0,

@@ -77,7 +77,10 @@ def read_tabular(
             try:
                 return pd.read_json(io.BytesIO(raw))
             except ValueError:
-                return pd.read_json(io.BytesIO(raw), orient="records")
+                try:
+                    return pd.read_json(io.BytesIO(raw), orient="records")
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Cannot parse JSON file")
         if ext in (".tsv", ".txt"):
             return pd.read_csv(io.BytesIO(raw), sep="\t")
         raise HTTPException(
@@ -106,7 +109,10 @@ def read_tabular(
             try:
                 return pd.read_json(p)
             except ValueError:
-                return pd.read_json(p, orient="records")
+                try:
+                    return pd.read_json(p, orient="records")
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Cannot parse JSON file")
         if ext in (".tsv", ".txt"):
             return pd.read_csv(p, sep="\t")
     except FileNotFoundError:

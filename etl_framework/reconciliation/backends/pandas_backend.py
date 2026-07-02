@@ -114,8 +114,9 @@ class PandasBackend:
             mismatch_rows = both[~match_mask]
 
             budget = self._mismatch_row_limit - len(mismatches)
-            for row in mismatch_rows.iloc[:budget].itertuples(index=False):
-                row_dict = row._asdict()
+            row_cols = list(mismatch_rows.columns)
+            for row in mismatch_rows.iloc[:budget].itertuples(index=False, name=None):
+                row_dict = dict(zip(row_cols, row))
                 sv_val = row_dict.get(src_col)
                 tv_val = row_dict.get(tgt_col)
                 mismatches.append(MismatchRecord(

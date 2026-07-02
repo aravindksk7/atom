@@ -86,10 +86,11 @@ class DuckDBBackend:
         mismatches: list[MismatchRecord] = []
         value_cols = [c for c in df_source.columns if c not in self._key_columns]
 
-        for row in merged.itertuples(index=False):
+        merged_cols = list(merged.columns)
+        for row in merged.itertuples(index=False, name=None):
             if len(mismatches) >= self._mismatch_row_limit:
                 break
-            rd = row._asdict()
+            rd = dict(zip(merged_cols, row))
             in_src = rd.get("__in_src__", False)
             in_tgt = rd.get("__in_tgt__", False)
             key_vals = {k: rd[k] for k in self._key_columns}
