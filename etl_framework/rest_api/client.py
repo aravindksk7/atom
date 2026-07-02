@@ -50,7 +50,8 @@ class APIEndpointClient:
         except requests.exceptions.RequestException as exc:
             raise APIRequestError(url=url, http_status=None, message=str(exc)) from exc
         if response.status_code >= 400:
-            raise APIRequestError(url=url, http_status=response.status_code, message=response.text)
+            body = response.text[:1000] if response.text else ""
+            raise APIRequestError(url=url, http_status=response.status_code, message=body)
         return response
 
     def _parse_response(self, response: requests.Response) -> pd.DataFrame:
