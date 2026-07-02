@@ -159,8 +159,16 @@ def validate_config(body: ConfigValidationRequest):
             ))
 
     for ep_name, ep_data in (body.config_data.get("api_endpoints") or {}).items():
+        if not isinstance(ep_data, dict):
+            connection_errors.append(FrameworkErrorOut(
+                error_type="validation_error",
+                message=f"api_endpoints.{ep_name} must be a mapping of fields, got {type(ep_data).__name__}",
+                field_name=f"api_endpoints.{ep_name}",
+                details={},
+            ))
+            continue
         try:
-            ApiEndpointEntry.model_validate({"name": ep_name, **(ep_data or {})})
+            ApiEndpointEntry.model_validate({"name": ep_name, **ep_data})
         except ValidationError as exc:
             for err in exc.errors():
                 connection_errors.append(FrameworkErrorOut(

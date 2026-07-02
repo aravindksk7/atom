@@ -909,3 +909,21 @@ def test_validate_config_rejects_api_endpoint_missing_scheme(client):
     data = resp.json()
     assert data["ok"] is False
     assert any("api_endpoints.orders" in err["field_name"] for err in data["errors"])
+
+
+def test_validate_config_rejects_non_dict_api_endpoint_entry(client):
+    resp = client.post(
+        "/api/configs/validate",
+        json={
+            "env_name": "dev",
+            "config_data": {
+                "db_host": "localhost",
+                "db_password": "secret",
+                "api_endpoints": {"orders": "not-a-dict"},
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert any(err["field_name"] == "api_endpoints.orders" for err in data["errors"])
