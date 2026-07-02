@@ -4,6 +4,7 @@ import re
 import time
 
 from fastapi import HTTPException
+from requests import exceptions as requests_exc
 
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BODocOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
@@ -12,7 +13,7 @@ from etl_framework.repository.repository import ConfigRepository
 from etl_framework.sap_bo.client import BORestClient
 
 
-def _friendly_error(exc: Exception) -> str:
+def _legacy_friendly_error(exc: Exception) -> str:
     msg = str(exc)
     exc_type = type(exc).__name__
     if "NameResolutionError" in msg or "getaddrinfo failed" in msg or "Name or service not known" in msg:
@@ -31,6 +32,44 @@ def _friendly_error(exc: Exception) -> str:
         return "Authentication failed — check username and password"
     if "Forbidden" in msg or "403" in msg:
         return "Access denied (403) — check service account permissions"
+    return msg
+
+
+def _friendly_error(exc: Exception) -> str:
+    msg = str(exc)
+    exc_type = type(exc).__name__
+    if isinstance(exc, requests_exc.ProxyError) or "ProxyError" in msg:
+        return (
+            "Cannot reach SAP BO through the configured proxy - verify BO proxy "
+            "settings or HTTPS_PROXY"
+        )
+    if isinstance(exc, requests_exc.SSLError) or "certificate verify failed" in msg:
+        return (
+            "SAP BO TLS certificate verification failed - install the issuing CA "
+            "or disable SSL verification only for a trusted internal endpoint"
+        )
+    if "NameResolutionError" in msg or "getaddrinfo failed" in msg or "Name or service not known" in msg:
+        m = re.search(r"resolve '([^']+)'", msg)
+        host = m.group(1) if m else "host"
+        return f"Cannot resolve '{host}' - check the SAP BO URL in your config"
+    if "Connection refused" in msg or "ConnectionRefusedError" in msg:
+        return "Connection refused - verify the server is running and the port is correct"
+    if "timed out" in msg.lower() or "Timeout" in exc_type:
+        return (
+            "Connection timed out from the application server - browser access may "
+            "be using a proxy/VPN route; verify backend network access"
+        )
+    if "Max retries exceeded" in msg:
+        m = re.search(r"host='([^']+)', port=(\d+)", msg)
+        target = f"{m.group(1)}:{m.group(2)}" if m else "server"
+        return (
+            f"Cannot reach {target} from the application server - browser access "
+            "may be using a proxy/VPN route; configure BO proxy or firewall rules"
+        )
+    if "Unauthorized" in msg or "401" in msg:
+        return "Authentication failed - check username and password"
+    if "Forbidden" in msg or "403" in msg:
+        return "Access denied (403) - check service account permissions"
     return msg
 
 

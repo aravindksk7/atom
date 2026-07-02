@@ -1,6 +1,7 @@
 import pytest
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.config.loader import ConfigLoader
+from api.routes.configs import _preserve_masked_secrets
 
 
 def test_invalid_db_port_raises_configuration_error(tmp_path):
@@ -98,3 +99,42 @@ environments:
 """)
     envs = ConfigLoader().load(str(cfg))
     assert envs["dev"].db_password == "secret123"
+
+
+def test_preserve_masked_top_level_secrets_on_config_update():
+    incoming = {
+        "db_password": "********",
+        "bo_password": "********",
+        "automic_password": "changed",
+    }
+    existing = {
+        "db_password": "db-secret",
+        "bo_password": "bo-secret",
+        "automic_password": "automic-secret",
+    }
+
+    result = _preserve_masked_secrets(incoming, existing)
+
+    assert result["db_password"] == "db-secret"
+    assert result["bo_password"] == "bo-secret"
+    assert result["automic_password"] == "changed"
+
+
+def test_preserve_masked_named_connection_secrets_on_config_update():
+    incoming = {
+        "connections": {
+            "finance": {"db_password": "********"},
+            "hr": {"db_password": "new-secret"},
+        }
+    }
+    existing = {
+        "connections": {
+            "finance": {"db_password": "finance-secret"},
+            "hr": {"db_password": "old-hr-secret"},
+        }
+    }
+
+    result = _preserve_masked_secrets(incoming, existing)
+
+    assert result["connections"]["finance"]["db_password"] == "finance-secret"
+    assert result["connections"]["hr"]["db_password"] == "new-secret"

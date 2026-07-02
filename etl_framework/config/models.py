@@ -27,6 +27,8 @@ class EnvironmentConfig(BaseModel):
     bo_user: str = ""
     bo_password: str = ""
     bo_timeout: int = 60
+    bo_proxy_url: str = ""
+    bo_verify_ssl: bool = True
 
     @field_validator("db_port")
     @classmethod
