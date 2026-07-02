@@ -75,7 +75,11 @@ def test_build_case_api_reconciliation_passes_when_identical():
         case_fn = ex._build_case(job)
         result = case_fn()
 
+    # Proves the API path actually ran (not the simulated DB fallback, which
+    # never touches APIEndpointClient and would trivially also report PASSED).
+    assert MockClient.return_value.fetch_dataframe.call_count == 2
     assert result.status == TestStatus.PASSED
+    assert result.source_row_count == 2
 
 
 def test_build_case_api_reconciliation_not_used_without_live_connections():
