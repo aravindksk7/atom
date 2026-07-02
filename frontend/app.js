@@ -22,11 +22,27 @@ async function api(method, path, body) {
   if (resp.status === 204) return null;
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    const error = new Error(err.detail || resp.statusText);
+    const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
     error.status = resp.status;
     throw error;
   }
   return resp.json();
+}
+
+function apiErrorMessage(detail, fallback = 'Request failed') {
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(item => apiErrorMessage(item, '')).filter(Boolean).join('; ') || fallback;
+  }
+  if (typeof detail === 'object') {
+    if (detail.message) return String(detail.message);
+    if (detail.error) return String(detail.error);
+    if (detail.error_type && detail.field_name) return `${detail.field_name}: ${detail.error_type}`;
+    if (detail.errors) return apiErrorMessage(detail.errors, fallback);
+    try { return JSON.stringify(detail); } catch (_) { return fallback; }
+  }
+  return String(detail);
 }
 
 async function apiBlob(path) {
@@ -34,7 +50,8 @@ async function apiBlob(path) {
   const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
   const resp = await fetch(API + path, { headers });
   if (!resp.ok) {
-    const error = new Error(resp.statusText);
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
     error.status = resp.status;
     throw error;
   }

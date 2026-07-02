@@ -78,6 +78,16 @@ def test_test_bo_connection_404_config_raises(service, mock_config_repo):
     assert exc_info.value.status_code == 404
 
 
+def test_friendly_bo_error_includes_response_body():
+    from api.services.adapter_service import _friendly_error
+    from etl_framework.exceptions import BOAPIError
+
+    message = _friendly_error(BOAPIError("rpt-sales", 404, '{"error":"report not found"}'))
+
+    assert "SAP BO API error 404" in message
+    assert "report not found" in message
+
+
 # ---------------------------------------------------------------------------
 # list_bo_documents
 # ---------------------------------------------------------------------------

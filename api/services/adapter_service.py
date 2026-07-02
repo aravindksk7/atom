@@ -9,6 +9,7 @@ from requests import exceptions as requests_exc
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BODocOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig
+from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.sap_bo.client import BORestClient
 
@@ -38,6 +39,13 @@ def _legacy_friendly_error(exc: Exception) -> str:
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc)
     exc_type = type(exc).__name__
+    if isinstance(exc, ReportNotFoundError):
+        return str(exc)
+    if isinstance(exc, BOAPIError):
+        body = (exc.response_body or "").strip()
+        if body:
+            return f"SAP BO API error {exc.http_status}: {body}"
+        return str(exc)
     if isinstance(exc, requests_exc.ProxyError) or "ProxyError" in msg:
         return (
             "Cannot reach SAP BO through the configured proxy - verify BO proxy "

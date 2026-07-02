@@ -104,6 +104,46 @@ def test_bo_live_source_downloads_selected_doc_report():
     assert df.to_dict("records") == [{"id": 1, "value": "ok"}]
 
 
+def test_bo_compare_error_records_error_result_with_sapbo_body():
+    from api.schemas import BOCompareRequest, SourceConfig
+    from api.services.compare_service import CompareService
+    from etl_framework.exceptions import BOAPIError
+    from etl_framework.repository.repository import RunRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        repo = RunRepository(db)
+        repo.create_run("bo-error-run", "Mock A", "Mock B", run_type="bo_comparison")
+        service = CompareService(db, MagicMock())
+        service._load_bo_source = MagicMock(
+            side_effect=BOAPIError("rpt-missing", 404, '{"error":"report not found"}')
+        )
+        request = BOCompareRequest(
+            source_a=SourceConfig(source_type="live", config_id=1, doc_id="1001", report_id="rpt-missing"),
+            source_b=SourceConfig(source_type="live", config_id=1, doc_id="1001", report_id="rpt-sales"),
+            label_a="Mock A",
+            label_b="Mock B",
+        )
+
+        with pytest.raises(BOAPIError):
+            service.run_bo_comparison(request, "bo-error-run")
+
+        db.expire_all()
+        run = repo.get_run("bo-error-run")
+        assert run.status == "ERROR"
+        assert run.total_tests == 1
+        assert run.error == 1
+        assert len(run.results) == 1
+        assert run.results[0].status == "ERROR"
+        assert "report not found" in run.results[0].error_message
+
+
 def test_bo_compare_infers_employee_id_key_for_files():
     import pandas as pd
     from api.services.compare_service import CompareService
