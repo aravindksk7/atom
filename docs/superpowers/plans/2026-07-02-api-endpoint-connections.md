@@ -15,6 +15,7 @@
 - The moved `_FrameEngine` class is renamed to `FrameEngine` (no leading underscore) when it moves into its own shared module, since a leading underscore signals module-private and it's no longer private once two modules import it.
 - The job-modal fields for `api_reconciliation` (Section 5 of the spec) are plain text inputs, not dropdowns populated from "the selected config's `api_endpoints`" — there is no config-selection concept in the job modal today (jobs are config-agnostic; credentials come from whichever config is picked at Run-launch time). This matches how `bo_report`'s `bo_report_id`/`bo_page_id` fields already work as plain text, not config-scoped dropdowns.
 - The Compare tab has *two* independent source pickers that both use `SourceConfig` under the hood: the BO/recon tab (`boSourceAType`/`boSourceBType`, pill buttons) and the Column Stats tab (`colStatsSourceAType`/`colStatsSourceBType`, `<select>` dropdown). Both share the same `_buildBOSource()` payload builder, so one task (18) updates the builder and both tabs' markup gets `api` options (Tasks 18 and 19).
+- **Course correction after Task 1's code-quality review:** `pyproject.toml` sets `testpaths = ["tests"]` and CI runs `pytest tests/`, so tests co-located under `etl_framework/**/test_*.py` are invisible to CI even though they pass when invoked by direct file path. Task 1's test file was moved from `tests/unit/test_resolve_api_endpoint.py` to `tests/unit/test_resolve_api_endpoint.py` to match the existing `tests/unit/test_resolve_connection.py` convention for that same module. **Tasks 3-6 below have been updated accordingly**: the `APIEndpointClient` tests live in `tests/unit/test_rest_api_client.py`, not `tests/unit/test_rest_api_client.py`.
 
 ---
 
@@ -23,11 +24,11 @@
 | File | Responsibility |
 |---|---|
 | `etl_framework/config/models.py` | Add `ApiEndpointEntry`, `resolve_api_endpoint()` |
-| `etl_framework/config/test_models.py` (new) | Tests for the above |
+| `tests/unit/test_resolve_api_endpoint.py` (new) | Tests for the above |
 | `etl_framework/exceptions.py` | Add `APIRequestError` |
 | `etl_framework/rest_api/__init__.py` (new) | Package init (empty) |
 | `etl_framework/rest_api/client.py` (new) | `APIEndpointClient` — auth, fetch, pagination, JSON/CSV parsing |
-| `etl_framework/rest_api/test_client.py` (new) | Tests for `APIEndpointClient` |
+| `tests/unit/test_rest_api_client.py` (new) | Tests for `APIEndpointClient` |
 | `api/schemas.py` | Extend `SourceConfig`, `JobDefinition.job_type`; add `RestApiTestRequest`, `RestApiPreviewRequest` |
 | `api/routes/configs.py` | Extend `_SENSITIVE_KEYS`, `_mask`, `_preserve_masked_secrets`, `/validate` |
 | `api/services/adapter_service.py` | Add `test_api_endpoint`, `preview_api_endpoint` |
@@ -46,11 +47,11 @@
 
 **Files:**
 - Modify: `etl_framework/config/models.py`
-- Test: `etl_framework/config/test_models.py` (new)
+- Test: `tests/unit/test_resolve_api_endpoint.py` (new)
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `etl_framework/config/test_models.py`:
+Create `tests/unit/test_resolve_api_endpoint.py`:
 
 ```python
 import pytest
@@ -108,7 +109,7 @@ def test_resolve_api_endpoint_raises_when_no_api_endpoints_key():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest etl_framework/config/test_models.py -v`
+Run: `python -m pytest tests/unit/test_resolve_api_endpoint.py -v`
 Expected: FAIL with `ImportError: cannot import name 'ApiEndpointEntry'`
 
 - [ ] **Step 3: Implement `ApiEndpointEntry` and `resolve_api_endpoint`**
@@ -192,13 +193,13 @@ def resolve_api_endpoint(config_json: dict, name: str) -> ApiEndpointEntry:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest etl_framework/config/test_models.py -v`
+Run: `python -m pytest tests/unit/test_resolve_api_endpoint.py -v`
 Expected: 7 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add etl_framework/config/models.py etl_framework/config/test_models.py
+git add etl_framework/config/models.py tests/unit/test_resolve_api_endpoint.py
 git commit -m "feat: add ApiEndpointEntry config model and resolve_api_endpoint helper"
 ```
 
@@ -244,7 +245,7 @@ git commit -m "feat: add APIRequestError exception"
 **Files:**
 - Create: `etl_framework/rest_api/__init__.py`
 - Create: `etl_framework/rest_api/client.py`
-- Test: `etl_framework/rest_api/test_client.py` (new)
+- Test: `tests/unit/test_rest_api_client.py` (new)
 
 - [ ] **Step 1: Create the empty package init**
 
@@ -252,7 +253,7 @@ Create `etl_framework/rest_api/__init__.py` with empty content.
 
 - [ ] **Step 2: Write the failing tests**
 
-Create `etl_framework/rest_api/test_client.py`:
+Create `tests/unit/test_rest_api_client.py`:
 
 ```python
 from __future__ import annotations
@@ -369,7 +370,7 @@ def test_fetch_dataframe_no_auth_sends_no_auth_tuple():
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'etl_framework.rest_api.client'`
 
 - [ ] **Step 4: Implement the client (auth + single-page JSON fetch)**
@@ -475,13 +476,13 @@ class APIEndpointClient:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -v`
 Expected: 7 passed
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add etl_framework/rest_api/__init__.py etl_framework/rest_api/client.py etl_framework/rest_api/test_client.py
+git add etl_framework/rest_api/__init__.py etl_framework/rest_api/client.py tests/unit/test_rest_api_client.py
 git commit -m "feat: add APIEndpointClient with auth handling and single-page JSON fetch"
 ```
 
@@ -490,13 +491,13 @@ git commit -m "feat: add APIEndpointClient with auth handling and single-page JS
 ## Task 4: REST API client — CSV parsing + `json_root_path` edge cases
 
 **Files:**
-- Modify: `etl_framework/rest_api/test_client.py`
+- Modify: `tests/unit/test_rest_api_client.py`
 
 (No production code changes — Task 3's implementation already handles these cases. This task locks the behavior in with tests.)
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `etl_framework/rest_api/test_client.py`:
+Append to `tests/unit/test_rest_api_client.py`:
 
 ```python
 def test_fetch_dataframe_parses_csv():
@@ -542,13 +543,13 @@ def test_fetch_dataframe_raises_on_unparsable_json():
 
 - [ ] **Step 2: Run tests to verify they pass**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -v`
 Expected: 12 passed (all Task 3 + Task 4 tests — this confirms Task 3's implementation already handles these edge cases correctly)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add etl_framework/rest_api/test_client.py
+git add tests/unit/test_rest_api_client.py
 git commit -m "test: cover CSV parsing and json_root_path edge cases in APIEndpointClient"
 ```
 
@@ -558,11 +559,11 @@ git commit -m "test: cover CSV parsing and json_root_path edge cases in APIEndpo
 
 **Files:**
 - Modify: `etl_framework/rest_api/client.py`
-- Modify: `etl_framework/rest_api/test_client.py`
+- Modify: `tests/unit/test_rest_api_client.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `etl_framework/rest_api/test_client.py`:
+Append to `tests/unit/test_rest_api_client.py`:
 
 ```python
 def test_fetch_dataframe_page_pagination_stops_on_short_page():
@@ -604,7 +605,7 @@ def test_fetch_dataframe_page_pagination_stops_at_max_pages():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -k page_pagination -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -k page_pagination -v`
 Expected: FAIL — `fetch_dataframe()` currently only requests one page, so `test_fetch_dataframe_page_pagination_stops_on_short_page` gets only `[{"id": 1}, {"id": 2}]` (2 rows, not 3), and the params tests never get a `page`/`limit` param sent.
 
 - [ ] **Step 3: Implement pagination in `fetch_dataframe`**
@@ -646,13 +647,13 @@ In `etl_framework/rest_api/client.py`, replace the `fetch_dataframe` method:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -v`
 Expected: 15 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add etl_framework/rest_api/client.py etl_framework/rest_api/test_client.py
+git add etl_framework/rest_api/client.py tests/unit/test_rest_api_client.py
 git commit -m "feat: add page/limit pagination to APIEndpointClient"
 ```
 
@@ -662,11 +663,11 @@ git commit -m "feat: add page/limit pagination to APIEndpointClient"
 
 **Files:**
 - Modify: `etl_framework/rest_api/client.py`
-- Modify: `etl_framework/rest_api/test_client.py`
+- Modify: `tests/unit/test_rest_api_client.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `etl_framework/rest_api/test_client.py`:
+Append to `tests/unit/test_rest_api_client.py`:
 
 ```python
 def test_fetch_dataframe_cursor_pagination_follows_next_cursor():
@@ -742,7 +743,7 @@ def test_fetch_dataframe_max_pages_override_wins_over_entry_default():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -k cursor -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -k cursor -v`
 Expected: FAIL — cursor pagination currently `break`s after the first page unconditionally.
 
 - [ ] **Step 3: Implement cursor pagination**
@@ -784,13 +785,13 @@ Then add the `_extract_cursor` helper method (below `_walk_json_path`):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest etl_framework/rest_api/test_client.py -v`
+Run: `python -m pytest tests/unit/test_rest_api_client.py -v`
 Expected: 20 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add etl_framework/rest_api/client.py etl_framework/rest_api/test_client.py
+git add etl_framework/rest_api/client.py tests/unit/test_rest_api_client.py
 git commit -m "feat: add cursor pagination and max_pages override to APIEndpointClient"
 ```
 
