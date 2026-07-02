@@ -186,3 +186,74 @@ def test_fetch_dataframe_page_pagination_stops_at_max_pages():
     with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}, {"id": 2}])):
         df = client.fetch_dataframe()
     assert len(df) == 6  # 3 pages * 2 rows
+
+
+def test_fetch_dataframe_cursor_pagination_follows_next_cursor():
+    entry = _entry(json_root_path="items", pagination_type="cursor",
+                    pagination_cursor_path="next_cursor", pagination_cursor_param="cursor",
+                    pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    page1 = _fake_response(json_data={"items": [{"id": 1}], "next_cursor": "abc"})
+    page2 = _fake_response(json_data={"items": [{"id": 2}], "next_cursor": None})
+    with patch.object(client._session, "request", side_effect=[page1, page2]):
+        df = client.fetch_dataframe()
+    assert list(df["id"]) == [1, 2]
+
+
+def test_fetch_dataframe_cursor_pagination_sends_cursor_as_query_param():
+    entry = _entry(json_root_path="items", pagination_type="cursor",
+                    pagination_cursor_path="next_cursor", pagination_cursor_param="cursor",
+                    pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    page1 = _fake_response(json_data={"items": [{"id": 1}], "next_cursor": "abc"})
+    page2 = _fake_response(json_data={"items": [{"id": 2}], "next_cursor": None})
+    captured_params = []
+
+    def fake_request(method, url, **kwargs):
+        captured_params.append(dict(kwargs["params"]))
+        return [page1, page2][len(captured_params) - 1]
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        client.fetch_dataframe()
+    assert "cursor" not in captured_params[0]
+    assert captured_params[1]["cursor"] == "abc"
+
+
+def test_fetch_dataframe_cursor_pagination_follows_full_url_cursor():
+    entry = _entry(json_root_path="items", pagination_type="cursor",
+                    pagination_cursor_path="next_url", pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    page1 = _fake_response(json_data={"items": [{"id": 1}], "next_url": "https://api.example.com/v1/orders?page=2"})
+    page2 = _fake_response(json_data={"items": [{"id": 2}], "next_url": None})
+    captured_urls = []
+
+    def fake_request(method, url, **kwargs):
+        captured_urls.append(url)
+        return [page1, page2][len(captured_urls) - 1]
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        client.fetch_dataframe()
+    assert captured_urls == [
+        "https://api.example.com/v1/orders",
+        "https://api.example.com/v1/orders?page=2",
+    ]
+
+
+def test_fetch_dataframe_cursor_pagination_respects_max_pages_cap():
+    entry = _entry(json_root_path="items", pagination_type="cursor",
+                    pagination_cursor_path="next_cursor", pagination_cursor_param="cursor",
+                    pagination_max_pages=2)
+    client = APIEndpointClient(entry)
+    # Every page returns a next_cursor, so without the cap this would loop forever
+    with patch.object(client._session, "request",
+                       return_value=_fake_response(json_data={"items": [{"id": 1}], "next_cursor": "more"})):
+        df = client.fetch_dataframe()
+    assert len(df) == 2
+
+
+def test_fetch_dataframe_max_pages_override_wins_over_entry_default():
+    entry = _entry(pagination_type="page", pagination_page_size=1, pagination_max_pages=50)
+    client = APIEndpointClient(entry)
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+        df = client.fetch_dataframe(max_pages=1)
+    assert len(df) == 1

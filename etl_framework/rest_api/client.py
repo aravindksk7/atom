@@ -42,7 +42,15 @@ class APIEndpointClient:
                 page_number += 1
                 continue
             if entry.pagination_type == "cursor":
-                break  # cursor pagination implemented in Task 6
+                cursor_value = self._extract_cursor(response)
+                if not cursor_value:
+                    break
+                from urllib.parse import urlparse
+                if urlparse(cursor_value).scheme:
+                    url = cursor_value
+                    query_params = {}
+                else:
+                    query_params[entry.pagination_cursor_param] = cursor_value
 
         if not frames:
             return pd.DataFrame()
@@ -104,6 +112,22 @@ class APIEndpointClient:
                 message=f"json_root_path '{entry.json_root_path}' did not resolve to a list of records",
             )
         return pd.json_normalize(records) if records else pd.DataFrame()
+
+    def _extract_cursor(self, response: requests.Response) -> str | None:
+        entry = self._entry
+        if not entry.pagination_cursor_path or entry.response_format == "csv":
+            return None
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        current = payload
+        for part in entry.pagination_cursor_path.split("."):
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return str(current) if current else None
 
     @staticmethod
     def _walk_json_path(payload, path: str, url: str):
