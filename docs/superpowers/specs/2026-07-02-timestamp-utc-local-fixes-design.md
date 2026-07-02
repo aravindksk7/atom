@@ -30,3 +30,7 @@ Three places break that convention:
 - No changes to `frontend/app.js` — its UTC→browser-local conversion is already correct.
 - No changes to any other API route, DB column, or `datetime.now(timezone.utc)` call site — they already follow the correct convention.
 - No DB migration — no column types change.
+
+## Known limitation
+
+No backfill for pre-existing data: JSON log lines already on disk before this fix keep the old, mislabeled `Z` suffix, and any `executed_at`/`checked_at` values already stored from the two naive-datetime call sites remain whatever they were (potentially off by the server's UTC offset). Neither is reconstructible after the fact. New data written after this fix is correct.
