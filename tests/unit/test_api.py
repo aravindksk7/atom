@@ -869,3 +869,43 @@ def test_update_config_preserves_masked_api_endpoint_secret(client):
     # base_url change went through, but the mask did NOT clobber the real secret
     assert detail["config_data"]["api_endpoints"]["orders"]["base_url"] == "https://api.example.com/orders-v2"
     assert detail["config_data"]["api_endpoints"]["orders"]["bearer_token"] == "********"
+
+
+# --- api_endpoints validation ---
+
+def test_validate_config_accepts_valid_api_endpoint(client):
+    resp = client.post(
+        "/api/configs/validate",
+        json={
+            "env_name": "dev",
+            "config_data": {
+                "db_host": "localhost",
+                "db_password": "secret",
+                "api_endpoints": {
+                    "orders": {"base_url": "https://api.example.com/orders"},
+                },
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_validate_config_rejects_api_endpoint_missing_scheme(client):
+    resp = client.post(
+        "/api/configs/validate",
+        json={
+            "env_name": "dev",
+            "config_data": {
+                "db_host": "localhost",
+                "db_password": "secret",
+                "api_endpoints": {
+                    "orders": {"base_url": "api.example.com/orders"},
+                },
+            },
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert any("api_endpoints.orders" in err["field_name"] for err in data["errors"])

@@ -17,7 +17,7 @@ from api.schemas import (
 )
 from api.dependencies import get_session
 from etl_framework.config.loader import ConfigLoader
-from etl_framework.config.models import EnvironmentConfig, resolve_connection
+from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, resolve_connection
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
 from api.services.audit_service import AuditService
@@ -157,6 +157,19 @@ def validate_config(body: ConfigValidationRequest):
                 field_name=f"connections.{conn_name}",
                 details={},
             ))
+
+    for ep_name, ep_data in (body.config_data.get("api_endpoints") or {}).items():
+        try:
+            ApiEndpointEntry.model_validate({"name": ep_name, **(ep_data or {})})
+        except ValidationError as exc:
+            for err in exc.errors():
+                connection_errors.append(FrameworkErrorOut(
+                    error_type="validation_error",
+                    message=err["msg"],
+                    field_name=f"api_endpoints.{ep_name}." + ".".join(str(p) for p in err["loc"]),
+                    details={"input": err.get("input")},
+                ))
+
     if connection_errors:
         return ConfigValidationOut(ok=False, env_name=body.env_name, errors=connection_errors)
 
