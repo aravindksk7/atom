@@ -102,7 +102,10 @@ class AdapterService:
 
     def preview_api_endpoint(self, config_id: int, endpoint_name: str, limit: int) -> dict:
         import json
-        entry = self._get_api_endpoint(config_id, endpoint_name)
+        try:
+            entry = self._get_api_endpoint(config_id, endpoint_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
             df = APIEndpointClient(entry).fetch_dataframe(max_pages=1)
         except Exception as exc:

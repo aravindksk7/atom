@@ -1008,3 +1008,15 @@ def test_rest_api_preview_endpoint_returns_sample_rows(client, monkeypatch):
     data = resp.json()
     assert data["columns"] == ["id", "amount"]
     assert len(data["rows"]) == 2
+
+
+def test_rest_api_preview_endpoint_missing_endpoint_returns_404(client):
+    cfg = client.post(
+        "/api/configs",
+        json={"name": "api-adapter-cfg4", "env_name": "dev", "config_data": {"api_endpoints": {}}},
+    ).json()
+    resp = client.post(
+        "/api/adapters/rest-api/preview",
+        json={"config_id": cfg["id"], "endpoint_name": "missing", "limit": 10},
+    )
+    assert resp.status_code == 404
