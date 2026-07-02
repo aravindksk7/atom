@@ -312,7 +312,7 @@ class JobDefinition(BaseModel):
     tags: list[str] = Field(default_factory=list)
     job_type: Literal[
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
-        "freshness", "cross_job_assertion", "schema_snapshot", "profile",
+        "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -330,6 +330,13 @@ class JobDefinition(BaseModel):
         if self.job_type == "bo_report":
             if not self.params.get("report_id"):
                 raise ValueError("bo_report jobs require 'report_id' in params")
+        elif self.job_type == "api_reconciliation":
+            if not self.params.get("source_api_endpoint") or not self.params.get("target_api_endpoint"):
+                raise ValueError(
+                    "api_reconciliation jobs require 'source_api_endpoint' and 'target_api_endpoint' in params"
+                )
+            if not self.key_columns:
+                raise ValueError("api_reconciliation jobs require key_columns")
         elif self.job_type == "automic_job":
             if not self.params.get("job_name") and not self.params.get("run_id"):
                 raise ValueError("automic_job jobs require 'job_name' or 'run_id' in params")

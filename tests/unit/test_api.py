@@ -769,3 +769,48 @@ def test_source_config_api_accepts_config_id_and_endpoint_name():
     src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders")
     assert src.source_type == "api"
     assert src.api_endpoint_name == "orders"
+
+
+# --- api_reconciliation job type ---
+
+def test_create_api_reconciliation_job_requires_endpoint_params(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_api_job",
+            "job_type": "api_reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "params": {},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_api_reconciliation_job_requires_key_columns(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_api_job2",
+            "job_type": "api_reconciliation",
+            "query": "",
+            "key_columns": [],
+            "params": {"source_api_endpoint": "orders_a", "target_api_endpoint": "orders_b"},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_api_reconciliation_job_succeeds(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "good_api_job",
+            "job_type": "api_reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "params": {"source_api_endpoint": "orders_a", "target_api_endpoint": "orders_b"},
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["job_type"] == "api_reconciliation"
