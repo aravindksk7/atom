@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator, ConfigDict
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class EnvironmentConfig(BaseModel):
@@ -120,3 +122,59 @@ def resolve_connection(
     else:
         resolved_name = env_name
     return EnvironmentConfig(name=resolved_name, **base)
+
+
+class ApiEndpointEntry(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = ""
+    base_url: str
+    method: Literal["GET", "POST"] = "GET"
+
+    auth_type: Literal["none", "api_key", "bearer", "basic"] = "none"
+    api_key_header: str = "X-API-Key"
+    api_key: str = ""
+    bearer_token: str = ""
+    basic_username: str = ""
+    basic_password: str = ""
+
+    headers: dict[str, str] = Field(default_factory=dict)
+    query_params: dict[str, str] = Field(default_factory=dict)
+    body: dict[str, Any] | None = None
+
+    timeout: int = 30
+    verify_ssl: bool = True
+
+    response_format: Literal["json", "csv"] = "json"
+    json_root_path: str = ""
+
+    pagination_type: Literal["none", "cursor", "page"] = "none"
+    pagination_cursor_path: str = ""
+    pagination_cursor_param: str = "cursor"
+    pagination_page_param: str = "page"
+    pagination_size_param: str = "limit"
+    pagination_page_size: int = 100
+    pagination_max_pages: int = Field(default=50, ge=1, le=1000)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, v: str) -> str:
+        from urllib.parse import urlparse
+        if not urlparse(v).scheme:
+            raise ValueError("base_url must include http:// or https://")
+        return v
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"must be > 0, got {v}")
+        return v
+
+
+def resolve_api_endpoint(config_json: dict, name: str) -> ApiEndpointEntry:
+    """Return the named API endpoint entry from a config's JSON blob."""
+    endpoints = config_json.get("api_endpoints") or {}
+    if name not in endpoints:
+        raise ValueError(f"api_endpoints entry '{name}' not found in config")
+    return ApiEndpointEntry(name=name, **endpoints[name])
