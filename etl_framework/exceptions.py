@@ -90,3 +90,12 @@ class RepositoryError(ETLFrameworkError):
         super().__init__(
             f"Repository error [{backend}] during '{operation}': {original_error}"
         )
+
+
+class APIRequestError(ETLFrameworkError):
+    def __init__(self, url: str, http_status: int | None, message: str) -> None:
+        self.url = url
+        self.http_status = http_status
+        self.message = message
+        status_part = f" (status {http_status})" if http_status is not None else ""
+        super().__init__(f"API request to '{url}' failed{status_part}: {message}")
