@@ -8,9 +8,10 @@ from requests import exceptions as requests_exc
 
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BODocOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
-from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
+from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
 
 
@@ -74,6 +75,44 @@ class AdapterService:
         if cfg is None:
             raise HTTPException(status_code=404, detail="Config not found")
         return EnvironmentConfig(name=cfg.env_name, **cfg.config_json)
+
+    def _get_api_endpoint(self, config_id: int, endpoint_name: str):
+        cfg = self._config_repo.get(config_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="Config not found")
+        return resolve_api_endpoint(cfg.config_json or {}, endpoint_name)
+
+    # ------------------------------------------------------------------
+    # REST API endpoints
+    # ------------------------------------------------------------------
+
+    def test_api_endpoint(self, config_id: int, endpoint_name: str) -> AdapterTestOut:
+        t0 = time.monotonic()
+        try:
+            entry = self._get_api_endpoint(config_id, endpoint_name)
+            APIEndpointClient(entry).fetch_dataframe(max_pages=1)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            return AdapterTestOut(ok=False, message=str(exc), latency_ms=0)
+        except Exception as exc:
+            return AdapterTestOut(ok=False, message=_friendly_error(exc), latency_ms=0)
+
+    def preview_api_endpoint(self, config_id: int, endpoint_name: str, limit: int) -> dict:
+        import json
+        try:
+            entry = self._get_api_endpoint(config_id, endpoint_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            df = APIEndpointClient(entry).fetch_dataframe(max_pages=1)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+        df = df.head(max(1, min(200, limit)))
+        rows = json.loads(df.to_json(orient="values", date_format="iso"))
+        return {"columns": list(df.columns), "rows": rows}
 
     # ------------------------------------------------------------------
     # SAP BO

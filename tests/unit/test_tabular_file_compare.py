@@ -89,3 +89,50 @@ def test_mixed_sources_raise_422(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             svc.run_recon_file_compare(req, "run-mixed")
     assert exc.value.status_code == 422
+
+
+def test_load_bo_source_dispatches_to_api_source():
+    from api.schemas import SourceConfig
+
+    svc = _svc()
+    svc._config_repo = MagicMock()
+    svc._config_repo.get.return_value = SimpleNamespace(
+        config_json={"api_endpoints": {"orders": {"base_url": "https://api.example.com/orders"}}}
+    )
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders")
+    fake_df = pd.DataFrame({"id": [1, 2]})
+
+    with patch("etl_framework.rest_api.client.APIEndpointClient") as MockClient:
+        MockClient.return_value.fetch_dataframe.return_value = fake_df
+        result = svc._load_bo_source(src, None, None)
+
+    assert result is fake_df
+    MockClient.return_value.fetch_dataframe.assert_called_once_with()
+
+
+def test_load_api_source_404_when_config_missing():
+    from fastapi import HTTPException
+    from api.schemas import SourceConfig
+
+    svc = _svc()
+    svc._config_repo = MagicMock()
+    svc._config_repo.get.return_value = None
+    src = SourceConfig(source_type="api", config_id=999, api_endpoint_name="orders")
+
+    with pytest.raises(HTTPException) as exc:
+        svc._load_bo_source(src, None, None)
+    assert exc.value.status_code == 404
+
+
+def test_load_api_source_404_when_endpoint_missing():
+    from fastapi import HTTPException
+    from api.schemas import SourceConfig
+
+    svc = _svc()
+    svc._config_repo = MagicMock()
+    svc._config_repo.get.return_value = SimpleNamespace(config_json={"api_endpoints": {}})
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="missing")
+
+    with pytest.raises(HTTPException) as exc:
+        svc._load_bo_source(src, None, None)
+    assert exc.value.status_code == 404

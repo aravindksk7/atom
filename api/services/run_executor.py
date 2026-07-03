@@ -13,6 +13,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
+from api.services.frame_engine import FrameEngine
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.db.engine import DBEngine
 from etl_framework.automic.client import AutomicClient
@@ -400,6 +401,8 @@ class RunExecutor:
             return self._build_case_bo_report(job)
         if job.job_type == "automic_job" and self._settings.use_live_connections:
             return self._build_case_automic(job)
+        if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
+            return self._build_case_api_reconciliation(job)
 
         def run_job() -> ReconciliationResult:
             source_engine, target_engine = self._build_engines(job)
@@ -914,6 +917,31 @@ class RunExecutor:
                 executed_at=datetime.now(timezone.utc),
                 duration_seconds=0.0,
             )
+        return run_job
+
+    def _build_case_api_reconciliation(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            from etl_framework.config.models import resolve_api_endpoint
+            from etl_framework.rest_api.client import APIEndpointClient
+
+            api_endpoints = self._config_snapshot.get("api_endpoints") or {}
+            endpoints_snapshot = {"api_endpoints": api_endpoints}
+            src_entry = resolve_api_endpoint(endpoints_snapshot, job.params["source_api_endpoint"])
+            tgt_entry = resolve_api_endpoint(endpoints_snapshot, job.params["target_api_endpoint"])
+
+            df_a = APIEndpointClient(src_entry).fetch_dataframe()
+            df_b = APIEndpointClient(tgt_entry).fetch_dataframe()
+
+            reconciler = ReconciliationEngine(
+                source_engine=FrameEngine(df_a, self._source_env),
+                target_engine=FrameEngine(df_b, self._target_env),
+                key_columns=job.key_columns,
+                exclude_columns=job.exclude_columns,
+                float_tolerance=self._settings.float_tolerance,
+                mismatch_row_limit=self._settings.mismatch_row_limit,
+                backend=self._build_backend(job),
+            )
+            return reconciler.reconcile(query="__api_source__", query_name=job.name)
         return run_job
 
     def _build_case_dbt(self, job: JobDefinition):

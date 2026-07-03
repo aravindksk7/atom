@@ -312,7 +312,7 @@ class JobDefinition(BaseModel):
     tags: list[str] = Field(default_factory=list)
     job_type: Literal[
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
-        "freshness", "cross_job_assertion", "schema_snapshot", "profile",
+        "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -330,6 +330,13 @@ class JobDefinition(BaseModel):
         if self.job_type == "bo_report":
             if not self.params.get("report_id"):
                 raise ValueError("bo_report jobs require 'report_id' in params")
+        elif self.job_type == "api_reconciliation":
+            if not self.params.get("source_api_endpoint") or not self.params.get("target_api_endpoint"):
+                raise ValueError(
+                    "api_reconciliation jobs require 'source_api_endpoint' and 'target_api_endpoint' in params"
+                )
+            if not self.key_columns:
+                raise ValueError("api_reconciliation jobs require key_columns")
         elif self.job_type == "automic_job":
             if not self.params.get("job_name") and not self.params.get("run_id"):
                 raise ValueError("automic_job jobs require 'job_name' or 'run_id' in params")
@@ -398,6 +405,17 @@ class BOTestRequest(BaseModel):
     config_id: int
 
 
+class RestApiTestRequest(BaseModel):
+    config_id: int
+    endpoint_name: str
+
+
+class RestApiPreviewRequest(BaseModel):
+    config_id: int
+    endpoint_name: str
+    limit: int = 50
+
+
 class AutomicLookupRequest(BaseModel):
     config_id: int
     identifier: str
@@ -464,7 +482,7 @@ class RunCompareOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SourceConfig(BaseModel):
-    source_type: Literal["live", "path", "upload"]
+    source_type: Literal["live", "path", "upload", "api"]
     config_id: int | None = None
     doc_id: str | None = None
     report_id: str | None = None
@@ -472,6 +490,7 @@ class SourceConfig(BaseModel):
     file_path: str | None = None
     file_content_b64: str | None = None
     file_name: str | None = None
+    api_endpoint_name: str | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":
@@ -481,6 +500,8 @@ class SourceConfig(BaseModel):
             raise ValueError("file_path required for path source")
         if self.source_type == "upload" and not self.file_content_b64:
             raise ValueError("file_content_b64 required for upload source")
+        if self.source_type == "api" and (self.config_id is None or not self.api_endpoint_name):
+            raise ValueError("config_id and api_endpoint_name required for api source")
         return self
 
 

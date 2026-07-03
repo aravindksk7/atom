@@ -15,6 +15,7 @@ from api.schemas import (
     AdvancedCompareOptions,
 )
 from api.services.file_source import read_tabular
+from api.services.frame_engine import FrameEngine
 from etl_framework.reconciliation.chunker import build_chunk_query
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.models import TestResult
@@ -63,18 +64,6 @@ _KEY_CANDIDATES = (
     "account id",
     "account_id",
 )
-
-
-class _FrameEngine:
-    """Wrap a pre-loaded DataFrame so ReconciliationEngine can consume it."""
-
-    def __init__(self, df, env_name: str):
-        import types
-        self._df = df
-        self._env = types.SimpleNamespace(name=env_name)
-
-    def execute_query(self, query: str, params=None):
-        return self._df
 
 
 def _build_engine(
@@ -162,8 +151,8 @@ class CompareService:
                     key_columns = ["__row__"]
             self._validate_key_columns(df_a, df_b, key_columns)
 
-            engine_a = _FrameEngine(df_a, req.label_a)
-            engine_b = _FrameEngine(df_b, req.label_b)
+            engine_a = FrameEngine(df_a, req.label_a)
+            engine_b = FrameEngine(df_b, req.label_b)
             reconciler = _build_engine(
                 engine_a, engine_b,
                 key_columns=key_columns,
@@ -239,11 +228,25 @@ class CompareService:
                 )
             finally:
                 client.logout()
+        if src.source_type == "api":
+            return self._load_api_source(src)
         return read_tabular(
             path=src.file_path,
             content_b64=src.file_content_b64,
             file_name=src.file_name,
         )
+
+    def _load_api_source(self, src) -> pd.DataFrame:
+        cfg = self._config_repo.get(src.config_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="Config not found")
+        from etl_framework.config.models import resolve_api_endpoint
+        from etl_framework.rest_api.client import APIEndpointClient
+        try:
+            entry = resolve_api_endpoint(cfg.config_json or {}, src.api_endpoint_name or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return APIEndpointClient(entry).fetch_dataframe()
 
     @staticmethod
     def _infer_key_columns(df_a, df_b) -> list[str]:
@@ -294,8 +297,8 @@ class CompareService:
                 df_b.insert(0, "__row__", range(1, len(df_b) + 1))
                 key_columns = ["__row__"]
         self._validate_key_columns(df_a, df_b, key_columns)
-        engine_a = _FrameEngine(df_a, req.label_a)
-        engine_b = _FrameEngine(df_b, req.label_b)
+        engine_a = FrameEngine(df_a, req.label_a)
+        engine_b = FrameEngine(df_b, req.label_b)
         reconciler = _build_engine(
             engine_a, engine_b,
             key_columns=key_columns,
