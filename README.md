@@ -67,6 +67,8 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 - Launch dual-environment reconciliation runs and compare the paired results.
 - Compare a stored reconciliation run or HTML report against a production HTML report.
 - Define **multiple named DB connections within a single saved config** (e.g. `hr_db`, `finance_db` sharing one environment's BO/Automic settings) and pick which one a run or SQL compare uses at launch time.
+- Define **named REST API endpoints within a saved config** (auth: none/API key/bearer/basic; JSON with dot-path record extraction or CSV; cursor or page/limit pagination) and use them as a job source/target or as either side of a Compare-tab comparison — see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources).
+- **`api_reconciliation`** job type — reconcile two REST API endpoints against each other the same way `reconciliation` reconciles two SQL queries, with the same key columns, DQ rules, and pass-condition support.
 - Browse generated HTML reports, metrics dashboards, and searchable logs in a dark-themed UI.
 - Use SAP BO and Automic adapters from the UI and API.
 - Use the REST API directly with OpenAPI documentation at `/docs`.
@@ -397,6 +399,63 @@ A single saved config can define more than one database connection under a `conn
 - **SQL Direct Compare** (`POST /api/compare/sql`) — `connection_a` / `connection_b` select a named connection from `config_id_a` / `config_id_b` respectively.
 - **Web UI** — the Config modal has a **Named Connections** section for adding, editing, and removing connections on a saved config. The Launch tab's Run Settings panel and the Compare tab's SQL Direct Compare cards show a connection picker dropdown whenever the selected config has named connections.
 - Secrets in `connections` entries are masked the same way as top-level config fields when a config is read back via the API or UI (`db_password`, etc. are never returned in plaintext after creation).
+
+### API Endpoints (REST API Data Sources)
+
+A saved config can also define named REST API endpoints under an `api_endpoints` map, so a config with DB/BO/Automic settings can also point at one or more HTTP APIs — e.g. an internal microservice or partner API you want to reconcile against a database table.
+
+```json
+{
+  "name": "prod-main",
+  "env_name": "prod",
+  "config_data": {
+    "api_endpoints": {
+      "orders_api": {
+        "base_url": "https://api.example.com/v1/orders",
+        "method": "GET",
+        "auth_type": "bearer",
+        "bearer_token": "secret-token",
+        "headers": { "Accept": "application/json" },
+        "response_format": "json",
+        "json_root_path": "data.items",
+        "pagination_type": "cursor",
+        "pagination_cursor_path": "meta.next_cursor",
+        "pagination_cursor_param": "cursor",
+        "pagination_max_pages": 50
+      }
+    }
+  }
+}
+```
+
+**Fields per endpoint:**
+
+| Field | Default | Description |
+|---|---|---|
+| `base_url` | — (required) | Full URL, must include `http://` or `https://` |
+| `method` | `GET` | `GET` or `POST` |
+| `auth_type` | `none` | `none`, `api_key`, `bearer`, or `basic` |
+| `api_key_header` / `api_key` | `X-API-Key` / `""` | Header name and value when `auth_type = api_key` |
+| `bearer_token` | `""` | Sent as `Authorization: Bearer <token>` when `auth_type = bearer` |
+| `basic_username` / `basic_password` | `""` / `""` | HTTP Basic credentials when `auth_type = basic` |
+| `headers` / `query_params` | `{}` / `{}` | Extra headers / query string parameters sent on every request |
+| `body` | `null` | JSON body sent when `method = POST` |
+| `timeout` | `30` | Per-request timeout in seconds |
+| `verify_ssl` | `true` | Set `false` to skip TLS certificate verification (trusted internal endpoints only) |
+| `response_format` | `json` | `json` or `csv` |
+| `json_root_path` | `""` | Dot-path to the array of records inside a JSON response (e.g. `data.items`); empty means the response body itself is the array |
+| `pagination_type` | `none` | `none`, `cursor`, or `page` |
+| `pagination_cursor_path` / `pagination_cursor_param` | `""` / `cursor` | Dot-path to the next-page cursor/URL in the response, and the query param used to send it back (ignored if the cursor value is itself a full URL — it's followed directly) |
+| `pagination_page_param` / `pagination_size_param` / `pagination_page_size` | `page` / `limit` / `100` | Query param names and page size for page/limit-style pagination |
+| `pagination_max_pages` | `50` | Safety cap on the number of pages fetched (1–1000) |
+
+**Where it's used:**
+
+- **Compare tab** — both **BO Report Compare** and **Column Stats Compare** accept `source_type: "api"` for either side, referencing `config_id` + `api_endpoint_name`. See [Compare Tab](#compare-tab).
+- **Jobs** — the `api_reconciliation` job type reconciles `source_api_endpoint` against `target_api_endpoint`. See [Job Types Reference](#job-types-reference).
+- **Adapters tab / API** — `POST /api/adapters/rest-api/test` checks connectivity (one page only); `POST /api/adapters/rest-api/preview` fetches a sample of rows to confirm parsing before wiring it into a job or comparison.
+- **Web UI** — the Config modal has an **API Endpoints** section (parallel to Named Connections) for adding, editing, testing, and previewing endpoints on a saved config.
+- Secrets (`api_key`, `bearer_token`, `basic_password`) are masked the same way as other config secrets when read back via the API or UI.
 
 ### YAML Import
 
@@ -861,7 +920,7 @@ When triggering a run via the API you can specify `job_sequence` as a list of st
 
 ### Job Types Reference
 
-The framework supports eight job types. Each type has its own required parameters and behaviour. Choose the job type that matches what you want to test or monitor.
+The framework supports nine job types. Each type has its own required parameters and behaviour. Choose the job type that matches what you want to test or monitor.
 
 #### `reconciliation` (default)
 
@@ -1113,6 +1172,42 @@ Asserts that a numeric metric from one job's latest result matches another job's
 
 ---
 
+#### `api_reconciliation`
+
+Reconciles two REST API endpoints against each other, row-by-row, the same way `reconciliation` reconciles two SQL queries. Use this to validate a microservice or partner API against another API, or (via the Compare tab instead) against a database table.
+
+**Required fields:**
+
+| Field | Description |
+|---|---|
+| `key_columns` | One or more columns that uniquely identify a row (used to join the two API responses) |
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `source_api_endpoint` | Name of an endpoint defined in the config's `api_endpoints` map (source side) |
+| `target_api_endpoint` | Name of an endpoint defined in the config's `api_endpoints` map (target side) |
+
+**Optional fields:**
+
+| Field | Default | Description |
+|---|---|---|
+| `exclude_columns` | `[]` | Columns to ignore during comparison |
+| `rules` | `[]` | DQ rules evaluated against the source result set |
+| `depends_on` | `[]` | Job names that must complete (and pass) before this job runs |
+| `pass_condition` | `null` | Custom threshold overrides for pass/fail logic |
+
+**How it works (live mode):**
+
+1. When `use_live_connections` is enabled, the executor resolves `source_api_endpoint`/`target_api_endpoint` from the `api_endpoints` map on the config used for the run, fetches both (following any configured pagination), and reconciles the resulting datasets on `key_columns`.
+2. Value differences, rows missing from target, and rows missing from source are recorded as mismatch details, exactly like `reconciliation`.
+3. Without `use_live_connections`, the job falls back to simulation data like other job types.
+
+See [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) for how to define the endpoints an `api_reconciliation` job references.
+
+---
+
 ### Run Settings Reference
 
 Run settings are configured in the **Run Settings** panel in the Launch tab or passed as `run_settings` in the API payload. All fields are optional; defaults are shown.
@@ -1198,6 +1293,12 @@ dbt artifacts:
 - Point the job at `target/run_results.json`; optionally include `target/manifest.json`.
 - Execution converts dbt result statuses into normal run results and records failing/error nodes as mismatch details.
 
+REST API endpoints:
+
+- Defined per saved config in the Config modal's **API Endpoints** section — see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources).
+- **Test** — `POST /api/adapters/rest-api/test` fetches a single page and reports latency, without pulling the full (possibly paginated) dataset.
+- **Preview** — `POST /api/adapters/rest-api/preview` fetches a sample of rows so you can confirm auth, `json_root_path`, and response parsing are correct before wiring the endpoint into a job or comparison.
+
 ### Reports
 
 Use this tab to:
@@ -1282,6 +1383,7 @@ Each side (Source A, Source B) can be any combination of:
 | `live` | Fetch the report directly from a live SAP BO server | Saved config (with BO URL/credentials), Document ID, Report/Page ID, Download format (`csv`/`xlsx`/`xls`) |
 | `path` | Read a previously downloaded file from a file system path | Absolute file path on the server |
 | `upload` | Upload a file directly from your browser | File contents (CSV, XLSX, or XLS) |
+| `api` | Fetch data from a named REST API endpoint defined on a saved config | Saved config, endpoint name (from the config's `api_endpoints` map) — see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) |
 
 **Steps (UI):**
 
@@ -1305,6 +1407,7 @@ Each side (Source A, Source B) can be any combination of:
 | `label_a` / `label_b` | Display names for each source in mismatch details |
 | `doc_id` | Document-level BO ID (can be set once at the top instead of per-source) |
 | `report_id` | Report/page-level BO ID (same as above) |
+| `api_endpoint_name` | Endpoint name (from the config's `api_endpoints` map) when a side uses `source_type: "api"` |
 
 **API:**
 
@@ -1546,7 +1649,7 @@ The **Column Stats** sub-tab computes aggregate statistics for each column (row 
 **Steps (UI):**
 
 1. Open the **Compare** tab and select **Column Stats**.
-2. Configure **Source A** and **Source B** (same upload / path / live options as BO Compare).
+2. Configure **Source A** and **Source B** (same upload / path / live / api options as BO Compare).
 3. Set **Float Tolerance** (default `1e-9`) and **Row Count Tolerance** (default `0`, meaning exact row counts are required).
 4. Optionally set a **Query/Report name** for labelling.
 5. Click **Compute Column Stats**.
