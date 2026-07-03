@@ -172,6 +172,28 @@ def test_list_documents_handles_single_document_not_wrapped_in_list(authenticate
     assert docs == [{"id": "101", "name": "Sales Report", "folder": "/Finance"}]
 
 
+def test_list_documents_pages_through_results_beyond_default_page_size(authenticated_client):
+    """Defensive: extends the same explicit-pagesize paging confirmed necessary
+    for list_reports to list_documents, since both are biprws collection
+    endpoints subject to the same admin-configured page size cap."""
+    page_size = 200
+    first_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(page_size)]
+    second_page = [{"id": "200", "name": "Doc 200", "folder": ""}]
+    responses = []
+    for page_docs in (first_page, second_page):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": page_docs}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses) as mock_get:
+        docs = authenticated_client.list_documents()
+    assert len(docs) == page_size + 1
+    assert docs[-1]["id"] == "200"
+    assert mock_get.call_count == 2
+    assert mock_get.call_args_list[0][1]["params"] == {"page": 1, "pagesize": page_size}
+    assert mock_get.call_args_list[1][1]["params"] == {"page": 2, "pagesize": page_size}
+
+
 # ---------------------------------------------------------------------------
 # list_reports
 # ---------------------------------------------------------------------------
@@ -204,6 +226,31 @@ def test_list_reports_unwraps_plural_container_nested_singular_child(authenticat
     with patch.object(authenticated_client._session, "get", return_value=mock_response):
         reports = authenticated_client.list_reports("101")
     assert reports == [{"id": "1", "name": "Page 1", "reportIndex": 0}]
+
+
+def test_list_reports_pages_through_results_beyond_default_page_size(authenticated_client):
+    """biprws paginates collection responses (page size is admin-configured in
+    CMC; observed capping a real on-premises document's report tabs at 10),
+    silently truncating documents with more tabs than one page holds.
+    list_reports must request an explicit pagesize and keep paging until a
+    short page comes back, not stop after the first page."""
+    page_size = 200
+    first_page = [{"id": str(i), "name": f"Tab {i}", "reportIndex": i} for i in range(page_size)]
+    second_page = [{"id": "200", "name": "Tab 200", "reportIndex": 200}]
+    responses = []
+    for page_reports in (first_page, second_page):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"reports": page_reports}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses) as mock_get:
+        reports = authenticated_client.list_reports("101")
+    assert len(reports) == page_size + 1
+    assert reports[0]["id"] == "0"
+    assert reports[-1]["id"] == "200"
+    assert mock_get.call_count == 2
+    assert mock_get.call_args_list[0][1]["params"] == {"page": 1, "pagesize": page_size}
+    assert mock_get.call_args_list[1][1]["params"] == {"page": 2, "pagesize": page_size}
 
 
 def test_list_reports_calls_correct_endpoint(authenticated_client):
@@ -306,16 +353,19 @@ def test_download_report_csv_sends_csv_accept_header(authenticated_client):
     assert "csv" in accept.lower()
 
 
-def test_download_report_calls_content_endpoint(authenticated_client):
+def test_download_report_calls_report_resource_without_content_suffix(authenticated_client):
+    """The raylight export endpoint is GET .../documents/{docId}/reports/{reportId}
+    with the format chosen via the Accept header -- there is no '/content'
+    sub-resource. The old '/content' suffix hit a real on-premises server and
+    got back 'SAP BO API error 404 for report' since that path doesn't exist."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.content = b"data"
     with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
         authenticated_client.download_report("DOC1", "RPT2", "pdf")
     called_url = mock_get.call_args[0][0]
-    assert "DOC1" in called_url
-    assert "RPT2" in called_url
-    assert "content" in called_url
+    assert called_url.endswith("/documents/DOC1/reports/RPT2")
+    assert "content" not in called_url
 
 
 def test_download_report_http_error_raises(authenticated_client):
