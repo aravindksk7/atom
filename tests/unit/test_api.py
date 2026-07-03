@@ -1020,3 +1020,55 @@ def test_rest_api_preview_endpoint_missing_endpoint_returns_404(client):
         json={"config_id": cfg["id"], "endpoint_name": "missing", "limit": 10},
     )
     assert resp.status_code == 404
+
+
+# --- End-to-end: source_type "api" through the real Column Stats route ---
+
+def test_column_stats_compare_api_source_type_end_to_end(client, monkeypatch):
+    """Covers the one integration path this plan otherwise only smoke-tested
+    manually: UI 'api' source_type -> POST /api/compare/column-stats ->
+    SourceConfig validation -> CompareService -> _load_api_source -> APIEndpointClient."""
+    cfg = client.post(
+        "/api/configs",
+        json={
+            "name": "colstats-api-cfg",
+            "env_name": "dev",
+            "config_data": {
+                "api_endpoints": {
+                    "orders_a": {"base_url": "https://a.example.com/orders"},
+                    "orders_b": {"base_url": "https://b.example.com/orders"},
+                }
+            },
+        },
+    ).json()
+
+    import pandas as pd
+    import etl_framework.rest_api.client as rest_api_client_module
+
+    class _FakeClient:
+        def __init__(self, entry):
+            self._entry = entry
+
+        def fetch_dataframe(self, max_pages=None):
+            if self._entry.name == "orders_a":
+                return pd.DataFrame({"id": [1, 2], "amount": [10, 20]})
+            return pd.DataFrame({"id": [1, 2], "amount": [10, 25]})
+
+    # _load_api_source imports APIEndpointClient locally at call time, so
+    # patching the module attribute (not a re-exported name) is what's picked up.
+    monkeypatch.setattr(rest_api_client_module, "APIEndpointClient", _FakeClient)
+
+    resp = client.post(
+        "/api/compare/column-stats",
+        json={
+            "source_a": {"source_type": "api", "config_id": cfg["id"], "api_endpoint_name": "orders_a"},
+            "source_b": {"source_type": "api", "config_id": cfg["id"], "api_endpoint_name": "orders_b"},
+            "label_a": "Orders A",
+            "label_b": "Orders B",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source_env"] == "Orders A"
+    assert data["target_env"] == "Orders B"
+    assert data["has_diffs"] is True
