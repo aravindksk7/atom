@@ -3753,6 +3753,7 @@
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
+            <option value="api">API endpoint</option>
           </select>
           <template x-if="colStatsSourceAType === 'upload'">
             <div>
@@ -3773,6 +3774,18 @@
               <input x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
             </div>
           </template>
+          <template x-if="colStatsSourceAType === 'api'">
+            <div class="space-y-2">
+              <select x-model="colStatsSourceA.configId" class="field-input field-select">
+                <option value="">Select config</option>
+                <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+              </select>
+              <select x-model="colStatsSourceA.endpointName" class="field-input field-select">
+                <option value="">Select endpoint</option>
+                <template x-for="name in configApiEndpointNames(colStatsSourceA.configId)" :key="name"><option :value="name" x-text="name"></option></template>
+              </select>
+            </div>
+          </template>
         </div>
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
@@ -3783,6 +3796,7 @@
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
+            <option value="api">API endpoint</option>
           </select>
           <template x-if="colStatsSourceBType === 'upload'">
             <div>
@@ -3801,6 +3815,18 @@
               </select>
               <input x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
               <input x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+            </div>
+          </template>
+          <template x-if="colStatsSourceBType === 'api'">
+            <div class="space-y-2">
+              <select x-model="colStatsSourceB.configId" class="field-input field-select">
+                <option value="">Select config</option>
+                <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+              </select>
+              <select x-model="colStatsSourceB.endpointName" class="field-input field-select">
+                <option value="">Select endpoint</option>
+                <template x-for="name in configApiEndpointNames(colStatsSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
+              </select>
             </div>
           </template>
         </div>
