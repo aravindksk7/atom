@@ -437,6 +437,127 @@
           </template>
         </div>
         <div class="divider"></div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="field-label">API ENDPOINTS</span>
+              <span class="text-xs text-slate-400 ml-2">REST endpoints usable as job/comparison data sources.</span>
+            </div>
+            <button @click="addApiEndpoint()" type="button" class="btn-secondary btn-sm text-xs">+ Add Endpoint</button>
+          </div>
+          <template x-for="(ep, idx) in configModal.apiEndpoints" :key="idx">
+            <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" />
+                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || 'not configured'"></span>
+                <span class="text-xs text-slate-400 uppercase" x-text="ep.method"></span>
+                <button @click="toggleApiEndpoint(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="ep.expanded ? '▲' : '▼'"></button>
+                <button @click="removeApiEndpoint(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
+              </div>
+              <div x-show="ep.expanded" class="p-3 space-y-3">
+                <div class="grid-2">
+                  <div><label class="field-label">Base URL</label><input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" /></div>
+                  <div>
+                    <label class="field-label">Method</label>
+                    <select x-model="ep.method" class="field-input field-select">
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label class="field-label">Auth Type</label>
+                  <select x-model="ep.auth_type" class="field-input field-select">
+                    <option value="none">None</option>
+                    <option value="api_key">API Key Header</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                  </select>
+                </div>
+                <div x-show="ep.auth_type === 'api_key'" class="grid-2">
+                  <div><label class="field-label">Header Name</label><input x-model="ep.api_key_header" class="field-input" placeholder="X-API-Key" /></div>
+                  <div><label class="field-label">API Key</label><input x-model="ep.api_key" type="password" class="field-input" /></div>
+                </div>
+                <div x-show="ep.auth_type === 'bearer'">
+                  <label class="field-label">Bearer Token</label><input x-model="ep.bearer_token" type="password" class="field-input" />
+                </div>
+                <div x-show="ep.auth_type === 'basic'" class="grid-2">
+                  <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" /></div>
+                  <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                </div>
+                <div class="grid-2">
+                  <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json"></textarea></div>
+                  <div><label class="field-label">Query Params (one per line, "name=value")</label><textarea x-model="ep.query_params_raw" rows="2" class="field-input font-mono text-xs" placeholder="status=active"></textarea></div>
+                </div>
+                <div x-show="ep.method === 'POST'">
+                  <label class="field-label">Body (JSON)</label>
+                  <textarea x-model="ep.body_raw" rows="2" class="field-input font-mono text-xs" placeholder='{"filter": "active"}'></textarea>
+                </div>
+                <div class="grid-2">
+                  <div><label class="field-label">Timeout (s)</label><input x-model="ep.timeout" type="number" class="field-input" /></div>
+                  <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
+                    <input x-model="ep.verify_ssl" type="checkbox" class="rounded border-slate-300" /> Verify SSL certificate
+                  </label>
+                </div>
+                <div class="grid-2">
+                  <div>
+                    <label class="field-label">Response Format</label>
+                    <select x-model="ep.response_format" class="field-input field-select">
+                      <option value="json">JSON</option>
+                      <option value="csv">CSV</option>
+                    </select>
+                  </div>
+                  <div x-show="ep.response_format === 'json'">
+                    <label class="field-label">JSON Root Path</label>
+                    <input x-model="ep.json_root_path" class="field-input" placeholder="data.items" />
+                  </div>
+                </div>
+                <div>
+                  <label class="field-label">Pagination</label>
+                  <select x-model="ep.pagination_type" class="field-input field-select">
+                    <option value="none">None</option>
+                    <option value="cursor">Cursor</option>
+                    <option value="page">Page / Limit</option>
+                  </select>
+                </div>
+                <div x-show="ep.pagination_type === 'cursor'" class="grid-2">
+                  <div><label class="field-label">Cursor Path</label><input x-model="ep.pagination_cursor_path" class="field-input" placeholder="meta.next_cursor" /></div>
+                  <div><label class="field-label">Cursor Query Param</label><input x-model="ep.pagination_cursor_param" class="field-input" placeholder="cursor" /></div>
+                </div>
+                <div x-show="ep.pagination_type === 'page'" class="grid-2">
+                  <div><label class="field-label">Page Param</label><input x-model="ep.pagination_page_param" class="field-input" placeholder="page" /></div>
+                  <div><label class="field-label">Size Param</label><input x-model="ep.pagination_size_param" class="field-input" placeholder="limit" /></div>
+                  <div><label class="field-label">Page Size</label><input x-model="ep.pagination_page_size" type="number" class="field-input" /></div>
+                </div>
+                <div x-show="ep.pagination_type !== 'none'">
+                  <label class="field-label">Max Pages</label>
+                  <input x-model="ep.pagination_max_pages" type="number" class="field-input" style="width:120px" />
+                </div>
+                <div class="flex items-center gap-2">
+                  <button @click="testApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Test</button>
+                  <button @click="previewApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Preview</button>
+                  <span x-show="ep.testResult" :class="ep.testResult && ep.testResult.ok ? 'text-emerald-600' : 'text-red-600'" class="text-xs" x-text="ep.testResult ? ep.testResult.message : ''"></span>
+                </div>
+                <p x-show="ep.previewError" x-text="ep.previewError" class="text-xs text-red-600"></p>
+                <div x-show="ep.previewResult" class="overflow-x-auto max-h-40 border border-slate-200 rounded">
+                  <table class="text-xs w-full">
+                    <thead class="bg-slate-100 sticky top-0">
+                      <tr><template x-for="col in (ep.previewResult?.columns || [])" :key="col"><th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap"></th></template></tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="(row, ri) in (ep.previewResult?.rows || [])" :key="ri">
+                        <tr :class="ri % 2 === 0 ? 'bg-white' : 'bg-slate-50'">
+                          <template x-for="(cell, ci) in row" :key="ci"><td x-text="cell ?? 'NULL'" class="px-2 py-1 whitespace-nowrap max-w-xs truncate"></td></template>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="divider"></div>
         <div class="grid-2">
           <div><label class="field-label">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" /></div>
           <div><label class="field-label">BO User</label><input x-model="configModal.bo_user" class="field-input" /></div>

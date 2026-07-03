@@ -832,6 +832,7 @@ function app() {
         bo_proxy_url: '', bo_verify_ssl: true,
         automic_url: '', automic_user: '', automic_password: '',
         connections: [],
+        apiEndpoints: [],
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -858,6 +859,35 @@ function app() {
           db_user: entry.db_user || '',
           db_password: entry.db_password || '',
           expanded: false,
+        })),
+        apiEndpoints: Object.entries(d.api_endpoints || {}).map(([name, entry]) => ({
+          name,
+          base_url: entry.base_url || '',
+          method: entry.method || 'GET',
+          auth_type: entry.auth_type || 'none',
+          api_key_header: entry.api_key_header || 'X-API-Key',
+          api_key: entry.api_key || '',
+          bearer_token: entry.bearer_token || '',
+          basic_username: entry.basic_username || '',
+          basic_password: entry.basic_password || '',
+          headers_raw: Object.entries(entry.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n'),
+          query_params_raw: Object.entries(entry.query_params || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+          body_raw: entry.body ? JSON.stringify(entry.body, null, 2) : '',
+          timeout: entry.timeout ?? 30,
+          verify_ssl: entry.verify_ssl !== false,
+          response_format: entry.response_format || 'json',
+          json_root_path: entry.json_root_path || '',
+          pagination_type: entry.pagination_type || 'none',
+          pagination_cursor_path: entry.pagination_cursor_path || '',
+          pagination_cursor_param: entry.pagination_cursor_param || 'cursor',
+          pagination_page_param: entry.pagination_page_param || 'page',
+          pagination_size_param: entry.pagination_size_param || 'limit',
+          pagination_page_size: entry.pagination_page_size ?? 100,
+          pagination_max_pages: entry.pagination_max_pages ?? 50,
+          expanded: false,
+          previewResult: null,
+          previewError: '',
+          testResult: null,
         })),
       };
       this.configValidation = null;
@@ -898,6 +928,50 @@ function app() {
             }])
         );
       }
+      if (m.apiEndpoints && m.apiEndpoints.length > 0) {
+        data.api_endpoints = Object.fromEntries(
+          m.apiEndpoints
+            .filter(e => e.name.trim() && e.base_url.trim())
+            .map(e => {
+              const headers = {};
+              (e.headers_raw || '').split('\n').forEach(line => {
+                const idx = line.indexOf(':');
+                if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+              });
+              const query_params = {};
+              (e.query_params_raw || '').split('\n').forEach(line => {
+                const idx = line.indexOf('=');
+                if (idx > 0) query_params[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+              });
+              let body = null;
+              if (e.body_raw && e.body_raw.trim()) {
+                try { body = JSON.parse(e.body_raw); } catch { body = null; }
+              }
+              return [e.name.trim(), {
+                base_url: e.base_url.trim(),
+                method: e.method || 'GET',
+                auth_type: e.auth_type || 'none',
+                api_key_header: e.api_key_header || 'X-API-Key',
+                api_key: e.api_key || '',
+                bearer_token: e.bearer_token || '',
+                basic_username: e.basic_username || '',
+                basic_password: e.basic_password || '',
+                headers, query_params, body,
+                timeout: Number(e.timeout) || 30,
+                verify_ssl: e.verify_ssl !== false,
+                response_format: e.response_format || 'json',
+                json_root_path: e.json_root_path || '',
+                pagination_type: e.pagination_type || 'none',
+                pagination_cursor_path: e.pagination_cursor_path || '',
+                pagination_cursor_param: e.pagination_cursor_param || 'cursor',
+                pagination_page_param: e.pagination_page_param || 'page',
+                pagination_size_param: e.pagination_size_param || 'limit',
+                pagination_page_size: Number(e.pagination_page_size) || 100,
+                pagination_max_pages: Number(e.pagination_max_pages) || 50,
+              }];
+            })
+        );
+      }
       return data;
     },
 
@@ -921,6 +995,57 @@ function app() {
     namedConnectionSummary(conn) {
       const parts = [conn.db_host, conn.db_name].filter(Boolean);
       return parts.length ? parts.join(' / ') : 'not configured';
+    },
+
+    addApiEndpoint() {
+      const idx = this.configModal.apiEndpoints.length + 1;
+      this.configModal.apiEndpoints.push({
+        name: `endpoint_${idx}`, base_url: '', method: 'GET',
+        auth_type: 'none', api_key_header: 'X-API-Key', api_key: '',
+        bearer_token: '', basic_username: '', basic_password: '',
+        headers_raw: '', query_params_raw: '', body_raw: '',
+        timeout: 30, verify_ssl: true,
+        response_format: 'json', json_root_path: '',
+        pagination_type: 'none', pagination_cursor_path: '',
+        pagination_cursor_param: 'cursor', pagination_page_param: 'page',
+        pagination_size_param: 'limit', pagination_page_size: 100, pagination_max_pages: 50,
+        expanded: true, previewResult: null, previewError: '', testResult: null,
+      });
+    },
+
+    removeApiEndpoint(idx) {
+      this.configModal.apiEndpoints.splice(idx, 1);
+    },
+
+    toggleApiEndpoint(idx) {
+      this.configModal.apiEndpoints[idx].expanded = !this.configModal.apiEndpoints[idx].expanded;
+    },
+
+    async testApiEndpoint(idx) {
+      const m = this.configModal;
+      const ep = m.apiEndpoints[idx];
+      if (!m.id) { ep.testResult = { ok: false, message: 'Save the config first, then test.' }; return; }
+      try {
+        ep.testResult = await api('POST', '/api/adapters/rest-api/test', {
+          config_id: m.id, endpoint_name: ep.name,
+        });
+      } catch (e) {
+        ep.testResult = { ok: false, message: e.message };
+      }
+    },
+
+    async previewApiEndpoint(idx) {
+      const m = this.configModal;
+      const ep = m.apiEndpoints[idx];
+      if (!m.id) { ep.previewError = 'Save the config first, then preview.'; return; }
+      ep.previewError = '';
+      try {
+        ep.previewResult = await api('POST', '/api/adapters/rest-api/preview', {
+          config_id: m.id, endpoint_name: ep.name, limit: 20,
+        });
+      } catch (e) {
+        ep.previewError = e.message;
+      }
     },
 
     async validateConfig() {
