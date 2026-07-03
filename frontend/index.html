@@ -2884,6 +2884,7 @@
           <button @click="boSourceAType = 'live'" :class="boSourceAType === 'live' ? 'pill active' : 'pill'">Live</button>
           <button @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+          <button @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
         <input x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" />
         <template x-if="boSourceAType === 'live'">
@@ -2908,6 +2909,18 @@
         <template x-if="boSourceAType === 'upload'">
           <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'a')" class="field-input" />
         </template>
+        <template x-if="boSourceAType === 'api'">
+          <div class="space-y-2">
+            <select x-model="boSourceA.configId" class="field-input field-select">
+              <option value="">Select config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <select x-model="boSourceA.endpointName" class="field-input field-select">
+              <option value="">Select endpoint</option>
+              <template x-for="name in configApiEndpointNames(boSourceA.configId)" :key="name"><option :value="name" x-text="name"></option></template>
+            </select>
+          </div>
+        </template>
       </div>
 
       <div class="vs-divider">VS</div>
@@ -2918,6 +2931,7 @@
           <button @click="boSourceBType = 'live'" :class="boSourceBType === 'live' ? 'pill active' : 'pill'">Live</button>
           <button @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+          <button @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
         <input x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" />
         <template x-if="boSourceBType === 'live'">
@@ -2941,6 +2955,18 @@
         </template>
         <template x-if="boSourceBType === 'upload'">
           <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'b')" class="field-input" />
+        </template>
+        <template x-if="boSourceBType === 'api'">
+          <div class="space-y-2">
+            <select x-model="boSourceB.configId" class="field-input field-select">
+              <option value="">Select config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <select x-model="boSourceB.endpointName" class="field-input field-select">
+              <option value="">Select endpoint</option>
+              <template x-for="name in configApiEndpointNames(boSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
+            </select>
+          </div>
         </template>
       </div>
     </div>

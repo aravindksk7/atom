@@ -387,8 +387,8 @@ function app() {
 
     boSourceAType: 'live',
     boSourceBType: 'upload',
-    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A' },
-    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B' },
+    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '' },
+    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '' },
     boDocsA: [],
     boDocsB: [],
     boReportsA: [],
@@ -481,8 +481,8 @@ function app() {
     // Column Stats
     colStatsSourceAType: 'upload',
     colStatsSourceBType: 'upload',
-    colStatsSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A' },
-    colStatsSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B' },
+    colStatsSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '' },
+    colStatsSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '' },
     colStatsQueryName: 'stats_compare',
     colStatsFloatTol: '1e-9',
     colStatsRowCountTol: 0,
@@ -1441,6 +1441,12 @@ function app() {
       return Object.keys(cfg.config_data.connections);
     },
 
+    configApiEndpointNames(configId) {
+      const cfg = this.configs.find(c => String(c.id) === String(configId));
+      if (!cfg || !cfg.config_data || !cfg.config_data.api_endpoints) return [];
+      return Object.keys(cfg.config_data.api_endpoints);
+    },
+
     async runTests() {
       if (!this.selectedJobs.length) return;
       this.isLaunching = true;
@@ -2063,6 +2069,13 @@ function app() {
         };
       }
       if (type === 'path') return { source_type: 'path', file_path: src.filePath };
+      if (type === 'api') {
+        return {
+          source_type: 'api',
+          config_id: Number(src.configId),
+          api_endpoint_name: src.endpointName,
+        };
+      }
       return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
     },
 
