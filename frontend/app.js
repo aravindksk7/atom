@@ -1128,6 +1128,7 @@ function app() {
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
         automic_job_name: '', automic_run_id: '',
+        api_source_endpoint: '', api_target_endpoint: '',
         dbt_manifest_path: '', dbt_run_results_path: '',
         pass_min_row_count: '',
         pass_max_row_count: '',
@@ -1168,6 +1169,8 @@ function app() {
         bo_format: job.params?.format || 'xlsx',
         automic_job_name: job.params?.job_name || '',
         automic_run_id: job.params?.run_id || '',
+        api_source_endpoint: job.params?.source_api_endpoint || '',
+        api_target_endpoint: job.params?.target_api_endpoint || '',
         dbt_manifest_path: job.params?.manifest_path || '',
         dbt_run_results_path: job.params?.run_results_path || '',
         pass_min_row_count: job.pass_condition?.min_row_count ?? '',
@@ -1266,6 +1269,10 @@ function app() {
         if (m.automic_job_name) params.job_name = m.automic_job_name;
         if (m.automic_run_id) params.run_id = m.automic_run_id;
       }
+      if (m.job_type === 'api_reconciliation') {
+        params.source_api_endpoint = m.api_source_endpoint;
+        params.target_api_endpoint = m.api_target_endpoint;
+      }
       if (m.job_type === 'bo_report') {
         if (m.bo_report_id) params.report_id = m.bo_report_id;
         if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
@@ -1297,7 +1304,7 @@ function app() {
         params.tolerance = Number(m.cja_tolerance) || 0;
         params.tolerance_type = m.cja_tolerance_type || 'absolute';
       }
-      const keyColumns = ['reconciliation', 'bo_report'].includes(m.job_type)
+      const keyColumns = ['reconciliation', 'bo_report', 'api_reconciliation'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
       const pc = {};
@@ -1342,6 +1349,12 @@ function app() {
       }
       if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
       if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
+      if (m.job_type === 'api_reconciliation') {
+        return Boolean(
+          m.api_source_endpoint && m.api_target_endpoint &&
+          m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length
+        );
+      }
       if (m.job_type === 'dbt_artifact') return Boolean(m.dbt_run_results_path);
       if (m.job_type === 'freshness') return Boolean(m.query?.trim() && m.freshness_ts_col);
       if (m.job_type === 'profile') return Boolean(m.query?.trim());

@@ -936,6 +936,7 @@
             <option value="schema_snapshot">schema_snapshot</option>
             <option value="profile">profile</option>
             <option value="cross_job_assertion">cross_job_assertion</option>
+            <option value="api_reconciliation">api_reconciliation</option>
           </select>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -1003,7 +1004,7 @@
             </div>
           </div>
         </div>
-        <div x-show="['reconciliation','bo_report'].includes(jobModal.job_type)">
+        <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
           <label class="field-label">Key Columns (comma-separated)</label>
           <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" />
         </div>
@@ -1034,6 +1035,19 @@
             <label class="field-label">Automic Run ID</label>
             <input x-model="jobModal.automic_run_id" class="field-input" placeholder="RUN_42" />
           </div>
+        </div>
+        <div x-show="jobModal.job_type === 'api_reconciliation'" class="grid-2">
+          <div>
+            <label class="field-label">Source API Endpoint</label>
+            <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" />
+          </div>
+          <div>
+            <label class="field-label">Target API Endpoint</label>
+            <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" />
+          </div>
+          <p class="text-xs text-slate-400 col-span-2">
+            Endpoint names must match entries in the api_endpoints section of whichever config is selected when this job runs.
+          </p>
         </div>
         <div x-show="jobModal.job_type === 'dbt_artifact'" class="grid-2">
           <div>
