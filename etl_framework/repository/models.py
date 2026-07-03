@@ -108,6 +108,7 @@ class TestResult(Base):
     missing_in_source_count = Column(Integer, default=0, nullable=False)
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime(timezone=True), nullable=True)
+    sample_rows = Column(JSON, nullable=True)
 
     # Override fields for marking test outcomes as passing even when they fail
     override_status = Column(String(20), nullable=True)

@@ -18,6 +18,27 @@ def _as_list(value) -> list:
     return [value]
 
 
+def _unwrap_collection(data: dict, plural_key: str, singular_key: str, *fallback_keys: str) -> list:
+    """Unwrap a biprws collection response.
+
+    On-premises biprws wraps collections one level deeper than a flat
+    {plural_key: [...]}: {plural_key: {singular_key: [...]}} (the collection
+    is a plural container element whose only child is the singular element
+    name, itself subject to the same single-item-collapses-to-bare-object
+    quirk _as_list handles). Fall back to a flat list/bare object directly
+    under plural_key (or fallback_keys) for shapes that don't nest this way.
+    """
+    container = data.get(plural_key)
+    if container is None:
+        for key in fallback_keys:
+            container = data.get(key)
+            if container is not None:
+                break
+    if isinstance(container, dict) and singular_key in container:
+        container = container[singular_key]
+    return _as_list(container)
+
+
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
@@ -107,15 +128,18 @@ class BORestClient:
                 response_body=response.text,
             )
         data = response.json()
-        raw = _as_list(data.get("documents", data.get("entries", [])))
-        return [
-            {
-                "id": str(d.get("id", "")),
+        raw = _unwrap_collection(data, "documents", "document", "entries")
+        results = []
+        for d in raw:
+            doc_id = str(d.get("id", ""))
+            if not doc_id:
+                logger.warning("SAP BO document entry missing 'id' field, raw entry: %r", d)
+            results.append({
+                "id": doc_id,
                 "name": d.get("name", ""),
                 "folder": d.get("folder", d.get("parentFolderCUID", "")),
-            }
-            for d in raw
-        ]
+            })
+        return results
 
     def list_reports(self, doc_id: str) -> list[dict]:
         """GET /biprws/raylight/v1/documents/{doc_id}/reports — list report tabs."""
@@ -137,14 +161,17 @@ class BORestClient:
                 response_body=response.text,
             )
         data = response.json()
-        return [
-            {
-                "id": str(r.get("id", "")),
+        results = []
+        for r in _unwrap_collection(data, "reports", "report"):
+            report_id = str(r.get("id", ""))
+            if not report_id:
+                logger.warning("SAP BO report entry missing 'id' field, raw entry: %r", r)
+            results.append({
+                "id": report_id,
                 "name": r.get("name", ""),
                 "reportIndex": r.get("reportIndex", 0),
-            }
-            for r in _as_list(data.get("reports", []))
-        ]
+            })
+        return results
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",

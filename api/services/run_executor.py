@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import os
 import re
 import time
@@ -29,6 +31,7 @@ from etl_framework.utils.context import set_run_id
 from etl_framework.utils.tracing import span
 
 HOLD_POLL_INTERVAL_SECONDS = int(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
+BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
 
 
 _SEED_JOBS: list[JobDefinition] = [
@@ -841,6 +844,9 @@ class RunExecutor:
 
     def _build_case_bo_report(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
+            from api.services.file_source import read_tabular
+
+            t0 = time.monotonic()
             creds = self._config_snapshot.get("bo_credentials", {})
             env = EnvironmentConfig(name=creds.get("name", "bo"), **{
                 k: v for k, v in creds.items() if k != "name"
@@ -850,21 +856,34 @@ class RunExecutor:
             doc_id = job.params.get("report_id", "")
             report_id = job.params.get("bo_report_id", "")
             fmt = job.params.get("format", "xlsx")
-            data = client.download_report(doc_id, report_id, fmt)
+            try:
+                data = client.download_report(doc_id, report_id, fmt)
+            finally:
+                client.logout()
+
+            df = read_tabular(
+                content_b64=base64.b64encode(data).decode("ascii"),
+                file_name=f"bo_report_{doc_id}_{report_id}.{fmt}",
+            )
+            row_count = len(df)
+            sample_rows = json.loads(
+                df.head(BO_REPORT_SAMPLE_ROW_LIMIT).to_json(orient="records", date_format="iso")
+            )
             return ReconciliationResult(
                 query_name=job.name,
                 source_env=self._source_env,
                 target_env=self._target_env,
-                source_row_count=len(data),
-                target_row_count=len(data),
-                matched_count=len(data),
+                source_row_count=row_count,
+                target_row_count=row_count,
+                matched_count=row_count,
                 missing_in_target_count=0,
                 missing_in_source_count=0,
                 value_mismatch_count=0,
                 mismatches=[],
                 status=TestStatus.PASSED,
                 executed_at=datetime.now(timezone.utc),
-                duration_seconds=0.0,
+                duration_seconds=time.monotonic() - t0,
+                sample_rows=sample_rows,
             )
         return run_job
 

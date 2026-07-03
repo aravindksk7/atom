@@ -128,6 +128,37 @@ def test_list_documents_http_error_raises(authenticated_client):
             authenticated_client.list_documents()
 
 
+def test_list_documents_unwraps_plural_container_nested_singular_child(authenticated_client):
+    """On-premises biprws wraps the collection one level deeper than the mock
+    assumed: {"documents": {"document": [...]}} instead of a flat
+    {"documents": [...]} array (classic BIP RESTful plural-wraps-singular-child
+    JSON convention). Reproduces the exact payload seen from a real on-prem
+    server, which previously caused list_documents to treat the wrapper dict
+    itself as a single document lacking an 'id', yielding an empty doc_id and
+    a downstream 404 on GET .../documents//reports."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "documents": {
+            "document": [
+                {
+                    "id": "123456",
+                    "cuid": "AB123456789123456789012",
+                    "name": "01.aCIS_Sum_Mon_Bran_Reg",
+                    "description": "asasdadadad",
+                    "folderid": 131373,
+                    "scheduled": "false",
+                }
+            ]
+        }
+    }
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        docs = authenticated_client.list_documents()
+    assert docs == [
+        {"id": "123456", "name": "01.aCIS_Sum_Mon_Bran_Reg", "folder": ""}
+    ]
+
+
 def test_list_documents_handles_single_document_not_wrapped_in_list(authenticated_client):
     """SAP BO's biprws collapses a single-element collection into a bare object
     instead of a one-element JSON array (a known BI4 RESTful Web Services quirk)."""
@@ -159,6 +190,20 @@ def test_list_reports_returns_reports_for_document(authenticated_client):
     assert len(reports) == 2
     assert reports[0]["id"] == "1"
     assert reports[1]["name"] == "Summary"
+
+
+def test_list_reports_unwraps_plural_container_nested_singular_child(authenticated_client):
+    """Defensive: extends the same plural-wraps-singular-child convention
+    confirmed for list_documents ({"reports": {"report": [...]}}) in case the
+    on-premises reports sub-resource is serialized the same way."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "reports": {"report": [{"id": "1", "name": "Page 1", "reportIndex": 0}]}
+    }
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        reports = authenticated_client.list_reports("101")
+    assert reports == [{"id": "1", "name": "Page 1", "reportIndex": 0}]
 
 
 def test_list_reports_calls_correct_endpoint(authenticated_client):

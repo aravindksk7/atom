@@ -18,6 +18,7 @@ def _b64csv(data: dict) -> str:
 
 def _svc():
     svc = CompareService.__new__(CompareService)
+    svc._db = MagicMock()
     svc._repo = MagicMock()
     svc._repo.update_run_status = MagicMock()
     svc._repo.add_test_result = MagicMock(return_value=SimpleNamespace(id=5))

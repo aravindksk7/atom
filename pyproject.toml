@@ -26,6 +26,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "polars>=1.0",
     "pyarrow>=14.0",
+    "duckdb>=0.10",
 ]
 
 [project.optional-dependencies]

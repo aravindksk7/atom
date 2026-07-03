@@ -196,6 +196,7 @@ class RunRepository:
             missing_in_target_count=result.missing_in_target_count,
             missing_in_source_count=result.missing_in_source_count,
             executed_at=result.executed_at,
+            sample_rows=result.sample_rows,
         )
         self._db.add(tr)
         self._db.commit()

@@ -1594,6 +1594,12 @@
                             class="hover:underline text-xs">
                       <span x-text="expandedMismatches[r.id] !== undefined ? '▲ Collapse' : (expandingMismatch[r.id] ? '…' : '▼ Expand')"></span>
                     </button>
+                    <button x-show="r.sample_rows && r.sample_rows.length > 0"
+                            @click="toggleSampleRowsExpand(r.id)"
+                            :class="expandedSampleRows[r.id] ? 'text-slate-400' : 'text-indigo-500'"
+                            class="hover:underline text-xs">
+                      <span x-text="(expandedSampleRows[r.id] ? '▲ Hide' : '▼ View') + ' read rows'"></span>
+                    </button>
                     <button x-show="r.status === 'FAILED' && !r.override_reason"
                             @click="toggleOutcomeOverrideForm(r.id)"
                             class="text-emerald-500 hover:underline text-xs">Pass with actions</button>
@@ -1714,6 +1720,39 @@
                             </div>
                           </template>
                         </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+                <!-- Sample of rows actually read from the source -->
+                <template x-if="expandedSampleRows[r.id]">
+                  <tr>
+                    <td colspan="7" class="p-0">
+                      <div class="mismatch-expand-panel">
+                        <div class="mismatch-expand-header">
+                          <span x-text="'Rows read from source — showing ' + (r.sample_rows || []).length + ' of ' + (r.source_row_count ?? (r.sample_rows || []).length)"></span>
+                        </div>
+                        <table class="mismatch-diff-table">
+                          <thead>
+                            <tr>
+                              <template x-for="col in sampleRowColumns(r.sample_rows)" :key="col">
+                                <th x-text="col"></th>
+                              </template>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-if="!r.sample_rows || r.sample_rows.length === 0">
+                              <tr><td :colspan="Math.max(sampleRowColumns(r.sample_rows).length, 1)" class="text-muted text-center py-3">No rows stored</td></tr>
+                            </template>
+                            <template x-for="(row, idx) in (r.sample_rows || [])" :key="idx">
+                              <tr>
+                                <template x-for="col in sampleRowColumns(r.sample_rows)" :key="col">
+                                  <td class="font-mono text-xs" x-text="row[col] ?? '∅'"></td>
+                                </template>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
                       </div>
                     </td>
                   </tr>

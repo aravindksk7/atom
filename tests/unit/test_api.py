@@ -238,6 +238,53 @@ def test_trigger_run_injects_saved_config_credentials(client):
     assert snapshot["automic_credentials"]["automic_user"] == "svc"
 
 
+def test_trigger_run_ignores_masked_secrets_from_stale_config_data(client):
+    """Regression test: the Launch page's Saved Config dropdown is populated
+    from GET /api/configs, which masks db_password/bo_password/automic_password
+    as "********" for display. The frontend then echoes that same masked object
+    back as config_data when triggering a live run. Previously the backend
+    merged {**cfg.config_json, **body.config_data} with body.config_data
+    winning, so the mask literal clobbered the real password and every live
+    run triggered via a Saved Config failed authentication."""
+    created = client.post(
+        "/api/configs",
+        json={
+            "name": "live2",
+            "env_name": "qa2",
+            "config_data": {
+                "db_host": "sql-live",
+                "db_password": "super-secret",
+                "bo_url": "https://bo-server",
+                "bo_password": "bo-secret",
+            },
+        },
+    ).json()
+
+    # Simulate the frontend: fetch the (masked) list, then send that back as
+    # config_data alongside config_id when launching a run.
+    listed = client.get("/api/configs").json()
+    masked_cfg = next(c for c in listed if c["id"] == created["id"])
+    assert masked_cfg["config_data"]["db_password"] == "********"
+
+    run = client.post(
+        "/api/runs",
+        json={
+            "source_env": "qa2",
+            "target_env": "prod",
+            "job_sequence": [],
+            "config_id": created["id"],
+            "config_data": masked_cfg["config_data"],
+            "run_settings": {"use_live_connections": True},
+        },
+    )
+    assert run.status_code == 202
+
+    detail = client.get(f"/api/runs/{run.json()['run_id']}")
+    snapshot = detail.json()["config_snapshot"]
+    assert snapshot["db_password"] == "super-secret"
+    assert snapshot["bo_credentials"]["bo_password"] == "bo-secret"
+
+
 def test_trigger_run_rejects_invalid_backend(client):
     resp = client.post(
         "/api/runs",
@@ -249,6 +296,49 @@ def test_trigger_run_rejects_invalid_backend(client):
         },
     )
     assert resp.status_code == 422
+
+
+def test_recon_file_compare_surfaces_error_message(client):
+    """An internal failure during recon-file compare must be visible on the run,
+    not just swallowed into a bare ERROR status (regression: previously only
+    run_bo_comparison persisted error_message; recon-file/sql compare did not)."""
+    resp = client.post(
+        "/api/compare/recon-file",
+        json={
+            "stored_run_id": "does-not-exist",
+            "file_b_path": "unused.csv",
+            "label_a": "Source A",
+            "label_b": "Source B",
+        },
+    )
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "ERROR"
+    assert detail["results"], "expected an error TestResult to be persisted"
+    assert "not found" in detail["results"][0]["error_message"].lower()
+
+
+def test_sql_compare_surfaces_error_message(client):
+    resp = client.post(
+        "/api/compare/sql",
+        json={
+            "config_id_a": 999999,
+            "config_id_b": 999999,
+            "query_a": "SELECT 1",
+            "query_b": "SELECT 1",
+            "label_a": "Source A",
+            "label_b": "Source B",
+        },
+    )
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "ERROR"
+    assert detail["results"], "expected an error TestResult to be persisted"
+    assert "not found" in detail["results"][0]["error_message"].lower()
 
 
 def test_trigger_run_rejects_negative_worker_count(client):

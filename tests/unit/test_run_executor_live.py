@@ -167,7 +167,7 @@ def test_bo_report_job_returns_passed_on_success():
         "key_columns": [],
         "exclude_columns": [],
         "source_env": None, "target_env": None,
-        "params": {"report_id": "101", "bo_report_id": "1", "format": "xlsx"},
+        "params": {"report_id": "101", "bo_report_id": "1", "format": "csv"},
         "enabled": True,
     })
     executor = _make_executor(
@@ -178,7 +178,7 @@ def test_bo_report_job_returns_passed_on_success():
 
     with patch("api.services.run_executor.BORestClient") as MockBO:
         inst = MockBO.return_value
-        inst.download_report.return_value = b"xlsx data"
+        inst.download_report.return_value = b"id,sku\n1,A100\n"
         executor.execute()
 
     run = RunRepository(db).get_run("r-bo")
@@ -186,6 +186,81 @@ def test_bo_report_job_returns_passed_on_success():
     assert run.total_tests == 1
     result = run.results[0]
     assert result.status == TestStatus.PASSED.value
+
+
+def test_bo_report_job_reports_actual_row_count_not_byte_length():
+    """Regression test: the executor previously reported len(raw_bytes) as the
+    row count (and reused the same bytes for source and target with no real
+    read), so every BO report test showed a fixed, meaningless row count
+    instead of the number of rows actually in the downloaded report."""
+    db = _session()
+    RunRepository(db).create_run("r-bo-rows", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "orders_report",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_report",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"report_id": "101", "bo_report_id": "1", "format": "csv"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-bo-rows", ["orders_report"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    csv_bytes = b"id,sku,amount\n1,A100,25.5\n2,B200,50.0\n3,C300,12.0\n"
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.download_report.return_value = csv_bytes
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-bo-rows")
+    result = run.results[0]
+    assert result.source_row_count == 3
+    assert result.target_row_count == 3
+    assert len(csv_bytes) != 3  # sanity: byte length would have been a different, wrong number
+
+
+def test_bo_report_job_stores_sample_of_read_rows():
+    db = _session()
+    RunRepository(db).create_run("r-bo-sample", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "orders_report",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_report",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"report_id": "101", "bo_report_id": "1", "format": "csv"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-bo-sample", ["orders_report"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    csv_bytes = b"id,sku,amount\n1,A100,25.5\n2,B200,50.0\n"
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.download_report.return_value = csv_bytes
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-bo-sample")
+    result = run.results[0]
+    assert result.sample_rows == [
+        {"id": 1, "sku": "A100", "amount": 25.5},
+        {"id": 2, "sku": "B200", "amount": 50.0},
+    ]
 
 
 def test_bo_report_job_returns_error_on_failure():

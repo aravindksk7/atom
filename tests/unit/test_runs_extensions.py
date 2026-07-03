@@ -163,6 +163,62 @@ def test_mismatches_default_pagination_is_100_0(client, mock_run_repo):
 
 
 # ---------------------------------------------------------------------------
+# /{run_id} detail — sample_rows pass-through
+# ---------------------------------------------------------------------------
+
+def _make_test_result(sample_rows):
+    r = MagicMock()
+    r.id = 1
+    r.query_name = "orders_report"
+    r.status = "PASSED"
+    r.effective_status = "PASSED"
+    r.duration_seconds = 0.5
+    r.source_row_count = 2
+    r.target_row_count = 2
+    r.value_mismatch_count = 0
+    r.missing_in_target_count = 0
+    r.missing_in_source_count = 0
+    r.error_message = None
+    r.executed_at = None
+    r.override_reason = None
+    r.override_by = None
+    r.override_at = None
+    r.sample_rows = sample_rows
+    return r
+
+
+def test_run_detail_includes_sample_rows_read_from_source(client, mock_run_repo):
+    run = MagicMock()
+    run.run_id = "r-bo"
+    run.status = "PASSED"
+    run.started_at = None
+    run.completed_at = None
+    run.total_tests = 1
+    run.passed = 1
+    run.failed = 0
+    run.slow = 0
+    run.error = 0
+    run.run_type = "reconciliation"
+    run.pair_id = None
+    run.source_env = "dev"
+    run.target_env = "prod"
+    run.config_snapshot = {}
+    run.results = [_make_test_result([
+        {"id": 1, "sku": "A100", "amount": 25.5},
+        {"id": 2, "sku": "B200", "amount": 50.0},
+    ])]
+    mock_run_repo.get_run.return_value = run
+
+    resp = client.get("/api/runs/r-bo")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["results"][0]["sample_rows"] == [
+        {"id": 1, "sku": "A100", "amount": 25.5},
+        {"id": 2, "sku": "B200", "amount": 50.0},
+    ]
+
+
+# ---------------------------------------------------------------------------
 # /stream
 # ---------------------------------------------------------------------------
 
