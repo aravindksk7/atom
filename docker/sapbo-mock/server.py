@@ -179,7 +179,14 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/biprws/raylight/v1/documents":
-            self._send_json(HTTPStatus.OK, {"documents": DOCUMENTS})
+            # Real on-premises biprws wraps the collection under a "document"
+            # child even when there's only one entry (observed live payload
+            # kept it as a one-element array, unlike the "reports" sub-resource
+            # below which does collapse a single element to a bare object).
+            self._send_json(
+                HTTPStatus.OK,
+                {"documents": {"document": DOCUMENTS}},
+            )
             return
 
         reports_match = re.fullmatch(r"/biprws/raylight/v1/documents/([^/]+)/reports", path)
