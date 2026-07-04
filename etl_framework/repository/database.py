@@ -323,6 +323,8 @@ def _backfill_schedule_selections(bind) -> None:
 
     Idempotent — only touches rows where selection_id is still NULL, so this
     is a no-op once every schedule has been migrated or created fresh.
+    Disambiguates the synthesized name with a numeric suffix on collision,
+    rather than crashing on the UNIQUE constraint or skipping the migration.
     """
     if bind.dialect.name != "sqlite":
         return
@@ -341,8 +343,14 @@ def _backfill_schedule_selections(bind) -> None:
         if not legacy:
             return
         for sched in legacy:
+            base_name = f"{sched.name} (migrated)"
+            candidate_name = base_name
+            suffix = 2
+            while db.query(JobSelection).filter_by(name=candidate_name).first() is not None:
+                candidate_name = f"{sched.name} (migrated {suffix})"
+                suffix += 1
             selection = JobSelection(
-                name=f"{sched.name} (migrated)",
+                name=candidate_name,
                 description="Auto-created from a pre-existing schedule.",
             )
             db.add(selection)
