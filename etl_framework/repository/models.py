@@ -44,6 +44,42 @@ class SavedJob(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+# ---------------------------------------------------------------------------
+# Job Selections
+# ---------------------------------------------------------------------------
+
+class JobSelection(Base):
+    __tablename__ = "job_selections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=False, default="")
+    tags = Column(JSON, nullable=False, default=list)
+    archived = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    versions = relationship(
+        "JobSelectionVersion", back_populates="selection",
+        cascade="all, delete-orphan", lazy="select",
+        order_by="JobSelectionVersion.version_number",
+    )
+
+
+class JobSelectionVersion(Base):
+    __tablename__ = "job_selection_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    selection_id = Column(Integer, ForeignKey("job_selections.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    job_sequence = Column(JSON, nullable=False, default=list)
+    run_settings_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    selection = relationship("JobSelection", back_populates="versions")
+
+
 class TestRun(Base):
     __tablename__ = "test_runs"
 
@@ -64,6 +100,8 @@ class TestRun(Base):
     pair_id  = Column(String(36), nullable=True, index=True)
     is_baseline = Column(Boolean, nullable=False, default=False, index=True)
     cancel_requested = Column(Boolean, default=False, nullable=False)
+    selection_id = Column(Integer, nullable=True, index=True)
+    selection_version = Column(Integer, nullable=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
@@ -226,6 +264,8 @@ class ScheduledRun(Base):
     last_run_at = Column(DateTime(timezone=True), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    selection_id = Column(Integer, nullable=True, index=True)
+    selection_version = Column(Integer, nullable=True)
 
 
 # ---------------------------------------------------------------------------
