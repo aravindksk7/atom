@@ -361,6 +361,61 @@ class JobDefinition(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Job Selections
+# ---------------------------------------------------------------------------
+
+class JobSelectionVersionOut(BaseModel):
+    version_number: int
+    job_sequence: list[str | SequenceStep]
+    run_settings: RunSettings
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class JobSelectionCreate(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    job_sequence: list[str | SequenceStep] = Field(default_factory=list)
+    run_settings: RunSettings = Field(default_factory=RunSettings)
+
+
+class JobSelectionUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    job_sequence: list[str | SequenceStep] | None = None
+    run_settings: RunSettings | None = None
+
+
+class JobSelectionOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    tags: list[str]
+    archived: bool
+    latest_version: int
+    job_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobSelectionDetailOut(JobSelectionOut):
+    versions: list[JobSelectionVersionOut]
+
+
+class JobSelectionLaunchRequest(BaseModel):
+    source_env: str
+    target_env: str = ""
+    source_connection: str | None = None
+    target_connection: str | None = None
+    config_id: int | None = None
+    config_data: dict[str, Any] = Field(default_factory=dict)
+    version: int | None = None
+
+
+# ---------------------------------------------------------------------------
 # Adapter / SAP BO / Automic schemas
 # ---------------------------------------------------------------------------
 
