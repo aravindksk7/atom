@@ -8,6 +8,7 @@ from etl_framework.repository.database import init_db
 from etl_framework.utils.logging import configure_logging
 from etl_framework.utils.tracing import configure_tracing
 from api.routes import configs, runs, jobs, health as health_routes, adapters, compare as compare_routes
+from api.routes import selections as selections_routes
 from api.routes import auth as auth_routes
 from api.routes import audit as audit_routes
 from api.routes import tokens, notifications, schedules, lineage as lineage_routes
@@ -54,6 +55,7 @@ app.include_router(profiles_routes.router, prefix="/api")
 app.include_router(schema_snapshot_routes.router, prefix="/api")
 app.include_router(contracts_routes.router, prefix="/api/contracts")
 app.include_router(logs_routes.router, prefix="/api/logs")
+app.include_router(selections_routes.router, prefix="/api/selections")
 
 
 @app.get("/api/health")
