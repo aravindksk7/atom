@@ -161,7 +161,6 @@ class JobSelectionRepository:
         self, selection_id: int, name: str | None = None,
         description: str | None = None, tags: list[str] | None = None,
     ) -> JobSelection | None:
-        from datetime import datetime, timezone
         selection = self.get(selection_id)
         if selection is None:
             return None
@@ -179,7 +178,6 @@ class JobSelectionRepository:
     def create_new_version(
         self, selection_id: int, job_sequence: list | None, run_settings: dict | None,
     ) -> JobSelectionVersion | None:
-        from datetime import datetime, timezone
         selection = self.get(selection_id)
         if selection is None:
             return None
@@ -209,10 +207,12 @@ class JobSelectionRepository:
             .count()
         )
 
-    def archive_or_raise(self, selection_id: int) -> JobSelection:
+    def archive_or_raise(self, selection_id: int) -> JobSelection | None:
+        selection = self.get(selection_id)
+        if selection is None:
+            return None
         if self.active_schedule_count(selection_id) > 0:
             raise ValueError("Cannot archive: an enabled schedule still references this selection")
-        selection = self.get(selection_id)
         selection.archived = True
         self._db.commit()
         self._db.refresh(selection)

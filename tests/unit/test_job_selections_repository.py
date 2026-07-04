@@ -78,6 +78,12 @@ def test_archive_succeeds_when_no_active_schedule():
     assert repo.get(sel.id).archived is True
 
 
+def test_archive_or_raise_returns_none_for_nonexistent_id():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    assert repo.archive_or_raise(999999) is None
+
+
 def test_runs_for_selection_filters_by_selection_id():
     db = _session()
     repo = JobSelectionRepository(db)
