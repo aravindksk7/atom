@@ -6,7 +6,7 @@ from etl_framework.reconciliation.models import MismatchRecord, ReconciliationRe
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
-    RunStep, TERMINAL_STATUSES,
+    RunStep, JobSelection, JobSelectionVersion, TERMINAL_STATUSES,
 )
 
 
@@ -111,6 +111,123 @@ class JobRepository:
         return True
 
 
+class JobSelectionRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create(
+        self, name: str, description: str, tags: list[str],
+        job_sequence: list, run_settings: dict,
+    ) -> JobSelection:
+        selection = JobSelection(name=name, description=description, tags=tags or [])
+        self._db.add(selection)
+        self._db.flush()
+        self._db.add(JobSelectionVersion(
+            selection_id=selection.id, version_number=1,
+            job_sequence=job_sequence or [], run_settings_json=run_settings or {},
+        ))
+        self._db.commit()
+        self._db.refresh(selection)
+        return selection
+
+    def get(self, selection_id: int) -> JobSelection | None:
+        return self._db.get(JobSelection, selection_id)
+
+    def get_by_name(self, name: str) -> JobSelection | None:
+        return self._db.query(JobSelection).filter_by(name=name).first()
+
+    def list(self, include_archived: bool = False) -> list[JobSelection]:
+        q = self._db.query(JobSelection)
+        if not include_archived:
+            q = q.filter(JobSelection.archived.is_(False))
+        return q.order_by(JobSelection.name).all()
+
+    def latest_version(self, selection_id: int) -> JobSelectionVersion | None:
+        return (
+            self._db.query(JobSelectionVersion)
+            .filter_by(selection_id=selection_id)
+            .order_by(JobSelectionVersion.version_number.desc())
+            .first()
+        )
+
+    def get_version(self, selection_id: int, version_number: int) -> JobSelectionVersion | None:
+        return (
+            self._db.query(JobSelectionVersion)
+            .filter_by(selection_id=selection_id, version_number=version_number)
+            .first()
+        )
+
+    def update_metadata(
+        self, selection_id: int, name: str | None = None,
+        description: str | None = None, tags: list[str] | None = None,
+    ) -> JobSelection | None:
+        from datetime import datetime, timezone
+        selection = self.get(selection_id)
+        if selection is None:
+            return None
+        if name is not None:
+            selection.name = name
+        if description is not None:
+            selection.description = description
+        if tags is not None:
+            selection.tags = tags
+        selection.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(selection)
+        return selection
+
+    def create_new_version(
+        self, selection_id: int, job_sequence: list | None, run_settings: dict | None,
+    ) -> JobSelectionVersion | None:
+        from datetime import datetime, timezone
+        selection = self.get(selection_id)
+        if selection is None:
+            return None
+        current = self.latest_version(selection_id)
+        version = JobSelectionVersion(
+            selection_id=selection_id,
+            version_number=(current.version_number + 1 if current else 1),
+            job_sequence=(
+                job_sequence if job_sequence is not None
+                else (current.job_sequence if current else [])
+            ),
+            run_settings_json=(
+                run_settings if run_settings is not None
+                else (current.run_settings_json if current else {})
+            ),
+        )
+        self._db.add(version)
+        selection.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(version)
+        return version
+
+    def active_schedule_count(self, selection_id: int) -> int:
+        return (
+            self._db.query(ScheduledRun)
+            .filter(ScheduledRun.selection_id == selection_id, ScheduledRun.enabled.is_(True))
+            .count()
+        )
+
+    def archive_or_raise(self, selection_id: int) -> JobSelection:
+        if self.active_schedule_count(selection_id) > 0:
+            raise ValueError("Cannot archive: an enabled schedule still references this selection")
+        selection = self.get(selection_id)
+        selection.archived = True
+        self._db.commit()
+        self._db.refresh(selection)
+        return selection
+
+    def runs_for_selection(self, selection_id: int, limit: int = 100) -> list[TestRun]:
+        return (
+            self._db.query(TestRun)
+            .filter(TestRun.selection_id == selection_id)
+            .order_by(TestRun.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+
 class RunRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -123,6 +240,8 @@ class RunRepository:
         config_snapshot: dict | None = None,
         run_type: str = "reconciliation",
         pair_id: str | None = None,
+        selection_id: int | None = None,
+        selection_version: int | None = None,
     ) -> TestRun:
         run = TestRun(
             run_id=run_id,
@@ -132,6 +251,8 @@ class RunRepository:
             config_snapshot=config_snapshot,
             run_type=run_type,
             pair_id=pair_id,
+            selection_id=selection_id,
+            selection_version=selection_version,
         )
         self._db.add(run)
         self._db.commit()
