@@ -21,6 +21,7 @@ def init_db() -> None:
     from etl_framework.repository import contract_models  # noqa: F401 — registers contract ORM models
     Base.metadata.create_all(bind=engine)
     _ensure_compare_columns(engine)
+    _backfill_schedule_selections(engine)
 
 
 def _ensure_compare_columns(bind) -> None:
@@ -36,6 +37,10 @@ def _ensure_compare_columns(bind) -> None:
     test_run_cols = {col["name"] for col in inspector.get_columns("test_runs")}
     test_result_cols = {col["name"] for col in inspector.get_columns("test_results")}
     mismatch_cols = {col["name"] for col in inspector.get_columns("mismatch_details")}
+    scheduled_run_cols = (
+        {col["name"] for col in inspector.get_columns("scheduled_runs")}
+        if "scheduled_runs" in tables else set()
+    )
 
     with bind.begin() as conn:
         # --- original compare-tab columns ---
@@ -269,6 +274,88 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE INDEX IF NOT EXISTS ix_contract_breaches_run_id "
             "ON contract_breaches (run_id)"
         ))
+
+        # --- Job Selections ---
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS job_selections ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name VARCHAR(255) NOT NULL UNIQUE, "
+            "description TEXT NOT NULL DEFAULT '', "
+            "tags JSON, "
+            "archived BOOLEAN NOT NULL DEFAULT 0, "
+            "created_at DATETIME, "
+            "updated_at DATETIME)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_job_selections_name ON job_selections (name)"
+        ))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS job_selection_versions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "selection_id INTEGER NOT NULL REFERENCES job_selections(id) ON DELETE CASCADE, "
+            "version_number INTEGER NOT NULL, "
+            "job_sequence JSON, "
+            "run_settings_json JSON, "
+            "created_at DATETIME)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_job_selection_versions_selection_id "
+            "ON job_selection_versions (selection_id)"
+        ))
+
+        if "selection_id" not in test_run_cols:
+            conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_id INTEGER"))
+        if "selection_version" not in test_run_cols:
+            conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_version INTEGER"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_test_runs_selection_id ON test_runs (selection_id)"
+        ))
+
+        if scheduled_run_cols:
+            if "selection_id" not in scheduled_run_cols:
+                conn.execute(text("ALTER TABLE scheduled_runs ADD COLUMN selection_id INTEGER"))
+            if "selection_version" not in scheduled_run_cols:
+                conn.execute(text("ALTER TABLE scheduled_runs ADD COLUMN selection_version INTEGER"))
+
+
+def _backfill_schedule_selections(bind) -> None:
+    """One-time backfill: give every pre-existing ScheduledRun row a JobSelection.
+
+    Idempotent — only touches rows where selection_id is still NULL, so this
+    is a no-op once every schedule has been migrated or created fresh.
+    """
+    if bind.dialect.name != "sqlite":
+        return
+    inspector = inspect(bind)
+    if "scheduled_runs" not in set(inspector.get_table_names()):
+        return
+    cols = {col["name"] for col in inspector.get_columns("scheduled_runs")}
+    if "selection_id" not in cols:
+        return
+
+    from sqlalchemy.orm import Session
+    from etl_framework.repository.models import ScheduledRun, JobSelection, JobSelectionVersion
+
+    with Session(bind) as db:
+        legacy = db.query(ScheduledRun).filter(ScheduledRun.selection_id.is_(None)).all()
+        if not legacy:
+            return
+        for sched in legacy:
+            selection = JobSelection(
+                name=f"{sched.name} (migrated)",
+                description="Auto-created from a pre-existing schedule.",
+            )
+            db.add(selection)
+            db.flush()
+            db.add(JobSelectionVersion(
+                selection_id=selection.id,
+                version_number=1,
+                job_sequence=sched.job_sequence or [],
+                run_settings_json=sched.run_settings_json or {},
+            ))
+            sched.selection_id = selection.id
+            sched.selection_version = 1
+        db.commit()
 
 
 def get_db():
