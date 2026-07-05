@@ -3352,6 +3352,9 @@ function app() {
       }
       this.mismatchDiffRunIdA = this.compareRunIds[0];
       this.mismatchDiffRunIdB = this.compareRunIds[1];
+      this.mismatchDiffRunLabelA = 'Run A';
+      this.mismatchDiffRunLabelB = 'Run B';
+      this.mismatchDiffQueryName = '';
       this.showSelectionRunsModal = false;
       this.currentView = 'compare';
       this.compareSubTab = 'mmdiff';
