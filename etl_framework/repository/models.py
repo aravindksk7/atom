@@ -102,6 +102,7 @@ class TestRun(Base):
     cancel_requested = Column(Boolean, default=False, nullable=False)
     selection_id = Column(Integer, nullable=True, index=True)
     selection_version = Column(Integer, nullable=True)
+    ci_context = Column(JSON, nullable=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
