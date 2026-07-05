@@ -106,6 +106,26 @@ def test_cascade_delete_run_deletes_results(engine_and_db):
     assert db.get(TestResult, result_id) is None
 
 
+def test_test_run_ci_context_defaults_to_none_and_round_trips(engine_and_db):
+    engine, db = engine_and_db
+
+    run = TestRun(run_id="ci-run-1", source_env="dev", target_env="prod")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    assert run.ci_context is None
+
+    run.ci_context = {
+        "commit_sha": "a1b2c3d",
+        "pipeline_url": "https://gitlab.example.com/team/proj/-/pipelines/4821",
+        "ref": "main",
+        "triggered_by": "gitlab-ci",
+    }
+    db.commit()
+    db.refresh(run)
+    assert run.ci_context["commit_sha"] == "a1b2c3d"
+
+
 def test_init_db_creates_tables():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     from etl_framework.repository.database import Base as db_base

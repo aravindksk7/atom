@@ -1466,6 +1466,7 @@
             <div class="flex gap-1 flex-shrink-0">
               <button @click="openLaunchSelectionModal(sel)" class="btn-primary btn-sm text-xs">Launch</button>
               <button @click="openSelectionRuns(sel)" class="btn-secondary btn-sm text-xs">History</button>
+              <button @click="openCiIntegrationModal(sel)" class="btn-secondary btn-sm text-xs">CI/CD</button>
               <button @click="openEditSelectionModal(sel)" class="btn-secondary btn-sm text-xs">Edit</button>
               <button @click="deleteSelection(sel.id)" class="btn-danger btn-sm text-xs">Archive</button>
             </div>
@@ -1526,6 +1527,32 @@
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
         <button @click="launchSelection()" class="btn-primary">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CI/CD Integration Modal -->
+  <div x-show="showCiIntegrationModal" x-cloak class="modal-backdrop" @click.self="showCiIntegrationModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4">CI/CD Integration — <span x-text="ciIntegrationModal.selectionName"></span></h2>
+      <div class="space-y-3 text-sm">
+        <div>
+          <div class="label">STEP 1 — Create an API token</div>
+          <p class="text-muted">Use the Tokens section to create one, then store it as a masked/protected GitLab CI/CD variable.</p>
+        </div>
+        <div>
+          <div class="label">STEP 2 — Add these variables in GitLab (Settings &rarr; CI/CD &rarr; Variables)</div>
+          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono">ATOM_API_URL = &lt;your Atom base URL&gt;
+ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
+        </div>
+        <div>
+          <div class="label">STEP 3 — Copy this into .gitlab-ci.yml</div>
+          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono" x-text="ciIntegrationModal.yamlSnippet"></pre>
+          <button @click="copyCiYamlSnippet()" class="btn-primary btn-sm text-xs mt-2">Copy snippet</button>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showCiIntegrationModal = false" class="btn-secondary">Close</button>
       </div>
     </div>
   </div>

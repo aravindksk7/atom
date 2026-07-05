@@ -113,3 +113,20 @@ def test_launch_dual_env_job_type_without_target_fails_clearly(client):
     assert resp.status_code == 422
     assert "orders_recon" in resp.json()["detail"]
     assert "target_env" in resp.json()["detail"]
+
+
+def test_launch_with_ci_context_stores_it_on_run(client):
+    created = _create_selection(client)
+    ctx = {"commit_sha": "deadbeef", "pipeline_url": "https://gitlab.example.com/p/9", "ref": "main"}
+    resp = client.post(
+        f"/api/selections/{created['id']}/launch",
+        json={"source_env": "dev", "target_env": "qa", "ci_context": ctx},
+    )
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunRepository
+    with _db_module.SessionLocal() as db:
+        run = RunRepository(db).get_run(run_id)
+        assert run.ci_context == ctx

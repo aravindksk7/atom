@@ -16,8 +16,15 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 
 Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follow the [bootstrap steps](#authentication) below.
 
+## CI/CD Job Status
+
+<!-- ATOM:JOB-STATUS:START -->
+_No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch tab for setup instructions and a ready-to-copy `.gitlab-ci.yml` snippet._
+<!-- ATOM:JOB-STATUS:END -->
+
 ## Contents
 
+- [CI/CD Job Status](#cicd-job-status)
 - [Capabilities](#capabilities)
 - [Architecture](#architecture)
 - [Requirements](#requirements)

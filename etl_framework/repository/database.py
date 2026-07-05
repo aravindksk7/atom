@@ -307,6 +307,8 @@ def _ensure_compare_columns(bind) -> None:
             conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_id INTEGER"))
         if "selection_version" not in test_run_cols:
             conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_version INTEGER"))
+        if "ci_context" not in test_run_cols:
+            conn.execute(text("ALTER TABLE test_runs ADD COLUMN ci_context JSON"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_test_runs_selection_id ON test_runs (selection_id)"
         ))
