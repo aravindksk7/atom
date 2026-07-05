@@ -1821,7 +1821,7 @@ In `frontend/app.js`, add right after `deleteSelection` (end of Task 10, Step 2 
       this.mismatchDiffRunIdB = this.compareRunIds[1];
       this.showSelectionRunsModal = false;
       this.currentView = 'compare';
-      this.compareSubTab = 'mismatchdiff';
+      this.compareSubTab = 'mmdiff';
       this.runMismatchDiff();
     },
 ```
