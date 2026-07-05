@@ -545,6 +545,9 @@ function app() {
     selectionModal: {},
     selectionModalEditing: false,
     selectedSelectionJobNames: [],
+    showLaunchSelectionModal: false,
+    launchSelectionModal: {},
+    showSelectionRunsModal: false,
     selectionRunsPanel: null,
     selectionRuns: [],
     compareRunIds: [],
@@ -3296,6 +3299,63 @@ function app() {
       } catch (e) {
         this.toast('error', 'Archive failed', e.message);
       }
+    },
+
+    openLaunchSelectionModal(sel) {
+      this.launchSelectionModal = { selection_id: sel.id, source_env: 'dev', target_env: 'prod' };
+      this.showLaunchSelectionModal = true;
+    },
+
+    async launchSelection() {
+      const m = this.launchSelectionModal;
+      const body = { source_env: m.source_env, target_env: m.target_env || '' };
+      try {
+        const run = await api('POST', `/api/selections/${m.selection_id}/launch`, body);
+        this.showLaunchSelectionModal = false;
+        this.toast('success', 'Launched', `Run ${run.run_id} started`);
+        setTimeout(() => this.loadRuns(), 1000);
+      } catch (e) {
+        this.toast('error', 'Launch failed', e.message);
+      }
+    },
+
+    async openSelectionRuns(sel) {
+      this.selectionRunsPanel = sel;
+      this.compareRunIds = [];
+      try {
+        this.selectionRuns = await api('GET', `/api/selections/${sel.id}/runs`);
+      } catch (e) {
+        this.selectionRuns = [];
+        this.toast('error', 'Could not load run history', e.message);
+      }
+      this.showSelectionRunsModal = true;
+    },
+
+    isCompareRunSelected(runId) {
+      return this.compareRunIds.includes(runId);
+    },
+
+    toggleCompareRunSelection(runId) {
+      const idx = this.compareRunIds.indexOf(runId);
+      if (idx >= 0) {
+        this.compareRunIds.splice(idx, 1);
+      } else {
+        if (this.compareRunIds.length >= 2) this.compareRunIds.shift();
+        this.compareRunIds.push(runId);
+      }
+    },
+
+    compareSelectedRuns() {
+      if (this.compareRunIds.length !== 2) {
+        this.toast('warn', 'Select exactly two runs', 'Pick two runs to compare');
+        return;
+      }
+      this.mismatchDiffRunIdA = this.compareRunIds[0];
+      this.mismatchDiffRunIdB = this.compareRunIds[1];
+      this.showSelectionRunsModal = false;
+      this.currentView = 'compare';
+      this.compareSubTab = 'mmdiff';
+      this.runMismatchDiff();
     },
 
     // ===========================================================

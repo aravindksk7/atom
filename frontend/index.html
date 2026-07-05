@@ -1502,6 +1502,61 @@
     </div>
   </div>
 
+  <!-- Launch Selection Modal -->
+  <div x-show="showLaunchSelectionModal" x-cloak class="modal-backdrop" @click.self="showLaunchSelectionModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4">Launch Job Selection</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Source Env</label>
+          <select x-model="launchSelectionModal.source_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Target Env (leave blank for single-environment jobs)</label>
+          <select x-model="launchSelectionModal.target_env" class="field-input field-select">
+            <option value="">— None —</option>
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
+        <button @click="launchSelection()" class="btn-primary">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selection Run History / Compare-Pairing Modal -->
+  <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></h2>
+      <div>
+        <div class="text-muted text-xs mb-2">Pick exactly two runs to compare (any environment, any time).</div>
+        <template x-if="selectionRuns.length === 0">
+          <div class="empty-state"><div class="empty-state-title">No runs yet for this selection.</div></div>
+        </template>
+        <div class="space-y-1 max-h-80 overflow-y-auto">
+          <template x-for="run in selectionRuns" :key="run.run_id">
+            <label class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200">
+              <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" />
+              <span class="font-mono text-xs text-slate-600" x-text="run.run_id"></span>
+              <span class="badge text-xs" x-text="run.status"></span>
+              <span class="text-muted text-xs" x-text="run.started_at || ''"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showSelectionRunsModal = false" class="btn-secondary">Close</button>
+        <button @click="compareSelectedRuns()" :disabled="compareRunIds.length !== 2" class="btn-primary">Compare Selected</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Schedules sub-tab ── -->
   <div x-show="launchSubTab === 'schedules'">
     <div class="flex justify-end mb-3">
