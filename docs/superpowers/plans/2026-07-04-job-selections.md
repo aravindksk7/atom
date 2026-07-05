@@ -1333,7 +1333,7 @@ def test_create_schedule_dual_env_job_without_target_fails_clearly(client):
 - [ ] **Step 3: Run the tests**
 
 Run: `pytest tests/unit/test_schedules_selection_refactor.py -v`
-Expected: all 6 tests PASS.
+Expected: all 5 tests PASS.
 
 - [ ] **Step 4: Commit**
 
