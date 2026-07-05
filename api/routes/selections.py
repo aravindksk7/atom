@@ -224,6 +224,7 @@ def launch_selection(
         config_snapshot=config_snapshot or None,
         selection_id=selection_id,
         selection_version=version.version_number,
+        ci_context=body.ci_context,
     )
     AuditService(db).log(
         request, "selection.launched", "job_selection", selection_id,

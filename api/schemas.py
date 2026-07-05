@@ -413,6 +413,7 @@ class JobSelectionLaunchRequest(BaseModel):
     config_id: int | None = None
     config_data: dict[str, Any] = Field(default_factory=dict)
     version: int | None = None
+    ci_context: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
