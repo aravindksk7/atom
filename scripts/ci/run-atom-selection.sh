@@ -72,8 +72,9 @@ if [ "${readme_update_ok}" = true ]; then
       git commit -m "chore: update job status for run ${run_id} [skip ci]"
       if ! git push origin "HEAD:${CI_COMMIT_REF_NAME}"; then
         echo "push rejected, retrying after rebase..."
-        git pull --rebase origin "${CI_COMMIT_REF_NAME}"
-        git push origin "HEAD:${CI_COMMIT_REF_NAME}"
+        if ! { git pull --rebase origin "${CI_COMMIT_REF_NAME}" && git push origin "HEAD:${CI_COMMIT_REF_NAME}"; }; then
+          echo "warning: README push failed after retry; continuing (pipeline result unaffected)" >&2
+        fi
       fi
     fi
   else
