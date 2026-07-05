@@ -965,6 +965,45 @@ def export_run_csv(run_id: str, db: Session = Depends(get_session)):
     )
 
 
+_STATUS_EMOJI = {"PASSED": "✅", "FAILED": "❌", "ERROR": "❌", "SLOW": "⚠️", "CANCELLED": "⚠️"}
+
+
+def _render_markdown_summary(run) -> str:
+    if run.ci_context:
+        trigger_line = (
+            f"_Last run: {run.completed_at or run.started_at} via GitLab CI "
+            f"(commit {run.ci_context.get('commit_sha', '?')}, "
+            f"[pipeline]({run.ci_context.get('pipeline_url', '')}), "
+            f"ref `{run.ci_context.get('ref', '?')}`)_"
+        )
+    else:
+        trigger_line = f"_Last run: {run.completed_at or run.started_at} (manual)_"
+
+    lines = [
+        "## Job Status (auto-updated)",
+        "",
+        trigger_line,
+        "",
+        "| Job | Status | Duration |",
+        "|-----|--------|----------|",
+    ]
+    for result in run.results:
+        emoji = _STATUS_EMOJI.get(result.effective_status, result.effective_status)
+        lines.append(f"| {result.query_name} | {emoji} {result.effective_status} | {result.duration_seconds:.1f}s |")
+    lines.append("")
+    lines.append(f"[View full run in Atom](/#/runs/{run.run_id})")
+    return "\n".join(lines)
+
+
+@router.get("/{run_id}/markdown-summary", response_class=PlainTextResponse)
+def get_run_markdown_summary(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return PlainTextResponse(_render_markdown_summary(run), media_type="text/markdown")
+
+
 @router.delete("/{run_id}", status_code=204)
 def delete_run(run_id: str, request: Request, db: Session = Depends(get_session)):
     repo = RunRepository(db)
