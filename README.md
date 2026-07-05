@@ -19,7 +19,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 ## CI/CD Job Status
 
 <!-- ATOM:JOB-STATUS:START -->
-_No CI-triggered run yet. See [CI/CD Integration](#cicd-integration) to wire up a GitLab pipeline._
+_No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch tab for setup instructions and a ready-to-copy `.gitlab-ci.yml` snippet._
 <!-- ATOM:JOB-STATUS:END -->
 
 ## Contents
