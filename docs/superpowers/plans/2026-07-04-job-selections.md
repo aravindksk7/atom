@@ -1834,8 +1834,8 @@ In `frontend/index.html`, add right after the Job Selection Modal block from Tas
   <!-- Launch Selection Modal -->
   <div x-show="showLaunchSelectionModal" x-cloak class="modal-backdrop" @click.self="showLaunchSelectionModal = false">
     <div class="modal-box w-full max-w-md">
-      <div class="modal-header">Launch Job Selection</div>
-      <div class="modal-body space-y-3">
+      <h2 class="text-lg font-bold mb-4">Launch Job Selection</h2>
+      <div class="space-y-3">
         <div>
           <label class="field-label">Source Env</label>
           <select x-model="launchSelectionModal.source_env" class="field-input field-select">
@@ -1852,7 +1852,7 @@ In `frontend/index.html`, add right after the Job Selection Modal block from Tas
           </select>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
         <button @click="launchSelection()" class="btn-primary">Launch</button>
       </div>
@@ -1862,8 +1862,8 @@ In `frontend/index.html`, add right after the Job Selection Modal block from Tas
   <!-- Selection Run History / Compare-Pairing Modal -->
   <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
     <div class="modal-box w-full max-w-2xl">
-      <div class="modal-header" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></div>
-      <div class="modal-body">
+      <h2 class="text-lg font-bold mb-4" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></h2>
+      <div>
         <div class="text-muted text-xs mb-2">Pick exactly two runs to compare (any environment, any time).</div>
         <template x-if="selectionRuns.length === 0">
           <div class="empty-state"><div class="empty-state-title">No runs yet for this selection.</div></div>
@@ -1879,7 +1879,7 @@ In `frontend/index.html`, add right after the Job Selection Modal block from Tas
           </template>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="flex justify-end gap-3 mt-6">
         <button @click="showSelectionRunsModal = false" class="btn-secondary">Close</button>
         <button @click="compareSelectedRuns()" :disabled="compareRunIds.length !== 2" class="btn-primary">Compare Selected</button>
       </div>
