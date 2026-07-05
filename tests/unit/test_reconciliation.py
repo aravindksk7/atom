@@ -392,3 +392,39 @@ def test_executed_at_is_timezone_aware():
     engine = _make_engine(df, df.copy())
     result = engine.reconcile("SELECT 1", "q")
     assert result.executed_at.tzinfo is not None
+
+
+# --- Segment value enrichment ---
+
+def test_segment_values_attached_from_source_frame():
+    source = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 20]})
+    target = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 99]})
+    engine = _make_engine(source, target, segment_columns=["region"])
+    result = engine.reconcile("SELECT 1", "q")
+    diff = [m for m in result.mismatches if m.mismatch_type == "value_diff"]
+    assert diff and diff[0].segment_values == {"region": "APAC"}
+
+
+def test_segment_values_fall_back_to_target_for_missing_in_source():
+    source = pd.DataFrame({"id": [1], "region": ["EMEA"], "amt": [10]})
+    target = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 20]})
+    engine = _make_engine(source, target, segment_columns=["region"])
+    result = engine.reconcile("SELECT 1", "q")
+    miss = [m for m in result.mismatches if m.mismatch_type == "missing_in_source"]
+    assert miss and miss[0].segment_values == {"region": "APAC"}
+
+
+def test_no_segment_columns_leaves_segment_values_none():
+    source = pd.DataFrame({"id": [1], "amt": [10]})
+    target = pd.DataFrame({"id": [1], "amt": [99]})
+    engine = _make_engine(source, target)
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.mismatches[0].segment_values is None
+
+
+def test_segment_column_absent_from_frames_is_skipped():
+    source = pd.DataFrame({"id": [1], "amt": [10]})
+    target = pd.DataFrame({"id": [1], "amt": [99]})
+    engine = _make_engine(source, target, segment_columns=["nonexistent"])
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.mismatches[0].segment_values is None
