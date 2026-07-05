@@ -23,10 +23,11 @@ def _job_id(schedule_id: int) -> str:
 
 def _run_schedule(schedule_id: int, name: str) -> None:
     """Called by APScheduler; runs inside a daemon thread."""
+    import uuid as _uuid
     from etl_framework.repository.database import SessionLocal
-    from etl_framework.repository.repository import ScheduleRepository
-    from api.routes.runs import _execute_run
-    from api.schemas import RunSettings
+    from etl_framework.repository.repository import ScheduleRepository, JobSelectionRepository, RunRepository
+    from api.routes.runs import _execute_run, _snapshot_from_trigger
+    from api.schemas import RunTrigger
 
     db = SessionLocal()
     try:
@@ -34,15 +35,44 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         sched = repo.get(schedule_id)
         if sched is None or not sched.enabled:
             return
-        run_id = str(uuid.uuid4())
-        settings = RunSettings(**(sched.run_settings_json or {}))
-        _execute_run(
-            run_id=run_id,
-            job_sequence=sched.job_sequence or [],
+
+        sel_repo = JobSelectionRepository(db)
+        version = sel_repo.get_version(sched.selection_id, sched.selection_version)
+        if version is None:
+            logger.error(
+                "Schedule '%s' references missing selection %s v%s; skipping run",
+                name, sched.selection_id, sched.selection_version,
+            )
+            return
+
+        trigger = RunTrigger(
             source_env=sched.source_env,
             target_env=sched.target_env,
-            run_settings=settings,
-            config_snapshot=sched.run_settings_json or {},
+            job_sequence=version.job_sequence or [],
+            run_settings=version.run_settings_json or {},
+        )
+        run_id = str(_uuid.uuid4())
+        config_snapshot = _snapshot_from_trigger(trigger, db)
+        config_snapshot["job_sequence"] = [
+            s.model_dump() if hasattr(s, "model_dump") else s for s in trigger.job_sequence
+        ]
+        config_snapshot["run_settings"] = trigger.run_settings.model_dump()
+
+        RunRepository(db).create_run(
+            run_id=run_id,
+            source_env=trigger.source_env,
+            target_env=trigger.target_env,
+            config_snapshot=config_snapshot,
+            selection_id=sched.selection_id,
+            selection_version=sched.selection_version,
+        )
+        _execute_run(
+            run_id=run_id,
+            job_sequence=trigger.job_sequence,
+            source_env=trigger.source_env,
+            target_env=trigger.target_env,
+            run_settings=trigger.run_settings,
+            config_snapshot=config_snapshot,
         )
         repo.touch(schedule_id, last_run_at=datetime.now(timezone.utc))
         logger.info("Scheduled run '%s' started as %s", name, run_id)
