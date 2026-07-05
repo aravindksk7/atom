@@ -621,6 +621,7 @@
     <div class="flex items-center gap-3">
       <div class="flex rounded-lg border border-slate-200 overflow-hidden">
         <button @click="launchSubTab='jobs'" :class="launchSubTab==='jobs' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Jobs</button>
+        <button @click="launchSubTab='selections'; loadJobSelections()" :class="launchSubTab==='selections' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Job Selections</button>
         <button @click="launchSubTab='schedules'; loadSchedules()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
       </div>
       <template x-if="launchSubTab==='jobs'">
@@ -1440,6 +1441,66 @@
     </button>
   </div>
   </div><!-- end jobs sub-tab -->
+
+  <!-- ── Job Selections sub-tab ── -->
+  <div x-show="launchSubTab === 'selections'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">Job Selections</div>
+        <button @click="openNewSelectionModal()" class="btn-primary btn-sm">+ New Selection</button>
+      </div>
+      <template x-if="jobSelections.length === 0">
+        <div class="empty-state"><div class="empty-state-title">No saved job selections yet.</div></div>
+      </template>
+      <div class="space-y-1">
+        <template x-for="sel in jobSelections" :key="sel.id">
+          <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-800" x-text="sel.name"></span>
+                <span class="badge text-xs" x-text="'v' + sel.latest_version"></span>
+                <span class="text-muted text-xs" x-text="sel.job_count + ' jobs'"></span>
+              </div>
+              <div class="text-muted truncate" x-text="sel.description"></div>
+            </div>
+            <div class="flex gap-1 flex-shrink-0">
+              <button @click="openLaunchSelectionModal(sel)" class="btn-primary btn-sm text-xs">Launch</button>
+              <button @click="openSelectionRuns(sel)" class="btn-secondary btn-sm text-xs">History</button>
+              <button @click="openEditSelectionModal(sel)" class="btn-secondary btn-sm text-xs">Edit</button>
+              <button @click="deleteSelection(sel.id)" class="btn-danger btn-sm text-xs">Archive</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Job Selection Modal -->
+  <div x-show="showSelectionModal" x-cloak class="modal-backdrop" @click.self="showSelectionModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <div class="modal-header" x-text="selectionModalEditing ? 'Edit Job Selection' : 'New Job Selection'"></div>
+      <div class="modal-body space-y-3">
+        <div><label class="field-label">Name *</label><input x-model="selectionModal.name" class="field-input" :disabled="selectionModalEditing" placeholder="nightly-set" /></div>
+        <div><label class="field-label">Description</label><input x-model="selectionModal.description" class="field-input" /></div>
+        <div><label class="field-label">Tags (comma-separated)</label><input x-model="selectionModal.tags" class="field-input" placeholder="daily, orders" /></div>
+        <div>
+          <label class="field-label">Jobs</label>
+          <div class="border rounded-lg max-h-64 overflow-y-auto">
+            <template x-for="job in filteredJobList" :key="job.name">
+              <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" class="rounded" :checked="isSelectionJobChecked(job.name)" @change="toggleSelectionJob(job.name)" />
+                <span class="text-sm" x-text="job.name"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button @click="showSelectionModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveSelection()" :disabled="!selectionModal.name || !selectedSelectionJobNames.length" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Schedules sub-tab ── -->
   <div x-show="launchSubTab === 'schedules'">

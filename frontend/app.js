@@ -540,6 +540,14 @@ function app() {
     launchSubTab: 'jobs',
     showScheduleModal: false,
     scheduleModal: {},
+    jobSelections: [],
+    showSelectionModal: false,
+    selectionModal: {},
+    selectionModalEditing: false,
+    selectedSelectionJobNames: [],
+    selectionRunsPanel: null,
+    selectionRuns: [],
+    compareRunIds: [],
     scheduleModalEditing: false,
 
     // -----------------------------------------------------------
@@ -3214,6 +3222,79 @@ function app() {
         setTimeout(() => this.loadRuns(), 1000);
       } catch (e) {
         this.toast('error', 'Trigger failed', e.message);
+      }
+    },
+
+    // ===========================================================
+    // JOB SELECTIONS
+    // ===========================================================
+    async loadJobSelections() {
+      try { this.jobSelections = await api('GET', '/api/selections'); } catch {}
+    },
+
+    openNewSelectionModal() {
+      this.selectionModal = { name: '', description: '', tags: '' };
+      this.selectedSelectionJobNames = [];
+      this.selectionModalEditing = false;
+      this.showSelectionModal = true;
+    },
+
+    async openEditSelectionModal(sel) {
+      const detail = await api('GET', `/api/selections/${sel.id}`);
+      const latest = detail.versions[detail.versions.length - 1];
+      this.selectionModal = {
+        id: detail.id,
+        name: detail.name,
+        description: detail.description,
+        tags: (detail.tags || []).join(', '),
+      };
+      this.selectedSelectionJobNames = (latest.job_sequence || []).map(
+        s => (typeof s === 'string' ? s : s.job_name)
+      );
+      this.selectionModalEditing = true;
+      this.showSelectionModal = true;
+    },
+
+    isSelectionJobChecked(name) {
+      return this.selectedSelectionJobNames.includes(name);
+    },
+
+    toggleSelectionJob(name) {
+      const idx = this.selectedSelectionJobNames.indexOf(name);
+      if (idx >= 0) this.selectedSelectionJobNames.splice(idx, 1);
+      else this.selectedSelectionJobNames.push(name);
+    },
+
+    async saveSelection() {
+      const m = this.selectionModal;
+      const body = {
+        name: m.name,
+        description: m.description || '',
+        tags: (m.tags || '').split(',').map(s => s.trim()).filter(Boolean),
+        job_sequence: this.selectedSelectionJobNames,
+      };
+      try {
+        if (this.selectionModalEditing) {
+          await api('PUT', `/api/selections/${m.id}`, body);
+        } else {
+          await api('POST', '/api/selections', body);
+        }
+        await this.loadJobSelections();
+        this.showSelectionModal = false;
+        this.toast('success', this.selectionModalEditing ? 'Selection updated' : 'Selection created', m.name);
+      } catch (e) {
+        this.toast('error', 'Save failed', e.message);
+      }
+    },
+
+    async deleteSelection(id) {
+      if (!confirm('Archive this job selection?')) return;
+      try {
+        await api('DELETE', `/api/selections/${id}`);
+        await this.loadJobSelections();
+        this.toast('success', 'Selection archived');
+      } catch (e) {
+        this.toast('error', 'Archive failed', e.message);
       }
     },
 
