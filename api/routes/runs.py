@@ -968,13 +968,22 @@ def export_run_csv(run_id: str, db: Session = Depends(get_session)):
 _STATUS_EMOJI = {"PASSED": "✅", "FAILED": "❌", "ERROR": "❌", "SLOW": "⚠️", "CANCELLED": "⚠️"}
 
 
+def _sanitize_ci_value(value) -> str:
+    text = str(value)
+    text = text.replace("\n", " ").replace("\r", " ").replace("`", "'")
+    # Neutralize HTML comment delimiters so a malicious ci_context value can't
+    # forge a `<!-- ATOM:JOB-STATUS:END -->`-style marker and corrupt a
+    # downstream regex-based splice (see Task 6 of the GitLab CI/CD plan).
+    return text.replace("<!--", "< !--").replace("-->", "-- >")
+
+
 def _render_markdown_summary(run) -> str:
     if run.ci_context:
         trigger_line = (
             f"_Last run: {run.completed_at or run.started_at} via GitLab CI "
-            f"(commit {run.ci_context.get('commit_sha', '?')}, "
-            f"[pipeline]({run.ci_context.get('pipeline_url', '')}), "
-            f"ref `{run.ci_context.get('ref', '?')}`)_"
+            f"(commit {_sanitize_ci_value(run.ci_context.get('commit_sha', '?'))}, "
+            f"[pipeline]({_sanitize_ci_value(run.ci_context.get('pipeline_url', ''))}), "
+            f"ref `{_sanitize_ci_value(run.ci_context.get('ref', '?'))}`)_"
         )
     else:
         trigger_line = f"_Last run: {run.completed_at or run.started_at} (manual)_"

@@ -82,3 +82,13 @@ def test_markdown_summary_shows_manual_when_no_ci_context(client):
 def test_markdown_summary_missing_run_returns_404(client):
     resp = client.get("/api/runs/does-not-exist/markdown-summary")
     assert resp.status_code == 404
+
+
+def test_markdown_summary_sanitizes_ci_context_values(client):
+    _make_run_with_results(client, run_id="run-md-4", ci_context={
+        "commit_sha": "abc\n<!-- ATOM:JOB-STATUS:END -->\nmalicious",
+        "pipeline_url": "https://gitlab.example.com/p/1",
+        "ref": "main",
+    })
+    resp = client.get("/api/runs/run-md-4/markdown-summary")
+    assert "<!-- ATOM:JOB-STATUS:END -->" not in resp.text
