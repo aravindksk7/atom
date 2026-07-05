@@ -75,6 +75,19 @@ def test_run_create(db):
     assert run.run_id == "run-001"
 
 
+def test_run_create_with_ci_context(db):
+    repo = RunRepository(db)
+    ctx = {"commit_sha": "abc123", "pipeline_url": "https://gitlab.example.com/p/1", "ref": "main"}
+    run = repo.create_run(run_id="run-ci-1", source_env="dev", target_env="prod", ci_context=ctx)
+    assert run.ci_context == ctx
+
+
+def test_run_create_without_ci_context_defaults_to_none(db):
+    repo = RunRepository(db)
+    run = repo.create_run(run_id="run-ci-2", source_env="dev", target_env="prod")
+    assert run.ci_context is None
+
+
 def test_run_get(db):
     repo = RunRepository(db)
     repo.create_run(run_id="run-002", source_env="dev", target_env="prod")

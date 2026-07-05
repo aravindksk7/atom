@@ -242,6 +242,7 @@ class RunRepository:
         pair_id: str | None = None,
         selection_id: int | None = None,
         selection_version: int | None = None,
+        ci_context: dict | None = None,
     ) -> TestRun:
         run = TestRun(
             run_id=run_id,
@@ -253,6 +254,7 @@ class RunRepository:
             pair_id=pair_id,
             selection_id=selection_id,
             selection_version=selection_version,
+            ci_context=ci_context,
         )
         self._db.add(run)
         self._db.commit()
