@@ -3161,7 +3161,7 @@ function app() {
       this.scheduleModal = {
         name: '', cron_expr: '0 6 * * *',
         source_env: 'dev', target_env: 'prod',
-        job_sequence_raw: '',
+        selection_id: this.jobSelections[0]?.id || '',
         enabled: true,
       };
       this.scheduleModalEditing = false;
@@ -3175,7 +3175,7 @@ function app() {
         cron_expr: sched.cron_expr,
         source_env: sched.source_env,
         target_env: sched.target_env,
-        job_sequence_raw: (sched.job_sequence || []).join(', '),
+        selection_id: sched.selection_id,
         enabled: sched.enabled,
       };
       this.scheduleModalEditing = true;
@@ -3188,10 +3188,9 @@ function app() {
         name: m.name,
         cron_expr: m.cron_expr,
         source_env: m.source_env,
-        target_env: m.target_env,
-        job_sequence: m.job_sequence_raw.split(',').map(s => s.trim()).filter(Boolean),
+        target_env: m.target_env || '',
+        selection_id: m.selection_id,
         enabled: m.enabled,
-        run_settings_json: {},
       };
       try {
         if (this.scheduleModalEditing) {

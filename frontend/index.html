@@ -622,7 +622,7 @@
       <div class="flex rounded-lg border border-slate-200 overflow-hidden">
         <button @click="launchSubTab='jobs'" :class="launchSubTab==='jobs' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Jobs</button>
         <button @click="launchSubTab='selections'; loadJobSelections()" :class="launchSubTab==='selections' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Job Selections</button>
-        <button @click="launchSubTab='schedules'; loadSchedules()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
+        <button @click="launchSubTab='schedules'; loadSchedules(); loadJobSelections()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
       </div>
       <template x-if="launchSubTab==='jobs'">
         <label class="toggle-wrap">
@@ -1616,16 +1616,25 @@
           <div>
             <label class="field-label">Target Env</label>
             <select x-model="scheduleModal.target_env" class="field-input field-select">
+              <option value="">— None —</option>
               <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
             </select>
           </div>
         </div>
-        <div><label class="field-label">Jobs (comma-separated, in order)</label><input x-model="scheduleModal.job_sequence_raw" class="field-input" placeholder="orders_reconciliation, customers_reconciliation" /></div>
+        <div>
+          <label class="field-label">Job Selection *</label>
+          <select x-model="scheduleModal.selection_id" class="field-input field-select">
+            <option value="">— Select —</option>
+            <template x-for="sel in jobSelections" :key="sel.id">
+              <option :value="sel.id" x-text="sel.name + ' (v' + sel.latest_version + ', ' + sel.job_count + ' jobs)'"></option>
+            </template>
+          </select>
+        </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" /> Enabled</label>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showScheduleModal = false" class="btn-secondary">Cancel</button>
-        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr" class="btn-primary">Save</button>
+        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr || !scheduleModal.selection_id" class="btn-primary">Save</button>
       </div>
     </div>
   </div>
