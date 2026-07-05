@@ -1581,7 +1581,7 @@
               <div class="text-muted text-sm mt-0.5 font-mono" x-text="sched.cron_expr"></div>
               <div class="flex gap-3 mt-1 text-xs text-muted">
                 <span x-text="sched.source_env + ' → ' + sched.target_env"></span>
-                <span x-text="(sched.job_sequence||[]).length + ' job(s)'"></span>
+                <span x-text="(jobSelections.find(s => s.id === sched.selection_id)?.job_count ?? '?') + ' job(s)'"></span>
               </div>
               <div class="flex gap-4 mt-1 text-xs text-muted">
                 <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
@@ -1629,6 +1629,7 @@
               <option :value="sel.id" x-text="sel.name + ' (v' + sel.latest_version + ', ' + sel.job_count + ' jobs)'"></option>
             </template>
           </select>
+          <div class="text-xs text-amber-600" x-show="jobSelections.length === 0">You need at least one Job Selection first — create one in the Job Selections tab.</div>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" /> Enabled</label>
       </div>
