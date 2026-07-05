@@ -14,6 +14,7 @@ class MismatchRecord:
     mismatch_type: str  # "value_diff" | "missing_in_target" | "missing_in_source"
     delta: float | None = None           # target_value - source_value (numeric only)
     relative_delta: float | None = None  # delta / source_value (numeric only, None when source is 0)
+    segment_values: dict[str, Any] | None = None  # segment column -> value, for drill-down
 
 
 @dataclass
