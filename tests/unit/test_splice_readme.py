@@ -34,3 +34,8 @@ def test_splice_raises_clear_error_when_markers_missing():
 def test_splice_raises_clear_error_when_only_start_marker_present():
     with pytest.raises(MarkersNotFoundError):
         splice(f"# Title\n\n{START}\nunterminated\n", "new content")
+
+
+def test_splice_rejects_new_content_containing_marker_strings():
+    with pytest.raises(MarkersNotFoundError):
+        splice(f"# Title\n\n{START}\nold\n{END}\n", f"malicious {END}")

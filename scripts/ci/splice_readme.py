@@ -22,6 +22,10 @@ class MarkersNotFoundError(Exception):
 
 
 def splice(original: str, new_content: str) -> str:
+    if START_MARKER in new_content or END_MARKER in new_content:
+        raise MarkersNotFoundError(
+            "new_content must not contain the ATOM:JOB-STATUS marker comments"
+        )
     pattern = re.compile(
         re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER),
         re.DOTALL,
@@ -31,7 +35,7 @@ def splice(original: str, new_content: str) -> str:
             f"Could not find both {START_MARKER} and {END_MARKER} markers in the target file."
         )
     replacement = f"{START_MARKER}\n{new_content}\n{END_MARKER}"
-    return pattern.sub(replacement, original)
+    return pattern.sub(replacement, original, count=1)
 
 
 def main() -> int:
@@ -41,8 +45,12 @@ def main() -> int:
     readme_path = Path(sys.argv[1])
     content_path = Path(sys.argv[2])
 
-    original = readme_path.read_text(encoding="utf-8")
-    new_content = content_path.read_text(encoding="utf-8").strip()
+    try:
+        original = readme_path.read_text(encoding="utf-8")
+        new_content = content_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     try:
         updated = splice(original, new_content)
