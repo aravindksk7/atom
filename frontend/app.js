@@ -544,6 +544,8 @@ function app() {
     showSelectionModal: false,
     selectionModal: {},
     selectionModalEditing: false,
+    showCiIntegrationModal: false,
+    ciIntegrationModal: {},
     selectedSelectionJobNames: [],
     showLaunchSelectionModal: false,
     launchSelectionModal: {},
@@ -3328,6 +3330,32 @@ function app() {
         this.toast('error', 'Could not load run history', e.message);
       }
       this.showSelectionRunsModal = true;
+    },
+
+    openCiIntegrationModal(sel) {
+      const yaml = [
+        `atom-job-selection:`,
+        `  stage: test`,
+        `  script:`,
+        `    - ./scripts/ci/run-atom-selection.sh ${sel.id}`,
+        `  rules:`,
+        `    - if: '$CI_COMMIT_BRANCH == "main"'`,
+      ].join('\n');
+      this.ciIntegrationModal = {
+        selectionId: sel.id,
+        selectionName: sel.name,
+        yamlSnippet: yaml,
+      };
+      this.showCiIntegrationModal = true;
+    },
+
+    async copyCiYamlSnippet() {
+      try {
+        await navigator.clipboard.writeText(this.ciIntegrationModal.yamlSnippet);
+        this.toast('success', 'Copied', 'Pipeline snippet copied to clipboard');
+      } catch {
+        this.toast('warn', 'Copy failed', 'Select the text manually');
+      }
     },
 
     isCompareRunSelected(runId) {
