@@ -500,3 +500,97 @@ def test_breach_checker_idempotent_on_double_failure():
 
     open_breaches = repo.list_open_breaches(contract.id)
     assert len(open_breaches) == 1
+
+
+# ---------------------------------------------------------------------------
+# _resolve_segment_columns / segment_summary wiring
+# ---------------------------------------------------------------------------
+
+def _make_executor(db, run_id: str = "seg-run", job_sequence=None, run_settings=None) -> RunExecutor:
+    return RunExecutor(
+        db=db,
+        run_id=run_id,
+        source_env="dev",
+        target_env="prod",
+        job_sequence=job_sequence or [],
+        run_settings=run_settings or RunSettings(metrics_enabled=False),
+    )
+
+
+def test_resolve_segment_columns_manual_wins():
+    from api.schemas import JobDefinition
+
+    db = _session()
+    ex = _make_executor(db)
+    job = JobDefinition(
+        name="j", query="SELECT 1", key_columns=["id"],
+        params={"segment_columns": ["region", "day"]},
+    )
+    assert ex._resolve_segment_columns(job) == ["region", "day"]
+
+
+def test_resolve_segment_columns_auto_from_profiles():
+    from api.schemas import JobDefinition
+    from etl_framework.repository.repository import ColumnProfileRepository
+
+    db = _session()
+    repo = ColumnProfileRepository(db)
+    repo.save("j", None, "region", 0.0, 4, None, None, None, None, None, None, None, None)
+    repo.save("j", None, "customer_id", 0.0, 90000, None, None, None, None, None, None, None, None)
+    db.commit()
+
+    ex = _make_executor(db)
+    job = JobDefinition(name="j", query="SELECT 1", key_columns=["id"])
+    assert ex._resolve_segment_columns(job) == ["region"]
+
+
+def test_resolve_segment_columns_no_profiles_returns_empty():
+    from api.schemas import JobDefinition
+
+    db = _session()
+    ex = _make_executor(db)
+    job = JobDefinition(name="j", query="SELECT 1", key_columns=["id"])
+    assert ex._resolve_segment_columns(job) == []
+
+
+def test_run_with_segment_columns_persists_summary():
+    """End-to-end in simulation mode: mismatching frames + manual segment_columns
+    -> TestResult.segment_summary populated."""
+    db = _session()
+    RunRepository(db).create_run("seg-run-001", "dev", "prod", {})
+    JobRepository(db).create(
+        {
+            "name": "seg_job",
+            "description": "seg_job",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "SELECT * FROM t",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "segment_columns": ["region"],
+                "source_rows": [{"id": 1, "region": "EMEA", "amt": 10},
+                                 {"id": 2, "region": "APAC", "amt": 20}],
+                "target_rows": [{"id": 1, "region": "EMEA", "amt": 10},
+                                 {"id": 2, "region": "APAC", "amt": 99}],
+            },
+            "enabled": True,
+        }
+    )
+
+    RunExecutor(
+        db=db,
+        run_id="seg-run-001",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=["seg_job"],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = RunRepository(db).get_run("seg-run-001")
+    tr = run.results[0]
+    assert tr.segment_summary is not None
+    assert tr.segment_summary["region"][0]["value"] == "APAC"
+    assert tr.segment_summary["region"][0]["mismatch_count"] == 1
