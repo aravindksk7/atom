@@ -272,6 +272,7 @@ class TestResultOut(BaseModel):
     overridden_by: str | None = None
     override_at: datetime | None = None
     sample_rows: list[dict] | None = None
+    segment_summary: dict | None = None
 
     model_config = {"from_attributes": True}
 

@@ -34,6 +34,7 @@ class ReconciliationResult:
     duration_seconds: float
     schema_diff: dict[str, list[str]] | None = None
     sample_rows: list[dict] | None = None
+    segment_summary: dict | None = None  # segment col -> top-N mismatch buckets
 
     @property
     def total_issues(self) -> int:
