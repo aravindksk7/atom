@@ -1007,6 +1007,7 @@ class RunExecutor:
             from etl_framework.repository.repository import ColumnProfileRepository
             profiles = ColumnProfileRepository(self._db).get_latest(job.name)
         except Exception:
+            logger.warning("segment column auto-pick failed for %s", job.name, exc_info=True)
             return []
         return pick_auto_segment_columns(profiles, job.key_columns or self._settings.key_columns or [])
 
