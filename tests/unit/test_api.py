@@ -816,6 +816,21 @@ def test_create_api_reconciliation_job_succeeds(client):
     assert resp.json()["job_type"] == "api_reconciliation"
 
 
+def test_create_api_reconciliation_job_without_target_succeeds(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "draft_api_job",
+            "job_type": "api_reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "params": {"source_api_endpoint": "orders_a"},
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["job_type"] == "api_reconciliation"
+
+
 # --- api_endpoints secret masking ---
 
 def test_config_masks_api_endpoint_secrets(client):

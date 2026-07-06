@@ -331,10 +331,8 @@ class JobDefinition(BaseModel):
             if not self.params.get("report_id"):
                 raise ValueError("bo_report jobs require 'report_id' in params")
         elif self.job_type == "api_reconciliation":
-            if not self.params.get("source_api_endpoint") or not self.params.get("target_api_endpoint"):
-                raise ValueError(
-                    "api_reconciliation jobs require 'source_api_endpoint' and 'target_api_endpoint' in params"
-                )
+            if not self.params.get("source_api_endpoint"):
+                raise ValueError("api_reconciliation jobs require 'source_api_endpoint' in params")
             if not self.key_columns:
                 raise ValueError("api_reconciliation jobs require key_columns")
         elif self.job_type == "automic_job":

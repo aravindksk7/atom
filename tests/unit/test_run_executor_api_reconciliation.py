@@ -82,6 +82,19 @@ def test_build_case_api_reconciliation_passes_when_identical():
     assert result.source_row_count == 2
 
 
+def test_build_case_api_reconciliation_skips_without_target():
+    snapshot = {"api_endpoints": {"orders_a": {"base_url": "https://a.example.com/orders"}}}
+    ex = _executor(snapshot)
+    job = _job(params={"source_api_endpoint": "orders_a"})
+
+    with patch("etl_framework.rest_api.client.APIEndpointClient") as MockClient:
+        case_fn = ex._build_case(job)
+        result = case_fn()
+
+    MockClient.assert_not_called()
+    assert result.status == TestStatus.SKIPPED
+
+
 def test_build_case_api_reconciliation_not_used_without_live_connections():
     ex = _executor({}, use_live_connections=False)
     job = _job()

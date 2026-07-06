@@ -846,6 +846,7 @@ function app() {
         automic_url: '', automic_user: '', automic_password: '',
         connections: [],
         apiEndpoints: [],
+        apiBaseHost: '',
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -873,9 +874,11 @@ function app() {
           db_password: entry.db_password || '',
           expanded: false,
         })),
+        apiBaseHost: d.api_base_host || '',
         apiEndpoints: Object.entries(d.api_endpoints || {}).map(([name, entry]) => ({
           name,
           base_url: entry.base_url || '',
+          path: entry.path || '',
           method: entry.method || 'GET',
           auth_type: entry.auth_type || 'none',
           api_key_header: entry.api_key_header || 'X-API-Key',
@@ -941,10 +944,13 @@ function app() {
             }])
         );
       }
+      if (m.apiBaseHost && m.apiBaseHost.trim()) {
+        data.api_base_host = m.apiBaseHost.trim();
+      }
       if (m.apiEndpoints && m.apiEndpoints.length > 0) {
         data.api_endpoints = Object.fromEntries(
           m.apiEndpoints
-            .filter(e => e.name.trim() && e.base_url.trim())
+            .filter(e => e.name.trim() && (e.base_url.trim() || (e.path || '').trim()))
             .map(e => {
               const headers = {};
               (e.headers_raw || '').split('\n').forEach(line => {
@@ -962,6 +968,7 @@ function app() {
               }
               return [e.name.trim(), {
                 base_url: e.base_url.trim(),
+                path: (e.path || '').trim(),
                 method: e.method || 'GET',
                 auth_type: e.auth_type || 'none',
                 api_key_header: e.api_key_header || 'X-API-Key',
@@ -1013,7 +1020,7 @@ function app() {
     addApiEndpoint() {
       const idx = this.configModal.apiEndpoints.length + 1;
       this.configModal.apiEndpoints.push({
-        name: `endpoint_${idx}`, base_url: '', method: 'GET',
+        name: `endpoint_${idx}`, base_url: '', path: '', method: 'GET',
         auth_type: 'none', api_key_header: 'X-API-Key', api_key: '',
         bearer_token: '', basic_username: '', basic_password: '',
         headers_raw: '', query_params_raw: '', body_raw: '',
@@ -1232,7 +1239,7 @@ function app() {
       try {
         const resp = await fetch(`/api/configs/${configId}/preview-query`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.storedToken}` },
           body: JSON.stringify({ query, limit: 50 }),
         });
         if (!resp.ok) {
@@ -1284,7 +1291,7 @@ function app() {
       }
       if (m.job_type === 'api_reconciliation') {
         params.source_api_endpoint = m.api_source_endpoint;
-        params.target_api_endpoint = m.api_target_endpoint;
+        if (m.api_target_endpoint) params.target_api_endpoint = m.api_target_endpoint;
       }
       if (m.job_type === 'bo_report') {
         if (m.bo_report_id) params.report_id = m.bo_report_id;
@@ -1364,7 +1371,7 @@ function app() {
       if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
       if (m.job_type === 'api_reconciliation') {
         return Boolean(
-          m.api_source_endpoint && m.api_target_endpoint &&
+          m.api_source_endpoint &&
           m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length
         );
       }

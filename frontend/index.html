@@ -445,18 +445,26 @@
             </div>
             <button @click="addApiEndpoint()" type="button" class="btn-secondary btn-sm text-xs">+ Add Endpoint</button>
           </div>
+          <div class="mb-2">
+            <label class="field-label">Base Host (shared, optional)</label>
+            <input x-model="configModal.apiBaseHost" class="field-input" placeholder="https://api.example.com/v1" />
+            <span class="text-xs text-slate-400">Set once, then give each endpoint below a relative Path instead of repeating the full Base URL.</span>
+          </div>
           <template x-for="(ep, idx) in configModal.apiEndpoints" :key="idx">
             <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
               <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
                 <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" />
-                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || 'not configured'"></span>
+                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || (configModal.apiBaseHost && ep.path ? configModal.apiBaseHost.replace(/\/$/, '') + '/' + ep.path.replace(/^\//, '') : 'not configured')"></span>
                 <span class="text-xs text-slate-400 uppercase" x-text="ep.method"></span>
                 <button @click="toggleApiEndpoint(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="ep.expanded ? '▲' : '▼'"></button>
                 <button @click="removeApiEndpoint(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
               </div>
               <div x-show="ep.expanded" class="p-3 space-y-3">
                 <div class="grid-2">
-                  <div><label class="field-label">Base URL</label><input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" /></div>
+                  <div>
+                    <label class="field-label">Base URL <span class="text-slate-400 font-normal" x-show="configModal.apiBaseHost">(leave blank to use Base Host + Path)</span></label>
+                    <input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" />
+                  </div>
                   <div>
                     <label class="field-label">Method</label>
                     <select x-model="ep.method" class="field-input field-select">
@@ -464,6 +472,10 @@
                       <option value="POST">POST</option>
                     </select>
                   </div>
+                </div>
+                <div x-show="configModal.apiBaseHost">
+                  <label class="field-label">Path (appended to Base Host)</label>
+                  <input x-model="ep.path" class="field-input" placeholder="orders" />
                 </div>
                 <div>
                   <label class="field-label">Auth Type</label>
@@ -1043,11 +1055,12 @@
             <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" />
           </div>
           <div>
-            <label class="field-label">Target API Endpoint</label>
+            <label class="field-label">Target API Endpoint <span class="text-slate-400 font-normal">(optional — leave blank to compare later)</span></label>
             <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" />
           </div>
           <p class="text-xs text-slate-400 col-span-2">
             Endpoint names must match entries in the api_endpoints section of whichever config is selected when this job runs.
+            Without a target, the job saves and runs as SKIPPED until one is set.
           </p>
         </div>
         <div x-show="jobModal.job_type === 'dbt_artifact'" class="grid-2">

@@ -435,11 +435,29 @@ A saved config can also define named REST API endpoints under an `api_endpoints`
 }
 ```
 
+**Ingesting multiple endpoints on the same host:** set a top-level `api_base_host` on the config and give each endpoint a `path` instead of repeating the full `base_url`:
+
+```json
+{
+  "config_data": {
+    "api_base_host": "https://api.example.com/v1",
+    "api_endpoints": {
+      "orders_api":    { "path": "orders",    "auth_type": "bearer", "bearer_token": "secret-token" },
+      "customers_api": { "path": "customers", "auth_type": "bearer", "bearer_token": "secret-token" },
+      "invoices_api":  { "path": "/invoices",  "auth_type": "bearer", "bearer_token": "secret-token" }
+    }
+  }
+}
+```
+
+`api_base_host` and `path` are joined (`/` normalized either way). An endpoint that sets its own `base_url` ignores `api_base_host`/`path` entirely (explicit `base_url` always wins) — handy for the rare endpoint that lives on a different host. Auth, headers, and pagination settings are still per-endpoint; only the host is shared.
+
 **Fields per endpoint:**
 
 | Field | Default | Description |
 |---|---|---|
-| `base_url` | — (required) | Full URL, must include `http://` or `https://` |
+| `base_url` | `""` | Full URL, must include `http://` or `https://` if set. Required unless `path` + config-level `api_base_host` are both set |
+| `path` | `""` | Path appended to the config's top-level `api_base_host` when `base_url` is not set; ignored if `base_url` is set |
 | `method` | `GET` | `GET` or `POST` |
 | `auth_type` | `none` | `none`, `api_key`, `bearer`, or `basic` |
 | `api_key_header` / `api_key` | `X-API-Key` / `""` | Header name and value when `auth_type = api_key` |
@@ -866,7 +884,8 @@ All job management is available from the **Job Catalog** card in the Launch tab 
 7. Optionally add **DQ Rules** — click **+ Add Rule**, pick a rule type, and fill in the parameters. Multiple rules can be stacked on a single job.
 8. Optionally set a **Pass Condition** — override whether the job is considered passed based on row counts, mismatch thresholds, or a custom SQL assertion (see `PassCondition` fields below).
 9. For reconciliation jobs, click **Validate Query** to run a dry-run EXPLAIN against both the source and target databases before saving.
-10. Click **Save**.
+10. Click **Preview** to run the query for real against a selected config's database and see a live sample of rows (`POST /api/configs/{config_id}/preview-query`, capped at 200 rows). Pick which saved config to preview against from the dropdown next to the query field — this can be any saved config, not just the one the job will ultimately run under, so you can sanity-check a query against a different environment (e.g. a smaller dev DB) before wiring it into the job. Requires a valid API token; unlike Validate Query this executes the SQL, so avoid previewing destructive or expensive queries.
+11. Click **Save**.
 
 #### Edit or delete a job
 
@@ -1194,7 +1213,12 @@ Reconciles two REST API endpoints against each other, row-by-row, the same way `
 | Param | Description |
 |---|---|
 | `source_api_endpoint` | Name of an endpoint defined in the config's `api_endpoints` map (source side) |
-| `target_api_endpoint` | Name of an endpoint defined in the config's `api_endpoints` map (target side) |
+
+**Optional params:**
+
+| Param | Description |
+|---|---|
+| `target_api_endpoint` | Name of an endpoint defined in the config's `api_endpoints` map (target side). Leave unset to save the job as a draft — see below |
 
 **Optional fields:**
 
@@ -1210,6 +1234,7 @@ Reconciles two REST API endpoints against each other, row-by-row, the same way `
 1. When `use_live_connections` is enabled, the executor resolves `source_api_endpoint`/`target_api_endpoint` from the `api_endpoints` map on the config used for the run, fetches both (following any configured pagination), and reconciles the resulting datasets on `key_columns`.
 2. Value differences, rows missing from target, and rows missing from source are recorded as mismatch details, exactly like `reconciliation`.
 3. Without `use_live_connections`, the job falls back to simulation data like other job types.
+4. **`target_api_endpoint` is optional.** A job with only `source_api_endpoint` set saves fine and runs with status `SKIPPED` (no comparison performed) — useful for wiring up the source side first and adding the target once it's ready. Set `target_api_endpoint` later (edit the job) to turn on real reconciliation on the next run.
 
 See [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) for how to define the endpoints an `api_reconciliation` job references.
 

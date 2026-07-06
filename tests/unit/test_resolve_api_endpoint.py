@@ -49,3 +49,43 @@ def test_resolve_api_endpoint_raises_for_missing_name():
 def test_resolve_api_endpoint_raises_when_no_api_endpoints_key():
     with pytest.raises(ValueError, match="not found"):
         resolve_api_endpoint({}, "orders")
+
+
+def test_resolve_api_endpoint_combines_base_host_and_path():
+    config_json = {
+        "api_base_host": "https://api.example.com/v1",
+        "api_endpoints": {
+            "orders": {"path": "orders"},
+            "customers": {"path": "/customers"},
+        },
+    }
+    orders = resolve_api_endpoint(config_json, "orders")
+    customers = resolve_api_endpoint(config_json, "customers")
+    assert orders.base_url == "https://api.example.com/v1/orders"
+    assert customers.base_url == "https://api.example.com/v1/customers"
+
+
+def test_resolve_api_endpoint_explicit_base_url_overrides_host_path():
+    config_json = {
+        "api_base_host": "https://api.example.com/v1",
+        "api_endpoints": {
+            "orders": {"base_url": "https://other.example.com/orders", "path": "orders"},
+        },
+    }
+    entry = resolve_api_endpoint(config_json, "orders")
+    assert entry.base_url == "https://other.example.com/orders"
+
+
+def test_resolve_api_endpoint_raises_when_path_but_no_base_host():
+    config_json = {"api_endpoints": {"orders": {"path": "orders"}}}
+    with pytest.raises(ValueError, match="must define base_url"):
+        resolve_api_endpoint(config_json, "orders")
+
+
+def test_resolve_api_endpoint_raises_when_neither_base_url_nor_path():
+    config_json = {
+        "api_base_host": "https://api.example.com/v1",
+        "api_endpoints": {"orders": {}},
+    }
+    with pytest.raises(ValueError, match="must define base_url"):
+        resolve_api_endpoint(config_json, "orders")

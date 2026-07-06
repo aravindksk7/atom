@@ -128,7 +128,8 @@ class ApiEndpointEntry(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = ""
-    base_url: str
+    base_url: str = ""
+    path: str = ""
     method: Literal["GET", "POST"] = "GET"
 
     auth_type: Literal["none", "api_key", "bearer", "basic"] = "none"
@@ -160,7 +161,7 @@ class ApiEndpointEntry(BaseModel):
     @classmethod
     def validate_base_url(cls, v: str) -> str:
         from urllib.parse import urlparse
-        if not urlparse(v).scheme:
+        if v and not urlparse(v).scheme:
             raise ValueError("base_url must include http:// or https://")
         return v
 
@@ -177,4 +178,14 @@ def resolve_api_endpoint(config_json: dict, name: str) -> ApiEndpointEntry:
     endpoints = config_json.get("api_endpoints") or {}
     if name not in endpoints:
         raise ValueError(f"api_endpoints entry '{name}' not found in config")
-    return ApiEndpointEntry(name=name, **endpoints[name])
+    entry = dict(endpoints[name])
+    if not entry.get("base_url"):
+        base_host = config_json.get("api_base_host") or ""
+        path = entry.get("path") or ""
+        if not base_host or not path:
+            raise ValueError(
+                f"api_endpoints entry '{name}' must define base_url, "
+                "or path plus a top-level api_base_host"
+            )
+        entry["base_url"] = base_host.rstrip("/") + "/" + path.lstrip("/")
+    return ApiEndpointEntry(name=name, **entry)
