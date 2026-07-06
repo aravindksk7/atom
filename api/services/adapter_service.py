@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from fastapi import HTTPException
@@ -13,6 +14,12 @@ from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
+
+# SAP BO CALs (concurrent access licenses) are pooled server-side and only
+# freed on logoff. Serialize all BO client use to one at a time so parallel
+# requests can't pile up licenses faster than they're released, and always
+# logout() in a finally so a leaked session never outlives a single call.
+_bo_lock = threading.Lock()
 
 
 def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
@@ -121,42 +128,54 @@ class AdapterService:
     def test_bo_connection(self, config_id: int) -> AdapterTestOut:
         env = self._get_env_config(config_id)
         t0 = time.monotonic()
-        try:
+        with _bo_lock:
             client = BORestClient(env)
-            client.authenticate()
-            latency_ms = int((time.monotonic() - t0) * 1000)
-            return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
-        except Exception as exc:
-            return AdapterTestOut(ok=False, message=_friendly_error(exc, auth_type=env.bo_auth_type), latency_ms=0)
+            try:
+                client.authenticate()
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
+            except Exception as exc:
+                return AdapterTestOut(ok=False, message=_friendly_error(exc, auth_type=env.bo_auth_type), latency_ms=0)
+            finally:
+                client.logout()
 
     def list_bo_documents(self, config_id: int) -> list[BODocOut]:
         env = self._get_env_config(config_id)
-        try:
+        with _bo_lock:
             client = BORestClient(env)
-            client.authenticate()
-            raw = client.list_documents()
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            try:
+                client.authenticate()
+                raw = client.list_documents()
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            finally:
+                client.logout()
         return [BODocOut(id=d["id"], name=d["name"], folder=d.get("folder", "")) for d in raw]
 
     def list_bo_reports(self, config_id: int, doc_id: str) -> list[BOReportOut]:
         env = self._get_env_config(config_id)
-        try:
+        with _bo_lock:
             client = BORestClient(env)
-            client.authenticate()
-            raw = client.list_reports(doc_id)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            try:
+                client.authenticate()
+                raw = client.list_reports(doc_id)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            finally:
+                client.logout()
         return [BOReportOut(id=r["id"], name=r["name"], report_index=r.get("reportIndex", 0)) for r in raw]
 
     def download_bo_report(self, config_id: int, doc_id: str, report_id: str, fmt: str) -> bytes:
         env = self._get_env_config(config_id)
-        try:
+        with _bo_lock:
             client = BORestClient(env)
-            client.authenticate()
-            return client.download_report(doc_id, report_id, fmt)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            try:
+                client.authenticate()
+                return client.download_report(doc_id, report_id, fmt)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+            finally:
+                client.logout()
 
     # ------------------------------------------------------------------
     # Automic
