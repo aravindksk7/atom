@@ -294,6 +294,23 @@ class MismatchOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DrilldownRequest(BaseModel):
+    segment_column: str = Field(min_length=1)
+
+
+class DrilldownRow(BaseModel):
+    value: str
+    source_count: int
+    target_count: int
+    delta: int
+
+
+class DrilldownOut(BaseModel):
+    segment_column: str
+    job_name: str
+    rows: list[DrilldownRow]
+
+
 class RunDetailOut(RunStatusOut):
     source_env: str | None = None
     target_env: str | None = None

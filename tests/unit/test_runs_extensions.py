@@ -246,3 +246,116 @@ def test_stream_emits_terminal_progress_and_done(client, mock_run_repo):
     assert "event: progress" in body
     assert "event: done" in body
     assert '"percent_complete": 100' in body
+
+
+# ---------------------------------------------------------------------------
+# /results/{result_id}/drilldown — on-demand live re-query
+#
+# Note: the `mock_run_repo` fixture above is autouse and replaces
+# `api.routes.runs.RunRepository` with a MagicMock, so `client.get(f"/api/runs/{run_id}")`
+# (which goes through that repo) cannot be used here to discover result ids. The
+# drilldown endpoint itself talks to the DB directly (TestResult/TestRun/SavedJob),
+# bypassing RunRepository entirely, so it works fine against a real run. To get a
+# real completed run+result into the DB we build RunExecutor directly (same pattern
+# as tests/unit/test_run_executor.py) against the client's own SessionLocal, then
+# read the result id straight from the DB instead of via the mocked HTTP endpoint.
+# ---------------------------------------------------------------------------
+
+def _run_job_and_get_result(job_data: dict) -> tuple[str, int]:
+    """Create a job and synchronously execute a run against it, returning (run_id, result_id)."""
+    import uuid
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import JobRepository, RunRepository
+    from etl_framework.repository.models import TestResult
+    from api.services.run_executor import RunExecutor
+    from api.schemas import RunSettings
+
+    db = _db_module.SessionLocal()
+    try:
+        run_id = str(uuid.uuid4())
+        RunRepository(db).create_run(run_id, "dev", "qa", {})
+        JobRepository(db).create(job_data)
+        RunExecutor(
+            db=db,
+            run_id=run_id,
+            source_env="dev",
+            target_env="qa",
+            job_sequence=[job_data["name"]],
+            run_settings=RunSettings(metrics_enabled=False),
+        ).execute()
+        result = db.query(TestResult).filter(TestResult.run_id == run_id).first()
+        assert result is not None
+        return run_id, result.id
+    finally:
+        db.close()
+
+
+def test_drilldown_returns_side_by_side_counts(client):
+    run_id, result_id = _run_job_and_get_result({
+        "name": "drill_job",
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": "SELECT * FROM t",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None,
+        "target_env": None,
+        "params": {
+            "segment_columns": ["region"],
+            "source_rows": [{"id": 1, "region": "EMEA", "amt": 10},
+                             {"id": 2, "region": "APAC", "amt": 20}],
+            "target_rows": [{"id": 1, "region": "EMEA", "amt": 10},
+                             {"id": 2, "region": "APAC", "amt": 99},
+                             {"id": 3, "region": "APAC", "amt": 5}],
+        },
+        "enabled": True,
+    })
+
+    resp = client.post(
+        f"/api/runs/{run_id}/results/{result_id}/drilldown",
+        json={"segment_column": "region"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["segment_column"] == "region"
+    assert data["job_name"] == "drill_job"
+    by_value = {row["value"]: row for row in data["rows"]}
+    assert by_value["APAC"]["source_count"] == 1
+    assert by_value["APAC"]["target_count"] == 2
+    assert by_value["APAC"]["delta"] == 1
+    assert by_value["EMEA"]["source_count"] == 1
+    assert by_value["EMEA"]["target_count"] == 1
+    assert by_value["EMEA"]["delta"] == 0
+    # sorted by absolute delta descending
+    assert data["rows"][0]["value"] == "APAC"
+
+
+def test_drilldown_rejects_non_reconciliation_job(client):
+    run_id, result_id = _run_job_and_get_result({
+        "name": "fresh_job",
+        "description": "",
+        "tags": [],
+        "job_type": "freshness",
+        "query": "SELECT * FROM t",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None,
+        "target_env": None,
+        "params": {"timestamp_column": "ts"},
+        "enabled": True,
+    })
+
+    resp = client.post(
+        f"/api/runs/{run_id}/results/{result_id}/drilldown",
+        json={"segment_column": "region"},
+    )
+    assert resp.status_code == 400
+
+
+def test_drilldown_404_on_unknown_result(client):
+    resp = client.post(
+        "/api/runs/nope/results/99999/drilldown",
+        json={"segment_column": "region"},
+    )
+    assert resp.status_code == 404
