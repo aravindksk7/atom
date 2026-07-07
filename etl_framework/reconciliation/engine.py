@@ -21,6 +21,10 @@ from etl_framework.utils.tracing import span as _span
 logger = logging.getLogger("etl_framework.reconciliation.engine")
 
 
+def _column_key(column: object) -> str:
+    return "".join(ch for ch in str(column).lower() if ch.isalnum())
+
+
 class ReconciliationEngine:
     def __init__(
         self,
@@ -48,6 +52,7 @@ class ReconciliationEngine:
         self._target_engine = target_engine
         self._key_columns = key_columns
         self._exclude_columns = set(exclude_columns or [])
+        self._exclude_column_keys = {_column_key(col) for col in self._exclude_columns}
         self._float_tolerance = float_tolerance
         self._mismatch_row_limit = mismatch_row_limit
         self._schema_mismatch_policy = schema_mismatch_policy
@@ -152,26 +157,36 @@ class ReconciliationEngine:
 
             if self._backend is not None:
                 mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
+                sample_frac = getattr(self._backend, "sample_frac", None)
+                if sample_frac is not None and sample_frac < 1.0:
+                    mit_count = sum(
+                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
+                    )
+                    mis_count = sum(
+                        1 for m in mismatch_list if m.mismatch_type == "missing_in_source"
+                    )
+                    value_count = sum(
+                        1 for m in mismatch_list if m.mismatch_type == "value_diff"
+                    )
+                    matched_count = len(df_source) - mit_count
+                else:
+                    matched_count, mit_count, mis_count, value_count = self._count_mismatches(
+                        df_source_norm,
+                        df_target_norm,
+                    )
+                total_issues = mit_count + mis_count + value_count
                 result = ReconciliationResult(
                     query_name=query_name,
                     source_env=getattr(getattr(self._source_engine, "_env", None), "name", "source"),
                     target_env=getattr(getattr(self._target_engine, "_env", None), "name", "target"),
                     source_row_count=len(df_source),
                     target_row_count=len(df_target),
-                    matched_count=len(df_source) - sum(
-                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
-                    ),
-                    missing_in_target_count=sum(
-                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
-                    ),
-                    missing_in_source_count=sum(
-                        1 for m in mismatch_list if m.mismatch_type == "missing_in_source"
-                    ),
-                    value_mismatch_count=sum(
-                        1 for m in mismatch_list if m.mismatch_type == "value_diff"
-                    ),
+                    matched_count=matched_count,
+                    missing_in_target_count=mit_count,
+                    missing_in_source_count=mis_count,
+                    value_mismatch_count=value_count,
                     mismatches=mismatch_list,
-                    status=TestStatus.PASSED if not mismatch_list else TestStatus.FAILED,
+                    status=TestStatus.PASSED if total_issues == 0 else TestStatus.FAILED,
                     executed_at=executed_at,
                     duration_seconds=0.0,
                     schema_diff=schema_diff,
@@ -250,14 +265,17 @@ class ReconciliationEngine:
     # Schema helpers
     # ------------------------------------------------------------------
 
+    def _is_excluded_column(self, column: object) -> bool:
+        return _column_key(column) in self._exclude_column_keys
+
     def _validate_schemas(
         self,
         df_source: pd.DataFrame,
         df_target: pd.DataFrame,
         query_name: str,
     ) -> dict[str, list[str]] | None:
-        src_cols = set(df_source.columns) - self._exclude_columns
-        tgt_cols = set(df_target.columns) - self._exclude_columns
+        src_cols = {col for col in df_source.columns if not self._is_excluded_column(col)}
+        tgt_cols = {col for col in df_target.columns if not self._is_excluded_column(col)}
         missing_in_target = sorted(src_cols - tgt_cols)
         extra_in_target = sorted(tgt_cols - src_cols)
 
@@ -288,13 +306,13 @@ class ReconciliationEngine:
         if schema_diff:
             common = [
                 c for c in df_source.columns
-                if c in df_target.columns and c not in self._exclude_columns
+                if c in df_target.columns and not self._is_excluded_column(c)
             ]
             df_source = df_source[common]
             df_target = df_target[common]
         else:
-            drop_src = [c for c in self._exclude_columns if c in df_source.columns]
-            drop_tgt = [c for c in self._exclude_columns if c in df_target.columns]
+            drop_src = [c for c in df_source.columns if self._is_excluded_column(c)]
+            drop_tgt = [c for c in df_target.columns if self._is_excluded_column(c)]
             df_source = df_source.drop(columns=drop_src)
             df_target = df_target.drop(columns=drop_tgt)
         return df_source, df_target
@@ -398,6 +416,69 @@ class ReconciliationEngine:
             ))
         return records
 
+    def _count_mismatches(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+    ) -> tuple[int, int, int, int]:
+        merged = pd.merge(
+            df_source,
+            df_target,
+            on=self._key_columns,
+            how="outer",
+            indicator=True,
+            suffixes=("_src", "_tgt"),
+        )
+        missing_in_target = int((merged["_merge"] == "left_only").sum())
+        missing_in_source = int((merged["_merge"] == "right_only").sum())
+        both = merged[merged["_merge"] == "both"]
+        value_count = self._count_value_mismatches(both, df_source)
+        return len(both), missing_in_target, missing_in_source, value_count
+
+    def _count_value_mismatches(
+        self,
+        both: pd.DataFrame,
+        df_source: pd.DataFrame,
+    ) -> int:
+        count = 0
+        compare_cols = [
+            c for c in df_source.columns
+            if c not in self._key_columns and not self._is_excluded_column(c)
+        ]
+        for col in compare_cols:
+            src_col = f"{col}_src" if f"{col}_src" in both.columns else col
+            tgt_col = f"{col}_tgt" if f"{col}_tgt" in both.columns else col
+            if src_col not in both.columns or tgt_col not in both.columns:
+                continue
+
+            src_na = both[src_col].isna()
+            tgt_na = both[tgt_col].isna()
+            both_na = src_na & tgt_na
+            neither_na = ~src_na & ~tgt_na
+            col_tol = self._column_tolerances.get(col, self._float_tolerance)
+
+            if pd.api.types.is_datetime64_any_dtype(df_source[col]) and self._datetime_tolerance.total_seconds() > 0:
+                val_eq = pd.Series(False, index=both.index, dtype=bool)
+                if neither_na.any():
+                    delta_ns = (both.loc[neither_na, src_col] - both.loc[neither_na, tgt_col]).abs()
+                    tol_ns = int(self._datetime_tolerance.total_seconds() * 1e9)
+                    val_eq[neither_na] = delta_ns <= pd.Timedelta(nanoseconds=tol_ns)
+            elif pd.api.types.is_float_dtype(df_source[col]):
+                val_eq = pd.Series(False, index=both.index, dtype=bool)
+                if neither_na.any():
+                    val_eq[neither_na] = np.isclose(
+                        both.loc[neither_na, src_col].to_numpy(dtype=float),
+                        both.loc[neither_na, tgt_col].to_numpy(dtype=float),
+                        rtol=0,
+                        atol=col_tol,
+                    )
+            else:
+                val_eq = both[src_col].eq(both[tgt_col]).fillna(False)
+
+            mismatch_mask = ~((both_na & self._null_equals_null) | (neither_na & val_eq))
+            count += int(mismatch_mask.sum())
+        return count
+
     def _compare_column(
         self,
         col: str,
@@ -465,7 +546,7 @@ class ReconciliationEngine:
     ) -> tuple[list[MismatchRecord], int]:
         compare_cols = [
             c for c in df_source.columns
-            if c not in self._key_columns and c not in self._exclude_columns
+            if c not in self._key_columns and not self._is_excluded_column(c)
         ]
 
         if self._parallel_columns and len(compare_cols) > 1:

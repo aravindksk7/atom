@@ -66,6 +66,10 @@ _KEY_CANDIDATES = (
 )
 
 
+def _column_key(column: object) -> str:
+    return "".join(ch for ch in str(column).lower() if ch.isalnum())
+
+
 def _build_engine(
     engine_a,
     engine_b,
@@ -89,6 +93,7 @@ def _build_engine(
     common_kwargs = dict(
         key_columns=key_columns,
         float_tolerance=adv.float_tolerance,
+        mismatch_row_limit=mismatch_row_limit,
         column_tolerances=adv.column_tolerances or None,
         datetime_tolerance_seconds=adv.datetime_tolerance_seconds,
     )
@@ -279,6 +284,43 @@ class CompareService:
                 },
             )
 
+    @staticmethod
+    def _sort_for_positional_compare(
+        df_a: "pd.DataFrame",
+        df_b: "pd.DataFrame",
+        exclude_columns: list[str] | None,
+    ) -> tuple["pd.DataFrame", "pd.DataFrame"]:
+        """Sort both sides before row-position fallback alignment."""
+        excluded = {_column_key(col) for col in (exclude_columns or [])}
+        common_columns = [
+            col for col in df_a.columns
+            if col in df_b.columns and _column_key(col) not in excluded
+        ]
+        if not common_columns:
+            return df_a.reset_index(drop=True), df_b.reset_index(drop=True)
+
+        def _sort_frame(df: "pd.DataFrame") -> "pd.DataFrame":
+            try:
+                return df.sort_values(
+                    by=common_columns,
+                    kind="mergesort",
+                    na_position="first",
+                ).reset_index(drop=True)
+            except TypeError:
+                sort_keys = pd.DataFrame(index=df.index)
+                for idx, col in enumerate(common_columns):
+                    sort_keys[f"__sort_{idx}"] = df[col].map(
+                        lambda value: "" if pd.isna(value) else str(value)
+                    )
+                order = sort_keys.sort_values(
+                    by=list(sort_keys.columns),
+                    kind="mergesort",
+                    na_position="first",
+                ).index
+                return df.loc[order].reset_index(drop=True)
+
+        return _sort_frame(df_a), _sort_frame(df_b)
+
     def _run_tabular_file_compare(
         self, req: ReconFileCompareRequest, run_id: str,
         df_a: "pd.DataFrame", df_b: "pd.DataFrame",
@@ -291,6 +333,11 @@ class CompareService:
                 key_columns = self._infer_key_columns(df_a, df_b)
             except HTTPException:
                 # No identifiable key column — compare row-by-row using position
+                df_a, df_b = self._sort_for_positional_compare(
+                    df_a,
+                    df_b,
+                    req.exclude_columns or [],
+                )
                 df_a = df_a.copy()
                 df_b = df_b.copy()
                 df_a.insert(0, "__row__", range(1, len(df_a) + 1))

@@ -1557,7 +1557,7 @@ Exactly one source must be provided for each side.
 | `file_a_content_b64` / `file_b_content_b64` | Base64-encoded file contents for browser uploads |
 | `file_a_name` / `file_b_name` | File names (used for format detection, e.g. `.xlsx`, `.csv`) |
 | `key_columns` | Join columns; falls back to row-position if none are found |
-| `exclude_columns` | Columns to skip |
+| `exclude_columns` | Columns to skip; matching ignores case, spaces, hyphens, and underscores (for example `sequence_number` also matches `Sequence Number`) |
 | `label_a` / `label_b` | Display names |
 
 **Supported file formats:** CSV (auto-delimited), XLSX, XLS.

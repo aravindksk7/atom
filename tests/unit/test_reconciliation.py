@@ -118,6 +118,15 @@ def test_exclude_columns_skipped_in_comparison():
     assert result.total_issues == 0
 
 
+def test_exclude_columns_match_normalized_names():
+    source = pd.DataFrame({"id": [1], "val": ["x"], "Sequence Number": [1]})
+    target = pd.DataFrame({"id": [1], "val": ["x"], "sequence-number": [999]})
+    engine = _make_engine(source, target, exclude_columns=["sequence_number"])
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.schema_diff is None
+    assert result.total_issues == 0
+
+
 def test_float_tolerance_avoids_false_mismatch():
     source = pd.DataFrame({"id": [1], "amount": [10.000000001]})
     target = pd.DataFrame({"id": [1], "amount": [10.0]})
