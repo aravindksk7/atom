@@ -71,12 +71,15 @@ def classify_level(
     return "untested"
 
 
+def _count_transitions(statuses: list[str]) -> int:
+    return sum(1 for a, b in zip(statuses, statuses[1:]) if a != b)
+
+
 def compute_flakiness(statuses: list[str]) -> float:
     """Transitions / (window - 1). Statuses ordered oldest -> newest."""
     if len(statuses) < 2:
         return 0.0
-    transitions = sum(1 for a, b in zip(statuses, statuses[1:]) if a != b)
-    return transitions / (len(statuses) - 1)
+    return _count_transitions(statuses) / (len(statuses) - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +87,18 @@ def compute_flakiness(statuses: list[str]) -> float:
 # ---------------------------------------------------------------------------
 
 _SQL_JOB_TYPES = {"reconciliation", "freshness", "profile", "schema_snapshot"}
+_LEVEL_RANK = {"tested": 2, "observed": 1, "untested": 0}
 
 
 def build_coverage(db: Session) -> dict:
     """Build the full coverage matrix response."""
     sig = db.query(func.count(SavedJob.id), func.max(SavedJob.updated_at)).first()
-    cache_key = ("coverage", id(db.get_bind()), sig[0], str(sig[1]))
+    profile_sig = db.query(func.max(ColumnProfile.captured_at)).scalar()
+    snapshot_sig = db.query(func.max(SchemaSnapshot.captured_at)).scalar()
+    cache_key = (
+        "coverage", id(db.get_bind()), sig[0], str(sig[1]),
+        str(profile_sig), str(snapshot_sig),
+    )
     now = time.monotonic()
     cached = _CACHE.get(cache_key)
     if cached and now - cached[0] < _CACHE_TTL_SECONDS:
@@ -131,25 +140,32 @@ def build_coverage(db: Session) -> dict:
             for col in all_columns:
                 level = classify_level(col, rule_columns, reconciled, observed)
                 cur = entry["columns"].get(col)
-                rank = {"tested": 2, "observed": 1, "untested": 0}
-                if cur is None or rank[level] > rank[cur["level"]]:
-                    entry["columns"][col] = {
-                        "column": col, "level": level,
-                        "jobs": sorted({job.name} | set(cur["jobs"] if cur else [])),
-                        "rules": sorted(
-                            {r.get("type") for r in rules
-                             if str(r.get("column", "")).lower() == col}
-                            | set(cur["rules"] if cur else [])
-                        ),
+                if cur is None:
+                    cur = entry["columns"][col] = {
+                        "column": col, "level": level, "jobs": set(), "rules": set(),
                     }
-                elif cur is not None and job.name not in cur["jobs"]:
-                    cur["jobs"] = sorted(set(cur["jobs"]) | {job.name})
+                elif _LEVEL_RANK[level] > _LEVEL_RANK[cur["level"]]:
+                    cur["level"] = level
+                cur["jobs"].add(job.name)
+                cur["rules"].update(
+                    r.get("type") for r in rules
+                    if str(r.get("column", "")).lower() == col
+                )
 
     out_tables = []
     total_cols = tested_cols = observed_only = 0
     for table in sorted(tables):
         entry = tables[table]
-        cols = sorted(entry["columns"].values(), key=lambda c: c["column"])
+        cols = sorted(
+            (
+                {
+                    "column": c["column"], "level": c["level"],
+                    "jobs": sorted(c["jobs"]), "rules": sorted(c["rules"]),
+                }
+                for c in entry["columns"].values()
+            ),
+            key=lambda c: c["column"],
+        )
         n = len(cols)
         t = sum(1 for c in cols if c["level"] == "tested")
         o = sum(1 for c in cols if c["level"] == "observed")
@@ -224,7 +240,7 @@ def build_flaky_report(db: Session, window: int = DEFAULT_FLAKY_WINDOW) -> list[
             "job": query_name,
             "query_name": query_name,
             "score": round(score, 3),
-            "transitions": sum(1 for a, b in zip(statuses, statuses[1:]) if a != b),
+            "transitions": _count_transitions(statuses),
             "window": len(statuses),
             "flaky": score >= FLAKY_THRESHOLD,
             "recent_statuses": newest_first[:10],
