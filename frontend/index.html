@@ -3073,7 +3073,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
-          <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'a')" class="field-input" />
+          <input type="file" accept=".csv,.xlsx,.xls,.json,.xml" @change="handleBOFileUpload($event, 'a')" class="field-input" />
         </template>
         <template x-if="boSourceAType === 'api'">
           <div class="space-y-2">
@@ -3120,7 +3120,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
-          <input type="file" accept=".csv,.xlsx,.xls" @change="handleBOFileUpload($event, 'b')" class="field-input" />
+          <input type="file" accept=".csv,.xlsx,.xls,.json,.xml" @change="handleBOFileUpload($event, 'b')" class="field-input" />
         </template>
         <template x-if="boSourceBType === 'api'">
           <div class="space-y-2">
@@ -3425,7 +3425,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
           <template x-if="fileSourceAType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
               <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1" x-text="fileNameA ? fileNameA + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -3455,7 +3455,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
           <template x-if="fileSourceBType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
               <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1" x-text="fileNameB ? fileNameB + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -3923,7 +3923,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </select>
           <template x-if="colStatsSourceAType === 'upload'">
             <div>
-              <input type="file" accept=".csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
+              <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
               <div x-show="colStatsSourceA.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceA.fileName ? colStatsSourceA.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -3966,7 +3966,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </select>
           <template x-if="colStatsSourceBType === 'upload'">
             <div>
-              <input type="file" accept=".csv,.xlsx,.xls,.json,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
+              <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
               <div x-show="colStatsSourceB.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceB.fileName ? colStatsSourceB.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>

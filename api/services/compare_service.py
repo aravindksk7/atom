@@ -510,7 +510,7 @@ class CompareService:
         """Load one side of a recon-file compare.
 
         Returns dict[str, dict] for stored-run and HTML sources,
-        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .tsv, .txt).
+        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .xml, .tsv, .txt).
         """
         stored_run_id = req.stored_run_id if side == "a" else req.stored_run_id_b
         file_path = req.file_a_path if side == "a" else req.file_b_path
@@ -531,7 +531,7 @@ class CompareService:
                 for r in run.results
             }
 
-        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".tsv", ".txt"}
+        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".xml", ".tsv", ".txt"}
         name = file_name or file_path or ""
         ext = Path(name).suffix.lower() if name else ""
         if ext in _TABULAR_EXTS:
