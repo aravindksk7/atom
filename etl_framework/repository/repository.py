@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import insert
+from sqlalchemy import case, insert
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
@@ -369,10 +369,15 @@ class RunRepository:
     def list_mismatches(
         self, result_id: int, limit: int = 100, offset: int = 0
     ) -> list[MismatchDetail]:
+        mismatch_order = case(
+            (MismatchDetail.mismatch_type == "missing_in_target", 0),
+            (MismatchDetail.mismatch_type == "missing_in_source", 1),
+            else_=2,
+        )
         return (
             self._db.query(MismatchDetail)
             .filter(MismatchDetail.test_result_id == result_id)
-            .order_by(MismatchDetail.id)
+            .order_by(mismatch_order, MismatchDetail.id)
             .offset(offset)
             .limit(limit)
             .all()

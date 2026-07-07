@@ -484,6 +484,8 @@
                     <option value="api_key">API Key Header</option>
                     <option value="bearer">Bearer Token</option>
                     <option value="basic">Basic Auth</option>
+                    <option value="sap_bo_logontoken">SAP BO Logon Token</option>
+                    <option value="sap_bo_basic">SAP BO Basic Logon</option>
                   </select>
                 </div>
                 <div x-show="ep.auth_type === 'api_key'" class="grid-2">
@@ -496,6 +498,23 @@
                 <div x-show="ep.auth_type === 'basic'" class="grid-2">
                   <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" /></div>
                   <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_logontoken'">
+                  <label class="field-label">X-SAP-LogonToken</label><input x-model="ep.sap_bo_logon_token" type="password" class="field-input" />
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_basic'" class="grid-2">
+                  <div><label class="field-label">BO Username</label><input x-model="ep.basic_username" class="field-input" /></div>
+                  <div><label class="field-label">BO Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                  <div>
+                    <label class="field-label">BO Auth Type</label>
+                    <select x-model="ep.sap_bo_auth_type" class="field-input field-select">
+                      <option value="secEnterprise">Enterprise</option>
+                      <option value="secWinAD">Windows AD</option>
+                      <option value="secLDAP">LDAP</option>
+                      <option value="secSAPR3">SAP R/3</option>
+                    </select>
+                  </div>
+                  <div><label class="field-label">Logon URL Override</label><input x-model="ep.sap_bo_logon_url" class="field-input" placeholder="https://bo.example.com/biprws/logon/long" /></div>
                 </div>
                 <div class="grid-2">
                   <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json"></textarea></div>
@@ -517,6 +536,8 @@
                     <select x-model="ep.response_format" class="field-input field-select">
                       <option value="json">JSON</option>
                       <option value="csv">CSV</option>
+                      <option value="xlsx">XLSX</option>
+                      <option value="xls">XLS</option>
                     </select>
                   </div>
                   <div x-show="ep.response_format === 'json'">
@@ -3584,7 +3605,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                         <div class="diff-filter-bar" x-show="(fileExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
                           <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
                             <option value="">All types</option>
-                            <option value="value_mismatch">Value diff</option>
+                            <option value="value_diff">Value diff</option>
                             <option value="missing_in_target">Missing →</option>
                             <option value="missing_in_source">Missing ←</option>
                           </select>
@@ -3831,7 +3852,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                       <div class="diff-filter-bar" x-show="(sqlExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
                         <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
                           <option value="">All types</option>
-                          <option value="value_mismatch">Value diff</option>
+                          <option value="value_diff">Value diff</option>
                           <option value="missing_in_target">Missing →</option>
                           <option value="missing_in_source">Missing ←</option>
                         </select>

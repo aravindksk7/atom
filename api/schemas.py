@@ -459,6 +459,23 @@ class BOTestRequest(BaseModel):
     config_id: int
 
 
+class BOLogonRequest(BaseModel):
+    config_id: int
+    auth_type: Literal["secEnterprise", "secWinAD", "secLDAP", "secSAPR3"] | None = None
+
+
+class BOLogoffRequest(BaseModel):
+    config_id: int
+
+
+class BOAuthSessionOut(BaseModel):
+    ok: bool
+    message: str
+    auth_scheme: Literal["x-sap-logontoken", "basic", "config"]
+    token: str | None = None
+    latency_ms: int = 0
+
+
 class RestApiTestRequest(BaseModel):
     config_id: int
     endpoint_name: str

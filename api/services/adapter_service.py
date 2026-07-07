@@ -3,11 +3,12 @@ from __future__ import annotations
 import re
 import threading
 import time
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
-from api.schemas import AdapterTestOut, AutomicJobStatusOut, BODocOut, BOReportOut
+from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
@@ -20,6 +21,15 @@ from etl_framework.sap_bo.client import BORestClient
 # requests can't pile up licenses faster than they're released, and always
 # logout() in a finally so a leaked session never outlives a single call.
 _bo_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class SAPBOAuthContext:
+    scheme: str
+    token: str | None = None
+    username: str | None = None
+    password: str | None = None
+    auth_type: str | None = None
 
 
 def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
@@ -125,55 +135,148 @@ class AdapterService:
     # SAP BO
     # ------------------------------------------------------------------
 
-    def test_bo_connection(self, config_id: int) -> AdapterTestOut:
+    def _client_for_auth(self, env: EnvironmentConfig, auth: SAPBOAuthContext | None) -> BORestClient:
+        if auth and auth.scheme == "basic":
+            env = env.model_copy(
+                update={
+                    "bo_user": auth.username or "",
+                    "bo_password": auth.password or "",
+                    "bo_auth_type": auth.auth_type or env.bo_auth_type,
+                }
+            )
+        client = BORestClient(env)
+        if auth and auth.scheme == "x-sap-logontoken" and auth.token:
+            client.use_logon_token(auth.token)
+        return client
+
+    def _authenticate_if_needed(self, client: BORestClient, auth: SAPBOAuthContext | None) -> None:
+        if auth and auth.scheme == "x-sap-logontoken":
+            return
+        client.authenticate()
+
+    def create_bo_session(self, config_id: int, auth: SAPBOAuthContext | None = None) -> BOAuthSessionOut:
+        env = self._get_env_config(config_id)
+        t0 = time.monotonic()
+        with _bo_lock:
+            client = self._client_for_auth(env, auth)
+            try:
+                if auth and auth.scheme == "x-sap-logontoken":
+                    client.validate_session()
+                    token = None
+                    scheme = "x-sap-logontoken"
+                    message = "SAP BO token is valid"
+                else:
+                    token = client.authenticate()
+                    scheme = "basic" if auth and auth.scheme == "basic" else "config"
+                    message = "SAP BO logon successful"
+                    if not token:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="SAP BO logon succeeded but did not return X-SAP-LogonToken",
+                        )
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                return BOAuthSessionOut(
+                    ok=True,
+                    message=message,
+                    auth_scheme=scheme,
+                    token=token,
+                    latency_ms=latency_ms,
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=_friendly_error(exc, auth_type=(auth.auth_type if auth else env.bo_auth_type)),
+                ) from exc
+
+    def logoff_bo_session(self, config_id: int, token: str) -> BOAuthSessionOut:
         env = self._get_env_config(config_id)
         t0 = time.monotonic()
         with _bo_lock:
             client = BORestClient(env)
+            client.use_logon_token(token, owns_token=True)
             try:
-                client.authenticate()
+                client.logout()
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                return BOAuthSessionOut(
+                    ok=True,
+                    message="SAP BO logoff successful",
+                    auth_scheme="x-sap-logontoken",
+                    token=None,
+                    latency_ms=latency_ms,
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+
+    def test_bo_connection(self, config_id: int, auth: SAPBOAuthContext | None = None) -> AdapterTestOut:
+        env = self._get_env_config(config_id)
+        t0 = time.monotonic()
+        with _bo_lock:
+            client = self._client_for_auth(env, auth)
+            try:
+                if auth and auth.scheme == "x-sap-logontoken":
+                    client.validate_session()
+                else:
+                    client.authenticate()
                 latency_ms = int((time.monotonic() - t0) * 1000)
                 return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
             except Exception as exc:
-                return AdapterTestOut(ok=False, message=_friendly_error(exc, auth_type=env.bo_auth_type), latency_ms=0)
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                return AdapterTestOut(ok=False, message=_friendly_error(exc, auth_type=auth_type), latency_ms=0)
             finally:
                 client.logout()
 
-    def list_bo_documents(self, config_id: int) -> list[BODocOut]:
+    def list_bo_documents(self, config_id: int, auth: SAPBOAuthContext | None = None) -> list[BODocOut]:
         env = self._get_env_config(config_id)
         with _bo_lock:
-            client = BORestClient(env)
+            client = self._client_for_auth(env, auth)
             try:
-                client.authenticate()
+                self._authenticate_if_needed(client, auth)
                 raw = client.list_documents()
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
             finally:
                 client.logout()
         return [BODocOut(id=d["id"], name=d["name"], folder=d.get("folder", "")) for d in raw]
 
-    def list_bo_reports(self, config_id: int, doc_id: str) -> list[BOReportOut]:
+    def list_bo_reports(
+        self,
+        config_id: int,
+        doc_id: str,
+        auth: SAPBOAuthContext | None = None,
+    ) -> list[BOReportOut]:
         env = self._get_env_config(config_id)
         with _bo_lock:
-            client = BORestClient(env)
+            client = self._client_for_auth(env, auth)
             try:
-                client.authenticate()
+                self._authenticate_if_needed(client, auth)
                 raw = client.list_reports(doc_id)
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
             finally:
                 client.logout()
         return [BOReportOut(id=r["id"], name=r["name"], report_index=r.get("reportIndex", 0)) for r in raw]
 
-    def download_bo_report(self, config_id: int, doc_id: str, report_id: str, fmt: str) -> bytes:
+    def download_bo_report(
+        self,
+        config_id: int,
+        doc_id: str,
+        report_id: str,
+        fmt: str,
+        auth: SAPBOAuthContext | None = None,
+    ) -> bytes:
         env = self._get_env_config(config_id)
         with _bo_lock:
-            client = BORestClient(env)
+            client = self._client_for_auth(env, auth)
             try:
-                client.authenticate()
+                self._authenticate_if_needed(client, auth)
                 return client.download_report(doc_id, report_id, fmt)
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=env.bo_auth_type)) from exc
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
             finally:
                 client.logout()
 

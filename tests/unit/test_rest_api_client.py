@@ -19,6 +19,7 @@ def _fake_response(status_code=200, json_data=None, text="", url="https://api.ex
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = text
+    resp.content = text.encode("utf-8")
     resp.url = url
     if json_data is not None:
         resp.json.return_value = json_data
@@ -95,6 +96,64 @@ def test_fetch_dataframe_api_key_header():
     assert captured["headers"]["X-API-Key"] == "k1"
 
 
+def test_fetch_dataframe_sap_bo_logontoken_header():
+    entry = _entry(auth_type="sap_bo_logontoken", sap_bo_logon_token="bo-token")
+    client = APIEndpointClient(entry)
+    captured = {}
+
+    def fake_request(method, url, **kwargs):
+        captured.update(kwargs)
+        return _fake_response(json_data=[{"id": 1}])
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        client.fetch_dataframe()
+    assert captured["headers"]["X-SAP-LogonToken"] == "bo-token"
+    assert captured["auth"] is None
+
+
+def test_fetch_dataframe_sap_bo_basic_logs_on_then_uses_token_and_logs_off():
+    entry = _entry(
+        base_url="https://bo.example.com/biprws/raylight/v1/documents/100/reports/r1",
+        auth_type="sap_bo_basic",
+        basic_username="administrator",
+        basic_password="Password1",
+        sap_bo_auth_type="secEnterprise",
+    )
+    client = APIEndpointClient(entry)
+    captured_request = {}
+
+    logon = _fake_response(json_data={})
+    logon.headers = {"X-SAP-LogonToken": "issued-token"}
+    data = _fake_response(json_data=[{"id": 1}])
+    logoff = _fake_response(json_data={})
+
+    def fake_request(method, url, **kwargs):
+        captured_request.update(kwargs)
+        return data
+
+    with patch.object(client._session, "post", side_effect=[logon, logoff]) as mock_post, \
+         patch.object(client._session, "request", side_effect=fake_request):
+        df = client.fetch_dataframe()
+
+    assert list(df["id"]) == [1]
+    assert mock_post.call_args_list[0].args[0] == "https://bo.example.com/biprws/logon/long"
+    assert mock_post.call_args_list[0].kwargs["json"]["userName"] == "administrator"
+    assert mock_post.call_args_list[0].kwargs["json"]["auth"] == "secEnterprise"
+    assert captured_request["headers"]["X-SAP-LogonToken"] == "issued-token"
+    assert mock_post.call_args_list[1].args[0] == "https://bo.example.com/biprws/logoff"
+
+
+def test_fetch_dataframe_sap_bo_basic_raises_when_logon_response_has_no_token():
+    entry = _entry(auth_type="sap_bo_basic", basic_username="user", basic_password="pw")
+    client = APIEndpointClient(entry)
+    logon = _fake_response(json_data={})
+    logon.headers = {}
+
+    with patch.object(client._session, "post", return_value=logon):
+        with pytest.raises(APIRequestError, match="X-SAP-LogonToken"):
+            client.fetch_dataframe()
+
+
 def test_fetch_dataframe_no_auth_sends_no_auth_tuple():
     entry = _entry(auth_type="none")
     client = APIEndpointClient(entry)
@@ -117,6 +176,20 @@ def test_fetch_dataframe_parses_csv():
         df = client.fetch_dataframe()
     assert list(df.columns) == ["id", "name"]
     assert len(df) == 2
+
+
+def test_fetch_dataframe_parses_xlsx():
+    entry = _entry(response_format="xlsx")
+    client = APIEndpointClient(entry)
+    expected = pd.DataFrame([{"id": 1}])
+    response = _fake_response(text="xlsx-bytes")
+
+    with patch.object(client._session, "request", return_value=response), \
+         patch("etl_framework.rest_api.client.pd.read_excel", return_value=expected) as mock_read_excel:
+        df = client.fetch_dataframe()
+
+    assert list(df["id"]) == [1]
+    assert mock_read_excel.call_args.args[0].read() == b"xlsx-bytes"
 
 
 def test_fetch_dataframe_raises_when_root_path_missing():

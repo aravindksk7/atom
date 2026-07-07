@@ -241,7 +241,7 @@
         </select>
         <select id="filter-type" onchange="filterState.type=this.value;applyFilters()">
           <option value="">All types</option>
-          <option value="value_mismatch">Value diff</option>
+          <option value="value_diff">Value diff</option>
           <option value="missing_in_target">Missing →</option>
           <option value="missing_in_source">Missing ←</option>
         </select>
@@ -322,7 +322,7 @@
                     data-key="{{ mm.key_values | tojson }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
                     data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}">
-                  <td><span class="badge {% if mm.mismatch_type == 'value_mismatch' %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
+                  <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
                   <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values | tojson }}</td>
                   <td class="diff-values-cell" colspan="2">
@@ -544,14 +544,15 @@
 
   // ── Mismatch type donut ───────────────────────────────────────────────────
   function buildDonut(){
-    var counts={value_mismatch:0,missing_in_target:0,missing_in_source:0};
+    var counts={value_diff:0,missing_in_target:0,missing_in_source:0};
     document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
-      var t=tr.dataset.type; if(t in counts) counts[t]++; else counts.value_mismatch++;
+      var t=tr.dataset.type === 'value_mismatch' ? 'value_diff' : tr.dataset.type;
+      if(t in counts) counts[t]++; else counts.value_diff++;
     });
     var total=Object.values(counts).reduce(function(a,b){return a+b;},0);
     if(!total) return;
-    var colors={value_mismatch:'#fbbf24',missing_in_target:'#38bdf8',missing_in_source:'#a78bfa'};
-    var labels={value_mismatch:'Value diff',missing_in_target:'Missing →',missing_in_source:'Missing ←'};
+    var colors={value_diff:'#fbbf24',missing_in_target:'#38bdf8',missing_in_source:'#a78bfa'};
+    var labels={value_diff:'Value diff',missing_in_target:'Missing →',missing_in_source:'Missing ←'};
     var cx=80,cy=80,r=60,ir=36;
     var angle=-Math.PI/2, paths='';
     Object.entries(counts).forEach(function(entry){

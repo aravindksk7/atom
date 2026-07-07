@@ -26,7 +26,7 @@ router = APIRouter(tags=["configs"])
 
 _SENSITIVE_KEYS = {
     "db_password", "automic_password", "bo_password",
-    "api_key", "bearer_token", "basic_password",
+    "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
 }
 _MASK = "********"
 

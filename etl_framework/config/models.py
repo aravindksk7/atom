@@ -132,12 +132,22 @@ class ApiEndpointEntry(BaseModel):
     path: str = ""
     method: Literal["GET", "POST"] = "GET"
 
-    auth_type: Literal["none", "api_key", "bearer", "basic"] = "none"
+    auth_type: Literal[
+        "none",
+        "api_key",
+        "bearer",
+        "basic",
+        "sap_bo_logontoken",
+        "sap_bo_basic",
+    ] = "none"
     api_key_header: str = "X-API-Key"
     api_key: str = ""
     bearer_token: str = ""
     basic_username: str = ""
     basic_password: str = ""
+    sap_bo_logon_token: str = ""
+    sap_bo_auth_type: Literal["secEnterprise", "secWinAD", "secLDAP", "secSAPR3"] = "secEnterprise"
+    sap_bo_logon_url: str = ""
 
     headers: dict[str, str] = Field(default_factory=dict)
     query_params: dict[str, str] = Field(default_factory=dict)
@@ -146,7 +156,7 @@ class ApiEndpointEntry(BaseModel):
     timeout: int = 30
     verify_ssl: bool = True
 
-    response_format: Literal["json", "csv"] = "json"
+    response_format: Literal["json", "csv", "xlsx", "xls"] = "json"
     json_root_path: str = ""
 
     pagination_type: Literal["none", "cursor", "page"] = "none"
@@ -163,6 +173,14 @@ class ApiEndpointEntry(BaseModel):
         from urllib.parse import urlparse
         if v and not urlparse(v).scheme:
             raise ValueError("base_url must include http:// or https://")
+        return v
+
+    @field_validator("sap_bo_logon_url")
+    @classmethod
+    def validate_sap_bo_logon_url(cls, v: str) -> str:
+        from urllib.parse import urlparse
+        if v and not urlparse(v).scheme:
+            raise ValueError("sap_bo_logon_url must include http:// or https://")
         return v
 
     @field_validator("timeout")

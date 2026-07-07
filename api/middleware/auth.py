@@ -26,6 +26,15 @@ _EXEMPT_EXACT = {"/", "/api/health", "/api/auth/setup-status"}
 _EXEMPT_PATTERNS = [re.compile(r"^/api/runs/[^/]+/badge\.svg$")]
 
 
+def _has_sap_bo_auth(request: Request) -> bool:
+    if not request.url.path.startswith("/api/adapters/sap-bo/"):
+        return False
+    if request.headers.get("x-sap-logontoken"):
+        return True
+    auth = request.headers.get("Authorization", "")
+    return auth.lower().startswith("basic ")
+
+
 def evict_token_cache(token_hash: str) -> None:
     _cache.pop(token_hash, None)
 
@@ -50,6 +59,8 @@ def _is_exempt(path: str, method: str) -> bool:
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if _is_exempt(request.url.path, request.method):
+            return await call_next(request)
+        if _has_sap_bo_auth(request):
             return await call_next(request)
 
         auth = request.headers.get("Authorization", "")

@@ -15,6 +15,37 @@ def test_api_endpoint_entry_defaults():
     assert entry.verify_ssl is True
 
 
+def test_api_endpoint_entry_accepts_sap_bo_auth_modes_and_excel_format():
+    token_entry = ApiEndpointEntry(
+        base_url="https://bo.example.com/biprws/raylight/v1/documents/1/reports/2",
+        auth_type="sap_bo_logontoken",
+        sap_bo_logon_token="tok",
+        response_format="xlsx",
+    )
+    basic_entry = ApiEndpointEntry(
+        base_url="https://bo.example.com/biprws/raylight/v1/documents/1/reports/2",
+        auth_type="sap_bo_basic",
+        basic_username="user",
+        basic_password="pw",
+        sap_bo_auth_type="secWinAD",
+        response_format="xls",
+    )
+
+    assert token_entry.auth_type == "sap_bo_logontoken"
+    assert token_entry.response_format == "xlsx"
+    assert basic_entry.auth_type == "sap_bo_basic"
+    assert basic_entry.sap_bo_auth_type == "secWinAD"
+
+
+def test_api_endpoint_entry_rejects_sap_bo_logon_url_without_scheme():
+    with pytest.raises(ValidationError):
+        ApiEndpointEntry(
+            base_url="https://bo.example.com/biprws/raylight/v1/documents/1/reports/2",
+            auth_type="sap_bo_basic",
+            sap_bo_logon_url="bo.example.com/biprws/logon/long",
+        )
+
+
 def test_api_endpoint_entry_requires_url_scheme():
     with pytest.raises(ValidationError):
         ApiEndpointEntry(base_url="api.example.com/orders")

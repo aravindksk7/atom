@@ -52,20 +52,35 @@ class BORestClient:
         self._auth_type = env_config.bo_auth_type
         self._timeout = env_config.bo_timeout
         self._token = None
+        self._owns_token = False
         self._session = requests.Session()
         self._verify_ssl = env_config.bo_verify_ssl
         proxy_url = env_config.bo_proxy_url.strip()
         if proxy_url:
             self._session.proxies.update({"http": proxy_url, "https": proxy_url})
 
-    def authenticate(self) -> None:
+    @property
+    def logon_token(self) -> str | None:
+        return self._token
+
+    def use_logon_token(self, token: str, *, owns_token: bool = False) -> None:
+        self._token = token
+        self._owns_token = owns_token
+        self._session.headers.update({"X-SAP-LogonToken": token})
+
+    def authenticate(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        auth_type: str | None = None,
+    ) -> str | None:
         url = f"{self._base_url}{self.LOGON_ENDPOINT}"
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         payload = {
-            "password": self._password,
+            "password": self._password if password is None else password,
             "clientType": "",
-            "auth": self._auth_type,
-            "userName": self._user
+            "auth": self._auth_type if auth_type is None else auth_type,
+            "userName": self._user if username is None else username
         }
         logger.debug("Authenticating with SAP BO REST API")
         response = self._session.post(
@@ -85,7 +100,26 @@ class BORestClient:
         
         self._token = response.headers.get("X-SAP-LogonToken")
         if self._token:
+            self._owns_token = True
             self._session.headers.update({"X-SAP-LogonToken": self._token})
+        return self._token
+
+    def validate_session(self) -> None:
+        if not self._token:
+            self.authenticate()
+        response = self._session.get(
+            f"{self._base_url}/biprws/raylight/v1/documents",
+            headers={"Accept": "application/json"},
+            params={"page": 1, "pagesize": 1},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=None,
+                http_status=response.status_code,
+                response_body=response.text,
+            )
 
     def fetch_report_data(self, report_id: str) -> pd.DataFrame:
         if not self._token:
@@ -231,11 +265,13 @@ class BORestClient:
         return response.content
 
     def logout(self) -> None:
-        if self._token:
+        if self._token and self._owns_token:
             self._session.post(
                 f"{self._base_url}/biprws/logoff",
                 timeout=self._timeout,
                 verify=self._verify_ssl,
             )
+        if self._token:
             self._session.headers.pop("X-SAP-LogonToken", None)
-            self._token = None
+        self._token = None
+        self._owns_token = False
