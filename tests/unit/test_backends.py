@@ -172,3 +172,36 @@ def test_engine_accepts_backend_parameter():
     )
     result = engine.reconcile("SELECT 1", "test_with_backend")
     assert result.status == TestStatus.PASSED
+
+
+def test_engine_backend_reports_full_counts_when_detail_rows_are_capped():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from etl_framework.reconciliation.engine import ReconciliationEngine
+
+    n = 20
+    src_df = pd.DataFrame({"id": list(range(n)), "val": ["a"] * n})
+    tgt_df = pd.DataFrame({"id": list(range(n)), "val": ["b"] * n})
+
+    source_db = MagicMock()
+    target_db = MagicMock()
+    source_db._env = SimpleNamespace(name="source")
+    target_db._env = SimpleNamespace(name="target")
+    source_db.execute_query.return_value = src_df
+    target_db.execute_query.return_value = tgt_df
+
+    backend = PandasBackend(key_columns=["id"], mismatch_row_limit=5)
+    engine = ReconciliationEngine(
+        source_engine=source_db,
+        target_engine=target_db,
+        key_columns=["id"],
+        backend=backend,
+    )
+
+    result = engine.reconcile("SELECT 1", "capped_backend")
+
+    assert result.source_row_count == n
+    assert result.target_row_count == n
+    assert result.value_mismatch_count == n
+    assert len(result.mismatches) == 5
+    assert result.status == TestStatus.FAILED
