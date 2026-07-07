@@ -142,6 +142,38 @@ def test_list_pairs_returns_unique_pair_ids(repo):
     assert set(pairs) == {"p1", "p2"}
 
 
+def test_collect_mismatch_rows_uses_snapshot_results_and_serializes_keys():
+    from types import SimpleNamespace
+    from api.services.mismatch_export import collect_mismatch_rows
+
+    snapshot = SimpleNamespace(results=[
+        SimpleNamespace(id=10, query_name="orders"),
+        SimpleNamespace(id=None, query_name="no-db-row"),
+    ])
+    repo = SimpleNamespace(
+        list_mismatches=lambda result_id, limit: [
+            SimpleNamespace(
+                key_values={"order_id": 123},
+                column_name="amount",
+                source_value="10.00",
+                target_value="11.00",
+                mismatch_type="value_diff",
+            )
+        ] if result_id == 10 else []
+    )
+
+    rows = collect_mismatch_rows(repo, snapshot)
+
+    assert rows == [{
+        "test_name": "orders",
+        "key_values": '{"order_id": 123}',
+        "column_name": "amount",
+        "source_value": "10.00",
+        "target_value": "11.00",
+        "mismatch_type": "value_diff",
+    }]
+
+
 @pytest.fixture
 def api_client(monkeypatch):
     from api.routes import runs as runs_module

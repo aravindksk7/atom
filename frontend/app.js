@@ -1,6 +1,13 @@
 /* ETL Framework – full 6-tab SPA */
 
 const API = window.ETL_API_BASE || '';
+const APP_CONFIG = window.ETL_APP_CONFIG || {};
+const isTerminalStatusValue = APP_CONFIG.isTerminalStatusValue || ((status) =>
+  ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase()));
+const HELP_METHODS = window.ETL_HELP_METHODS || {
+  showHelp() {},
+  initKeyboardShortcuts() {},
+};
 
 function normalizeToken(raw) {
   let token = String(raw || '').trim();
@@ -561,77 +568,42 @@ function app() {
     toasts: [],
     _toastSeq: 0,
 
-    // --- Task 1: Job Catalog Search/Filter ---
     jobSearchQuery: '',
 
-    // --- Task 2: Job Last Run Status ---
-    // (stored in localStorage, accessed via methods)
-
-    // --- Task 3: Multi-select with Shift-click ---
     multiSelectMode: false,
     shiftLastIndex: -1,
 
-    // --- Task 7: Config Dropdown + Session Memory ---
     // (savedConfigDisplay is a method; session settings persisted via methods)
 
-    // --- Task 8: Job Modal Tab Reorganization ---
     jobModalTab: 'basic',
-    jobModalTabs: [
-      { id: 'basic', label: 'Basic Info' },
-      { id: 'settings', label: 'Settings' },
-      { id: 'deps', label: 'Dependencies' },
-      { id: 'rules', label: 'DQ Rules' },
-      { id: 'tags', label: 'Tags' },
-      { id: 'conditions', label: 'Conditions' },
-    ],
+    jobModalTabs: APP_CONFIG.jobModalTabs || [],
 
-    // --- Task 9: Job Modal Inline Validation ---
     jobModalValidation: { sql: '', keyColumns: '', dependencies: '' },
 
-    // --- Task 10: DQ Rule Templates + Job Templates ---
-    dqRuleTemplates: [
-      { name: 'Price must be positive', type: 'column_mean_between', defaults: { min: 0, max: null } },
-      { name: 'ID must be not null', type: 'not_null', defaults: {} },
-      { name: 'Status code range', type: 'column_mean_between', defaults: { min: 100, max: 599 } },
-      { name: 'Email format validation', type: 'match_regex', defaults: { pattern: '^[\\w.+-]+@[\\w-]+\\.[\\w.]+$' } },
-    ],
+    dqRuleTemplates: APP_CONFIG.dqRuleTemplates || [],
     jobTemplates: [],
     jobTemplateName: '',
     showSaveTemplatePrompt: false,
 
-    // --- Task 11: Execution Sequence Drag-to-Reorder ---
     dragSrcIndex: null,
 
-    // --- Task 13: Compare Tab Template System ---
     compareTemplates: [],
     activeCompareTemplate: '',
     showCompareTemplatePanel: false,
     newCompareTemplateName: '',
-    predefinedCompareTemplates: [
-      { name: 'Daily BO Report Compare', type: 'bo', config: { sourceTypeA: 'api', sourceTypeB: 'api' } },
-      { name: 'Weekly Report Trend Analysis', type: 'bo', config: { sourceTypeA: 'api', sourceTypeB: 'baseline' } },
-      { name: 'Ad-hoc File Upload Comparison', type: 'bo', config: { sourceTypeA: 'upload', sourceTypeB: 'upload' } },
-      { name: 'Daily Reconciliation vs Baseline', type: 'reconciliation', config: {} },
-      { name: 'Production File Validation', type: 'reconciliation', config: { fileMode: 'upload' } },
-      { name: 'Environment-to-Environment Diff', type: 'reconciliation', config: {} },
-    ],
+    predefinedCompareTemplates: APP_CONFIG.predefinedCompareTemplates || [],
 
-    // --- Task 14: BO Report Tab Improvements ---
     boSaveAsBaseline: false,
     boLastUsedSourceTypes: { a: '', b: '' },
 
-    // --- Task 15: Quick Compare Mode ---
     quickCompareMode: false,
 
-    // --- Task 17: Results Panel Export + Visualization Toggle ---
     showMismatchChart: false,
     mismatchChartType: 'column',
     mismatchChartData: null,
 
-    // --- Task 18: Mismatch Acceptance Workflow ---
     mismatchStatusFilter: 'ALL',
 
-    // --- Task 19: Help System + Keyboard Shortcuts ---
     showingHelp: false,
     helpTitle: '',
     helpContent: '',
@@ -680,13 +652,9 @@ function app() {
       } catch {
         this.apiOk = false;
       }
-      // --- Task 7: Load session settings from localStorage ---
       this.loadSessionSettings();
-      // --- Task 10: Load job templates from localStorage ---
       this._loadJobTemplatesFromStorage();
-      // --- Task 13: Load compare templates from localStorage ---
       this.loadCompareTemplates();
-      // --- Task 19: Init keyboard shortcuts ---
       this.initKeyboardShortcuts();
       this.$watch('launchSettings.config_id', () => {
         this.launchSettings.source_connection = null;
@@ -1179,7 +1147,7 @@ function app() {
       this.jobModalEditing = false;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
-      this.jobModalTab = 'basic';  // Task 8: reset tab
+      this.jobModalTab = 'basic';
       this.showJobModal = true;
     },
 
@@ -1229,7 +1197,7 @@ function app() {
       this.jobModalEditing = true;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
-      this.jobModalTab = 'basic';  // Task 8: reset tab
+      this.jobModalTab = 'basic';
       this.showJobModal = true;
     },
 
@@ -1513,7 +1481,7 @@ function app() {
     },
 
     isTerminalStatus(status) {
-      return ['PASSED','FAILED','SLOW','ERROR','COMPLETED','CANCELLED'].includes(status);
+      return isTerminalStatusValue(status);
     },
 
     startRunStream(run) {
@@ -1539,20 +1507,6 @@ function app() {
         const idx = this.activeRuns.findIndex(r => r.run_id === progress.run_id);
         if (idx >= 0) Object.assign(this.activeRuns[idx], { status: progress.status, _progress: progress });
         this.closeRunStream(progress.run_id);
-        // --- Task 2: Save per-job last run statuses ---
-        if (progress.job_results) {
-          progress.job_results.forEach(jr => {
-            if (jr.job_name && jr.status) this.saveJobRunStatus(jr.job_name, jr.status);
-          });
-        }
-        // --- Task 12: Save per-job durations ---
-        if (progress.job_results) {
-          progress.job_results.forEach(jr => {
-            if (jr.job_name && jr.duration_seconds != null) {
-              this.saveJobDuration(jr.job_name, jr.duration_seconds);
-            }
-          });
-        }
         await this.loadRuns();
       });
       stream.onerror = () => this.closeRunStream(run.run_id);
@@ -1946,10 +1900,6 @@ function app() {
     // ===========================================================
     // COMPARE TAB
     // ===========================================================
-    _isTerminalStatus(status) {
-      return ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED'].includes(status);
-    },
-
     async loadCompareBODocuments(side) {
       const src = side === 'a' ? this.boSourceA : this.boSourceB;
       if (!src.configId) return;
@@ -2161,7 +2111,7 @@ function app() {
       if (!this.boCompareRunId) return;
       try {
         const status = await api('GET', `/api/runs/${this.boCompareRunId}/status`);
-        if (this._isTerminalStatus(status.status)) {
+        if (this.isTerminalStatus(status.status)) {
           clearInterval(this.boComparePollInterval);
           this.boComparePollInterval = null;
           this.boCompareResult = await api('GET', `/api/runs/${this.boCompareRunId}`);
@@ -2216,7 +2166,7 @@ function app() {
       if (!this.dualEnvPairId) return;
       try {
         const pair = await api('GET', `/api/compare/pairs/${this.dualEnvPairId}`);
-        if (this._isTerminalStatus(pair.run_a.status) && this._isTerminalStatus(pair.run_b.status)) {
+        if (this.isTerminalStatus(pair.run_a.status) && this.isTerminalStatus(pair.run_b.status)) {
           clearInterval(this.dualEnvPollInterval);
           this.dualEnvPollInterval = null;
           this.dualEnvResult = await api('GET', `/api/runs/compare?run_a=${runIdA}&run_b=${runIdB}`);
@@ -2267,7 +2217,7 @@ function app() {
         const poll = setInterval(async () => {
           try {
             const st = await api('GET', `/api/runs/${run.run_id}/status`);
-            if (this._isTerminalStatus(st.status)) {
+            if (this.isTerminalStatus(st.status)) {
               clearInterval(poll);
               this.fileCompareResult = await api('GET', `/api/runs/${run.run_id}`);
               this.fileCompareLoading = false;
@@ -2322,7 +2272,7 @@ function app() {
         const poll = setInterval(async () => {
           try {
             const st = await api('GET', `/api/runs/${run.run_id}/status`);
-            if (this._isTerminalStatus(st.status)) {
+            if (this.isTerminalStatus(st.status)) {
               clearInterval(poll);
               this.sqlCompareResult = await api('GET', `/api/runs/${run.run_id}`);
               this.sqlCompareLoading = false;
@@ -3589,7 +3539,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 1: Job Catalog Search/Filter ---
     // ===========================================================
     get filteredJobList() {
       const q = (this.jobSearchQuery || '').toLowerCase().trim();
@@ -3603,24 +3552,13 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 2: Job Last Run Status ---
     // ===========================================================
-    getJobLastStatus(jobName) {
-      try {
-        return localStorage.getItem(`etl_job_status_${jobName}`) || null;
-      } catch {
-        return null;
-      }
-    },
-
-    saveJobRunStatus(jobName, status) {
-      try {
-        localStorage.setItem(`etl_job_status_${jobName}`, status);
-      } catch {}
+    getJobLastStatus(job) {
+      const status = job?.last_run_status || job?.last_status || null;
+      return status ? String(status).toLowerCase() : null;
     },
 
     // ===========================================================
-    // --- Task 3: Multi-select with Shift-click + Select All/None ---
     // ===========================================================
     toggleJobWithShift(idx, event) {
       const jobs = this.filteredJobList;
@@ -3657,7 +3595,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 7: Config Dropdown Enhancement + Session Memory ---
     // ===========================================================
     savedConfigDisplay(config) {
       if (!config) return '';
@@ -3699,7 +3636,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 8: Job Modal Tab – reset on open (patch existing openers) ---
     // ===========================================================
     // Note: jobModalTab is reset in openNewJobModal/openEditJobModal by calling _resetJobModalTab()
     _resetJobModalTab() {
@@ -3707,7 +3643,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 9: Job Modal Inline Validation ---
     // ===========================================================
     validateJobModal() {
       const m = this.jobModal || {};
@@ -3746,7 +3681,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 10: DQ Rule Templates + Save as Template ---
     // ===========================================================
     applyDqTemplate(templateName) {
       const tpl = (this.dqRuleTemplates || []).find(t => t.name === templateName);
@@ -3827,7 +3761,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 11: Execution Sequence Drag-to-Reorder ---
     // ===========================================================
     onDragStart(idx) {
       this.dragSrcIndex = idx;
@@ -3853,7 +3786,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 12: Execution Sequence Utilities ---
     // ===========================================================
     clearExecutionSequence() {
       this.selectedJobs = [];
@@ -3889,13 +3821,11 @@ function app() {
     },
 
     get estimatedSequenceDuration() {
-      const seq = this.selectedJobs || [];
+      const byName = new Map((this.jobs || []).map(job => [job.name, job]));
       let total = 0;
-      seq.forEach(name => {
-        try {
-          const val = localStorage.getItem(`etl_job_duration_${name}`);
-          if (val) total += Number(val) || 0;
-        } catch {}
+      (this.selectedJobs || []).forEach(name => {
+        const job = byName.get(name);
+        total += Number(job?.estimated_duration_seconds || job?.avg_duration_seconds || 0) || 0;
       });
       if (total === 0) return '';
       const m = Math.floor(total / 60);
@@ -3903,14 +3833,7 @@ function app() {
       return m > 0 ? `~${m}m ${s}s` : `~${s}s`;
     },
 
-    saveJobDuration(jobName, durationSeconds) {
-      try {
-        localStorage.setItem(`etl_job_duration_${jobName}`, String(durationSeconds));
-      } catch {}
-    },
-
     // ===========================================================
-    // --- Task 13: Compare Tab Template System ---
     // ===========================================================
     loadCompareTemplates() {
       try {
@@ -3987,7 +3910,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 14: BO Report Tab Improvements ---
     // ===========================================================
     swapCompareSides() {
       // Swap source types
@@ -4023,7 +3945,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 15: Quick Compare Mode ---
     // ===========================================================
     enableQuickCompare() {
       this.quickCompareMode = true;
@@ -4047,7 +3968,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 16: Sort Runs for Display ---
     // ===========================================================
     sortRunsForDisplay(runs) {
       if (!runs || !runs.length) return [];
@@ -4059,7 +3979,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 17: Results Panel Export Settings + Chart Toggle ---
     // ===========================================================
     exportCompareSettings() {
       try {
@@ -4134,7 +4053,6 @@ function app() {
     },
 
     // ===========================================================
-    // --- Task 18: Mismatch Acceptance Workflow ---
     // ===========================================================
     get filteredMismatches() {
       const rows = this.drawer.rows || [];
@@ -4171,69 +4089,7 @@ function app() {
       if (accepted > 0) await this.loadRuns();
     },
 
-    // ===========================================================
-    // --- Task 19: Help System + Keyboard Shortcuts ---
-    // ===========================================================
-    showHelp(topic) {
-      const helpTopics = {
-        'job-search': { title: 'Job Search', content: 'Search jobs by name, description, or tags. The search is case-insensitive and matches partial text.' },
-        'chunkSize': { title: 'Chunk Size', content: 'Number of rows to process at once. Set to 0 to disable chunking and process all rows in memory. Larger values use more memory but may be faster for simple comparisons.' },
-        'hashPrecheck': { title: 'Hash Precheck', content: 'When enabled, computes hash values for rows first and only performs full row comparison when hashes differ. Significantly speeds up comparisons for large datasets with few actual differences.' },
-        'nullEqualsNull': { title: 'NULL Semantics', content: 'When enabled, treats two NULL values as equal during comparison. When disabled, NULL != NULL (SQL standard behavior).' },
-        'maxWorkers': { title: 'Max Workers', content: 'Maximum number of parallel test execution threads. Higher values speed up large test suites but increase database load.' },
-        'compareTemplate': { title: 'Compare Templates', content: 'Save and reuse comparison configurations. Templates store your source settings, key columns, and other options so you can quickly repeat common comparisons.' },
-        'sqlQuery': { title: 'SQL Query', content: 'The SELECT statement used to extract data for comparison. Must include all key columns and comparison columns. Parameterized queries use {env} as a placeholder for the environment name.' },
-      };
-      const entry = helpTopics[topic];
-      if (!entry) return;
-      this.helpTitle = entry.title;
-      this.helpContent = entry.content;
-      this.showingHelp = true;
-    },
-
-    initKeyboardShortcuts() {
-      document.addEventListener('keydown', (e) => {
-        // Skip if focus is in a form input
-        const tag = (document.activeElement && document.activeElement.tagName) || '';
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
-
-        const isMac = navigator.platform && navigator.platform.toUpperCase().includes('MAC');
-        const ctrl = isMac ? e.metaKey : e.ctrlKey;
-
-        if (ctrl && e.key === 's') {
-          e.preventDefault();
-          if (this.showJobModal) {
-            this.saveJob();
-          } else if (this.currentView === 'compare') {
-            this.saveCompareTemplate();
-          }
-          return;
-        }
-
-        if (e.key === 'Enter') {
-          if (this.currentView === 'jobs') {
-            this.launchJobs();
-          } else if (this.currentView === 'compare') {
-            const sub = this.compareSubTab;
-            if (sub === 'bo') this.runBOComparison && this.runBOComparison();
-            else if (sub === 'reconciliation') this.runReconciliation && this.runReconciliation();
-          }
-          return;
-        }
-
-        if (e.key === 'Escape') {
-          if (this.showingHelp) { this.showingHelp = false; return; }
-          if (this.showJobModal) { this.showJobModal = false; return; }
-          if (this.showCompareTemplatePanel) { this.showCompareTemplatePanel = false; return; }
-          if (this.showConfigModal) { this.showConfigModal = false; return; }
-          if (this.showBOJobModal) { this.showBOJobModal = false; return; }
-          if (this.showScheduleModal) { this.showScheduleModal = false; return; }
-          if (this.showHookModal) { this.showHookModal = false; return; }
-          if (this.showContractModal) { this.showContractModal = false; return; }
-          if (this.drawer && this.drawer.show) { this.drawer.show = false; return; }
-        }
-      });
-    },
+    ...HELP_METHODS,
 
     // ===========================================================
     // CONTRACTS

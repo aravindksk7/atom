@@ -25,24 +25,26 @@ from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.audit_service import AuditService
+from api.services.run_report import build_run_report_snapshot
 
 router = APIRouter(tags=["compare"])
 logger = logging.getLogger("api.routes.compare")
 
 
 def _status_out(r) -> RunStatusOut:
+    snapshot = build_run_report_snapshot(r)
     return RunStatusOut(
-        run_id=r.run_id,
-        status=r.status,
-        started_at=r.started_at,
-        completed_at=r.completed_at,
-        total_tests=r.total_tests or 0,
-        passed=r.passed or 0,
-        failed=r.failed or 0,
-        slow=r.slow or 0,
-        error=r.error or 0,
-        run_type=r.run_type,
-        pair_id=r.pair_id,
+        run_id=snapshot.run_id,
+        status=snapshot.status,
+        started_at=snapshot.started_at,
+        completed_at=snapshot.completed_at,
+        total_tests=snapshot.total_tests,
+        passed=snapshot.passed,
+        failed=snapshot.failed,
+        slow=snapshot.slow,
+        error=snapshot.error,
+        run_type=snapshot.run_type,
+        pair_id=snapshot.pair_id,
     )
 
 

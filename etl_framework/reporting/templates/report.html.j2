@@ -266,7 +266,12 @@
           {% for result in suite.reconciliation_results %}
           <tr>
             <td style="font-family: monospace;">{{ result.query_name }}</td>
-            <td>{{ status_badge(result.status) }}</td>
+            <td>
+              {{ status_badge(result.effective_status) }}
+              {% if result.effective_status != result.status %}
+              <span style="font-size:0.78em;color:var(--muted);margin-left:6px">raw: {{ result.status }}</span>
+              {% endif %}
+            </td>
             <td>{{ "%.2f"|format(result.duration_seconds) if result.duration_seconds else "N/A" }}s</td>
             <td>{{ result.source_row_count }}</td>
             <td>{{ result.target_row_count }}</td>

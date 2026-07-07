@@ -192,6 +192,19 @@ def test_recon_html_parser_reads_report_metrics_from_correct_columns():
     }
 
 
+def test_recon_html_parser_accepts_raw_status_note_in_status_cell():
+    from api.services.compare_service import CompareService
+
+    html = """
+    <table><tbody><tr>
+      <td>orders</td><td><span>PASSED</span><span>raw: FAILED</span></td><td>0.25s</td>
+      <td>10</td><td>10</td><td>1</td>
+    </tr></tbody></table>
+    """
+
+    assert CompareService._parse_html_report(html)["orders"]["status"] == "PASSED"
+
+
 @pytest.mark.parametrize(
     ("rows_b", "expected_status"),
     [(10, "PASSED"), (11, "FAILED")],

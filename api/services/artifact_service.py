@@ -2,6 +2,7 @@ import os
 from fastapi import HTTPException
 from etl_framework.repository.base import AbstractTestRunRepository
 from etl_framework.reporting.generator import ReportGenerator
+from api.services.run_report import build_run_report_snapshot
 import logging
 
 logger = logging.getLogger("api.services.artifact_service")
@@ -18,7 +19,7 @@ class ArtifactService:
 
         try:
             generator = ReportGenerator(output_dir=self._report_dir)
-            report_path = generator.generate(run)
+            report_path = generator.generate(build_run_report_snapshot(run, include_mismatches=True))
             return report_path
         except Exception as e:
             logger.error(f"Failed to generate HTML report for {run_id}: {e}", exc_info=True)

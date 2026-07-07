@@ -41,6 +41,12 @@ from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
 from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
+from api.services.mismatch_export import (
+    collect_mismatch_rows,
+    mismatch_csv_response,
+    mismatch_xlsx_response,
+)
+from api.services.run_report import build_run_report_snapshot
 from etl_framework.config.models import resolve_connection as _resolve_connection
 from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
 
@@ -84,38 +90,24 @@ def _wants_html(request: Request, fmt: str | None) -> bool:
 
 
 def _metrics_from_run(run) -> dict:
-    tests = []
-    total_duration = 0.0
-    passed = failed = slow = 0
-    for result in run.results:
-        duration = float(result.duration_seconds or 0)
-        total_duration += duration
-        status = getattr(result, "effective_status", None) or result.status or "UNKNOWN"
-        if status == "PASSED":
-            passed += 1
-        elif status == "SLOW":
-            slow += 1
-        elif status in {"FAILED", "ERROR"}:
-            failed += 1
-        tests.append({
-            "name": result.query_name,
-            "status": status,
-            "duration_seconds": duration,
-            "source_row_count": result.source_row_count or 0,
-            "target_row_count": result.target_row_count or 0,
-            "total_issues": result.total_issues,
-        })
-    return {
-        "run_id": run.run_id,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "total_tests": len(tests),
-        "passed": passed,
-        "failed": failed,
-        "slow": slow,
-        "total_duration_seconds": round(total_duration, 6),
-        "tests": tests,
-        "source": "database",
-    }
+    return build_run_report_snapshot(run).to_metrics()
+
+
+def _run_status_out(run) -> RunStatusOut:
+    snapshot = build_run_report_snapshot(run)
+    return RunStatusOut(
+        run_id=snapshot.run_id,
+        status=snapshot.status,
+        started_at=snapshot.started_at,
+        completed_at=snapshot.completed_at,
+        total_tests=snapshot.total_tests,
+        passed=snapshot.passed,
+        failed=snapshot.failed,
+        slow=snapshot.slow,
+        error=snapshot.error,
+        run_type=snapshot.run_type,
+        pair_id=snapshot.pair_id,
+    )
 
 
 def _validate_connection_name(cfg, name: str | None, field: str) -> None:
@@ -254,22 +246,7 @@ def list_runs(
 ):
     repo = RunRepository(db)
     runs = repo.list_runs(limit=limit, offset=offset, status=status, run_type=run_type)
-    return [
-        RunStatusOut(
-            run_id=r.run_id,
-            status=r.status,
-            started_at=r.started_at,
-            completed_at=r.completed_at,
-            total_tests=r.total_tests,
-            passed=r.passed,
-            failed=r.failed,
-            slow=r.slow,
-            error=r.error,
-            run_type=r.run_type,
-            pair_id=r.pair_id,
-        )
-        for r in runs
-    ]
+    return [_run_status_out(r) for r in runs]
 
 
 @router.post("/test-suite", response_model=RunStatusOut, status_code=202)
@@ -353,25 +330,15 @@ def get_run_status(run_id: str, db: Session = Depends(get_session)):
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    return RunStatusOut(
-        run_id=run.run_id,
-        status=run.status,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        total_tests=run.total_tests,
-        passed=run.passed,
-        failed=run.failed,
-        slow=run.slow,
-        error=run.error,
-        run_type=run.run_type,
-        pair_id=run.pair_id,
-    )
+    return _run_status_out(run)
 
 
 @router.get("/{run_id}/artifacts", response_model=list[GeneratedArtifactOut])
 def list_run_artifacts(run_id: str, db: Session = Depends(get_session)):
-    if RunRepository(db).get_run(run_id) is None:
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = build_run_report_snapshot(run)
     artifacts = []
 
     artifacts.append(
@@ -384,15 +351,15 @@ def list_run_artifacts(run_id: str, db: Session = Depends(get_session)):
     )
 
     metrics_path = Path("logs") / f"metrics_{run_id}.json"
-    if metrics_path.exists():
+    if metrics_path.exists() or snapshot.has_result_rows:
         artifacts.append(
             GeneratedArtifactOut(
-                name=metrics_path.name,
+                name=metrics_path.name if metrics_path.exists() else f"metrics_{run_id}.json",
                 artifact_type="metrics",
                 path=f"/api/runs/{run_id}/metrics",
                 created_at=datetime.fromtimestamp(
                     metrics_path.stat().st_mtime, tz=timezone.utc
-                ),
+                ) if metrics_path.exists() else datetime.now(timezone.utc),
             )
         )
     log_path = Path("logs") / "etl_framework.log"
@@ -420,11 +387,14 @@ def get_run_metrics(
     run = RunRepository(db).get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = build_run_report_snapshot(run)
     metrics_path = Path("logs") / f"metrics_{run_id}.json"
-    if metrics_path.exists():
+    if snapshot.has_result_rows:
+        metrics = snapshot.to_metrics()
+    elif metrics_path.exists():
         metrics = json.loads(metrics_path.read_text(encoding="utf-8", errors="replace"))
-    elif run.results:
-        metrics = _metrics_from_run(run)
+    elif snapshot.raw_status in _TERMINAL and snapshot.raw_total_tests > 0:
+        metrics = snapshot.to_metrics()
     else:
         raise HTTPException(status_code=404, detail="Metrics not found")
     if _wants_html(request, format):
@@ -553,6 +523,7 @@ def download_mismatches(
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = build_run_report_snapshot(run)
 
     if format == "html":
         service = ArtifactService(repository=repo)
@@ -563,100 +534,10 @@ def download_mismatches(
             headers={"Content-Disposition": f'attachment; filename="report_{run_id}.html"'},
         )
 
-    _FIELDS = ["test_name", "key_values", "column_name", "source_value", "target_value", "mismatch_type"]
-    rows = []
-    for result in run.results:
-        for m in repo.list_mismatches(result_id=result.id, limit=100_000):
-            rows.append({
-                "test_name": result.query_name,
-                "key_values": json.dumps(m.key_values) if isinstance(m.key_values, dict) else str(m.key_values or ""),
-                "column_name": m.column_name or "",
-                "source_value": m.source_value or "",
-                "target_value": m.target_value or "",
-                "mismatch_type": m.mismatch_type or "",
-            })
-
+    rows = collect_mismatch_rows(repo, snapshot)
     if format == "xlsx":
-        import openpyxl
-        from openpyxl.styles import PatternFill, Font, Alignment
-
-        FILLS = {
-            "value_diff":        PatternFill("solid", fgColor="FEF3C7"),  # amber
-            "value_mismatch":    PatternFill("solid", fgColor="FEF3C7"),  # amber
-            "missing_in_target": PatternFill("solid", fgColor="FEE2E2"),  # rose
-            "missing_in_source": PatternFill("solid", fgColor="EDE9FE"),  # violet
-        }
-        HEADER_FILL = PatternFill("solid", fgColor="1E293B")
-        HEADER_FONT = Font(bold=True, color="F1F5F9")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Mismatches"
-        ws.append(_FIELDS)
-        for cell in ws[1]:
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-            cell.alignment = Alignment(horizontal="center")
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = "A1:F1"
-
-        for row_data in rows:
-            ws.append([row_data[field] for field in _FIELDS])
-            fill = FILLS.get(row_data["mismatch_type"])
-            if fill:
-                for cell in ws[ws.max_row]:
-                    cell.fill = fill
-
-        for col, width in [("A", 30), ("B", 28), ("C", 22), ("D", 30), ("E", 30), ("F", 22)]:
-            ws.column_dimensions[col].width = width
-
-        # ── Summary sheet ────────────────────────────────────────────────
-        ws_sum = wb.create_sheet("Summary")
-        ws_sum.title = "Summary"
-        ws_sum.append(["Run ID", run_id])
-        ws_sum.append(["Status", run.status])
-        ws_sum.append(["Started", str(run.started_at or "")])
-        ws_sum.append(["Completed", str(run.completed_at or "")])
-        ws_sum.append(["Source Env", run.source_env or ""])
-        ws_sum.append(["Target Env", run.target_env or ""])
-        ws_sum.append([])
-        ws_sum.append(["Test Name", "Status", "Source Rows", "Target Rows",
-                        "Value Mismatches", "Missing in Target", "Missing in Source"])
-        for cell in ws_sum[ws_sum.max_row]:
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-        for result in run.results:
-            ws_sum.append([
-                result.query_name,
-                result.status,
-                result.source_row_count,
-                result.target_row_count,
-                result.value_mismatch_count,
-                result.missing_in_target_count,
-                result.missing_in_source_count,
-            ])
-        ws_sum.column_dimensions["A"].width = 36
-        ws_sum.column_dimensions["B"].width = 16
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        return StreamingResponse(
-            buf,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="mismatches_{run_id}.xlsx"'},
-        )
-
-    buf_str = io.StringIO()
-    writer = csv.DictWriter(buf_str, fieldnames=_FIELDS)
-    writer.writeheader()
-    writer.writerows(rows)
-    buf_str.seek(0)
-    return StreamingResponse(
-        iter([buf_str.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="mismatches_{run_id}.csv"'},
-    )
+        return mismatch_xlsx_response(run_id, snapshot, rows)
+    return mismatch_csv_response(run_id, rows)
 
 
 @router.patch(
@@ -910,22 +791,23 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    results = [_test_result_out(r) for r in run.results]
+    snapshot = build_run_report_snapshot(run)
+    results = [_test_result_out(r) for r in snapshot.results]
     return RunDetailOut(
-        run_id=run.run_id,
-        status=run.status,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        total_tests=run.total_tests,
-        passed=run.passed,
-        failed=run.failed,
-        slow=run.slow,
-        error=run.error,
-        run_type=run.run_type,
-        pair_id=run.pair_id,
-        source_env=run.source_env,
-        target_env=run.target_env,
-        config_snapshot=run.config_snapshot,
+        run_id=snapshot.run_id,
+        status=snapshot.status,
+        started_at=snapshot.started_at,
+        completed_at=snapshot.completed_at,
+        total_tests=snapshot.total_tests,
+        passed=snapshot.passed,
+        failed=snapshot.failed,
+        slow=snapshot.slow,
+        error=snapshot.error,
+        run_type=snapshot.run_type,
+        pair_id=snapshot.pair_id,
+        source_env=snapshot.source_env,
+        target_env=snapshot.target_env,
+        config_snapshot=snapshot.config_snapshot,
         results=results,
     )
 
