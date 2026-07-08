@@ -519,6 +519,24 @@ function app() {
     acceptForms: {},
 
     // -----------------------------------------------------------
+    // Regional — app-wide timezone
+    // -----------------------------------------------------------
+    appTimezone: 'UTC',
+    timezoneOpen: false,
+    timezoneDraft: 'UTC',
+    timezoneSaving: false,
+    timezoneOptions: [
+      'UTC',
+      'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+      'America/Anchorage', 'America/Sao_Paulo', 'America/Mexico_City', 'America/Toronto',
+      'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
+      'Europe/Rome', 'Europe/Amsterdam', 'Europe/Moscow', 'Europe/Istanbul',
+      'Asia/Kolkata', 'Asia/Dubai', 'Asia/Karachi', 'Asia/Dhaka', 'Asia/Bangkok',
+      'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul',
+      'Australia/Sydney', 'Australia/Perth', 'Pacific/Auckland',
+    ],
+
+    // -----------------------------------------------------------
     // Security – API tokens
     // -----------------------------------------------------------
     tokens: [],
@@ -642,6 +660,7 @@ function app() {
           this.loadTokens();
           this.loadHooks();
           this.loadSchedules();
+          this.loadTimezoneSetting();
         }
       }
       if (!this.storedToken && !this.authInitialized) this.showAuthModal = true;
@@ -3062,6 +3081,30 @@ function app() {
     },
 
     // ===========================================================
+    // REGIONAL – APP-WIDE TIMEZONE
+    // ===========================================================
+    async loadTimezoneSetting() {
+      try {
+        const resp = await api('GET', '/api/settings');
+        this.appTimezone = resp.timezone || 'UTC';
+        this.timezoneDraft = this.appTimezone;
+      } catch {}
+    },
+
+    async saveTimezoneSetting() {
+      this.timezoneSaving = true;
+      try {
+        const resp = await api('PUT', '/api/settings', { timezone: this.timezoneDraft });
+        this.appTimezone = resp.timezone;
+        this.toast('success', 'Timezone updated', `All timestamps now shown in ${resp.timezone}`);
+      } catch (e) {
+        this.toast('error', 'Failed to update timezone', e.message || '');
+      } finally {
+        this.timezoneSaving = false;
+      }
+    },
+
+    // ===========================================================
     // NOTIFICATIONS – WEBHOOK HOOKS
     // ===========================================================
     async loadHooks() {
@@ -3519,10 +3562,20 @@ function app() {
     // ===========================================================
     fmtDate(iso) {
       if (!iso) return '—';
-      // Treat bare ISO strings (no timezone suffix) as UTC so toLocale* shows local time correctly
+      // Treat bare ISO strings (no timezone suffix) as UTC so conversion below is correct
       const ts = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
       const d = new Date(ts);
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isNaN(d.getTime())) return '—';
+      try {
+        return new Intl.DateTimeFormat([], {
+          timeZone: this.appTimezone || 'UTC',
+          year: 'numeric', month: 'numeric', day: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        }).format(d);
+      } catch {
+        // Unknown/unsupported timeZone value — fall back to browser-local rather than throwing
+        return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
     },
 
     statusBadgeClass(status) {
