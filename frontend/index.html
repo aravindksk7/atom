@@ -2008,6 +2008,52 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             </div>
                           </template>
                         </div>
+                        <!-- Segment breakdown (stored at run time) -->
+                        <template x-if="r.segment_summary">
+                          <div class="px-3 py-2 border-t border-slate-100 mt-2">
+                            <div class="text-xs text-muted font-semibold mb-1">Mismatches by segment</div>
+                            <template x-for="[segCol, buckets] in Object.entries(r.segment_summary || {})" :key="segCol">
+                              <div class="mb-2">
+                                <div class="flex items-center gap-2 mb-1">
+                                  <span class="text-xs font-mono text-indigo-600" x-text="segCol"></span>
+                                  <button @click="loadSegmentDrill(selectedRun.run_id, r, segCol)"
+                                          :disabled="isSegDrillBusy(r, segCol)"
+                                          class="text-indigo-500 hover:underline text-xs ml-auto">
+                                    <span x-show="!segmentDrillLoading[r.id + ':' + segCol]">🔄 Re-query now</span>
+                                    <span x-show="segmentDrillLoading[r.id + ':' + segCol]">Loading…</span>
+                                  </button>
+                                </div>
+                                <template x-for="b in buckets" :key="b.value">
+                                  <div class="flex items-center gap-2 text-xs py-0.5">
+                                    <span class="font-mono w-28 truncate" x-text="b.value"></span>
+                                    <div class="flex-1 bg-slate-100 rounded h-2 max-w-56">
+                                      <div class="h-2 rounded bg-rose-400"
+                                           :style="'width:' + Math.min(100, 100 * b.mismatch_count / segmentMax(buckets)) + '%'"></div>
+                                    </div>
+                                    <span class="text-slate-500 font-semibold" x-text="b.mismatch_count + 'x'"></span>
+                                    <span class="text-muted" x-text="'(' + b.pct_of_total + '%)'"></span>
+                                  </div>
+                                </template>
+                                <template x-if="segmentDrill[r.id + ':' + segCol]">
+                                  <div class="mt-1 pl-2 border-l-2 border-indigo-200">
+                                    <div class="text-xs text-muted mb-0.5">Live counts (source vs target)</div>
+                                    <template x-for="row in segmentDrill[r.id + ':' + segCol]" :key="row.value">
+                                      <div class="flex items-center gap-2 text-xs py-0.5">
+                                        <span class="font-mono w-28 truncate" x-text="row.value"></span>
+                                        <span class="text-slate-600" x-text="row.source_count"></span>
+                                        <span class="text-muted">vs</span>
+                                        <span class="text-slate-600" x-text="row.target_count"></span>
+                                        <span class="font-semibold"
+                                              :class="row.delta === 0 ? 'text-emerald-600' : 'text-rose-500'"
+                                              x-text="(row.delta > 0 ? '+' : '') + row.delta"></span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
                       </div>
                     </td>
                   </tr>

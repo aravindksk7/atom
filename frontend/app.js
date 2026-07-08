@@ -284,6 +284,8 @@ function app() {
     // Mismatch distribution
     // -----------------------------------------------------------
     mismatchDist: {},  // result_id → distribution array
+    segmentDrill: {},
+    segmentDrillLoading: {},
 
     // -----------------------------------------------------------
     // Adapters – SAP BO
@@ -3484,6 +3486,33 @@ function app() {
       } catch {
         this.mismatchDist = { ...this.mismatchDist, [result.id]: [] };
       }
+    },
+
+    async loadSegmentDrill(runId, result, segmentColumn) {
+      const key = result.id + ':' + segmentColumn;
+      this.segmentDrillLoading = { ...this.segmentDrillLoading, [key]: true };
+      try {
+        const data = await api('POST', `/api/runs/${runId}/results/${result.id}/drilldown`,
+                               { segment_column: segmentColumn });
+        this.segmentDrill = { ...this.segmentDrill, [key]: data.rows };
+      } catch (e) {
+        if (!this.handleAuthError(e)) this.toast('error', 'Drill-down failed', e.message);
+      } finally {
+        this.segmentDrillLoading = { ...this.segmentDrillLoading, [key]: false };
+      }
+    },
+
+    segmentMax(rows) {
+      return Math.max(1, ...(rows || []).map(r => r.mismatch_count));
+    },
+
+    // NB: keep this expression dot-free where it's bound via `:disabled` in
+    // index.html — Alpine's x-bind coerces an `undefined` result to `""`
+    // whenever the *expression text* contains a literal `.` (a heuristic for
+    // dotted-path form bindings), and `""` is not null/undefined/false, so a
+    // boolean attribute like `disabled` would incorrectly get set permanently.
+    isSegDrillBusy(result, segCol) {
+      return !!this.segmentDrillLoading[result.id + ':' + segCol];
     },
 
     // ===========================================================
