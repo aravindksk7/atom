@@ -90,6 +90,33 @@ def test_bad_xml_raises_400():
     assert exc_info.value.status_code == 400
 
 
+def test_read_json_absolute_path_under_upload_base(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path.resolve())
+    path = tmp_path / "data.json"
+    path.write_text(json.dumps([{"id": 1, "name": "Alice"}]), encoding="utf-8")
+
+    df = read_tabular(path=str(path))
+
+    assert df.to_dict("records") == [{"id": 1, "name": "Alice"}]
+
+
+def test_read_xml_absolute_path_under_upload_base(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path.resolve())
+    path = tmp_path / "data.xml"
+    path.write_text(
+        "<dataset><record><id>1</id><name>Alice</name></record></dataset>",
+        encoding="utf-8",
+    )
+
+    df = read_tabular(path=str(path))
+
+    assert df.to_dict("records") == [{"id": "1", "name": "Alice"}]
+
+
 def test_read_tsv():
     raw = b"id\tname\n1\tAlice\n2\tBob\n"
     df = read_tabular(content_b64=b64(raw), file_name="data.tsv")

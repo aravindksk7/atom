@@ -1533,7 +1533,7 @@ Compare a stored reconciliation run result (or an HTML report file) against a pr
 | Source | How to specify |
 |---|---|
 | Stored run | `stored_run_id` — a run ID from History |
-| File on disk | `file_a_path` / `file_b_path` — server-side absolute path |
+| File on disk | `file_a_path` / `file_b_path` — server-side absolute path scoped to `UPLOAD_BASE_DIR`; on local Windows installs, `C:\temp` is allowed by default |
 | Browser upload | `file_a_content_b64` / `file_b_content_b64` — base64-encoded file content (set `file_a_name` / `file_b_name` for format detection) |
 
 Exactly one source must be provided for each side.
@@ -1553,14 +1553,14 @@ Exactly one source must be provided for each side.
 | Option | Description |
 |---|---|
 | `stored_run_id` / `stored_run_id_b` | IDs of previously stored runs to use as input |
-| `file_a_path` / `file_b_path` | Server file paths |
+| `file_a_path` / `file_b_path` | Server file paths scoped to `UPLOAD_BASE_DIR`; on local Windows installs, `C:\temp` is allowed by default |
 | `file_a_content_b64` / `file_b_content_b64` | Base64-encoded file contents for browser uploads |
 | `file_a_name` / `file_b_name` | File names (used for format detection, e.g. `.xlsx`, `.csv`) |
 | `key_columns` | Join columns; falls back to row-position if none are found |
 | `exclude_columns` | Columns to skip; matching ignores case, spaces, hyphens, and underscores (for example `sequence_number` also matches `Sequence Number`) |
 | `label_a` / `label_b` | Display names |
 
-**Supported file formats:** CSV (auto-delimited), XLSX, XLS.
+**Supported file formats:** CSV (auto-delimited), XLSX, XLS, JSON, XML, TSV/TXT.
 
 **Positional fallback:** When no key column can be inferred and `key_columns` is not specified, the engine inserts a synthetic `__row__` column (1-based row number) and uses it as the key. This ensures every row is compared even for files without a natural identifier (e.g. summary reports).
 

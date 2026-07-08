@@ -16,6 +16,10 @@ def _b64csv(data: dict) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def _b64(raw: bytes) -> str:
+    return base64.b64encode(raw).decode()
+
+
 def _svc():
     svc = CompareService.__new__(CompareService)
     svc._db = MagicMock()
@@ -32,6 +36,22 @@ def test_load_recon_source_returns_df_for_csv():
     req = ReconFileCompareRequest(
         file_a_content_b64=b64,
         file_a_name="data.csv",
+        stored_run_id_b="some-run",
+    )
+    result = svc._load_recon_source(req, "a")
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == ["id", "val"]
+
+
+def test_load_recon_source_returns_df_for_xml():
+    svc = _svc()
+    raw = b"""<dataset>
+  <record><id>1</id><val>10</val></record>
+  <record><id>2</id><val>20</val></record>
+</dataset>"""
+    req = ReconFileCompareRequest(
+        file_a_content_b64=_b64(raw),
+        file_a_name="data.xml",
         stored_run_id_b="some-run",
     )
     result = svc._load_recon_source(req, "a")
