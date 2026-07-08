@@ -6,7 +6,7 @@ from etl_framework.reconciliation.models import MismatchRecord, ReconciliationRe
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
-    RunStep, JobSelection, JobSelectionVersion, TERMINAL_STATUSES,
+    RunStep, JobSelection, JobSelectionVersion, AppSettings, TERMINAL_STATUSES,
 )
 
 
@@ -1053,3 +1053,39 @@ class SchemaSnapshotRepository:
             .order_by(SchemaSnapshot.captured_at.asc())
             .all()
         )
+
+
+# ---------------------------------------------------------------------------
+# App-wide settings repository
+# ---------------------------------------------------------------------------
+
+class SettingsRepository:
+    """Single-row app-wide settings (id=1). Currently holds just the display/schedule timezone."""
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def _get_or_create(self) -> AppSettings:
+        row = self._db.get(AppSettings, 1)
+        if row is None:
+            row = AppSettings(id=1, timezone="UTC")
+            self._db.add(row)
+            self._db.commit()
+            self._db.refresh(row)
+        return row
+
+    def get_timezone(self) -> str:
+        return self._get_or_create().timezone
+
+    def set_timezone(self, tz_name: str) -> AppSettings:
+        from zoneinfo import ZoneInfo
+        try:
+            ZoneInfo(tz_name)
+        except Exception as exc:
+            raise ValueError(f"Unknown timezone: {tz_name}") from exc
+        row = self._get_or_create()
+        row.timezone = tz_name
+        row.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(row)
+        return row
