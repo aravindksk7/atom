@@ -243,6 +243,10 @@ function app() {
     historyFilterStatus: '',
     historyFilterRunType: '',
     historySubTab: 'runs',
+    coverageData: null,
+    coverageLoading: false,
+    coverageGapsOnly: false,
+    flakyData: null,
     auditEvents: [],
     auditLoading: false,
     auditFilterResourceType: '',
@@ -3548,6 +3552,34 @@ function app() {
       });
       svg += '</svg>';
       return svg;
+    },
+
+    // ===========================================================
+    // COVERAGE
+    // ===========================================================
+    async loadCoverage() {
+      this.coverageLoading = true;
+      try {
+        this.coverageData = await api('GET', '/api/coverage');
+        this.flakyData = await api('GET', '/api/coverage/flaky');
+      } catch (e) {
+        if (!this.handleAuthError(e)) this.toast('error', 'Coverage load failed', e.message);
+      } finally {
+        this.coverageLoading = false;
+      }
+    },
+
+    coverageColumns(table) {
+      const cols = table.columns || [];
+      return this.coverageGapsOnly ? cols.filter(c => c.level === 'untested') : cols;
+    },
+
+    coverageLevelClass(level) {
+      return {
+        tested: 'bg-emerald-100 text-emerald-700',
+        observed: 'bg-amber-100 text-amber-700',
+        untested: 'bg-rose-100 text-rose-700',
+      }[level] || 'bg-slate-100 text-slate-600';
     },
 
     // ===========================================================
