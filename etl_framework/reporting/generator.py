@@ -6,10 +6,17 @@ from jinja2 import Environment, FileSystemLoader
 logger = logging.getLogger("etl_framework.reporting.generator")
 
 
-def to_local(value):
-    """Jinja filter: render an aware UTC datetime as local wall-clock time with a zone abbreviation."""
+def to_local(value, tz_name: str | None = None):
+    """Jinja filter: render an aware UTC datetime as local wall-clock time with a zone abbreviation.
+
+    With no tz_name, converts to the server process's OS-local timezone (original behavior).
+    With tz_name, converts to that IANA zone instead (the app-wide configured timezone).
+    """
     if value is None:
         return ""
+    if tz_name:
+        from zoneinfo import ZoneInfo
+        return value.astimezone(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
     return value.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 
@@ -22,14 +29,16 @@ class ReportGenerator:
         self,
         output_dir: str = DEFAULT_OUTPUT_DIR,
         max_mismatch_display: int = MAX_MISMATCH_DISPLAY,
+        timezone: str | None = None,
     ):
         self._output_dir = Path(output_dir)
         self._max_mismatch_display = max_mismatch_display
-        
+        self._timezone = timezone
+
         template_dir = Path(__file__).parent / "templates"
         loader = FileSystemLoader(template_dir)
         self._jinja_env = Environment(loader=loader, autoescape=True)
-        self._jinja_env.filters["to_local"] = to_local
+        self._jinja_env.filters["to_local"] = lambda v: to_local(v, self._timezone)
 
     def generate(self, suite_result) -> str:
         """

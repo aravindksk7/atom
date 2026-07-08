@@ -7,6 +7,17 @@ import logging
 
 logger = logging.getLogger("api.services.artifact_service")
 
+
+def _current_app_timezone() -> str:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import SettingsRepository
+    db = SessionLocal()
+    try:
+        return SettingsRepository(db).get_timezone()
+    finally:
+        db.close()
+
+
 class ArtifactService:
     def __init__(self, repository: AbstractTestRunRepository, report_dir: str = "./reports"):
         self._repository = repository
@@ -18,7 +29,7 @@ class ArtifactService:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
 
         try:
-            generator = ReportGenerator(output_dir=self._report_dir)
+            generator = ReportGenerator(output_dir=self._report_dir, timezone=_current_app_timezone())
             report_path = generator.generate(build_run_report_snapshot(run, include_mismatches=True))
             return report_path
         except Exception as e:
