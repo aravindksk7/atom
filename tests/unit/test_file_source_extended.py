@@ -17,6 +17,48 @@ def test_read_json_records():
     assert len(df) == 2
 
 
+def test_read_xml_repeated_records():
+    raw = b"""<?xml version="1.0"?>
+<dataset>
+  <record><id>1</id><name>Alice</name></record>
+  <record><id>2</id><name>Bob</name></record>
+</dataset>
+"""
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+    assert list(df.columns) == ["id", "name"]
+    assert df.to_dict("records") == [
+        {"id": "1", "name": "Alice"},
+        {"id": "2", "name": "Bob"},
+    ]
+
+
+def test_read_json_absolute_path_under_upload_base(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path.resolve())
+    path = tmp_path / "data.json"
+    path.write_text(json.dumps([{"id": 1, "name": "Alice"}]), encoding="utf-8")
+
+    df = read_tabular(path=str(path))
+
+    assert df.to_dict("records") == [{"id": 1, "name": "Alice"}]
+
+
+def test_read_xml_absolute_path_under_upload_base(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path.resolve())
+    path = tmp_path / "data.xml"
+    path.write_text(
+        "<dataset><record><id>1</id><name>Alice</name></record></dataset>",
+        encoding="utf-8",
+    )
+
+    df = read_tabular(path=str(path))
+
+    assert df.to_dict("records") == [{"id": "1", "name": "Alice"}]
+
+
 def test_read_tsv():
     raw = b"id\tname\n1\tAlice\n2\tBob\n"
     df = read_tabular(content_b64=b64(raw), file_name="data.tsv")

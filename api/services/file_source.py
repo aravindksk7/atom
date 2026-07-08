@@ -1,21 +1,35 @@
 from __future__ import annotations
 import base64
+from collections import Counter
 import csv
 import io
 import os
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 from pandas.errors import ParserError
 from fastapi import HTTPException
 
-# Filesystem-path uploads are only permitted when UPLOAD_BASE_DIR is set.
-# All paths are resolved and checked to be inside this directory before opening.
+_WINDOWS_TEMP_BASE = Path("C:/temp") if os.name == "nt" else None
+
+
+def _default_upload_base() -> Path | None:
+    if "UPLOAD_BASE_DIR" in os.environ:
+        return Path(os.environ["UPLOAD_BASE_DIR"]).resolve()
+    if _WINDOWS_TEMP_BASE is not None and _WINDOWS_TEMP_BASE.exists():
+        return _WINDOWS_TEMP_BASE.resolve()
+    return None
+
+
+# Filesystem-path uploads are scoped to UPLOAD_BASE_DIR when set. On local
+# Windows installs, C:\temp is allowed by default because the Compare UI and
+# docs use server-side temp paths for manual file comparisons.
 _UPLOAD_BASE: Path | None = (
-    Path(os.environ["UPLOAD_BASE_DIR"]).resolve()
-    if "UPLOAD_BASE_DIR" in os.environ
-    else None
+    _default_upload_base()
 )
+
+_SUPPORTED_FORMATS_DETAIL = "Use .csv, .xlsx, .xls, .json, .xml, or .tsv"
 
 
 def _read_csv_bytes(raw: bytes) -> pd.DataFrame:
@@ -56,12 +70,136 @@ def _next_nonempty(lines: list[str], start: int) -> str | None:
     return None
 
 
+def _read_json_bytes(raw: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_json(io.BytesIO(raw))
+    except ValueError:
+        try:
+            return pd.read_json(io.BytesIO(raw), orient="records")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Cannot parse JSON file")
+
+
+def _xml_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.rsplit("}", 1)[1]
+    return tag
+
+
+def _select_xml_records(root: ET.Element) -> list[ET.Element]:
+    children = list(root)
+    if not children:
+        return [root]
+
+    preferred = ("record", "row", "item", "entry")
+    for tag in preferred:
+        matches = [child for child in children if _xml_name(child.tag).lower() == tag]
+        if matches:
+            return matches
+
+    counts = Counter(_xml_name(child.tag) for child in children)
+    repeated = [tag for tag, count in counts.items() if count > 1]
+    if repeated:
+        record_tag = max(repeated, key=lambda tag: counts[tag])
+        return [child for child in children if _xml_name(child.tag) == record_tag]
+
+    for node in children:
+        nested = _select_xml_records(node)
+        if len(nested) > 1:
+            return nested
+
+    return [root] if all(not list(child) for child in children) else children
+
+
+def _flatten_xml_element(element: ET.Element) -> dict[str, str]:
+    row: dict[str, str] = {}
+
+    def put(key: str, value: str) -> None:
+        value = value.strip()
+        if not value:
+            return
+        if key in row:
+            suffix = 2
+            next_key = f"{key}_{suffix}"
+            while next_key in row:
+                suffix += 1
+                next_key = f"{key}_{suffix}"
+            key = next_key
+        row[key] = value
+
+    def walk(node: ET.Element, prefix: str) -> None:
+        for attr_name, attr_value in node.attrib.items():
+            attr_key = f"{prefix}_{_xml_name(attr_name)}" if prefix else _xml_name(attr_name)
+            put(attr_key, attr_value)
+
+        children = list(node)
+        text = (node.text or "").strip()
+        if not children:
+            if prefix:
+                put(prefix, text)
+            return
+        if text and prefix:
+            put(prefix, text)
+        for child in children:
+            child_name = _xml_name(child.tag)
+            child_key = f"{prefix}_{child_name}" if prefix else child_name
+            walk(child, child_key)
+
+    walk(element, "")
+    return row
+
+
+def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        raise HTTPException(status_code=400, detail="Cannot parse XML file")
+    rows = [_flatten_xml_element(record) for record in _select_xml_records(root)]
+    return pd.DataFrame(rows)
+
+
+def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:
+    if ext == ".csv":
+        return _read_csv_bytes(raw)
+    if ext in (".xlsx", ".xls"):
+        return pd.read_excel(io.BytesIO(raw))
+    if ext == ".json":
+        return _read_json_bytes(raw)
+    if ext == ".xml":
+        return _read_xml_bytes(raw)
+    if ext in (".tsv", ".txt"):
+        return pd.read_csv(io.BytesIO(raw), sep="\t")
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported file format '{ext}'. {_SUPPORTED_FORMATS_DETAIL}",
+    )
+
+
+def _resolve_allowed_path(path: str) -> Path:
+    if _UPLOAD_BASE is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Server-side file paths are disabled. Set UPLOAD_BASE_DIR or use content_b64 upload.",
+        )
+    base = _UPLOAD_BASE.resolve()
+    candidate = Path(path)
+    resolved = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file path. Allowed base directory: {base}",
+        )
+    return resolved
+
+
 def read_tabular(
     path: str | None = None,
     content_b64: str | None = None,
     file_name: str | None = None,
 ) -> pd.DataFrame:
-    """Read CSV or XLSX into a DataFrame from a filesystem path or base64-encoded bytes."""
+    """Read a tabular file into a DataFrame from a filesystem path or base64 bytes."""
     if path is None and content_b64 is None:
         raise HTTPException(status_code=400, detail="Provide path or content_b64")
 
@@ -69,55 +207,11 @@ def read_tabular(
         raw = base64.b64decode(content_b64)
         name = file_name or ""
         ext = Path(name).suffix.lower()
-        if ext == ".csv":
-            return _read_csv_bytes(raw)
-        if ext in (".xlsx", ".xls"):
-            return pd.read_excel(io.BytesIO(raw))
-        if ext == ".json":
-            try:
-                return pd.read_json(io.BytesIO(raw))
-            except ValueError:
-                try:
-                    return pd.read_json(io.BytesIO(raw), orient="records")
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Cannot parse JSON file")
-        if ext in (".tsv", ".txt"):
-            return pd.read_csv(io.BytesIO(raw), sep="\t")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file format '{ext}'. Use .csv, .xlsx, .json, or .tsv",
-        )
+        return _read_tabular_bytes(raw, ext)
 
-    if _UPLOAD_BASE is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Server-side file paths are disabled. Use content_b64 upload instead.",
-        )
-
-    resolved = (_UPLOAD_BASE / path).resolve()
-    if not str(resolved).startswith(str(_UPLOAD_BASE)):
-        raise HTTPException(status_code=400, detail="Invalid file path.")
-
-    p = resolved
+    p = _resolve_allowed_path(path)
     ext = p.suffix.lower()
     try:
-        if ext == ".csv":
-            return _read_csv_bytes(p.read_bytes())
-        if ext in (".xlsx", ".xls"):
-            return pd.read_excel(p)
-        if ext == ".json":
-            try:
-                return pd.read_json(p)
-            except ValueError:
-                try:
-                    return pd.read_json(p, orient="records")
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Cannot parse JSON file")
-        if ext in (".tsv", ".txt"):
-            return pd.read_csv(p, sep="\t")
+        return _read_tabular_bytes(p.read_bytes(), ext)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
-    raise HTTPException(
-        status_code=400,
-        detail=f"Unsupported file format '{ext}'. Use .csv, .xlsx, .json, or .tsv",
-    )

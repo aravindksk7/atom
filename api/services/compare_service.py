@@ -531,7 +531,7 @@ class CompareService:
                 for r in run.results
             }
 
-        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".tsv", ".txt"}
+        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".xml", ".tsv", ".txt"}
         name = file_name or file_path or ""
         ext = Path(name).suffix.lower() if name else ""
         if ext in _TABULAR_EXTS:
