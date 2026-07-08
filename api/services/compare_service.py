@@ -53,6 +53,7 @@ def _load_in_chunks(
 logger = logging.getLogger("api.services.compare_service")
 
 _SENTINEL_QUERY = "__file_source__"
+_DEFAULT_COMPARE_MISMATCH_ROW_LIMIT = 5000
 _KEY_CANDIDATES = (
     "id",
     "employee id",
@@ -68,6 +69,10 @@ _KEY_CANDIDATES = (
 
 def _column_key(column: object) -> str:
     return "".join(ch for ch in str(column).lower() if ch.isalnum())
+
+
+def _compare_mismatch_row_limit(adv: "AdvancedCompareOptions | None") -> int:
+    return getattr(adv, "mismatch_row_limit", _DEFAULT_COMPARE_MISMATCH_ROW_LIMIT)
 
 
 def _build_engine(
@@ -162,7 +167,7 @@ class CompareService:
                 engine_a, engine_b,
                 key_columns=key_columns,
                 exclude_columns=req.exclude_columns or [],
-                mismatch_row_limit=5000,
+                mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
                 adv=getattr(req, "advanced", None),
             )
             result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
@@ -350,7 +355,7 @@ class CompareService:
             engine_a, engine_b,
             key_columns=key_columns,
             exclude_columns=req.exclude_columns or [],
-            mismatch_row_limit=5000,
+            mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
             adv=getattr(req, "advanced", None),
         )
         result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")

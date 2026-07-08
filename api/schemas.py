@@ -587,6 +587,7 @@ class AdvancedCompareOptions(BaseModel):
     case_insensitive_columns: list[str] = Field(default_factory=list)
     whitespace_normalize_columns: list[str] = Field(default_factory=list)
     comparison_backend: Literal["pandas", "polars", "duckdb"] = "pandas"
+    mismatch_row_limit: int = Field(default=5000, ge=1)
     sample_frac: float | None = Field(default=None, ge=0.01, le=1.0)
     parallel_columns: bool = False
     parallel_workers: int = Field(default=4, ge=1, le=32)

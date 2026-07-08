@@ -212,6 +212,7 @@ function app() {
       chunk_size: 0,
       use_hash_precheck: true,
       comparison_backend: 'pandas',
+      mismatch_row_limit: 1000,
       health_check: false,
       metrics_enabled: true,
       use_live_connections: false,
@@ -461,6 +462,7 @@ function app() {
     boCaseInsensitiveColumns: '',
     boWhitespaceNormalizeColumns: '',
     boBackend: 'pandas',
+    boMismatchRowLimit: 5000,
     boSampleFrac: '',
     boParallelColumns: false,
 
@@ -471,6 +473,7 @@ function app() {
     fileCaseInsensitiveColumns: '',
     fileWhitespaceNormalizeColumns: '',
     fileBackend: 'pandas',
+    fileMismatchRowLimit: 5000,
     fileSampleFrac: '',
     fileParallelColumns: false,
 
@@ -481,6 +484,7 @@ function app() {
     sqlCaseInsensitiveColumns: '',
     sqlWhitespaceNormalizeColumns: '',
     sqlBackend: 'pandas',
+    sqlMismatchRowLimit: 5000,
     sqlSampleFrac: '',
     sqlParallelColumns: false,
 
@@ -1406,6 +1410,7 @@ function app() {
         chunk_size: Number(s.chunk_size),
         use_hash_precheck: Boolean(s.use_hash_precheck),
         comparison_backend: s.comparison_backend,
+        mismatch_row_limit: Number(s.mismatch_row_limit) || 1000,
         health_check: Boolean(s.health_check),
         metrics_enabled: Boolean(s.metrics_enabled),
         use_live_connections: Boolean(s.use_live_connections),
@@ -2109,6 +2114,7 @@ function app() {
 
     _buildAdvanced(prefix) {
       const p = prefix;
+      const rowLimit = parseInt(this[`${p}MismatchRowLimit`], 10);
       const adv = {
         float_tolerance: parseFloat(this[`${p}FloatTolerance`]) || 1e-9,
         column_tolerances: this._parseColumnTolerances(this[`${p}ColumnTolerances`]),
@@ -2116,6 +2122,7 @@ function app() {
         case_insensitive_columns: (this[`${p}CaseInsensitiveColumns`] || '').split(',').map(s => s.trim()).filter(Boolean),
         whitespace_normalize_columns: (this[`${p}WhitespaceNormalizeColumns`] || '').split(',').map(s => s.trim()).filter(Boolean),
         comparison_backend: this[`${p}Backend`] || 'pandas',
+        mismatch_row_limit: rowLimit > 0 ? rowLimit : 5000,
         parallel_columns: Boolean(this[`${p}ParallelColumns`]),
         parallel_workers: 4,
       };

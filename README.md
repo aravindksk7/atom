@@ -1610,6 +1610,7 @@ All three tabular compare modes (BO Report, Recon File, SQL Direct) accept an op
 | `datetime_tolerance_seconds` | `0.0` | Maximum allowed difference (in seconds) between two datetime values before they are flagged as mismatched. Useful when comparing timestamps that may differ by sub-second rounding. |
 | `case_insensitive_columns` | `[]` | String columns where comparison is case-insensitive. Values are lowercased before diffing. Example: `["status", "country_code"]`. **Pandas backend only.** |
 | `whitespace_normalize_columns` | `[]` | String columns where leading/trailing whitespace is stripped and runs of internal whitespace are collapsed to a single space before comparison. **Pandas backend only.** |
+| `mismatch_row_limit` | `5000` | Maximum number of mismatch detail rows stored for the compare result. Counts still include all mismatches. |
 | `sample_frac` | `null` | When set (0.01–1.0) both source and target DataFrames are randomly sampled to this fraction before comparison. Useful for quick smoke-tests on very large datasets. |
 | `parallel_columns` | `false` | When `true`, value comparison is distributed across `parallel_workers` threads — one thread per column. Speeds up wide tables (100+ columns). |
 | `parallel_workers` | `4` | Thread-pool size used when `parallel_columns` is `true`. |

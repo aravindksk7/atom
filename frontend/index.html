@@ -752,6 +752,12 @@
                  title="Maximum allowed difference between floating-point values before flagging as a mismatch">
         </div>
         <div>
+          <label class="field-label">Mismatch Row Limit</label>
+          <input type="number" min="1" x-model.number="launchSettings.mismatch_row_limit"
+                 class="field-input"
+                 title="Maximum number of mismatch detail rows stored per result. Counts still include all mismatches.">
+        </div>
+        <div>
           <label class="field-label">Schema Mismatch</label>
           <select x-model="launchSettings.schema_mismatch_policy" class="field-input field-select"
                   title="How to handle column count or type differences between source and target">
@@ -3267,6 +3273,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <input x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
           </div>
           <div>
+            <label class="field-label">Mismatch Row Limit</label>
+            <input x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+          </div>
+          <div>
             <label class="field-label">Sample Fraction (0–1)</label>
             <input x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
           </div>
@@ -3591,6 +3601,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <input x-model="fileDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
             </div>
             <div>
+              <label class="field-label">Mismatch Row Limit</label>
+              <input x-model.number="fileMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+            </div>
+            <div>
               <label class="field-label">Sample Fraction (0–1)</label>
               <input x-model="fileSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
             </div>
@@ -3848,6 +3862,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div>
             <label class="field-label">Datetime Tolerance (s)</label>
             <input x-model="sqlDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+          </div>
+          <div>
+            <label class="field-label">Mismatch Row Limit</label>
+            <input x-model.number="sqlMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
           </div>
           <div>
             <label class="field-label">Sample Fraction (0–1)</label>
