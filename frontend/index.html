@@ -289,6 +289,35 @@
     </template>
   </div>
 
+  <!-- Regional – App-wide Timezone -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="timezoneOpen = !timezoneOpen">
+      <div class="font-semibold text-slate-700">🌐 Regional — Timezone</div>
+      <span class="text-muted text-sm" x-text="timezoneOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="timezoneOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">All timestamps across the dashboard, run history, and generated reports are shown in this timezone. Scheduled runs also fire according to it — a cron expression of <code>0 9 * * *</code> means 9am in this zone.</p>
+        <template x-if="!activeTokenIsAdmin">
+          <div class="text-sm">Current: <span class="font-medium" x-text="appTimezone"></span> <span class="text-muted text-xs">(administrator access required to change)</span></div>
+        </template>
+        <template x-if="activeTokenIsAdmin">
+          <div class="flex items-center gap-2">
+            <select x-model="timezoneDraft" class="field-input field-select flex-1">
+              <template x-for="tz in timezoneOptions" :key="tz">
+                <option :value="tz" x-text="tz"></option>
+              </template>
+            </select>
+            <button @click="saveTimezoneSetting()" :disabled="timezoneSaving || timezoneDraft === appTimezone" class="btn-primary btn-sm">
+              <span x-show="!timezoneSaving">Save</span>
+              <span x-show="timezoneSaving">Saving…</span>
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
   <!-- Notifications – Webhook Hooks -->
   <div class="card mt-4">
     <div class="flex items-center justify-between cursor-pointer" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()">
@@ -1636,7 +1665,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <h2 class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
       <div class="space-y-3">
         <div><label class="field-label">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" /></div>
-        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily</div></div>
+        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily (times in <span x-text="appTimezone"></span>)</div></div>
         <div class="grid-2">
           <div>
             <label class="field-label">Source Env</label>
