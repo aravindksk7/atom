@@ -270,6 +270,18 @@ class ScheduledRun(Base):
 
 
 # ---------------------------------------------------------------------------
+# App-wide settings
+# ---------------------------------------------------------------------------
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    timezone = Column(String(64), nullable=False, default="UTC")
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
 # Audit log
 # ---------------------------------------------------------------------------
 
