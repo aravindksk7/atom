@@ -179,6 +179,7 @@
         <span class="badge badge-gray">{{ status }}</span>
       {% endif %}
     {% endmacro %}
+    {% set suite_total_issues = suite.total_issues if suite.total_issues is defined else (suite.reconciliation_results | sum(attribute='total_issues')) %}
 
     <div id="header">
       <h1>ETL Framework Execution Report</h1>
@@ -200,7 +201,7 @@
           <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Failed</div>
         </div>
         <div style="flex:1;min-width:120px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:12px 16px">
-          <div id="stat-total-mm" style="font-size:1.8em;font-weight:700;color:#fbbf24">…</div>
+          <div id="stat-total-mm" data-total-issues="{{ suite_total_issues }}" style="font-size:1.8em;font-weight:700;color:#fbbf24">{{ suite_total_issues }}</div>
           <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Mismatches</div>
         </div>
         <div style="flex:1;min-width:120px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:12px 16px">
@@ -219,11 +220,11 @@
 
     <div class="analytics-row" id="analytics-row">
       <div class="analytics-panel" id="col-heatmap-panel">
-        <div class="analytics-title">Top Columns by Mismatch Count</div>
+        <div class="analytics-title">Top Columns by Displayed Mismatch Count</div>
         <div id="col-heatmap"><span style="color:var(--muted);font-size:0.85em">No mismatches recorded.</span></div>
       </div>
       <div class="analytics-panel" id="type-donut-panel">
-        <div class="analytics-title">Mismatch Type Breakdown</div>
+        <div class="analytics-title">Displayed Mismatch Type Breakdown</div>
         <div id="type-donut"><span style="color:var(--muted);font-size:0.85em">No mismatches recorded.</span></div>
       </div>
     </div>
@@ -307,8 +308,18 @@
     <div id="mismatches">
       {% for result in suite.reconciliation_results %}
         {% if result.mismatches %}
+          {% set shown_mismatches = result.mismatches | length %}
+          {% set total_mismatches = result.total_issues %}
           <details>
-            <summary>{{ result.query_name }} Mismatches (Showing first {{ result.mismatches|length }})</summary>
+            <summary>
+              {{ result.query_name }} Mismatches
+              (Showing first {{ shown_mismatches }}{% if total_mismatches > shown_mismatches %} of {{ total_mismatches }}{% endif %})
+            </summary>
+            {% if total_mismatches > shown_mismatches %}
+            <p style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
+              Detail rows are capped; aggregate counts above show the full mismatch total.
+            </p>
+            {% endif %}
             <table>
               <thead>
                 <tr>
@@ -358,6 +369,13 @@
               </tbody>
             </table>
           </details>
+        {% elif result.total_issues > 0 %}
+          <details>
+            <summary>{{ result.query_name }} Mismatches (0 detail rows stored of {{ result.total_issues }})</summary>
+            <p style="margin:6px 0;color:var(--muted);font-size:0.9em">
+              No mismatch detail rows are stored for this result, but aggregate counts above show the full mismatch total.
+            </p>
+          </details>
         {% endif %}
       {% endfor %}
     </div>
@@ -375,6 +393,21 @@
   function escHtml(s) {
     return String(s==null?'':s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function totalIssueCount() {
+    var stat = document.getElementById('stat-total-mm');
+    var raw = stat ? stat.dataset.totalIssues : '';
+    var parsed = parseInt(raw || '0', 10);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function updateFilterCount(shown, displayed) {
+    var count = document.getElementById('filter-count');
+    if(!count) return;
+    var total = totalIssueCount();
+    if(total > displayed) count.textContent = shown + ' of ' + displayed + ' displayed (' + total + ' total)';
+    else count.textContent = shown + ' of ' + displayed + ' mismatches';
   }
 
   // ── Char diff (LCS O(n*m)) ────────────────────────────────────────────────
@@ -452,8 +485,7 @@
       tr.style.display = ok ? '' : 'none';
       if(ok) shown++;
     });
-    var count = document.getElementById('filter-count');
-    if(count) count.textContent = shown + ' of ' + rows.length + ' mismatches';
+    updateFilterCount(shown, rows.length);
     navIndex=-1; buildNavList();
   }
 
@@ -518,6 +550,8 @@
       var c=tr.dataset.column||'(none)';
       counts[c]=(counts[c]||0)+1;
     });
+    var stat=document.getElementById('stat-total-mm');
+    if(stat) stat.textContent=totalIssueCount();
     var sorted=Object.entries(counts).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
     if(!sorted.length) return;
     var maxC=sorted[0][1];
@@ -538,8 +572,6 @@
     }).join('');
     var container=document.getElementById('col-heatmap');
     if(container) container.innerHTML='<svg width="'+svgW+'" height="'+svgH+'" xmlns="http://www.w3.org/2000/svg">'+bars+'</svg>';
-    var total=Object.values(counts).reduce(function(a,b){return a+b;},0);
-    document.getElementById('stat-total-mm').textContent=total;
   }
 
   function filterByCol(col){
@@ -583,7 +615,7 @@
       '<svg width="160" height="160" xmlns="http://www.w3.org/2000/svg">'+
       paths+
       '<text x="'+cx+'" y="'+(cy-6)+'" text-anchor="middle" font-size="22" font-weight="bold" fill="#f4f7fb">'+total+'</text>'+
-      '<text x="'+cx+'" y="'+(cy+14)+'" text-anchor="middle" font-size="11" fill="#8491a3">mismatches</text>'+
+      '<text x="'+cx+'" y="'+(cy+14)+'" text-anchor="middle" font-size="11" fill="#8491a3">displayed</text>'+
       '</svg><div>'+legend+'</div></div>';
     var container=document.getElementById('type-donut');
     if(container) container.innerHTML=html;
@@ -618,8 +650,7 @@
     fillDuration();
     buildNavList();
     var rows=document.querySelectorAll('tr[data-mismatch]').length;
-    var fc=document.getElementById('filter-count');
-    if(fc) fc.textContent=rows+' of '+rows+' mismatches';
+    updateFilterCount(rows, rows);
   });
   </script>
 </body>

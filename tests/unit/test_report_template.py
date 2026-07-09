@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from etl_framework.reporting.generator import ReportGenerator
 
 
-def _make_suite(mismatches=None):
+def _make_suite(mismatches=None, total_issues=None):
     mm_list = mismatches or []
+    issue_count = len(mm_list) if total_issues is None else total_issues
 
     result = types.SimpleNamespace(
         query_name="orders_recon",
@@ -15,7 +16,7 @@ def _make_suite(mismatches=None):
         duration_seconds=1.23,
         source_row_count=100,
         target_row_count=98,
-        total_issues=len(mm_list),
+        total_issues=issue_count,
         value_mismatch_count=sum(1 for m in mm_list if m.mismatch_type == "value_mismatch"),
         missing_in_target_count=sum(1 for m in mm_list if m.mismatch_type == "missing_in_target"),
         missing_in_source_count=sum(1 for m in mm_list if m.mismatch_type == "missing_in_source"),
@@ -35,6 +36,7 @@ def _make_suite(mismatches=None):
         total_passed=0,
         total_failed=1,
         total_skipped=0,
+        total_issues=issue_count,
     )
     return suite
 
@@ -114,6 +116,18 @@ class TestReportTemplateSmoke:
         html = _render(_make_suite([mm]), tmp_path)
         assert "dev" in html
         assert "prod" in html
+
+    def test_mismatch_summary_uses_total_not_rendered_detail_count(self, tmp_path):
+        mismatches = [
+            _make_mm("amount", "100.00", "100.01"),
+            _make_mm("status", "active", "inactive"),
+        ]
+        html = _render(_make_suite(mismatches, total_issues=12000), tmp_path)
+
+        assert 'data-total-issues="12000"' in html
+        assert ">12000</div>" in html
+        assert "Showing first 2 of 12000" in html
+        assert "Detail rows are capped" in html
 
     def test_effective_status_is_rendered_with_raw_status_note(self, tmp_path):
         suite = _make_suite()

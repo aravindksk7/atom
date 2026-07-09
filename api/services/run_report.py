@@ -86,6 +86,10 @@ class RunReportSnapshot:
     def total_skipped(self) -> int:
         return 0
 
+    @property
+    def total_issues(self) -> int:
+        return sum(result.total_issues for result in self.results)
+
     def to_metrics(self) -> dict:
         total_duration = sum(float(result.duration_seconds or 0) for result in self.results)
         return {
