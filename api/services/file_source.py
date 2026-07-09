@@ -149,13 +149,61 @@ def _flatten_xml_element(element: ET.Element) -> dict[str, str]:
     return row
 
 
-def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        raise HTTPException(status_code=400, detail="Cannot parse XML file")
+def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, str]]]:
+    """Flatten each direct child of the XML root as it finishes parsing and
+    clear it immediately, so peak memory holds one record's worth of DOM at
+    a time instead of the whole parsed document tree.
+    """
+    context = ET.iterparse(io.BytesIO(raw), events=("start", "end"))
+    _, root = next(context)
+    depth = 1
+    candidates: list[tuple[str, dict[str, str]]] = []
+    for event, elem in context:
+        if event == "start":
+            depth += 1
+            continue
+        depth -= 1
+        if depth == 1:
+            candidates.append((_xml_name(elem.tag), _flatten_xml_element(elem)))
+            elem.clear()
+    return candidates
+
+
+def _read_xml_bytes_dom(raw: bytes) -> pd.DataFrame:
+    root = ET.fromstring(raw)
     rows = [_flatten_xml_element(record) for record in _select_xml_records(root)]
     return pd.DataFrame(rows)
+
+
+def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
+    try:
+        candidates = _stream_xml_candidates(raw)
+    except ET.ParseError:
+        raise HTTPException(status_code=400, detail="Cannot parse XML file")
+
+    if not candidates:
+        # Root has no children (single flat record, or nested structure that
+        # needs the recursive DOM heuristics) — these are small documents by
+        # construction, so the one-shot DOM path is cheap here.
+        return _read_xml_bytes_dom(raw)
+
+    preferred = ("record", "row", "item", "entry")
+    for tag in preferred:
+        matches = [row for name, row in candidates if name.lower() == tag]
+        if matches:
+            return pd.DataFrame(matches)
+
+    counts = Counter(name for name, _ in candidates)
+    repeated = [tag for tag, count in counts.items() if count > 1]
+    if repeated:
+        record_tag = max(repeated, key=lambda tag: counts[tag])
+        matches = [row for name, row in candidates if name == record_tag]
+        return pd.DataFrame(matches)
+
+    # No repeated top-level record tag — rare small-document edge case
+    # (deeply nested single record). Candidates were already cleared during
+    # streaming, so re-parse to run the recursive DOM selection heuristic.
+    return _read_xml_bytes_dom(raw)
 
 
 def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:

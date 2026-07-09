@@ -409,7 +409,7 @@ class ReconciliationEngine:
         mismatch_type: str,
     ) -> list[MismatchRecord]:
         records = []
-        for _, row in df.iterrows():
+        for _, row in df.head(self._mismatch_row_limit).iterrows():
             key_values = {k: row.get(k) for k in self._key_columns}
             records.append(MismatchRecord(
                 key_values=key_values,
@@ -561,7 +561,7 @@ class ReconciliationEngine:
         col_count = int(mismatch_mask.sum())
         records: list[MismatchRecord] = []
         if col_count:
-            for _, row in both.loc[mismatch_mask].iterrows():
+            for _, row in both.loc[mismatch_mask].head(self._mismatch_row_limit).iterrows():
                 sv, tv = row[src_col], row[tgt_col]
                 delta: float | None = None
                 rel_delta: float | None = None

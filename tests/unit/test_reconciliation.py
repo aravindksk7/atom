@@ -155,6 +155,59 @@ def test_mismatch_row_limit_caps_stored_records():
     assert len(result.mismatches) == 5  # capped at limit
 
 
+def test_value_mismatch_row_building_capped_to_limit_not_full_mismatch_set():
+    """Regression: building mismatch records must stop at mismatch_row_limit,
+    not row-iterate every mismatched row before truncating. On 500k+ row
+    file compares, the old code ran .iterrows() over the entire mismatched
+    set per column before slicing to the limit, making large compares
+    pathologically slow.
+    """
+    import unittest.mock as mock
+    n = 5000
+    source = pd.DataFrame({"id": list(range(n)), "val": ["x"] * n})
+    target = pd.DataFrame({"id": list(range(n)), "val": ["y"] * n})
+    engine = _make_engine(source, target, mismatch_row_limit=5)
+
+    rows_iterated = [0]
+    real_iterrows = pd.DataFrame.iterrows
+
+    def counting_iterrows(self):
+        for item in real_iterrows(self):
+            rows_iterated[0] += 1
+            yield item
+
+    with mock.patch.object(pd.DataFrame, "iterrows", counting_iterrows):
+        result = engine.reconcile("SELECT 1", "q")
+
+    assert result.value_mismatch_count == n  # count still accurate
+    assert len(result.mismatches) == 5  # output still capped
+    assert rows_iterated[0] <= 5  # row-building work bounded by limit, not n
+
+
+def test_missing_row_building_capped_to_limit_not_full_mismatch_set():
+    """Same regression as above, for missing_in_target/missing_in_source rows."""
+    import unittest.mock as mock
+    n = 5000
+    source = pd.DataFrame({"id": list(range(n)), "val": ["x"] * n})
+    target = pd.DataFrame({"id": [], "val": []})
+    engine = _make_engine(source, target, mismatch_row_limit=5)
+
+    rows_iterated = [0]
+    real_iterrows = pd.DataFrame.iterrows
+
+    def counting_iterrows(self):
+        for item in real_iterrows(self):
+            rows_iterated[0] += 1
+            yield item
+
+    with mock.patch.object(pd.DataFrame, "iterrows", counting_iterrows):
+        result = engine.reconcile("SELECT 1", "q")
+
+    assert result.missing_in_target_count == n  # count still accurate
+    assert len(result.mismatches) == 5  # output still capped
+    assert rows_iterated[0] <= 5  # row-building work bounded by limit, not n
+
+
 def test_type_normalizer_invoked_before_comparison():
     """Decimal values should be normalised and compared correctly."""
     from decimal import Decimal
