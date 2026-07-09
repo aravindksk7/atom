@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#050505" />
   <title>ETL Test Framework</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700;800&display=swap" />
   <link rel="stylesheet" href="vendor/tailwind.css" />
   <script defer src="vendor/alpine.min.js"></script>
   <script src="vendor/chart.umd.min.js"></script>
@@ -18,14 +21,18 @@
      ============================================================ -->
 <nav class="top-nav">
   <div class="top-nav-inner">
-    <span class="brand">⚡ ETL Framework</span>
+    <span class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+      ETL Framework
+    </span>
     <div class="flex gap-1 flex-1">
       <template x-for="tab in tabs" :key="tab.id">
         <button
           @click="currentView = tab.id; if (tab.id === 'contracts') loadContracts(); if (tab.id === 'logs') startGlobalLogsPolling(); else stopGlobalLogsPolling();"
           :class="currentView === tab.id ? 'active' : ''"
-          class="tab-btn"
-          x-text="tab.label">
+          class="tab-btn">
+          <span class="tab-icon" x-html="tab.icon"></span>
+          <span x-text="tab.label"></span>
         </button>
       </template>
     </div>
