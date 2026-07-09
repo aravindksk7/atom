@@ -136,10 +136,10 @@ def test_run_executor_health_gate_runs_before_jobs():
 def test_run_executor_records_polars_backend_failure(monkeypatch):
     from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
 
-    def fail_compare(self, df_source, df_target):
+    def fail_compare_with_counts(self, df_source, df_target):
         raise ImportError("polars is required")
 
-    monkeypatch.setattr(PolarsBackend, "compare", fail_compare)
+    monkeypatch.setattr(PolarsBackend, "compare_with_counts", fail_compare_with_counts)
     db = _session()
     RunRepository(db).create_run("run-004", "dev", "prod", {})
     JobRepository(db).create(

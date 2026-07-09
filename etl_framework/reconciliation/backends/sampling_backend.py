@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from etl_framework.reconciliation.backends.base import ComparisonBackend
+from etl_framework.reconciliation.backends.base import BackendCompareResult, ComparisonBackend
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -28,8 +28,11 @@ class SamplingBackend:
         self._seed = seed
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
+        return self.compare_with_counts(df_source, df_target).mismatches
+
+    def compare_with_counts(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> BackendCompareResult:
         if self._sample_frac >= 1.0 or (len(df_source) == 0 and len(df_target) == 0):
-            return self._inner.compare(df_source, df_target)
+            return self._compare_inner_with_counts(df_source, df_target)
 
         src_sampled = df_source.sample(
             frac=self._sample_frac, random_state=self._seed, replace=False
@@ -39,7 +42,31 @@ class SamplingBackend:
             frac=self._sample_frac, random_state=self._seed, replace=False
         ) if len(df_target) > 0 else df_target
 
-        return self._inner.compare(src_sampled.reset_index(drop=True), tgt_sampled.reset_index(drop=True))
+        return self._compare_inner_with_counts(
+            src_sampled.reset_index(drop=True),
+            tgt_sampled.reset_index(drop=True),
+        )
+
+    def _compare_inner_with_counts(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+    ) -> BackendCompareResult:
+        compare_with_counts = getattr(self._inner, "compare_with_counts", None)
+        if callable(compare_with_counts):
+            return compare_with_counts(df_source, df_target)
+
+        mismatches = self._inner.compare(df_source, df_target)
+        mit_count = sum(1 for m in mismatches if m.mismatch_type == "missing_in_target")
+        mis_count = sum(1 for m in mismatches if m.mismatch_type == "missing_in_source")
+        value_count = sum(1 for m in mismatches if m.mismatch_type == "value_diff")
+        return BackendCompareResult(
+            matched_count=max(len(df_source) - mit_count, 0),
+            missing_in_target_count=mit_count,
+            missing_in_source_count=mis_count,
+            value_mismatch_count=value_count,
+            mismatches=mismatches,
+        )
 
     @property
     def sample_frac(self) -> float:

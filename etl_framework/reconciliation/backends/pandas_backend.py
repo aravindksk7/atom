@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import numpy as np
 import pandas as pd
+from etl_framework.reconciliation.backends.base import BackendCompareResult
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -43,6 +44,9 @@ class PandasBackend:
         return df
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
+        return self.compare_with_counts(df_source, df_target).mismatches
+
+    def compare_with_counts(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> BackendCompareResult:
         df_source = self._normalize_df(df_source)
         df_target = self._normalize_df(df_target)
         merged = pd.merge(
@@ -57,14 +61,19 @@ class PandasBackend:
         # --- missing rows (vectorized) ---
         left_only = merged[merged["_merge"] == "left_only"]
         right_only = merged[merged["_merge"] == "right_only"]
+        missing_in_target_count = len(left_only)
+        missing_in_source_count = len(right_only)
 
         for df_miss, mtype, sv, tv in (
             (left_only,  "missing_in_target", "present", "missing"),
             (right_only, "missing_in_source", "missing", "present"),
         ):
-            for row in df_miss[self._key_columns].itertuples(index=False):
+            remaining = self._mismatch_row_limit - len(mismatches)
+            if remaining <= 0:
+                break
+            for row in df_miss[self._key_columns].head(remaining).itertuples(index=False):
                 if len(mismatches) >= self._mismatch_row_limit:
-                    return mismatches
+                    break
                 mismatches.append(MismatchRecord(
                     key_values=dict(zip(self._key_columns, row)),
                     column_name="<row>",
@@ -75,11 +84,17 @@ class PandasBackend:
         # --- value mismatches (vectorized per column) ---
         both = merged[merged["_merge"] == "both"].copy()
         if both.empty:
-            return mismatches
+            return BackendCompareResult(
+                matched_count=0,
+                missing_in_target_count=missing_in_target_count,
+                missing_in_source_count=missing_in_source_count,
+                value_mismatch_count=0,
+                mismatches=mismatches,
+            )
 
+        value_mismatch_count = 0
+        key_count = len(self._key_columns)
         for col in value_cols:
-            if len(mismatches) >= self._mismatch_row_limit:
-                break
             src_col = f"{col}_src" if f"{col}_src" in both.columns else col
             tgt_col = f"{col}_tgt" if f"{col}_tgt" in both.columns else col
             if src_col not in both.columns or tgt_col not in both.columns:
@@ -111,20 +126,27 @@ class PandasBackend:
                 val_eq = s.eq(t).fillna(False)
 
             match_mask = (both_na & self._null_equals_null) | (neither_na & val_eq)
-            mismatch_rows = both[~match_mask]
+            mismatch_mask = ~match_mask
+            value_mismatch_count += int(mismatch_mask.sum())
 
             budget = self._mismatch_row_limit - len(mismatches)
-            row_cols = list(mismatch_rows.columns)
-            for row in mismatch_rows.iloc[:budget].itertuples(index=False, name=None):
-                row_dict = dict(zip(row_cols, row))
-                sv_val = row_dict.get(src_col)
-                tv_val = row_dict.get(tgt_col)
+            if budget <= 0:
+                continue
+            record_cols = self._key_columns + [src_col, tgt_col]
+            for row in both.loc[mismatch_mask, record_cols].head(budget).itertuples(index=False, name=None):
+                key_values = dict(zip(self._key_columns, row[:key_count]))
                 mismatches.append(MismatchRecord(
-                    key_values={k: row_dict[k] for k in self._key_columns},
+                    key_values=key_values,
                     column_name=col,
-                    source_value=sv_val,
-                    target_value=tv_val,
+                    source_value=row[key_count],
+                    target_value=row[key_count + 1],
                     mismatch_type="value_diff",
                 ))
 
-        return mismatches
+        return BackendCompareResult(
+            matched_count=len(both),
+            missing_in_target_count=missing_in_target_count,
+            missing_in_source_count=missing_in_source_count,
+            value_mismatch_count=value_mismatch_count,
+            mismatches=mismatches,
+        )

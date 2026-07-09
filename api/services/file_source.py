@@ -106,12 +106,12 @@ def _strip_namespace(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _unique_path(base: str, existing: set[str]) -> str:
-    if base not in existing:
-        return base
-    idx = 2
+def _next_unique_path(base: str, existing: set[str], counters: dict[str, int]) -> str:
+    """Return a stable duplicate column name without rescanning from _2 each time."""
+    idx = counters.get(base, 1) + 1
     while f"{base}_{idx}" in existing:
         idx += 1
+    counters[base] = idx
     return f"{base}_{idx}"
 
 
@@ -133,6 +133,7 @@ def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict
         child_counts[child_tag] = child_counts.get(child_tag, 0) + 1
 
     seen: set[str] = set(row)
+    duplicate_counters: dict[str, int] = {}
     for child in children:
         child_tag = _strip_namespace(child.tag)
         child_prefix = f"{prefix}.{child_tag}" if prefix else child_tag
@@ -140,11 +141,43 @@ def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict
         for key, value in flattened.items():
             output_key = key
             if child_counts[child_tag] > 1 or output_key in seen:
-                output_key = _unique_path(key, seen)
+                output_key = _next_unique_path(key, seen, duplicate_counters)
             row[output_key] = value
             seen.add(output_key)
 
     return row
+
+
+def _select_nested_xml_records(element: ElementTree.Element) -> list[ElementTree.Element] | None:
+    """Return likely record children for one top-level wrapper element.
+
+    Some XML exports use a single wrapper under the root, e.g.
+    ``<response><orders><order>...</order></orders></response>``.  Flattening
+    that wrapper as one row creates one column per repeated child occurrence
+    (``order.id``, ``order.id_2``, ...), which is both semantically wrong and
+    very slow for tens of thousands of records.  This mirrors the DOM fallback
+    heuristic before flattening the wrapper.
+    """
+    children = list(element)
+    if len(children) <= 1:
+        return None
+
+    preferred = ("record", "row", "item", "entry")
+    for tag in preferred:
+        matches = [child for child in children if _strip_namespace(child.tag).lower() == tag]
+        if matches:
+            return matches
+
+    counts: dict[str, int] = {}
+    for child in children:
+        tag = _strip_namespace(child.tag)
+        counts[tag] = counts.get(tag, 0) + 1
+
+    repeated_tags = {tag for tag, count in counts.items() if count > 1}
+    if repeated_tags:
+        return [child for child in children if _strip_namespace(child.tag) in repeated_tags]
+
+    return None
 
 
 def _select_xml_records(root: ElementTree.Element) -> list[ElementTree.Element]:
@@ -192,7 +225,14 @@ def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
             continue
         depth -= 1
         if depth == 1:
-            candidates.append((_strip_namespace(elem.tag), _flatten_xml_element(elem)))
+            nested_records = _select_nested_xml_records(elem)
+            if nested_records is None:
+                candidates.append((_strip_namespace(elem.tag), _flatten_xml_element(elem)))
+            else:
+                candidates.extend(
+                    (_strip_namespace(record.tag), _flatten_xml_element(record))
+                    for record in nested_records
+                )
             elem.clear()
     return candidates
 

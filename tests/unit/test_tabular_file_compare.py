@@ -59,6 +59,36 @@ def test_load_recon_source_returns_df_for_xml():
     assert list(result.columns) == ["id", "val"]
 
 
+def test_nested_xml_record_container_is_not_flattened_as_one_huge_row(monkeypatch):
+    from api.services import file_source
+
+    raw = b"""<response><orders>
+  <order><id>1</id><val>10</val></order>
+  <order><id>2</id><val>20</val></order>
+  <order><id>3</id><val>30</val></order>
+</orders></response>"""
+    real_flatten = file_source._flatten_xml_element
+    flattened_tags: list[str] = []
+
+    def spy_flatten(element, prefix=""):
+        tag = file_source._strip_namespace(element.tag)
+        flattened_tags.append(tag)
+        assert tag != "orders"
+        return real_flatten(element, prefix)
+
+    monkeypatch.setattr(file_source, "_flatten_xml_element", spy_flatten)
+
+    result = file_source._read_xml_bytes(raw)
+
+    assert list(result.columns) == ["id", "val"]
+    assert result.to_dict("records") == [
+        {"id": "1", "val": "10"},
+        {"id": "2", "val": "20"},
+        {"id": "3", "val": "30"},
+    ]
+    assert "orders" not in flattened_tags
+
+
 def test_load_recon_source_returns_dict_for_stored_run():
     svc = _svc()
     run = SimpleNamespace(results=[

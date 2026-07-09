@@ -158,20 +158,16 @@ class ReconciliationEngine:
             df_source_norm, df_target_norm = self._preprocess_for_compare(df_source_norm, df_target_norm)
 
             if self._backend is not None:
-                mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
-                sample_frac = getattr(self._backend, "sample_frac", None)
-                if sample_frac is not None and sample_frac < 1.0:
-                    mit_count = sum(
-                        1 for m in mismatch_list if m.mismatch_type == "missing_in_target"
-                    )
-                    mis_count = sum(
-                        1 for m in mismatch_list if m.mismatch_type == "missing_in_source"
-                    )
-                    value_count = sum(
-                        1 for m in mismatch_list if m.mismatch_type == "value_diff"
-                    )
-                    matched_count = len(df_source) - mit_count
+                compare_with_counts = getattr(self._backend, "compare_with_counts", None)
+                if callable(compare_with_counts):
+                    backend_result = compare_with_counts(df_source_norm, df_target_norm)
+                    mismatch_list = backend_result.mismatches
+                    matched_count = backend_result.matched_count
+                    mit_count = backend_result.missing_in_target_count
+                    mis_count = backend_result.missing_in_source_count
+                    value_count = backend_result.value_mismatch_count
                 else:
+                    mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
                     matched_count, mit_count, mis_count, value_count = self._count_mismatches(
                         df_source_norm,
                         df_target_norm,

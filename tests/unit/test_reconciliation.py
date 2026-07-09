@@ -428,6 +428,60 @@ def test_polars_backend_integration_no_mismatches():
     assert result.status == TestStatus.PASSED
 
 
+def test_backend_compare_with_counts_skips_engine_recount():
+    from etl_framework.reconciliation.backends.base import BackendCompareResult
+
+    source = pd.DataFrame({"id": [1], "val": ["x"]})
+    target = pd.DataFrame({"id": [1], "val": ["y"]})
+
+    class CountingBackend:
+        def compare(self, df_source, df_target):
+            raise AssertionError("compare should not be called when compare_with_counts exists")
+
+        def compare_with_counts(self, df_source, df_target):
+            return BackendCompareResult(
+                matched_count=1,
+                missing_in_target_count=0,
+                missing_in_source_count=0,
+                value_mismatch_count=1,
+                mismatches=[
+                    MismatchRecord(
+                        key_values={"id": 1},
+                        column_name="val",
+                        source_value="x",
+                        target_value="y",
+                        mismatch_type="value_diff",
+                    )
+                ],
+            )
+
+    engine = _make_engine(source, target, backend=CountingBackend())
+    engine._count_mismatches = MagicMock(side_effect=AssertionError("engine recount should not run"))
+
+    result = engine.reconcile("SELECT 1", "backend_counts")
+
+    assert result.value_mismatch_count == 1
+    assert result.mismatches[0].column_name == "val"
+    engine._count_mismatches.assert_not_called()
+
+
+def test_duckdb_backend_integration_counts_without_materialized_python_scan():
+    pytest.importorskip("duckdb")
+    from etl_framework.reconciliation.backends.duckdb_backend import DuckDBBackend
+
+    src = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    tgt = pd.DataFrame({"id": [1, 2, 4], "val": ["a", "z", "d"]})
+    backend = DuckDBBackend(key_columns=["id"], mismatch_row_limit=10)
+    engine = _make_engine(src, tgt, backend=backend)
+
+    result = engine.reconcile("SELECT 1", "duckdb_counts")
+
+    assert result.matched_count == 2
+    assert result.missing_in_target_count == 1
+    assert result.missing_in_source_count == 1
+    assert result.value_mismatch_count == 1
+
+
 # --- Composite key columns ---
 
 def test_composite_keys_value_mismatch_attributed_correctly():

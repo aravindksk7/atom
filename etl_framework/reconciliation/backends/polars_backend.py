@@ -10,6 +10,7 @@ try:
 except (ImportError, TypeError):
     _POLARS_AVAILABLE = False
 
+from etl_framework.reconciliation.backends.base import BackendCompareResult
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -31,6 +32,9 @@ class PolarsBackend:
         self._datetime_tolerance = timedelta(seconds=datetime_tolerance_seconds)
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
+        return self.compare_with_counts(df_source, df_target).mismatches
+
+    def compare_with_counts(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> BackendCompareResult:
         if not _POLARS_AVAILABLE:
             raise ImportError(
                 "polars is required for PolarsBackend. "
@@ -43,43 +47,147 @@ class PolarsBackend:
         tgt = pl.from_pandas(df_target).with_columns(pl.lit(True).alias("__in_tgt__"))
 
         joined = src.join(tgt, on=self._key_columns, how="full", coalesce=True, suffix="_tgt")
+        in_src = pl.col("__in_src__").fill_null(False)
+        in_tgt = pl.col("__in_tgt__").fill_null(False)
 
-        for row in joined.iter_rows(named=True):
-            if len(mismatches) >= self._mismatch_row_limit:
-                break
-            key_vals = {k: row[k] for k in self._key_columns}
-            in_src = row.get("__in_src__") is True
-            in_tgt = row.get("__in_tgt__") is True
+        matched_count, missing_in_target_count, missing_in_source_count = joined.select(
+            (in_src & in_tgt).sum().alias("matched"),
+            (in_src & ~in_tgt).sum().alias("missing_in_target"),
+            (~in_src & in_tgt).sum().alias("missing_in_source"),
+        ).row(0)
 
-            if in_src and not in_tgt:
+        self._append_missing_records(
+            joined,
+            in_src & ~in_tgt,
+            "missing_in_target",
+            "present",
+            "missing",
+            mismatches,
+        )
+        self._append_missing_records(
+            joined,
+            ~in_src & in_tgt,
+            "missing_in_source",
+            "missing",
+            "present",
+            mismatches,
+        )
+
+        value_mismatch_count = 0
+        key_count = len(self._key_columns)
+        both_sides = in_src & in_tgt
+        for col in value_cols:
+            src_col = col
+            tgt_col = f"{col}_tgt"
+            if src_col not in joined.columns or tgt_col not in joined.columns:
+                continue
+
+            mismatch_expr = both_sides & self._value_mismatch_expr(
+                col,
+                src_col,
+                tgt_col,
+                df_source[col],
+                df_target[col],
+            )
+            col_count = int(joined.select(mismatch_expr.sum()).item())
+            value_mismatch_count += col_count
+
+            remaining = self._mismatch_row_limit - len(mismatches)
+            if remaining <= 0 or col_count == 0:
+                continue
+            record_cols = self._key_columns + [src_col, tgt_col]
+            for row in joined.filter(mismatch_expr).select(record_cols).head(remaining).iter_rows(named=False):
+                key_values = dict(zip(self._key_columns, row[:key_count]))
                 mismatches.append(MismatchRecord(
-                    key_values=key_vals, column_name="<row>",
-                    source_value="present", target_value="missing",
-                    mismatch_type="missing_in_target",
+                    key_values=key_values,
+                    column_name=col,
+                    source_value=row[key_count],
+                    target_value=row[key_count + 1],
+                    mismatch_type="value_diff",
                 ))
-            elif in_tgt and not in_src:
-                mismatches.append(MismatchRecord(
-                    key_values=key_vals, column_name="<row>",
-                    source_value="missing", target_value="present",
-                    mismatch_type="missing_in_source",
-                ))
-            else:
-                for col in value_cols:
-                    a = row.get(col)
-                    b = row.get(f"{col}_tgt")
-                    is_float = isinstance(a, float) or isinstance(b, float)
-                    is_dt = hasattr(a, "isoformat") or hasattr(b, "isoformat")
-                    tol = self._column_tolerances.get(col, self._float_tolerance)
-                    if not self._values_match(a, b, is_float=is_float, is_dt=is_dt, tolerance=tol):
-                        mismatches.append(MismatchRecord(
-                            key_values=key_vals, column_name=col,
-                            source_value=a, target_value=b,
-                            mismatch_type="value_diff",
-                        ))
-                        if len(mismatches) >= self._mismatch_row_limit:
-                            break
 
-        return mismatches
+        return BackendCompareResult(
+            matched_count=int(matched_count),
+            missing_in_target_count=int(missing_in_target_count),
+            missing_in_source_count=int(missing_in_source_count),
+            value_mismatch_count=value_mismatch_count,
+            mismatches=mismatches,
+        )
+
+    def _append_missing_records(
+        self,
+        joined,
+        mask,
+        mismatch_type: str,
+        source_value: str,
+        target_value: str,
+        mismatches: list[MismatchRecord],
+    ) -> None:
+        remaining = self._mismatch_row_limit - len(mismatches)
+        if remaining <= 0:
+            return
+        for row in joined.filter(mask).select(self._key_columns).head(remaining).iter_rows(named=True):
+            mismatches.append(MismatchRecord(
+                key_values={k: row[k] for k in self._key_columns},
+                column_name="<row>",
+                source_value=source_value,
+                target_value=target_value,
+                mismatch_type=mismatch_type,
+            ))
+
+    def _value_mismatch_expr(
+        self,
+        col: str,
+        src_col: str,
+        tgt_col: str,
+        source_series: pd.Series,
+        target_series: pd.Series,
+    ):
+        s = pl.col(src_col)
+        t = pl.col(tgt_col)
+        src_null = s.is_null()
+        tgt_null = t.is_null()
+        both_null = src_null & tgt_null
+        neither_null = ~src_null & ~tgt_null
+        tol = self._column_tolerances.get(col, self._float_tolerance)
+
+        if (
+            (
+                pd.api.types.is_datetime64_any_dtype(source_series)
+                or pd.api.types.is_datetime64_any_dtype(target_series)
+            )
+            and self._datetime_tolerance.total_seconds() > 0
+        ):
+            tol_us = int(self._datetime_tolerance.total_seconds() * 1_000_000)
+            val_eq = ((s - t).abs() <= pl.duration(microseconds=tol_us)).fill_null(False)
+        elif pd.api.types.is_float_dtype(source_series) or pd.api.types.is_float_dtype(target_series):
+            val_eq = (
+                (s.cast(pl.Float64, strict=False) - t.cast(pl.Float64, strict=False)).abs() <= tol
+            ).fill_null(False)
+        elif self._can_compare_exactly(source_series, target_series):
+            val_eq = (s == t).fill_null(False)
+        elif self._string_like(source_series) and self._string_like(target_series):
+            val_eq = (
+                s.cast(pl.Utf8, strict=False) == t.cast(pl.Utf8, strict=False)
+            ).fill_null(False)
+        else:
+            val_eq = pl.lit(False)
+
+        return ~((both_null & pl.lit(self._null_equals_null)) | (neither_null & val_eq))
+
+    @staticmethod
+    def _can_compare_exactly(source_series: pd.Series, target_series: pd.Series) -> bool:
+        return (
+            source_series.dtype == target_series.dtype
+            or (
+                pd.api.types.is_numeric_dtype(source_series)
+                and pd.api.types.is_numeric_dtype(target_series)
+            )
+        )
+
+    @staticmethod
+    def _string_like(series: pd.Series) -> bool:
+        return pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)
 
     def _values_match(self, a, b, is_float: bool, is_dt: bool = False, tolerance: float | None = None) -> bool:
         a_na = a is None or (isinstance(a, float) and math.isnan(a))

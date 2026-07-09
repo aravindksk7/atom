@@ -10,6 +10,7 @@ try:
 except (ImportError, TypeError):
     _DUCKDB_AVAILABLE = False
 
+from etl_framework.reconciliation.backends.base import BackendCompareResult
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -46,107 +47,248 @@ class DuckDBBackend:
     # ------------------------------------------------------------------
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
+        return self.compare_with_counts(df_source, df_target).mismatches
+
+    def compare_with_counts(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> BackendCompareResult:
         if not _DUCKDB_AVAILABLE:
             raise ImportError(
                 "duckdb is required for DuckDBBackend. "
                 "Install it with: pip install duckdb"
             )
+        src_marker = self._internal_column_name("__atom_in_src__", df_source, df_target)
+        tgt_marker = self._internal_column_name("__atom_in_tgt__", df_source, df_target, extra={src_marker})
+        src = df_source.assign(**{src_marker: True})
+        tgt = df_target.assign(**{tgt_marker: True})
+
         con = _duckdb.connect()
         try:
-            con.register("_src", df_source)
-            con.register("_tgt", df_target)
-            merged = con.execute(self._build_join_query(df_source)).df()
+            con.register("_src", src)
+            con.register("_tgt", tgt)
+            join_sql, key_aliases, value_specs = self._build_join_query(
+                df_source,
+                df_target,
+                src_marker,
+                tgt_marker,
+            )
+            matched_count, mit_count, mis_count, value_count = self._fetch_counts(
+                con,
+                join_sql,
+                value_specs,
+                df_source,
+            )
+            mismatches = self._fetch_mismatch_records(
+                con,
+                join_sql,
+                key_aliases,
+                value_specs,
+                df_source,
+                value_count,
+            )
         finally:
             con.close()
 
-        return self._extract_mismatches(merged, df_source)
+        return BackendCompareResult(
+            matched_count=matched_count,
+            missing_in_target_count=mit_count,
+            missing_in_source_count=mis_count,
+            value_mismatch_count=value_count,
+            mismatches=mismatches,
+        )
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
-    def _build_join_query(self, df_source: pd.DataFrame) -> str:
+    def _build_join_query(
+        self,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+        src_marker: str,
+        tgt_marker: str,
+    ) -> tuple[str, list[str], list[tuple[str, str, str]]]:
         key_join = " AND ".join(
-            f'COALESCE(_src."{k}" = _tgt."{k}", FALSE)' for k in self._key_columns
+            f"_src.{self._q(k)} = _tgt.{self._q(k)}" for k in self._key_columns
         )
-        src_cols = ", ".join(f'_src."{c}" AS "{c}_src"' for c in df_source.columns)
-        tgt_cols = ", ".join(f'_tgt."{c}" AS "{c}_tgt"' for c in df_source.columns)
-        key_cols = ", ".join(
-            f'COALESCE(_src."{k}", _tgt."{k}") AS "{k}"' for k in self._key_columns
-        )
-        return (
-            f"SELECT {key_cols}, "
-            f"(_src.\"{self._key_columns[0]}\" IS NOT NULL) AS __in_src__, "
-            f"(_tgt.\"{self._key_columns[0]}\" IS NOT NULL) AS __in_tgt__, "
-            f"{src_cols}, {tgt_cols} "
-            f"FROM _src FULL OUTER JOIN _tgt ON {key_join}"
-        )
+        key_aliases = [f"__key_{idx}" for idx, _ in enumerate(self._key_columns)]
+        key_cols = [
+            f"COALESCE(_src.{self._q(k)}, _tgt.{self._q(k)}) AS {self._q(alias)}"
+            for k, alias in zip(self._key_columns, key_aliases)
+        ]
+        value_specs: list[tuple[str, str, str]] = []
+        value_cols = [
+            c for c in df_source.columns
+            if c not in self._key_columns and c in df_target.columns
+        ]
+        value_selects: list[str] = []
+        for idx, col in enumerate(value_cols):
+            src_alias = f"__src_{idx}"
+            tgt_alias = f"__tgt_{idx}"
+            value_specs.append((col, src_alias, tgt_alias))
+            value_selects.append(f"_src.{self._q(col)} AS {self._q(src_alias)}")
+            value_selects.append(f"_tgt.{self._q(col)} AS {self._q(tgt_alias)}")
 
-    def _extract_mismatches(self, merged: pd.DataFrame, df_source: pd.DataFrame) -> list[MismatchRecord]:
+        select_parts = (
+            key_cols
+            + [
+                f"COALESCE(_src.{self._q(src_marker)}, FALSE) AS __in_src__",
+                f"COALESCE(_tgt.{self._q(tgt_marker)}, FALSE) AS __in_tgt__",
+            ]
+            + value_selects
+        )
+        return f"SELECT {', '.join(select_parts)} FROM _src FULL OUTER JOIN _tgt ON {key_join}", key_aliases, value_specs
+
+    def _fetch_counts(
+        self,
+        con,
+        join_sql: str,
+        value_specs: list[tuple[str, str, str]],
+        df_source: pd.DataFrame,
+    ) -> tuple[int, int, int, int]:
+        value_terms = [
+            self._count_term(col, src_alias, tgt_alias, df_source[col])
+            for col, src_alias, tgt_alias in value_specs
+        ]
+        value_count_sql = " + ".join(value_terms) if value_terms else "0"
+        sql = f"""
+            WITH joined AS ({join_sql})
+            SELECT
+                COALESCE(SUM(CASE WHEN __in_src__ AND __in_tgt__ THEN 1 ELSE 0 END), 0) AS matched_count,
+                COALESCE(SUM(CASE WHEN __in_src__ AND NOT __in_tgt__ THEN 1 ELSE 0 END), 0) AS missing_in_target_count,
+                COALESCE(SUM(CASE WHEN NOT __in_src__ AND __in_tgt__ THEN 1 ELSE 0 END), 0) AS missing_in_source_count,
+                {value_count_sql} AS value_mismatch_count
+            FROM joined
+        """
+        row = con.execute(sql).fetchone()
+        return tuple(int(value or 0) for value in row)  # type: ignore[return-value]
+
+    def _fetch_mismatch_records(
+        self,
+        con,
+        join_sql: str,
+        key_aliases: list[str],
+        value_specs: list[tuple[str, str, str]],
+        df_source: pd.DataFrame,
+        value_mismatch_count: int,
+    ) -> list[MismatchRecord]:
         mismatches: list[MismatchRecord] = []
-        value_cols = [c for c in df_source.columns if c not in self._key_columns]
+        self._append_missing_records(
+            con,
+            join_sql,
+            key_aliases,
+            "__in_src__ AND NOT __in_tgt__",
+            "missing_in_target",
+            "present",
+            "missing",
+            mismatches,
+        )
+        self._append_missing_records(
+            con,
+            join_sql,
+            key_aliases,
+            "NOT __in_src__ AND __in_tgt__",
+            "missing_in_source",
+            "missing",
+            "present",
+            mismatches,
+        )
+        if len(mismatches) >= self._mismatch_row_limit or value_mismatch_count == 0:
+            return mismatches
 
-        merged_cols = list(merged.columns)
-        for row in merged.itertuples(index=False, name=None):
-            if len(mismatches) >= self._mismatch_row_limit:
+        key_select = ", ".join(self._q(alias) for alias in key_aliases)
+        key_count = len(key_aliases)
+        for col, src_alias, tgt_alias in value_specs:
+            remaining = self._mismatch_row_limit - len(mismatches)
+            if remaining <= 0:
                 break
-            rd = dict(zip(merged_cols, row))
-            in_src = rd.get("__in_src__", False)
-            in_tgt = rd.get("__in_tgt__", False)
-            key_vals = {k: rd[k] for k in self._key_columns}
-
-            if in_src and not in_tgt:
+            condition = self._mismatch_condition(src_alias, tgt_alias, df_source[col])
+            sql = f"""
+                WITH joined AS ({join_sql})
+                SELECT {key_select}, {self._q(src_alias)}, {self._q(tgt_alias)}
+                FROM joined
+                WHERE __in_src__ AND __in_tgt__ AND {condition}
+                LIMIT {remaining}
+            """
+            for row in con.execute(sql).fetchall():
                 mismatches.append(MismatchRecord(
-                    key_values=key_vals, column_name="<row>",
-                    source_value="present", target_value="missing",
-                    mismatch_type="missing_in_target",
+                    key_values=dict(zip(self._key_columns, row[:key_count])),
+                    column_name=col,
+                    source_value=row[key_count],
+                    target_value=row[key_count + 1],
+                    mismatch_type="value_diff",
                 ))
-            elif in_tgt and not in_src:
-                mismatches.append(MismatchRecord(
-                    key_values=key_vals, column_name="<row>",
-                    source_value="missing", target_value="present",
-                    mismatch_type="missing_in_source",
-                ))
-            else:
-                for col in value_cols:
-                    sv = rd.get(f"{col}_src")
-                    tv = rd.get(f"{col}_tgt")
-                    tol = self._column_tolerances.get(col, self._float_tolerance)
-                    if not self._values_match(sv, tv, tol=tol):
-                        mismatches.append(MismatchRecord(
-                            key_values=key_vals, column_name=col,
-                            source_value=sv, target_value=tv,
-                            mismatch_type="value_diff",
-                        ))
-                        if len(mismatches) >= self._mismatch_row_limit:
-                            break
         return mismatches
 
-    def _values_match(self, a, b, tol: float) -> bool:
-        import math
-        try:
-            a_na = a is None or (isinstance(a, float) and math.isnan(a)) or bool(pd.isna(a))
-        except (TypeError, ValueError):
-            a_na = a is None
-        try:
-            b_na = b is None or (isinstance(b, float) and math.isnan(b)) or bool(pd.isna(b))
-        except (TypeError, ValueError):
-            b_na = b is None
-        if a_na and b_na:
-            return self._null_equals_null
-        if a_na or b_na:
-            return False
-        # datetime tolerance
-        if self._datetime_tolerance.total_seconds() > 0:
-            try:
-                diff = abs((pd.Timestamp(a) - pd.Timestamp(b)).total_seconds())
-                return diff <= self._datetime_tolerance.total_seconds()
-            except Exception:
-                pass
-        # float tolerance
-        try:
-            import numpy as np
-            return bool(np.isclose(float(a), float(b), rtol=0, atol=tol))
-        except (TypeError, ValueError):
-            pass
-        return a == b
+    def _append_missing_records(
+        self,
+        con,
+        join_sql: str,
+        key_aliases: list[str],
+        condition: str,
+        mismatch_type: str,
+        source_value: str,
+        target_value: str,
+        mismatches: list[MismatchRecord],
+    ) -> None:
+        remaining = self._mismatch_row_limit - len(mismatches)
+        if remaining <= 0:
+            return
+        key_select = ", ".join(self._q(alias) for alias in key_aliases)
+        sql = f"""
+            WITH joined AS ({join_sql})
+            SELECT {key_select}
+            FROM joined
+            WHERE {condition}
+            LIMIT {remaining}
+        """
+        for row in con.execute(sql).fetchall():
+            mismatches.append(MismatchRecord(
+                key_values=dict(zip(self._key_columns, row)),
+                column_name="<row>",
+                source_value=source_value,
+                target_value=target_value,
+                mismatch_type=mismatch_type,
+            ))
+
+    def _count_term(self, col: str, src_alias: str, tgt_alias: str, source_series: pd.Series) -> str:
+        condition = self._mismatch_condition(src_alias, tgt_alias, source_series)
+        return (
+            "COALESCE(SUM(CASE WHEN __in_src__ AND __in_tgt__ "
+            f"AND {condition} THEN 1 ELSE 0 END), 0)"
+        )
+
+    def _mismatch_condition(self, src_alias: str, tgt_alias: str, source_series: pd.Series) -> str:
+        src = self._q(src_alias)
+        tgt = self._q(tgt_alias)
+        both_null = f"({src} IS NULL AND {tgt} IS NULL)"
+        neither_null = f"({src} IS NOT NULL AND {tgt} IS NOT NULL)"
+
+        if pd.api.types.is_datetime64_any_dtype(source_series) and self._datetime_tolerance.total_seconds() > 0:
+            tol_us = int(self._datetime_tolerance.total_seconds() * 1_000_000)
+            equal = f"ABS(date_diff('microsecond', {src}, {tgt})) <= {tol_us}"
+        elif pd.api.types.is_float_dtype(source_series):
+            tol = self._column_tolerances.get(str(source_series.name), self._float_tolerance)
+            equal = f"ABS(CAST({src} AS DOUBLE) - CAST({tgt} AS DOUBLE)) <= {tol}"
+        else:
+            equal = f"{src} = {tgt}"
+
+        null_match = both_null if self._null_equals_null else "FALSE"
+        return f"NOT ({null_match} OR ({neither_null} AND ({equal})))"
+
+    @staticmethod
+    def _q(identifier: object) -> str:
+        return '"' + str(identifier).replace('"', '""') + '"'
+
+    @staticmethod
+    def _internal_column_name(
+        base: str,
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+        extra: set[str] | None = None,
+    ) -> str:
+        existing = {str(col) for col in df_source.columns} | {str(col) for col in df_target.columns} | (extra or set())
+        name = base
+        idx = 2
+        while name in existing:
+            name = f"{base}_{idx}"
+            idx += 1
+        return name
