@@ -1083,9 +1083,9 @@ body::before {
   backdrop-filter: blur(18px);
 }
 .auth-status-bar.is-missing {
-  background: linear-gradient(90deg, rgba(var(--accent-rgb),0.16), rgba(var(--accent-rgb),0.05));
-  color: #ffcc66;
-  border-color: rgba(var(--accent-rgb),0.32);
+  background: linear-gradient(90deg, rgba(251,191,36,0.16), rgba(251,191,36,0.05));
+  color: #fcd34d;
+  border-color: rgba(251,191,36,0.32);
 }
 .auth-status-bar.is-connected {
   background: linear-gradient(90deg, rgba(52,211,153,0.14), rgba(52,211,153,0.05));

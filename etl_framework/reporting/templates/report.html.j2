@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>ETL Test Report - {{ suite.started_at }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700;800&display=swap" />
   <style>
     :root {
       --bg: #050505;
@@ -12,21 +15,23 @@
       --text: #f4f7fb;
       --soft: #c7d0dc;
       --muted: #8491a3;
-      --cyan: #22d3ee;
+      --accent: #ffb300;
+      --accent-2: #ff7a1a;
+      --accent-rgb: 255,179,0;
       --blue: #3b82f6;
-      --violet: #8b5cf6;
       --emerald: #34d399;
       --amber: #fbbf24;
       --rose: #fb7185;
+      --font-display: 'IBM Plex Mono', 'Fira Code', Consolas, monospace;
     }
     * { box-sizing: border-box; }
     body {
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
       color: var(--text);
       background:
-        radial-gradient(circle at 18% 0%, rgba(34,211,238,0.12), transparent 28rem),
-        radial-gradient(circle at 82% 4%, rgba(232,121,249,0.11), transparent 26rem),
-        linear-gradient(180deg, #050505, #080a0d 48%, #050505);
+        radial-gradient(circle at 20% 0%, rgba(var(--accent-rgb),0.08), transparent 28rem),
+        radial-gradient(circle at 80% 6%, rgba(var(--accent-rgb),0.05), transparent 26rem),
+        linear-gradient(180deg, #050505 0%, #080a0d 42%, #050505 100%);
       margin: 0;
       padding: 28px;
     }
@@ -39,13 +44,20 @@
       border: 1px solid var(--line);
       box-shadow: 0 18px 60px rgba(0,0,0,0.42);
     }
-    h1, h2, h3 { color: var(--text); letter-spacing: 0; }
+    h1, h2, h3 { font-family: var(--font-display); letter-spacing: 0; color: var(--text); }
     h1 {
       margin-top: 0;
-      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--rose));
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      font-weight: 700;
+      text-shadow: 0 0 24px rgba(var(--accent-rgb), 0.30);
+    }
+    h1::after {
+      content: '';
+      display: block;
+      width: 4rem;
+      height: 2px;
+      margin-top: 0.5rem;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
     }
     p { color: var(--soft); }
     hr { border: none; height: 1px; background: var(--line); margin: 18px 0; }
@@ -92,7 +104,7 @@
       font-size: 0.78em;
     }
     td { color: var(--soft); }
-    tr:hover td { background: rgba(34,211,238,0.055); }
+    tr:hover td { background: rgba(var(--accent-rgb),0.07); }
     
     details {
       margin-bottom: 15px;
@@ -130,7 +142,7 @@
     /* Filter toolbar */
     #filter-toolbar { position:sticky; top:0; z-index:10; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,0.25); }
     #filter-toolbar select, #filter-search { background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:5px 9px; font-size:0.85em; }
-    #filter-toolbar select:focus, #filter-search:focus { outline:none; border-color:var(--cyan); }
+    #filter-toolbar select:focus, #filter-search:focus { outline:none; border-color:var(--accent); }
     #filter-count { margin-left:auto; font-size:0.8em; color:var(--muted); }
     .filter-clear-btn { background:rgba(255,255,255,0.07); border:1px solid var(--line); color:var(--soft); padding:4px 10px; border-radius:6px; cursor:pointer; font-size:0.82em; }
     .filter-clear-btn:hover { background:rgba(255,255,255,0.12); }
@@ -152,11 +164,11 @@
     /* Navigation pill */
     #nav-pill { position:fixed; bottom:24px; right:24px; display:flex; align-items:center; gap:8px; background:var(--panel-2); border:1px solid var(--line); border-radius:999px; padding:8px 16px; box-shadow:0 4px 20px rgba(0,0,0,0.4); z-index:100; }
     .nav-btn { background:rgba(255,255,255,0.08); border:1px solid var(--line); color:var(--soft); padding:4px 12px; border-radius:999px; cursor:pointer; font-size:0.82em; }
-    .nav-btn:hover { background:rgba(34,211,238,0.15); color:var(--cyan); }
+    .nav-btn:hover { background:rgba(var(--accent-rgb),0.15); color:var(--accent); }
     #nav-pos { color:var(--muted); font-size:0.8em; min-width:50px; text-align:center; }
 
     /* Row highlight on nav */
-    @keyframes nav-pulse { 0%,100%{background:transparent} 40%{background:rgba(34,211,238,0.15)} }
+    @keyframes nav-pulse { 0%,100%{background:transparent} 40%{background:rgba(var(--accent-rgb),0.15)} }
     .nav-active { animation: nav-pulse 1s ease; }
 
     /* Expand/collapse buttons */
