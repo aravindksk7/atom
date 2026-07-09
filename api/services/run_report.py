@@ -25,6 +25,7 @@ class ReportResult:
     override_by: str | None = None
     override_at: datetime | None = None
     sample_rows: list[dict] | None = None
+    segment_summary: dict | None = None
     mismatches: list[Any] = field(default_factory=list)
     schema_diff: Any = None
     total_issues_override: int | None = None
@@ -162,6 +163,7 @@ def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> Run
             override_by=getattr(result, "override_by", None),
             override_at=getattr(result, "override_at", None),
             sample_rows=getattr(result, "sample_rows", None),
+            segment_summary=getattr(result, "segment_summary", None),
             mismatches=list(getattr(result, "mismatches", []) or []) if include_mismatches else [],
             schema_diff=getattr(result, "schema_diff", None),
             total_issues_override=getattr(result, "total_issues", None),

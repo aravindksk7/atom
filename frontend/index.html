@@ -809,6 +809,12 @@
                  title="Maximum allowed difference between floating-point values before flagging as a mismatch">
         </div>
         <div>
+          <label class="field-label">Mismatch Row Limit</label>
+          <input type="number" min="1" x-model.number="launchSettings.mismatch_row_limit"
+                 class="field-input"
+                 title="Maximum number of mismatch detail rows stored per result. Counts still include all mismatches.">
+        </div>
+        <div>
           <label class="field-label">Schema Mismatch</label>
           <select x-model="launchSettings.schema_mismatch_policy" class="field-input field-select"
                   title="How to handle column count or type differences between source and target">
@@ -2041,6 +2047,52 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             </div>
                           </template>
                         </div>
+                        <!-- Segment breakdown (stored at run time) -->
+                        <template x-if="r.segment_summary">
+                          <div class="px-3 py-2 border-t border-slate-100 mt-2">
+                            <div class="text-xs text-muted font-semibold mb-1">Mismatches by segment</div>
+                            <template x-for="[segCol, buckets] in Object.entries(r.segment_summary || {})" :key="segCol">
+                              <div class="mb-2">
+                                <div class="flex items-center gap-2 mb-1">
+                                  <span class="text-xs font-mono text-indigo-600" x-text="segCol"></span>
+                                  <button @click="loadSegmentDrill(selectedRun.run_id, r, segCol)"
+                                          :disabled="isSegDrillBusy(r, segCol)"
+                                          class="text-indigo-500 hover:underline text-xs ml-auto">
+                                    <span x-show="!segmentDrillLoading[r.id + ':' + segCol]">🔄 Re-query now</span>
+                                    <span x-show="segmentDrillLoading[r.id + ':' + segCol]">Loading…</span>
+                                  </button>
+                                </div>
+                                <template x-for="b in buckets" :key="b.value">
+                                  <div class="flex items-center gap-2 text-xs py-0.5">
+                                    <span class="font-mono w-28 truncate" x-text="b.value"></span>
+                                    <div class="flex-1 bg-slate-100 rounded h-2 max-w-56">
+                                      <div class="h-2 rounded bg-rose-400"
+                                           :style="'width:' + Math.min(100, 100 * b.mismatch_count / segmentMax(buckets)) + '%'"></div>
+                                    </div>
+                                    <span class="text-slate-500 font-semibold" x-text="b.mismatch_count + 'x'"></span>
+                                    <span class="text-muted" x-text="'(' + b.pct_of_total + '%)'"></span>
+                                  </div>
+                                </template>
+                                <template x-if="segmentDrill[r.id + ':' + segCol]">
+                                  <div class="mt-1 pl-2 border-l-2 border-indigo-200">
+                                    <div class="text-xs text-muted mb-0.5">Live counts (source vs target)</div>
+                                    <template x-for="row in segmentDrill[r.id + ':' + segCol]" :key="row.value">
+                                      <div class="flex items-center gap-2 text-xs py-0.5">
+                                        <span class="font-mono w-28 truncate" x-text="row.value"></span>
+                                        <span class="text-slate-600" x-text="row.source_count"></span>
+                                        <span class="text-muted">vs</span>
+                                        <span class="text-slate-600" x-text="row.target_count"></span>
+                                        <span class="font-semibold"
+                                              :class="row.delta === 0 ? 'text-emerald-600' : 'text-rose-500'"
+                                              x-text="(row.delta > 0 ? '+' : '') + row.delta"></span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
                       </div>
                     </td>
                   </tr>
@@ -2096,6 +2148,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Audit</button>
         <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Profile</button>
         <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Schema</button>
+        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Coverage</button>
       </div>
 
       <!-- Trends panel -->
@@ -2359,6 +2412,66 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </div>
           </template>
         </div>
+      </div>
+
+      <!-- Coverage sub-tab -->
+      <div x-show="historySubTab==='coverage'">
+        <div class="flex items-center gap-4 mb-3">
+          <template x-if="coverageData">
+            <div class="text-sm text-muted">
+              <span x-text="coverageData.summary.tables"></span> tables ·
+              <span x-text="coverageData.summary.columns"></span> columns ·
+              <span class="text-emerald-600 font-semibold" x-text="coverageData.summary.tested_pct + '% tested'"></span> ·
+              <span class="text-amber-600" x-text="coverageData.summary.observed_pct + '% observed only'"></span>
+            </div>
+          </template>
+          <label class="flex items-center gap-1 text-xs text-muted ml-auto">
+            <input type="checkbox" x-model="coverageGapsOnly"> Gaps only
+          </label>
+          <button @click="coverageData=null; loadCoverage()" class="btn-secondary btn-sm text-xs">Refresh</button>
+        </div>
+        <div x-show="coverageLoading" class="text-muted text-sm">Loading…</div>
+        <template x-if="coverageData && coverageData.tables.length === 0">
+          <div class="text-muted text-sm">No coverage data yet — save jobs with SQL queries first.</div>
+        </template>
+        <template x-for="t in (coverageData?.tables || [])" :key="t.table">
+          <div class="mb-4 border border-slate-200 rounded-lg overflow-hidden">
+            <div class="px-3 py-2 bg-slate-50 flex items-center gap-3">
+              <span class="font-mono font-semibold text-sm" x-text="t.table"></span>
+              <span class="text-xs text-muted" x-text="t.job_count + ' job(s)'"></span>
+              <span class="ml-auto text-xs font-semibold"
+                    :class="t.tested_pct >= 70 ? 'text-emerald-600' : (t.tested_pct >= 30 ? 'text-amber-600' : 'text-rose-600')"
+                    x-text="t.tested_pct + '% tested'"></span>
+            </div>
+            <div class="px-3 py-2 flex flex-wrap gap-1">
+              <template x-for="c in coverageColumns(t)" :key="c.column">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono"
+                      :class="coverageLevelClass(c.level)"
+                      :title="'jobs: ' + c.jobs.join(', ') + (c.rules.length ? ' | rules: ' + c.rules.join(', ') : '')">
+                  <span x-text="c.column"></span>
+                </span>
+              </template>
+              <span x-show="coverageColumns(t).length === 0" class="text-xs text-muted">No gaps 🎉</span>
+            </div>
+          </div>
+        </template>
+        <!-- Flaky tests -->
+        <template x-if="flakyData && flakyData.length > 0">
+          <div class="mt-6">
+            <div class="text-sm font-semibold mb-2">Flaky tests (last 20 runs)</div>
+            <template x-for="f in flakyData" :key="f.query_name">
+              <div class="flex items-center gap-3 text-xs py-1">
+                <span class="font-mono w-48 truncate" x-text="f.query_name"></span>
+                <div class="flex-1 bg-slate-100 rounded h-2 max-w-48">
+                  <div class="h-2 rounded" :class="f.flaky ? 'bg-rose-500' : 'bg-amber-400'"
+                       :style="'width:' + Math.min(100, f.score * 100) + '%'"></div>
+                </div>
+                <span class="font-semibold w-12" x-text="f.score"></span>
+                <span class="text-muted" x-text="f.transitions + ' flips / ' + f.window + ' runs'"></span>
+              </div>
+            </template>
+          </div>
+        </template>
       </div>
 
       <!-- Runs list (default) -->
@@ -3192,6 +3305,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <input x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
           </div>
           <div>
+            <label class="field-label">Mismatch Row Limit</label>
+            <input x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+          </div>
+          <div>
             <label class="field-label">Sample Fraction (0–1)</label>
             <input x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
           </div>
@@ -3511,6 +3628,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <input x-model="fileDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
             </div>
             <div>
+              <label class="field-label">Mismatch Row Limit</label>
+              <input x-model.number="fileMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+            </div>
+            <div>
               <label class="field-label">Sample Fraction (0–1)</label>
               <input x-model="fileSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
             </div>
@@ -3768,6 +3889,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div>
             <label class="field-label">Datetime Tolerance (s)</label>
             <input x-model="sqlDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+          </div>
+          <div>
+            <label class="field-label">Mismatch Row Limit</label>
+            <input x-model.number="sqlMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
           </div>
           <div>
             <label class="field-label">Sample Fraction (0–1)</label>

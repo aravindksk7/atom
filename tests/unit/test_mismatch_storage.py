@@ -3,9 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from api.schemas import ReconFileCompareRequest
 from api.services.compare_service import CompareService
+from etl_framework.repository.database import Base
+from etl_framework.repository.repository import RunRepository
 
 
 def _service_with_mock_repo():
@@ -51,3 +55,39 @@ def test_no_mismatch_details_when_stats_match(monkeypatch):
         svc.run_recon_file_compare(req, "run-y")
 
     svc._repo.add_mismatch_details.assert_not_called()
+
+
+# --- segment_summary persistence ---
+# NOTE: this file otherwise tests CompareService against a mocked repo and has
+# no real DB fixture. For persistence-plumbing coverage we mirror the `db`
+# fixture + inline `RunRepository(db)` pattern used in test_repository.py.
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+
+
+def test_add_test_result_persists_segment_summary(db):
+    from datetime import datetime, timezone
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    repo = RunRepository(db)
+    repo.create_run(run_id="run-segsum-1", source_env="dev", target_env="qa")
+
+    summary = {"region": [{"value": "EMEA", "mismatch_count": 3,
+                           "missing_in_target": 1, "missing_in_source": 0,
+                           "value_diff": 2, "pct_of_total": 75.0}]}
+    result = ReconciliationResult(
+        query_name="q", source_env="dev", target_env="qa",
+        source_row_count=4, target_row_count=4, matched_count=1,
+        missing_in_target_count=1, missing_in_source_count=0,
+        value_mismatch_count=2, mismatches=[], status=TestStatus.FAILED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        segment_summary=summary,
+    )
+    tr = repo.add_test_result("run-segsum-1", result)
+    assert tr.segment_summary == summary

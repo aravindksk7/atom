@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import logging
 import os
 import re
 import time
@@ -22,6 +24,10 @@ from etl_framework.reconciliation.backends.pandas_backend import PandasBackend
 from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.reconciliation.segments import (
+    build_segment_summary,
+    pick_auto_segment_columns,
+)
 from etl_framework.repository.models import TestResult
 from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
 from etl_framework.runner.health import HealthChecker
@@ -33,6 +39,8 @@ from etl_framework.utils.tracing import span
 
 HOLD_POLL_INTERVAL_SECONDS = int(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
 BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
+
+logger = logging.getLogger(__name__)
 
 
 _SEED_JOBS: list[JobDefinition] = [
@@ -406,6 +414,7 @@ class RunExecutor:
 
         def run_job() -> ReconciliationResult:
             source_engine, target_engine = self._build_engines(job)
+            segment_columns = self._resolve_segment_columns(job)
             engine = ReconciliationEngine(
                 source_engine=source_engine,
                 target_engine=target_engine,
@@ -418,6 +427,7 @@ class RunExecutor:
                 chunk_size=self._settings.chunk_size,
                 use_hash_precheck=self._settings.use_hash_precheck,
                 backend=self._build_backend(job),
+                segment_columns=segment_columns,
             )
             max_duration = self._settings.max_duration_seconds or None
             result = engine.reconcile(
@@ -430,6 +440,12 @@ class RunExecutor:
                 result = self._apply_dq_rules(result, job, source_engine)
             if job.pass_condition:
                 result = self._apply_pass_condition(result, job, source_engine)
+            if segment_columns:
+                try:
+                    summary = build_segment_summary(result.mismatches, segment_columns)
+                    result = dataclasses.replace(result, segment_summary=summary)
+                except Exception:
+                    logger.warning("segment summary failed for %s", job.name, exc_info=True)
             return result
 
         max_retries = self._settings.max_retries
@@ -1001,6 +1017,19 @@ class RunExecutor:
                 duration_seconds=duration,
             )
         return run_job
+
+    def _resolve_segment_columns(self, job: JobDefinition) -> list[str]:
+        """Manual params.segment_columns wins; else auto-pick from latest profile."""
+        manual = job.params.get("segment_columns") or []
+        if manual:
+            return [str(c) for c in manual]
+        try:
+            from etl_framework.repository.repository import ColumnProfileRepository
+            profiles = ColumnProfileRepository(self._db).get_latest(job.name)
+        except Exception:
+            logger.warning("segment column auto-pick failed for %s", job.name, exc_info=True)
+            return []
+        return pick_auto_segment_columns(profiles, job.key_columns or self._settings.key_columns or [])
 
     def _build_backend(self, job: JobDefinition):
         key_columns = job.key_columns or self._settings.key_columns

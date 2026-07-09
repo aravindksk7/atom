@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_session
 from api.routes.configs import _preserve_masked_secrets
 from api.schemas import (
+    DrilldownOut,
+    DrilldownRequest,
+    DrilldownRow,
     GeneratedArtifactOut,
     MismatchAcceptOut,
     MismatchAcceptRequest,
@@ -75,6 +78,7 @@ def _test_result_out(result) -> TestResultOut:
         overridden_by=result.override_by,
         override_at=result.override_at,
         sample_rows=result.sample_rows,
+        segment_summary=result.segment_summary,
     )
 
 
@@ -586,6 +590,78 @@ def accept_mismatch(
         accepted_by=updated.accepted_by,
         result_status_updated=status_changed,
     )
+
+
+@router.post("/{run_id}/results/{result_id}/drilldown", response_model=DrilldownOut)
+def drilldown_result(
+    run_id: str,
+    result_id: int,
+    payload: DrilldownRequest,
+    db: Session = Depends(get_session),
+):
+    """Re-query both sides grouped by a segment column — live counts.
+
+    Unlike the stored `segment_summary` attached at run completion (see
+    ReconciliationEngine._attach_segment_values), this re-runs both sides'
+    queries fresh so the caller can catch data drift since the original run.
+    """
+    from etl_framework.repository.models import TestResult, TestRun, SavedJob
+    from api.services.run_executor import RunExecutor
+    from api.schemas import RunSettings
+
+    tr = db.get(TestResult, result_id)
+    if tr is None or tr.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Result not found")
+    run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    saved = db.query(SavedJob).filter(SavedJob.name == tr.query_name).first()
+    if saved is None:
+        raise HTTPException(status_code=404, detail=f"Job '{tr.query_name}' not found")
+    if saved.job_type != "reconciliation":
+        raise HTTPException(status_code=400,
+                            detail="Drill-down is only supported for reconciliation jobs")
+
+    snapshot = run.config_snapshot or {}
+    ex = RunExecutor(
+        db=db, run_id=f"drilldown-{run_id}",
+        source_env=run.source_env or "source",
+        target_env=run.target_env or "target",
+        job_sequence=[],
+        run_settings=RunSettings(
+            use_live_connections=bool(snapshot.get("source_credentials")),
+        ),
+        config_snapshot=snapshot,
+    )
+    job_def = ex._job_to_definition(saved)
+    seg = payload.segment_column
+
+    try:
+        src_engine, tgt_engine = ex._build_engines(job_def)
+        df_src = src_engine.execute_query(job_def.query, job_def.params)
+        df_tgt = tgt_engine.execute_query(job_def.query, job_def.params)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Drill-down query failed: {exc}")
+
+    def counts(df) -> dict[str, int]:
+        if df is None or df.empty or seg not in df.columns:
+            return {}
+        grouped = df.groupby(df[seg].astype(object).where(df[seg].notna(), "(null)")).size()
+        return {str(k): int(v) for k, v in grouped.items()}
+
+    src_counts = counts(df_src)
+    tgt_counts = counts(df_tgt)
+    if not src_counts and not tgt_counts:
+        raise HTTPException(status_code=400,
+                            detail=f"Segment column '{seg}' not present in either side")
+
+    rows = []
+    for value in sorted(set(src_counts) | set(tgt_counts)):
+        s, t = src_counts.get(value, 0), tgt_counts.get(value, 0)
+        rows.append(DrilldownRow(value=value, source_count=s, target_count=t, delta=t - s))
+    rows.sort(key=lambda r: -abs(r.delta))
+    return DrilldownOut(segment_column=seg, job_name=tr.query_name, rows=rows)
 
 
 @router.get("/trends")

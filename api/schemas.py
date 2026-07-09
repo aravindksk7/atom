@@ -272,6 +272,7 @@ class TestResultOut(BaseModel):
     overridden_by: str | None = None
     override_at: datetime | None = None
     sample_rows: list[dict] | None = None
+    segment_summary: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -291,6 +292,23 @@ class MismatchOut(BaseModel):
     accepted_by: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class DrilldownRequest(BaseModel):
+    segment_column: str = Field(min_length=1)
+
+
+class DrilldownRow(BaseModel):
+    value: str
+    source_count: int
+    target_count: int
+    delta: int
+
+
+class DrilldownOut(BaseModel):
+    segment_column: str
+    job_name: str
+    rows: list[DrilldownRow]
 
 
 class RunDetailOut(RunStatusOut):
@@ -584,6 +602,7 @@ class AdvancedCompareOptions(BaseModel):
     case_insensitive_columns: list[str] = Field(default_factory=list)
     whitespace_normalize_columns: list[str] = Field(default_factory=list)
     comparison_backend: Literal["pandas", "polars", "duckdb"] = "pandas"
+    mismatch_row_limit: int = Field(default=5000, ge=1)
     sample_frac: float | None = Field(default=None, ge=0.01, le=1.0)
     parallel_columns: bool = False
     parallel_workers: int = Field(default=4, ge=1, le=32)

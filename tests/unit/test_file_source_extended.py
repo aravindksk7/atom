@@ -102,6 +102,31 @@ def test_read_json_absolute_path_under_upload_base(tmp_path, monkeypatch):
     assert df.to_dict("records") == [{"id": 1, "name": "Alice"}]
 
 
+def test_read_xml_repeated_records_streams_without_full_dom_parse(monkeypatch):
+    """Regression: large XML files (500k+ records) were parsed via a single
+    ET.fromstring() call that builds the whole DOM tree in memory at once.
+    For the common repeated-record shape, reading must stream record-by-record
+    instead, so peak memory doesn't scale with the whole document.
+    """
+    import xml.etree.ElementTree as ET
+
+    records = "".join(
+        f"<record><id>{i}</id><name>User{i}</name></record>" for i in range(50)
+    )
+    raw = f"<?xml version=\"1.0\"?><dataset>{records}</dataset>".encode()
+
+    def _forbidden_fromstring(*args, **kwargs):
+        raise AssertionError("full-DOM ET.fromstring() should not be used for repeated-record XML")
+
+    monkeypatch.setattr(ET, "fromstring", _forbidden_fromstring)
+
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+
+    assert len(df) == 50
+    assert df.iloc[0].to_dict() == {"id": "0", "name": "User0"}
+    assert df.iloc[49].to_dict() == {"id": "49", "name": "User49"}
+
+
 def test_read_xml_absolute_path_under_upload_base(tmp_path, monkeypatch):
     import api.services.file_source as fs
 

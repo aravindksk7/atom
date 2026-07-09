@@ -155,6 +155,59 @@ def test_mismatch_row_limit_caps_stored_records():
     assert len(result.mismatches) == 5  # capped at limit
 
 
+def test_value_mismatch_row_building_capped_to_limit_not_full_mismatch_set():
+    """Regression: building mismatch records must stop at mismatch_row_limit,
+    not row-iterate every mismatched row before truncating. On 500k+ row
+    file compares, the old code ran .iterrows() over the entire mismatched
+    set per column before slicing to the limit, making large compares
+    pathologically slow.
+    """
+    import unittest.mock as mock
+    n = 5000
+    source = pd.DataFrame({"id": list(range(n)), "val": ["x"] * n})
+    target = pd.DataFrame({"id": list(range(n)), "val": ["y"] * n})
+    engine = _make_engine(source, target, mismatch_row_limit=5)
+
+    rows_iterated = [0]
+    real_iterrows = pd.DataFrame.iterrows
+
+    def counting_iterrows(self):
+        for item in real_iterrows(self):
+            rows_iterated[0] += 1
+            yield item
+
+    with mock.patch.object(pd.DataFrame, "iterrows", counting_iterrows):
+        result = engine.reconcile("SELECT 1", "q")
+
+    assert result.value_mismatch_count == n  # count still accurate
+    assert len(result.mismatches) == 5  # output still capped
+    assert rows_iterated[0] <= 5  # row-building work bounded by limit, not n
+
+
+def test_missing_row_building_capped_to_limit_not_full_mismatch_set():
+    """Same regression as above, for missing_in_target/missing_in_source rows."""
+    import unittest.mock as mock
+    n = 5000
+    source = pd.DataFrame({"id": list(range(n)), "val": ["x"] * n})
+    target = pd.DataFrame({"id": [], "val": []})
+    engine = _make_engine(source, target, mismatch_row_limit=5)
+
+    rows_iterated = [0]
+    real_iterrows = pd.DataFrame.iterrows
+
+    def counting_iterrows(self):
+        for item in real_iterrows(self):
+            rows_iterated[0] += 1
+            yield item
+
+    with mock.patch.object(pd.DataFrame, "iterrows", counting_iterrows):
+        result = engine.reconcile("SELECT 1", "q")
+
+    assert result.missing_in_target_count == n  # count still accurate
+    assert len(result.mismatches) == 5  # output still capped
+    assert rows_iterated[0] <= 5  # row-building work bounded by limit, not n
+
+
 def test_type_normalizer_invoked_before_comparison():
     """Decimal values should be normalised and compared correctly."""
     from decimal import Decimal
@@ -401,3 +454,39 @@ def test_executed_at_is_timezone_aware():
     engine = _make_engine(df, df.copy())
     result = engine.reconcile("SELECT 1", "q")
     assert result.executed_at.tzinfo is not None
+
+
+# --- Segment value enrichment ---
+
+def test_segment_values_attached_from_source_frame():
+    source = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 20]})
+    target = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 99]})
+    engine = _make_engine(source, target, segment_columns=["region"])
+    result = engine.reconcile("SELECT 1", "q")
+    diff = [m for m in result.mismatches if m.mismatch_type == "value_diff"]
+    assert diff and diff[0].segment_values == {"region": "APAC"}
+
+
+def test_segment_values_fall_back_to_target_for_missing_in_source():
+    source = pd.DataFrame({"id": [1], "region": ["EMEA"], "amt": [10]})
+    target = pd.DataFrame({"id": [1, 2], "region": ["EMEA", "APAC"], "amt": [10, 20]})
+    engine = _make_engine(source, target, segment_columns=["region"])
+    result = engine.reconcile("SELECT 1", "q")
+    miss = [m for m in result.mismatches if m.mismatch_type == "missing_in_source"]
+    assert miss and miss[0].segment_values == {"region": "APAC"}
+
+
+def test_no_segment_columns_leaves_segment_values_none():
+    source = pd.DataFrame({"id": [1], "amt": [10]})
+    target = pd.DataFrame({"id": [1], "amt": [99]})
+    engine = _make_engine(source, target)
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.mismatches[0].segment_values is None
+
+
+def test_segment_column_absent_from_frames_is_skipped():
+    source = pd.DataFrame({"id": [1], "amt": [10]})
+    target = pd.DataFrame({"id": [1], "amt": [99]})
+    engine = _make_engine(source, target, segment_columns=["nonexistent"])
+    result = engine.reconcile("SELECT 1", "q")
+    assert result.mismatches[0].segment_values is None

@@ -47,6 +47,7 @@ class ReconciliationEngine:
         since: datetime | None = None,
         parallel_columns: bool = False,
         parallel_workers: int = 4,
+        segment_columns: list[str] | None = None,
     ):
         self._source_engine = source_engine
         self._target_engine = target_engine
@@ -69,6 +70,7 @@ class ReconciliationEngine:
         self._since: datetime | None = since
         self._parallel_columns: bool = parallel_columns
         self._parallel_workers: int = parallel_workers
+        self._segment_columns: list[str] = segment_columns or []
 
     def reconcile(
         self,
@@ -194,6 +196,8 @@ class ReconciliationEngine:
             else:
                 result = self._compare(df_source_norm, df_target_norm, query_name, executed_at,
                                        schema_diff)
+            if self._segment_columns and result.mismatches:
+                self._attach_segment_values(result.mismatches, df_source_norm, df_target_norm)
             result = dataclasses.replace(result, duration_seconds=time.monotonic() - t0)
             return self._apply_slo(result, max_duration_seconds)
 
@@ -405,7 +409,7 @@ class ReconciliationEngine:
         mismatch_type: str,
     ) -> list[MismatchRecord]:
         records = []
-        for _, row in df.iterrows():
+        for _, row in df.head(self._mismatch_row_limit).iterrows():
             key_values = {k: row.get(k) for k in self._key_columns}
             records.append(MismatchRecord(
                 key_values=key_values,
@@ -479,6 +483,44 @@ class ReconciliationEngine:
             count += int(mismatch_mask.sum())
         return count
 
+    def _attach_segment_values(
+        self,
+        mismatches: list[MismatchRecord],
+        df_source: pd.DataFrame,
+        df_target: pd.DataFrame,
+    ) -> None:
+        """Set MismatchRecord.segment_values from source rows (target fallback).
+
+        Never raises — drill-down enrichment must not fail a run.
+        """
+        try:
+            seg_cols = [
+                c for c in self._segment_columns
+                if c in df_source.columns or c in df_target.columns
+            ]
+            if not seg_cols:
+                return
+
+            def build_lookup(df: pd.DataFrame) -> dict:
+                cols = [c for c in seg_cols if c in df.columns]
+                if not cols or df.empty or not all(k in df.columns for k in self._key_columns):
+                    return {}
+                lut = {}
+                n_keys = len(self._key_columns)
+                for row in df[self._key_columns + cols].itertuples(index=False, name=None):
+                    lut[row[:n_keys]] = dict(zip(cols, row[n_keys:]))
+                return lut
+
+            src_lut = build_lookup(df_source)
+            tgt_lut = build_lookup(df_target)
+            for m in mismatches:
+                key = tuple(m.key_values.get(k) for k in self._key_columns)
+                vals = src_lut.get(key) or tgt_lut.get(key)
+                if vals is not None:
+                    m.segment_values = {c: vals.get(c) for c in seg_cols if c in vals}
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("segment value enrichment failed; skipping", exc_info=True)
+
     def _compare_column(
         self,
         col: str,
@@ -519,7 +561,7 @@ class ReconciliationEngine:
         col_count = int(mismatch_mask.sum())
         records: list[MismatchRecord] = []
         if col_count:
-            for _, row in both.loc[mismatch_mask].iterrows():
+            for _, row in both.loc[mismatch_mask].head(self._mismatch_row_limit).iterrows():
                 sv, tv = row[src_col], row[tgt_col]
                 delta: float | None = None
                 rel_delta: float | None = None

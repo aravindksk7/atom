@@ -177,18 +177,67 @@ def _select_xml_records(root: ElementTree.Element) -> list[ElementTree.Element]:
     return [root]
 
 
+def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
+    """Flatten each direct child of the XML root as it finishes parsing and
+    clear it immediately, so peak memory holds one record's worth of DOM at
+    a time instead of the whole parsed document tree.
+    """
+    context = ElementTree.iterparse(io.BytesIO(raw), events=("start", "end"))
+    _, root = next(context)
+    depth = 1
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for event, elem in context:
+        if event == "start":
+            depth += 1
+            continue
+        depth -= 1
+        if depth == 1:
+            candidates.append((_strip_namespace(elem.tag), _flatten_xml_element(elem)))
+            elem.clear()
+    return candidates
+
+
+def _read_xml_bytes_dom(raw: bytes) -> pd.DataFrame:
+    root = ElementTree.fromstring(raw)
+    records = _select_xml_records(root)
+    rows = [_flatten_xml_element(record) for record in records]
+    return pd.DataFrame(rows)
+
+
 def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
     head = raw[:512].lower()
     if b"<!doctype" in head or b"<!entity" in head:
         raise HTTPException(status_code=400, detail="XML files with DTD or entity declarations are not supported")
+
     try:
-        root = ElementTree.fromstring(raw)
+        candidates = _stream_xml_candidates(raw)
     except ElementTree.ParseError as exc:
         raise HTTPException(status_code=400, detail="Cannot parse XML file") from exc
 
-    records = _select_xml_records(root)
-    rows = [_flatten_xml_element(record) for record in records]
-    return pd.DataFrame(rows)
+    if not candidates:
+        # Root has no children (single flat record) — trivially small, so
+        # the one-shot DOM path is cheap here.
+        return _read_xml_bytes_dom(raw)
+
+    preferred = ("record", "row", "item", "entry")
+    for tag in preferred:
+        matches = [row for name, row in candidates if name.lower() == tag]
+        if matches:
+            return pd.DataFrame(matches)
+
+    counts: dict[str, int] = {}
+    for name, _ in candidates:
+        counts[name] = counts.get(name, 0) + 1
+    repeated_tags = {tag for tag, count in counts.items() if count > 1}
+    if repeated_tags:
+        matches = [row for name, row in candidates if name in repeated_tags]
+        return pd.DataFrame(matches)
+
+    # No repeated top-level tag — rare small-document edge case (nested
+    # record container, e.g. <response><orders><order/>...</orders></response>).
+    # Candidates were already cleared during streaming, so re-parse to run
+    # the recursive DOM selection heuristic (grandchildren detection).
+    return _read_xml_bytes_dom(raw)
 
 
 def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:

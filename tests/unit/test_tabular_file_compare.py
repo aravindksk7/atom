@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from api.schemas import ReconFileCompareRequest
+from api.schemas import AdvancedCompareOptions, BOCompareRequest, ReconFileCompareRequest, SourceConfig
 from api.services.compare_service import CompareService
 
 
@@ -157,6 +157,65 @@ def test_run_tabular_file_compare_backend_keeps_service_detail_limit():
     assert len(svc._repo.add_mismatch_details.call_args.args[1]) == n
 
 
+def test_run_tabular_file_compare_uses_configured_detail_limit():
+    svc = _svc()
+    captured = {}
+
+    def add_test_result(run_id, result):
+        captured["result"] = result
+        return SimpleNamespace(id=5)
+
+    svc._repo.add_test_result = MagicMock(side_effect=add_test_result)
+    n = 1200
+    df_a = pd.DataFrame({"id": list(range(n)), "amount": [100] * n})
+    df_b = pd.DataFrame({"id": list(range(n)), "amount": [200] * n})
+
+    req = ReconFileCompareRequest(
+        file_a_content_b64="x",
+        file_a_name="a.csv",
+        file_b_content_b64="y",
+        file_b_name="b.csv",
+        key_columns=["id"],
+        advanced=AdvancedCompareOptions(mismatch_row_limit=25),
+    )
+    with patch("api.services.compare_service.MetricsWriter") as mw:
+        mw.return_value.write = MagicMock()
+        svc._run_tabular_file_compare(req, "run-cap", df_a, df_b)
+
+    assert captured["result"].value_mismatch_count == n
+    assert len(captured["result"].mismatches) == 25
+    assert len(svc._repo.add_mismatch_details.call_args.args[1]) == 25
+
+
+def test_run_bo_comparison_uses_configured_detail_limit():
+    svc = _svc()
+    captured = {}
+
+    def add_test_result(run_id, result):
+        captured["result"] = result
+        return SimpleNamespace(id=5)
+
+    svc._repo.add_test_result = MagicMock(side_effect=add_test_result)
+    n = 100
+    df_a = pd.DataFrame({"id": list(range(n)), "amount": [100] * n})
+    df_b = pd.DataFrame({"id": list(range(n)), "amount": [200] * n})
+    svc._load_bo_source = MagicMock(side_effect=[df_a, df_b])
+
+    req = BOCompareRequest(
+        source_a=SourceConfig(source_type="upload", file_content_b64="x", file_name="a.csv"),
+        source_b=SourceConfig(source_type="upload", file_content_b64="y", file_name="b.csv"),
+        key_columns=["id"],
+        advanced=AdvancedCompareOptions(mismatch_row_limit=10),
+    )
+    with patch("api.services.compare_service.MetricsWriter") as mw:
+        mw.return_value.write = MagicMock()
+        svc.run_bo_comparison(req, "run-bo-cap")
+
+    assert captured["result"].value_mismatch_count == n
+    assert len(captured["result"].mismatches) == 10
+    assert len(svc._repo.add_mismatch_details.call_args.args[1]) == 10
+
+
 def test_mixed_sources_raise_422(monkeypatch):
     from fastapi import HTTPException
     svc = _svc()
@@ -177,8 +236,6 @@ def test_mixed_sources_raise_422(monkeypatch):
 
 
 def test_load_bo_source_dispatches_to_api_source():
-    from api.schemas import SourceConfig
-
     svc = _svc()
     svc._config_repo = MagicMock()
     svc._config_repo.get.return_value = SimpleNamespace(
