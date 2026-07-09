@@ -1730,6 +1730,40 @@ function app() {
       return (r.value_mismatch_count || 0) + (r.missing_in_target_count || 0) + (r.missing_in_source_count || 0);
     },
 
+    mismatchStats(r) {
+      return {
+        value: r?.value_mismatch_count || 0,
+        missingTarget: r?.missing_in_target_count || 0,
+        missingSource: r?.missing_in_source_count || 0,
+        total: this.totalMismatches(r || {}),
+      };
+    },
+
+    mismatchBreakdownText(r) {
+      const s = this.mismatchStats(r);
+      const parts = [];
+      if (s.value) parts.push(`${s.value} value`);
+      if (s.missingTarget) parts.push(`${s.missingTarget} missing in target`);
+      if (s.missingSource) parts.push(`${s.missingSource} missing in source`);
+      return parts.length ? parts.join(' / ') : '0';
+    },
+
+    detailRowsLabel(rows, r) {
+      const loaded = Array.isArray(rows) ? rows.length : 0;
+      const total = this.totalMismatches(r || {});
+      if (total > loaded) return `${loaded} detail rows shown of ${total} total mismatches`;
+      return `${loaded} detail rows shown`;
+    },
+
+    filteredDetailLabel(rows, filterKey, filterState, r) {
+      const shown = this.filteredDiff(rows || [], filterKey, filterState).length;
+      const loaded = Array.isArray(rows) ? rows.length : 0;
+      const total = this.totalMismatches(r || {});
+      if (total > loaded) return `${shown} shown of ${loaded} loaded (${total} total)`;
+      if (shown !== loaded) return `${shown} shown of ${loaded} loaded`;
+      return `${shown} shown`;
+    },
+
     toggleOutcomeOverrideForm(resultId) {
       if (this.outcomeOverrideForms[resultId]?.open) {
         const forms = { ...this.outcomeOverrideForms };
@@ -4153,7 +4187,7 @@ function app() {
         data: {
           labels: dist.map(d => d.column || d.label || ''),
           datasets: [{
-            label: 'Mismatches',
+            label: 'Stored detail rows',
             data: dist.map(d => d.count || 0),
             backgroundColor: '#fb7185',
             borderColor: '#0d0f12',

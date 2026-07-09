@@ -1913,6 +1913,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <td>
                     <span :class="totalMismatches(r) > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'"
                           x-text="totalMismatches(r)"></span>
+                    <div x-show="totalMismatches(r) > 0"
+                         class="text-xs text-slate-400"
+                         x-text="mismatchBreakdownText(r)"></div>
                   </td>
                   <td class="flex gap-2 items-center">
                     <button x-show="totalMismatches(r) > 0"
@@ -1965,7 +1968,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     <td colspan="7" class="p-0">
                       <div class="mismatch-expand-panel">
                         <div class="mismatch-expand-header">
-                          <span x-text="'Mismatch details — ' + expandedMismatches[r.id].length + ' rows'"></span>
+                          <span x-text="'Mismatch details - ' + detailRowsLabel(expandedMismatches[r.id], r)"></span>
+                          <span x-show="totalMismatches(r) > 0"
+                                class="text-xs text-slate-400 ml-2"
+                                x-text="mismatchBreakdownText(r)"></span>
                         </div>
                         <table class="mismatch-diff-table">
                           <thead>
@@ -2027,11 +2033,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                           <button @click="loadMismatchDist(selectedRun.run_id, r)"
                                   x-show="!mismatchDist[r.id]"
                                   class="text-indigo-500 hover:underline text-xs">
-                            📊 Load Value Distribution
+                            Load Stored Detail Distribution
                           </button>
+                          <div class="text-[11px] text-slate-400 mt-1">
+                            Distribution is based on stored detail rows; aggregate totals are shown above.
+                          </div>
                           <template x-if="mismatchDist[r.id]">
                             <div>
-                              <div class="text-xs text-muted font-semibold mb-1">Top mismatch patterns</div>
+                              <div class="text-xs text-muted font-semibold mb-1">Top stored detail patterns</div>
                               <template x-for="d in (mismatchDist[r.id] || []).slice(0,5)" :key="d.column + d.source + d.target">
                                 <div class="flex items-center gap-2 text-xs py-0.5">
                                   <span class="font-mono text-indigo-600 w-24 truncate" x-text="d.column"></span>
@@ -2042,7 +2051,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                                 </div>
                               </template>
                               <template x-if="!mismatchDist[r.id] || mismatchDist[r.id].length === 0">
-                                <div class="text-muted text-xs">No distribution data</div>
+                                <div class="text-muted text-xs">No stored detail distribution data</div>
                               </template>
                             </div>
                           </template>
@@ -2050,7 +2059,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                         <!-- Segment breakdown (stored at run time) -->
                         <template x-if="r.segment_summary">
                           <div class="px-3 py-2 border-t border-slate-100 mt-2">
-                            <div class="text-xs text-muted font-semibold mb-1">Mismatches by segment</div>
+                            <div class="text-xs text-muted font-semibold mb-1">Stored detail rows by segment</div>
                             <template x-for="[segCol, buckets] in Object.entries(r.segment_summary || {})" :key="segCol">
                               <div class="mb-2">
                                 <div class="flex items-center gap-2 mb-1">
@@ -3370,6 +3379,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option value="sourceValue">Source Value</option>
               <option value="targetValue">Target Value</option>
             </select>
+            <span class="text-xs text-slate-400 ml-auto">Chart uses stored detail rows.</span>
           </div>
           <canvas id="mismatchChart" height="120" x-show="mismatchChartData"></canvas>
           <p x-show="!mismatchChartData" class="text-xs text-slate-400 text-center py-4">Loading chart data...</p>
@@ -3387,7 +3397,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <tr>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
-                  <td x-text="totalMismatches(r)"></td>
+                  <td>
+                    <span x-text="totalMismatches(r)"></span>
+                    <div x-show="totalMismatches(r) > 0"
+                         class="text-xs text-slate-400"
+                         x-text="mismatchBreakdownText(r)"></div>
+                  </td>
                   <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '-'"></td>
                   <td>
                     <button x-show="totalMismatches(r) > 0" @click="openMismatchDrawer(boCompareResult.run_id, r)" class="btn-secondary btn-sm">View</button>
@@ -3684,6 +3699,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
                     <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
                           x-text="(r.value_mismatch_count ? r.value_mismatch_count + ' diff' : '') + (r.missing_in_target_count ? '  ' + r.missing_in_target_count + ' missing→' : '') + (r.missing_in_source_count ? '  ' + r.missing_in_source_count + ' missing←' : '')"></span>
+                    <span class="text-xs font-semibold text-rose-600"
+                          x-show="totalMismatches(r) > 0"
+                          x-text="totalMismatches(r) + ' total'"></span>
                     <span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span>
                     <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs"
                           x-text="fileExpandedDiffs[r.query_name]?.loading ? '…' : (fileExpandedDiffs[r.query_name]?.open ? '▲' : '▼')"></span>
@@ -3695,15 +3713,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                       <div>
                         <!-- row counter + truncation notice -->
                         <div class="flex items-center justify-between px-3 py-1 bg-slate-50 border-b border-slate-100 text-xs text-slate-500">
-                          <span x-text="'Showing ' + fileExpandedDiffs[r.query_name].data.length + ' detail rows'"></span>
+                          <span x-text="detailRowsLabel(fileExpandedDiffs[r.query_name].data, r)"></span>
                           <span x-show="fileExpandedDiffs[r.query_name].hasMore || fileExpandedDiffs[r.query_name].data.length >= 5000"
                                 class="text-amber-600 font-medium">
-                            Up to 5,000 rows stored — download for the complete list
+                            Stored detail rows are capped; aggregate counts include all records.
                           </span>
                         </div>
                         <!-- Column summary mini-chart -->
                         <div class="col-summary" x-show="colSummary(fileExpandedDiffs[r.query_name]?.data).length > 1">
-                          <div class="col-summary-label">Mismatches by column</div>
+                          <div class="col-summary-label">Loaded detail rows by column</div>
                           <template x-for="item in colSummary(fileExpandedDiffs[r.query_name]?.data)" :key="item.col">
                             <div class="col-bar-row"
                                  @click="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col = item.col">
@@ -3734,7 +3752,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                                  placeholder="Search key values…"
                                  class="diff-filter-search">
                           <span class="diff-filter-count"
-                                x-text="filteredDiff(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter).length + ' shown'">
+                                x-text="filteredDetailLabel(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter, r)">
                           </span>
                         </div>
                         <div class="overflow-x-auto max-h-64">
@@ -3786,7 +3804,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             <span x-show="!fileExpandedDiffs[r.query_name].loadingMore">Load next 100 rows</span>
                             <span x-show="fileExpandedDiffs[r.query_name].loadingMore">Loading…</span>
                           </button>
-                          <span class="text-xs text-slate-400" x-text="fileExpandedDiffs[r.query_name].data.length + ' loaded so far'"></span>
+                          <span class="text-xs text-slate-400" x-text="detailRowsLabel(fileExpandedDiffs[r.query_name].data, r)"></span>
                         </div>
                       </div>
                     </template>
@@ -3943,6 +3961,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
                   <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
                         x-text="(r.value_mismatch_count ? r.value_mismatch_count + ' diff' : '') + (r.missing_in_target_count ? '  ' + r.missing_in_target_count + ' missing→' : '') + (r.missing_in_source_count ? '  ' + r.missing_in_source_count + ' missing←' : '')"></span>
+                  <span class="text-xs font-semibold text-rose-600"
+                        x-show="totalMismatches(r) > 0"
+                        x-text="totalMismatches(r) + ' total'"></span>
                   <span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status === 'PASSED' ? 'Matched' : 'Differs'"></span>
                   <span x-show="r.status !== 'PASSED'" class="text-slate-400 text-xs"
                         x-text="sqlExpandedDiffs[r.query_name]?.loading ? '…' : (sqlExpandedDiffs[r.query_name]?.open ? '▲' : '▼')"></span>
@@ -3952,9 +3973,16 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <div x-show="sqlExpandedDiffs[r.query_name]?.error" x-text="sqlExpandedDiffs[r.query_name]?.error" class="px-3 py-2 text-xs text-red-500"></div>
                   <template x-if="sqlExpandedDiffs[r.query_name]?.data?.length">
                     <div>
+                      <div class="flex items-center justify-between px-3 py-1 bg-slate-50 border-b border-slate-100 text-xs text-slate-500">
+                        <span x-text="detailRowsLabel(sqlExpandedDiffs[r.query_name].data, r)"></span>
+                        <span x-show="totalMismatches(r) > sqlExpandedDiffs[r.query_name].data.length"
+                              class="text-amber-600 font-medium">
+                          Loaded detail rows are capped; aggregate counts include all records.
+                        </span>
+                      </div>
                       <!-- Column summary mini-chart -->
                       <div class="col-summary" x-show="colSummary(sqlExpandedDiffs[r.query_name]?.data).length > 1">
-                        <div class="col-summary-label">Mismatches by column</div>
+                        <div class="col-summary-label">Loaded detail rows by column</div>
                         <template x-for="item in colSummary(sqlExpandedDiffs[r.query_name]?.data)" :key="item.col">
                           <div class="col-bar-row"
                                @click="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col = item.col">
@@ -3985,7 +4013,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                                placeholder="Search key values…"
                                class="diff-filter-search">
                         <span class="diff-filter-count"
-                              x-text="filteredDiff(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter).length + ' shown'">
+                              x-text="filteredDetailLabel(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter, r)">
                         </span>
                       </div>
                       <!-- Diff table -->
@@ -4415,6 +4443,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <button class="drawer-close" @click="drawer.show = false">✕</button>
       </div>
       <div class="drawer-body">
+        <div x-show="drawer.result" class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-3">
+          <span x-text="detailRowsLabel(drawer.rows, drawer.result)"></span>
+          <span x-show="totalMismatches(drawer.result) > 0"
+                class="font-medium text-slate-600"
+                x-text="mismatchBreakdownText(drawer.result)"></span>
+        </div>
         <template x-if="drawer.loading">
           <div class="text-muted text-sm py-8 text-center">Loading mismatches…</div>
         </template>
@@ -4488,8 +4522,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
         </div>
         <template x-if="drawer.rows.length >= 100">
-          <div class="text-center mt-4">
+          <div class="text-center mt-4 space-y-1">
             <button @click="loadMoreMismatches()" class="btn-secondary btn-sm">Load more</button>
+            <div class="text-xs text-slate-400" x-text="detailRowsLabel(drawer.rows, drawer.result)"></div>
           </div>
         </template>
       </div>
