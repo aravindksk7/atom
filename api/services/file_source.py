@@ -1,11 +1,12 @@
 from __future__ import annotations
 import base64
-from collections import Counter
 import csv
 import io
+import json
 import os
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from typing import Any
+from xml.etree import ElementTree
 
 import pandas as pd
 from pandas.errors import ParserError
@@ -25,9 +26,7 @@ def _default_upload_base() -> Path | None:
 # Filesystem-path uploads are scoped to UPLOAD_BASE_DIR when set. On local
 # Windows installs, C:\temp is allowed by default because the Compare UI and
 # docs use server-side temp paths for manual file comparisons.
-_UPLOAD_BASE: Path | None = (
-    _default_upload_base()
-)
+_UPLOAD_BASE: Path | None = _default_upload_base()
 
 _SUPPORTED_FORMATS_DETAIL = "Use .csv, .xlsx, .xls, .json, .xml, or .tsv"
 
@@ -72,119 +71,152 @@ def _next_nonempty(lines: list[str], start: int) -> str | None:
 
 def _read_json_bytes(raw: bytes) -> pd.DataFrame:
     try:
-        return pd.read_json(io.BytesIO(raw))
-    except ValueError:
-        try:
-            return pd.read_json(io.BytesIO(raw), orient="records")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Cannot parse JSON file")
+        data = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Cannot parse JSON file") from exc
+
+    if isinstance(data, list):
+        if not data:
+            return pd.DataFrame()
+        if all(isinstance(item, dict) for item in data):
+            return pd.json_normalize(data)
+        return pd.DataFrame({"value": data})
+
+    if isinstance(data, dict):
+        records = _find_record_list(data)
+        if records is not None:
+            return pd.json_normalize(records)
+        return pd.json_normalize(data)
+
+    return pd.DataFrame({"value": [data]})
 
 
-def _xml_name(tag: str) -> str:
-    if "}" in tag:
-        return tag.rsplit("}", 1)[1]
-    return tag
+def _find_record_list(value: dict[str, Any]) -> list[dict[str, Any]] | None:
+    for item in value.values():
+        if isinstance(item, list) and all(isinstance(row, dict) for row in item):
+            return item
+        if isinstance(item, dict):
+            nested = _find_record_list(item)
+            if nested is not None:
+                return nested
+    return None
 
 
-def _select_xml_records(root: ET.Element) -> list[ET.Element]:
+def _strip_namespace(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _unique_path(base: str, existing: set[str]) -> str:
+    if base not in existing:
+        return base
+    idx = 2
+    while f"{base}_{idx}" in existing:
+        idx += 1
+    return f"{base}_{idx}"
+
+
+def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict[str, Any]:
+    row: dict[str, Any] = {}
+
+    for name, value in element.attrib.items():
+        key = f"{prefix}.{_strip_namespace(name)}" if prefix else _strip_namespace(name)
+        row[key] = value
+
+    children = list(element)
+    text = (element.text or "").strip()
+    if text and not children:
+        row[prefix or _strip_namespace(element.tag)] = text
+
+    child_counts: dict[str, int] = {}
+    for child in children:
+        child_tag = _strip_namespace(child.tag)
+        child_counts[child_tag] = child_counts.get(child_tag, 0) + 1
+
+    seen: set[str] = set(row)
+    for child in children:
+        child_tag = _strip_namespace(child.tag)
+        child_prefix = f"{prefix}.{child_tag}" if prefix else child_tag
+        flattened = _flatten_xml_element(child, child_prefix)
+        for key, value in flattened.items():
+            output_key = key
+            if child_counts[child_tag] > 1 or output_key in seen:
+                output_key = _unique_path(key, seen)
+            row[output_key] = value
+            seen.add(output_key)
+
+    return row
+
+
+def _select_xml_records(root: ElementTree.Element) -> list[ElementTree.Element]:
     children = list(root)
     if not children:
         return [root]
 
     preferred = ("record", "row", "item", "entry")
     for tag in preferred:
-        matches = [child for child in children if _xml_name(child.tag).lower() == tag]
+        matches = [child for child in children if _strip_namespace(child.tag).lower() == tag]
         if matches:
             return matches
 
-    counts = Counter(_xml_name(child.tag) for child in children)
-    repeated = [tag for tag, count in counts.items() if count > 1]
-    if repeated:
-        record_tag = max(repeated, key=lambda tag: counts[tag])
-        return [child for child in children if _xml_name(child.tag) == record_tag]
+    counts: dict[str, int] = {}
+    for child in children:
+        tag = _strip_namespace(child.tag)
+        counts[tag] = counts.get(tag, 0) + 1
 
-    for node in children:
-        nested = _select_xml_records(node)
-        if len(nested) > 1:
-            return nested
+    repeated_tags = {tag for tag, count in counts.items() if count > 1}
+    if repeated_tags:
+        return [child for child in children if _strip_namespace(child.tag) in repeated_tags]
 
-    return [root] if all(not list(child) for child in children) else children
+    for child in children:
+        grandchildren = list(child)
+        if len(grandchildren) > 1:
+            grandchild_tags = [_strip_namespace(grandchild.tag) for grandchild in grandchildren]
+            if len(set(grandchild_tags)) == 1:
+                return grandchildren
 
-
-def _flatten_xml_element(element: ET.Element) -> dict[str, str]:
-    row: dict[str, str] = {}
-
-    def put(key: str, value: str) -> None:
-        value = value.strip()
-        if not value:
-            return
-        if key in row:
-            suffix = 2
-            next_key = f"{key}_{suffix}"
-            while next_key in row:
-                suffix += 1
-                next_key = f"{key}_{suffix}"
-            key = next_key
-        row[key] = value
-
-    def walk(node: ET.Element, prefix: str) -> None:
-        for attr_name, attr_value in node.attrib.items():
-            attr_key = f"{prefix}_{_xml_name(attr_name)}" if prefix else _xml_name(attr_name)
-            put(attr_key, attr_value)
-
-        children = list(node)
-        text = (node.text or "").strip()
-        if not children:
-            if prefix:
-                put(prefix, text)
-            return
-        if text and prefix:
-            put(prefix, text)
-        for child in children:
-            child_name = _xml_name(child.tag)
-            child_key = f"{prefix}_{child_name}" if prefix else child_name
-            walk(child, child_key)
-
-    walk(element, "")
-    return row
+    return [root]
 
 
-def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, str]]]:
+def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
     """Flatten each direct child of the XML root as it finishes parsing and
     clear it immediately, so peak memory holds one record's worth of DOM at
     a time instead of the whole parsed document tree.
     """
-    context = ET.iterparse(io.BytesIO(raw), events=("start", "end"))
+    context = ElementTree.iterparse(io.BytesIO(raw), events=("start", "end"))
     _, root = next(context)
     depth = 1
-    candidates: list[tuple[str, dict[str, str]]] = []
+    candidates: list[tuple[str, dict[str, Any]]] = []
     for event, elem in context:
         if event == "start":
             depth += 1
             continue
         depth -= 1
         if depth == 1:
-            candidates.append((_xml_name(elem.tag), _flatten_xml_element(elem)))
+            candidates.append((_strip_namespace(elem.tag), _flatten_xml_element(elem)))
             elem.clear()
     return candidates
 
 
 def _read_xml_bytes_dom(raw: bytes) -> pd.DataFrame:
-    root = ET.fromstring(raw)
-    rows = [_flatten_xml_element(record) for record in _select_xml_records(root)]
+    root = ElementTree.fromstring(raw)
+    records = _select_xml_records(root)
+    rows = [_flatten_xml_element(record) for record in records]
     return pd.DataFrame(rows)
 
 
 def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
+    head = raw[:512].lower()
+    if b"<!doctype" in head or b"<!entity" in head:
+        raise HTTPException(status_code=400, detail="XML files with DTD or entity declarations are not supported")
+
     try:
         candidates = _stream_xml_candidates(raw)
-    except ET.ParseError:
-        raise HTTPException(status_code=400, detail="Cannot parse XML file")
+    except ElementTree.ParseError as exc:
+        raise HTTPException(status_code=400, detail="Cannot parse XML file") from exc
 
     if not candidates:
-        # Root has no children (single flat record, or nested structure that
-        # needs the recursive DOM heuristics) — these are small documents by
-        # construction, so the one-shot DOM path is cheap here.
+        # Root has no children (single flat record) — trivially small, so
+        # the one-shot DOM path is cheap here.
         return _read_xml_bytes_dom(raw)
 
     preferred = ("record", "row", "item", "entry")
@@ -193,16 +225,18 @@ def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
         if matches:
             return pd.DataFrame(matches)
 
-    counts = Counter(name for name, _ in candidates)
-    repeated = [tag for tag, count in counts.items() if count > 1]
-    if repeated:
-        record_tag = max(repeated, key=lambda tag: counts[tag])
-        matches = [row for name, row in candidates if name == record_tag]
+    counts: dict[str, int] = {}
+    for name, _ in candidates:
+        counts[name] = counts.get(name, 0) + 1
+    repeated_tags = {tag for tag, count in counts.items() if count > 1}
+    if repeated_tags:
+        matches = [row for name, row in candidates if name in repeated_tags]
         return pd.DataFrame(matches)
 
-    # No repeated top-level record tag — rare small-document edge case
-    # (deeply nested single record). Candidates were already cleared during
-    # streaming, so re-parse to run the recursive DOM selection heuristic.
+    # No repeated top-level tag — rare small-document edge case (nested
+    # record container, e.g. <response><orders><order/>...</orders></response>).
+    # Candidates were already cleared during streaming, so re-parse to run
+    # the recursive DOM selection heuristic (grandchildren detection).
     return _read_xml_bytes_dom(raw)
 
 
@@ -247,19 +281,17 @@ def read_tabular(
     content_b64: str | None = None,
     file_name: str | None = None,
 ) -> pd.DataFrame:
-    """Read a tabular file into a DataFrame from a filesystem path or base64 bytes."""
+    """Read tabular files into a DataFrame from a filesystem path or base64-encoded bytes."""
     if path is None and content_b64 is None:
         raise HTTPException(status_code=400, detail="Provide path or content_b64")
 
     if content_b64 is not None:
         raw = base64.b64decode(content_b64)
         name = file_name or ""
-        ext = Path(name).suffix.lower()
-        return _read_tabular_bytes(raw, ext)
+        return _read_tabular_bytes(raw, Path(name).suffix.lower())
 
     p = _resolve_allowed_path(path)
-    ext = p.suffix.lower()
     try:
-        return _read_tabular_bytes(p.read_bytes(), ext)
+        return _read_tabular_bytes(p.read_bytes(), p.suffix.lower())
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")

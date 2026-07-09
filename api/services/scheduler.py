@@ -121,11 +121,21 @@ def stop() -> None:
     _scheduler = None
 
 
+def _current_timezone() -> str:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import SettingsRepository
+    db = SessionLocal()
+    try:
+        return SettingsRepository(db).get_timezone()
+    finally:
+        db.close()
+
+
 def _add_job(sched) -> None:
     if _scheduler is None:
         return
     try:
-        trigger = CronTrigger.from_crontab(sched.cron_expr, timezone="UTC")
+        trigger = CronTrigger.from_crontab(sched.cron_expr, timezone=_current_timezone())
         _scheduler.add_job(
             _run_schedule,
             trigger=trigger,
@@ -154,6 +164,20 @@ def reload_job(sched) -> None:
     remove_job(sched.id)
     if sched.enabled:
         _add_job(sched)
+
+
+def refresh_all_timezones() -> None:
+    """Re-add every enabled schedule so its CronTrigger picks up the current app timezone."""
+    if _scheduler is None:
+        return
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import ScheduleRepository
+    db = SessionLocal()
+    try:
+        for sched in ScheduleRepository(db).list_enabled():
+            _add_job(sched)
+    finally:
+        db.close()
 
 
 def is_available() -> bool:

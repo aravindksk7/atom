@@ -14,6 +14,7 @@ class APIEndpointClient:
     def __init__(self, entry: ApiEndpointEntry) -> None:
         self._entry = entry
         self._session = requests.Session()
+        self._sap_bo_token: str | None = None
 
     def fetch_dataframe(self, max_pages: int | None = None) -> pd.DataFrame:
         entry = self._entry
@@ -23,35 +24,38 @@ class APIEndpointClient:
         url = entry.base_url
         page_number = 1
 
-        for _ in range(page_cap):
-            if entry.pagination_type == "page":
-                query_params[entry.pagination_page_param] = page_number
-                query_params[entry.pagination_size_param] = entry.pagination_page_size
+        try:
+            for _ in range(page_cap):
+                if entry.pagination_type == "page":
+                    query_params[entry.pagination_page_param] = page_number
+                    query_params[entry.pagination_size_param] = entry.pagination_page_size
 
-            response = self._request(url, query_params)
-            frame = self._parse_response(response)
-            frames.append(frame)
+                response = self._request(url, query_params)
+                frame = self._parse_response(response)
+                frames.append(frame)
 
-            if entry.pagination_type == "none":
-                break
-            if entry.pagination_type == "page":
-                if len(frame) < entry.pagination_page_size:
+                if entry.pagination_type == "none":
                     break
-                page_number += 1
-                continue
-            if entry.pagination_type == "cursor":
-                cursor_value = self._extract_cursor(response)
-                if not cursor_value:
-                    break
-                if urlparse(cursor_value).scheme:
-                    url = cursor_value
-                    query_params = {}
-                else:
-                    query_params[entry.pagination_cursor_param] = cursor_value
+                if entry.pagination_type == "page":
+                    if len(frame) < entry.pagination_page_size:
+                        break
+                    page_number += 1
+                    continue
+                if entry.pagination_type == "cursor":
+                    cursor_value = self._extract_cursor(response)
+                    if not cursor_value:
+                        break
+                    if urlparse(cursor_value).scheme:
+                        url = cursor_value
+                        query_params = {}
+                    else:
+                        query_params[entry.pagination_cursor_param] = cursor_value
 
-        if not frames:
-            return pd.DataFrame()
-        return pd.concat(frames, ignore_index=True)
+            if not frames:
+                return pd.DataFrame()
+            return pd.concat(frames, ignore_index=True)
+        finally:
+            self._logout_sap_bo()
 
     def _auth_kwargs(self) -> dict:
         entry = self._entry
@@ -63,7 +67,70 @@ class APIEndpointClient:
             headers["Authorization"] = f"Bearer {entry.bearer_token}"
         elif entry.auth_type == "basic":
             auth = (entry.basic_username, entry.basic_password)
+        elif entry.auth_type == "sap_bo_logontoken":
+            headers["X-SAP-LogonToken"] = entry.sap_bo_logon_token
+        elif entry.auth_type == "sap_bo_basic":
+            headers["X-SAP-LogonToken"] = self._get_sap_bo_token()
         return {"headers": headers, "auth": auth}
+
+    def _sap_bo_logon_url(self) -> str:
+        if self._entry.sap_bo_logon_url:
+            return self._entry.sap_bo_logon_url
+        parsed = urlparse(self._entry.base_url)
+        return f"{parsed.scheme}://{parsed.netloc}/biprws/logon/long"
+
+    def _sap_bo_logoff_url(self) -> str:
+        logon_url = self._sap_bo_logon_url()
+        return logon_url.rsplit("/", 2)[0] + "/logoff"
+
+    def _get_sap_bo_token(self) -> str:
+        if self._sap_bo_token:
+            return self._sap_bo_token
+        entry = self._entry
+        url = self._sap_bo_logon_url()
+        payload = {
+            "password": entry.basic_password,
+            "clientType": "",
+            "auth": entry.sap_bo_auth_type,
+            "userName": entry.basic_username,
+        }
+        try:
+            response = self._session.post(
+                url,
+                json=payload,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                timeout=entry.timeout,
+                verify=entry.verify_ssl,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise APIRequestError(url=url, http_status=None, message=str(exc)) from exc
+        if response.status_code >= 400:
+            body = response.text[:1000] if response.text else ""
+            raise APIRequestError(url=url, http_status=response.status_code, message=body)
+        token = response.headers.get("X-SAP-LogonToken")
+        if not token:
+            raise APIRequestError(
+                url=url,
+                http_status=response.status_code,
+                message="SAP BO logon response did not include X-SAP-LogonToken",
+            )
+        self._sap_bo_token = token
+        return token
+
+    def _logout_sap_bo(self) -> None:
+        if self._entry.auth_type != "sap_bo_basic" or not self._sap_bo_token:
+            return
+        try:
+            self._session.post(
+                self._sap_bo_logoff_url(),
+                headers={"X-SAP-LogonToken": self._sap_bo_token},
+                timeout=self._entry.timeout,
+                verify=self._entry.verify_ssl,
+            )
+        except requests.exceptions.RequestException:
+            pass
+        finally:
+            self._sap_bo_token = None
 
     def _request(self, url: str, query_params: dict) -> requests.Response:
         entry = self._entry
@@ -94,6 +161,14 @@ class APIEndpointClient:
                 raise APIRequestError(
                     url=response.url, http_status=response.status_code,
                     message=f"Cannot parse API response as csv: {exc}",
+                ) from exc
+        if entry.response_format in ("xlsx", "xls"):
+            try:
+                return pd.read_excel(io.BytesIO(response.content))
+            except Exception as exc:
+                raise APIRequestError(
+                    url=response.url, http_status=response.status_code,
+                    message=f"Cannot parse API response as {entry.response_format}: {exc}",
                 ) from exc
         try:
             payload = response.json()

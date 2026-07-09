@@ -115,6 +115,18 @@ class TestReportTemplateSmoke:
         assert "dev" in html
         assert "prod" in html
 
+    def test_effective_status_is_rendered_with_raw_status_note(self, tmp_path):
+        suite = _make_suite()
+        suite.reconciliation_results[0].status = "FAILED"
+        suite.reconciliation_results[0].effective_status = "PASSED"
+        suite.total_passed = 1
+        suite.total_failed = 0
+
+        html = _render(suite, tmp_path)
+
+        assert "PASSED" in html
+        assert "raw: FAILED" in html
+
 
 def test_accepted_at_rendered_via_to_local_filter(tmp_path):
     accepted_dt = datetime(2026, 7, 1, 18, 30, 0, tzinfo=timezone.utc)

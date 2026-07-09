@@ -128,6 +128,35 @@ def test_run_tabular_file_compare_sorts_before_positional_fallback():
     svc._repo.add_mismatch_details.assert_not_called()
 
 
+def test_run_tabular_file_compare_backend_keeps_service_detail_limit():
+    svc = _svc()
+    captured = {}
+
+    def add_test_result(run_id, result):
+        captured["result"] = result
+        return SimpleNamespace(id=5)
+
+    svc._repo.add_test_result = MagicMock(side_effect=add_test_result)
+    n = 1200
+    df_a = pd.DataFrame({"id": list(range(n)), "amount": [100] * n})
+    df_b = pd.DataFrame({"id": list(range(n)), "amount": [200] * n})
+
+    req = ReconFileCompareRequest(
+        file_a_content_b64="x",
+        file_a_name="a.csv",
+        file_b_content_b64="y",
+        file_b_name="b.csv",
+        key_columns=["id"],
+    )
+    with patch("api.services.compare_service.MetricsWriter") as mw:
+        mw.return_value.write = MagicMock()
+        svc._run_tabular_file_compare(req, "run-cap", df_a, df_b)
+
+    assert captured["result"].value_mismatch_count == n
+    assert len(captured["result"].mismatches) == n
+    assert len(svc._repo.add_mismatch_details.call_args.args[1]) == n
+
+
 def test_run_tabular_file_compare_uses_configured_detail_limit():
     svc = _svc()
     captured = {}

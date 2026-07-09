@@ -289,6 +289,35 @@
     </template>
   </div>
 
+  <!-- Regional – App-wide Timezone -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="timezoneOpen = !timezoneOpen">
+      <div class="font-semibold text-slate-700">🌐 Regional — Timezone</div>
+      <span class="text-muted text-sm" x-text="timezoneOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="timezoneOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">All timestamps across the dashboard, run history, and generated reports are shown in this timezone. Scheduled runs also fire according to it — a cron expression of <code>0 9 * * *</code> means 9am in this zone.</p>
+        <template x-if="!activeTokenIsAdmin">
+          <div class="text-sm">Current: <span class="font-medium" x-text="appTimezone"></span> <span class="text-muted text-xs">(administrator access required to change)</span></div>
+        </template>
+        <template x-if="activeTokenIsAdmin">
+          <div class="flex items-center gap-2">
+            <select x-model="timezoneDraft" class="field-input field-select flex-1">
+              <template x-for="tz in timezoneOptions" :key="tz">
+                <option :value="tz" x-text="tz"></option>
+              </template>
+            </select>
+            <button @click="saveTimezoneSetting()" :disabled="timezoneSaving || timezoneDraft === appTimezone" class="btn-primary btn-sm">
+              <span x-show="!timezoneSaving">Save</span>
+              <span x-show="timezoneSaving">Saving…</span>
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
   <!-- Notifications – Webhook Hooks -->
   <div class="card mt-4">
     <div class="flex items-center justify-between cursor-pointer" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()">
@@ -445,18 +474,26 @@
             </div>
             <button @click="addApiEndpoint()" type="button" class="btn-secondary btn-sm text-xs">+ Add Endpoint</button>
           </div>
+          <div class="mb-2">
+            <label class="field-label">Base Host (shared, optional)</label>
+            <input x-model="configModal.apiBaseHost" class="field-input" placeholder="https://api.example.com/v1" />
+            <span class="text-xs text-slate-400">Set once, then give each endpoint below a relative Path instead of repeating the full Base URL.</span>
+          </div>
           <template x-for="(ep, idx) in configModal.apiEndpoints" :key="idx">
             <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
               <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
                 <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" />
-                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || 'not configured'"></span>
+                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || (configModal.apiBaseHost && ep.path ? configModal.apiBaseHost.replace(/\/$/, '') + '/' + ep.path.replace(/^\//, '') : 'not configured')"></span>
                 <span class="text-xs text-slate-400 uppercase" x-text="ep.method"></span>
                 <button @click="toggleApiEndpoint(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="ep.expanded ? '▲' : '▼'"></button>
                 <button @click="removeApiEndpoint(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
               </div>
               <div x-show="ep.expanded" class="p-3 space-y-3">
                 <div class="grid-2">
-                  <div><label class="field-label">Base URL</label><input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" /></div>
+                  <div>
+                    <label class="field-label">Base URL <span class="text-slate-400 font-normal" x-show="configModal.apiBaseHost">(leave blank to use Base Host + Path)</span></label>
+                    <input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" />
+                  </div>
                   <div>
                     <label class="field-label">Method</label>
                     <select x-model="ep.method" class="field-input field-select">
@@ -465,6 +502,10 @@
                     </select>
                   </div>
                 </div>
+                <div x-show="configModal.apiBaseHost">
+                  <label class="field-label">Path (appended to Base Host)</label>
+                  <input x-model="ep.path" class="field-input" placeholder="orders" />
+                </div>
                 <div>
                   <label class="field-label">Auth Type</label>
                   <select x-model="ep.auth_type" class="field-input field-select">
@@ -472,6 +513,8 @@
                     <option value="api_key">API Key Header</option>
                     <option value="bearer">Bearer Token</option>
                     <option value="basic">Basic Auth</option>
+                    <option value="sap_bo_logontoken">SAP BO Logon Token</option>
+                    <option value="sap_bo_basic">SAP BO Basic Logon</option>
                   </select>
                 </div>
                 <div x-show="ep.auth_type === 'api_key'" class="grid-2">
@@ -484,6 +527,23 @@
                 <div x-show="ep.auth_type === 'basic'" class="grid-2">
                   <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" /></div>
                   <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_logontoken'">
+                  <label class="field-label">X-SAP-LogonToken</label><input x-model="ep.sap_bo_logon_token" type="password" class="field-input" />
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_basic'" class="grid-2">
+                  <div><label class="field-label">BO Username</label><input x-model="ep.basic_username" class="field-input" /></div>
+                  <div><label class="field-label">BO Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                  <div>
+                    <label class="field-label">BO Auth Type</label>
+                    <select x-model="ep.sap_bo_auth_type" class="field-input field-select">
+                      <option value="secEnterprise">Enterprise</option>
+                      <option value="secWinAD">Windows AD</option>
+                      <option value="secLDAP">LDAP</option>
+                      <option value="secSAPR3">SAP R/3</option>
+                    </select>
+                  </div>
+                  <div><label class="field-label">Logon URL Override</label><input x-model="ep.sap_bo_logon_url" class="field-input" placeholder="https://bo.example.com/biprws/logon/long" /></div>
                 </div>
                 <div class="grid-2">
                   <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json"></textarea></div>
@@ -505,6 +565,8 @@
                     <select x-model="ep.response_format" class="field-input field-select">
                       <option value="json">JSON</option>
                       <option value="csv">CSV</option>
+                      <option value="xlsx">XLSX</option>
+                      <option value="xls">XLS</option>
                     </select>
                   </div>
                   <div x-show="ep.response_format === 'json'">
@@ -644,7 +706,6 @@
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Settings</div>
 
-    <!-- Task 5: Connection Settings group -->
     <div class="settings-group">
       <div class="settings-group-label">Connection</div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -664,7 +725,6 @@
         </div>
         <div>
           <label class="field-label">Saved Config</label>
-          <!-- Task 7: Enhanced config dropdown showing name + env -->
           <select x-model="launchSettings.config_id" class="field-input field-select">
             <option value="">— None —</option>
             <template x-for="cfg in configs" :key="cfg.id">
@@ -697,7 +757,6 @@
       </template>
     </div>
 
-    <!-- Task 5: Execution Settings group -->
     <div class="settings-group">
       <div class="settings-group-label">Execution</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -719,7 +778,6 @@
       </div>
     </div>
 
-    <!-- Task 5: Comparison Settings group -->
     <div class="settings-group">
       <div class="settings-group-label">Comparison</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -731,7 +789,6 @@
           </select>
         </div>
         <div>
-          <!-- Task 6: chunk_size tooltip -->
           <div class="flex items-center gap-1 mb-1">
             <label class="field-label mb-0">Chunk Size</label>
             <button @click="showHelp('chunkSize')" class="help-btn" title="Learn more">
@@ -769,7 +826,6 @@
       </div>
     </div>
 
-    <!-- Task 5: Advanced Options group -->
     <div class="settings-group">
       <div class="settings-group-label">Advanced</div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -779,12 +835,10 @@
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
           <input type="checkbox" class="rounded" x-model="launchSettings.metrics_enabled" /> Metrics
         </label>
-        <!-- Task 6: Tooltip on null_equals_null -->
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
                title="Treat two NULL values as equal during comparison">
           <input type="checkbox" class="rounded" x-model="launchSettings.null_equals_null" /> NULL = NULL
         </label>
-        <!-- Task 6: Tooltip on hash_precheck -->
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
                title="Use hash comparison before full value comparison to speed up processing">
           <input type="checkbox" class="rounded" x-model="launchSettings.use_hash_precheck" /> Hash precheck
@@ -814,7 +868,6 @@
       </div>
     </div>
 
-    <!-- Task 1: Job Search -->
     <div class="px-0 py-2 border-b mb-2">
       <div class="relative">
         <input type="text"
@@ -828,7 +881,6 @@
       </div>
     </div>
 
-    <!-- Task 3: Select All / Select None -->
     <div class="flex gap-2 py-1.5 border-b bg-slate-50 text-xs mb-2 -mx-0 px-1">
       <button @click="selectAllJobs()" class="btn-link btn-sm text-slate-600">Select All</button>
       <span class="text-slate-300">|</span>
@@ -841,24 +893,21 @@
     <div class="space-y-1">
       <template x-for="(job, $index) in filteredJobList" :key="job.name">
         <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors">
-          <!-- Task 3: shift-aware checkbox click -->
           <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" />
           <label class="flex-1 min-w-0 cursor-pointer" @click.prevent="toggleJobWithShift($index, $event)">
             <div class="flex items-center gap-2">
-              <!-- Task 2: Status indicator dot -->
               <span class="w-2 h-2 rounded-full flex-shrink-0 inline-block"
                     :class="{
-                      'bg-emerald-500': getJobLastStatus(job.name) === 'passed',
-                      'bg-rose-500': getJobLastStatus(job.name) === 'failed',
-                      'bg-amber-400 animate-pulse': getJobLastStatus(job.name) === 'running',
-                      'bg-slate-300': !getJobLastStatus(job.name)
+                      'bg-emerald-500': getJobLastStatus(job) === 'passed',
+                      'bg-rose-500': getJobLastStatus(job) === 'failed',
+                      'bg-amber-400 animate-pulse': getJobLastStatus(job) === 'running',
+                      'bg-slate-300': !getJobLastStatus(job)
                     }">
               </span>
               <span class="font-medium text-slate-800 truncate" x-text="job.name"></span>
               <span class="badge text-xs" :class="'jtype-' + (job.job_type || 'reconciliation')" x-text="job.job_type || 'reconciliation'"></span>
             </div>
             <div class="text-muted truncate" x-text="job.description"></div>
-            <!-- Task 4: Tags as badges -->
             <template x-if="job.tags && job.tags.length">
               <div class="flex flex-wrap gap-1 mt-0.5">
                 <template x-for="tag in job.tags" :key="tag">
@@ -879,7 +928,6 @@
   <!-- Job Modal -->
   <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false">
     <div class="modal-box w-full max-w-2xl">
-      <!-- Task 10: Modal header with Save as Template -->
       <div class="flex items-center mb-4">
         <h2 class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
         <button @click="showSaveTemplatePrompt = !showSaveTemplatePrompt"
@@ -888,7 +936,6 @@
         </button>
       </div>
 
-      <!-- Task 10: Template name prompt -->
       <div x-show="showSaveTemplatePrompt" class="mb-3 flex gap-2">
         <input type="text"
                x-model="jobTemplateName"
@@ -898,7 +945,6 @@
         <button @click="showSaveTemplatePrompt = false" class="btn-outline btn-sm text-sm">Cancel</button>
       </div>
 
-      <!-- Task 10: Use Template dropdown (for new job) -->
       <template x-if="jobTemplates && jobTemplates.length > 0">
         <div class="mb-3">
           <select @change="loadJobTemplate($event.target.value); $event.target.value=''"
@@ -911,7 +957,6 @@
         </div>
       </template>
 
-      <!-- Task 8: Job Modal Tabs -->
       <div class="flex border-b mb-4 overflow-x-auto">
         <template x-for="tab in jobModalTabs" :key="tab.id">
           <button @click="jobModalTab = tab.id"
@@ -922,7 +967,6 @@
         </template>
       </div>
 
-      <!-- Task 8: Basic tab panel -->
       <div x-show="jobModalTab === 'basic'" class="space-y-3">
         <div>
           <label class="field-label">Job Name *</label>
@@ -951,21 +995,17 @@
         </label>
       </div>
 
-      <!-- Task 8: Settings tab panel -->
       <div x-show="jobModalTab === 'settings'" class="space-y-3">
         <div x-show="jobModal.job_type === 'reconciliation'">
           <label class="field-label">SQL Query</label>
-          <!-- Task 9: @input for validation -->
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
                     @input="validateJobModal()"></textarea>
-          <!-- Task 9: SQL validation message -->
           <p x-show="jobModalValidation && jobModalValidation.sql"
              class="text-xs mt-1"
              :class="jobModalValidation && jobModalValidation.sql && jobModalValidation.sql.startsWith('✓') ? 'text-emerald-600' : 'text-amber-600'"
              x-text="jobModalValidation && jobModalValidation.sql ? jobModalValidation.sql : ''">
           </p>
-          <!-- Task 6: Help icon for SQL -->
           <div class="flex items-center mt-1">
             <button @click="showHelp('sqlQuery')" class="btn-link btn-sm text-slate-400 ml-1" title="Learn more about SQL queries">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -973,7 +1013,6 @@
               </svg>
             </button>
           </div>
-          <!-- Task 11: Query preview bar -->
           <div class="mt-3 border border-slate-200 rounded-lg overflow-hidden">
             <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
               <span class="text-xs font-medium text-slate-600">Preview against config</span>
@@ -1049,11 +1088,12 @@
             <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" />
           </div>
           <div>
-            <label class="field-label">Target API Endpoint</label>
+            <label class="field-label">Target API Endpoint <span class="text-slate-400 font-normal">(optional — leave blank to compare later)</span></label>
             <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" />
           </div>
           <p class="text-xs text-slate-400 col-span-2">
             Endpoint names must match entries in the api_endpoints section of whichever config is selected when this job runs.
+            Without a target, the job saves and runs as SKIPPED until one is set.
           </p>
         </div>
         <div x-show="jobModal.job_type === 'dbt_artifact'" class="grid-2">
@@ -1181,12 +1221,10 @@
         </template>
       </div>
 
-      <!-- Task 8: Deps tab panel -->
       <div x-show="jobModalTab === 'deps'" class="space-y-3">
         <div>
           <label class="field-label">Depends On (comma-separated job names)</label>
           <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" />
-          <!-- Task 9: Dependencies validation message -->
           <p x-show="jobModalValidation && jobModalValidation.dependencies"
              class="text-xs mt-1 text-amber-600"
              x-text="jobModalValidation && jobModalValidation.dependencies ? jobModalValidation.dependencies : ''">
@@ -1194,10 +1232,8 @@
         </div>
       </div>
 
-      <!-- Task 8 + Task 10: Rules tab panel with DQ templates -->
       <div x-show="jobModalTab === 'rules'" class="space-y-3">
         <div x-show="jobModal.job_type === 'reconciliation'">
-          <!-- Task 10: DQ Rule Templates picker -->
           <div class="flex items-center gap-2 mb-3">
             <label class="text-sm text-slate-500">Template:</label>
             <select @change="applyDqTemplate($event.target.value); $event.target.value=''"
@@ -1292,7 +1328,6 @@
         </div>
       </div>
 
-      <!-- Task 8: Tags tab panel -->
       <div x-show="jobModalTab === 'tags'" class="space-y-3">
         <div>
           <label class="field-label">Tags (comma-separated)</label>
@@ -1351,7 +1386,6 @@
 
   <!-- Execution sequence -->
   <div class="card mb-4">
-    <!-- Task 12: Execution sequence utilities header -->
     <div class="flex items-center gap-2 mb-2">
       <span class="text-sm font-medium text-slate-700">Execution Sequence</span>
       <span class="text-xs text-slate-400 ml-1" x-show="estimatedSequenceDuration" x-text="estimatedSequenceDuration"></span>
@@ -1362,7 +1396,6 @@
       </div>
     </div>
 
-    <!-- Task 12: Circular dependency warning -->
     <div x-show="hasCircularDependency()" class="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
       ⚠ Circular dependency detected in selected jobs
     </div>
@@ -1638,7 +1671,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <h2 class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
       <div class="space-y-3">
         <div><label class="field-label">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" /></div>
-        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily</div></div>
+        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily (times in <span x-text="appTimezone"></span>)</div></div>
         <div class="grid-2">
           <div>
             <label class="field-label">Source Env</label>
@@ -3114,7 +3147,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <button @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
   </div>
 
-  <!-- Task 13: Compare Template Bar -->
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
     <select @change="loadCompareTemplate($event.target.value)"
             class="field-input text-sm flex-1"
@@ -3298,7 +3330,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
       </div>
-      <!-- Task 14: Save as Baseline + Swap Sides -->
       <div class="flex items-center gap-4 mb-3">
         <label class="flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" x-model="boSaveAsBaseline" class="rounded">
@@ -3316,7 +3347,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
     <template x-if="boCompareResult">
       <div class="card">
-        <!-- Task 17: Results panel header with export and chart toggle -->
         <div class="flex items-center gap-2 mb-3">
           <h3 class="text-sm font-semibold text-slate-700">BO Compare Result</h3>
           <div class="ml-auto flex items-center gap-2">
@@ -3332,7 +3362,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
 
-        <!-- Task 17: Mismatch Distribution Chart -->
         <div x-show="showMismatchChart" class="mb-4 p-3 border rounded bg-white">
           <div class="flex items-center gap-2 mb-2">
             <span class="text-xs font-medium">Chart by:</span>
@@ -3373,7 +3402,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 
   <div x-show="compareSubTab === 'recon'" class="space-y-4">
-    <!-- Task 15: Quick Compare Mode toggle -->
     <div class="flex items-center gap-3 mb-3 p-2 bg-slate-50 rounded border">
       <label class="flex items-center gap-2 text-sm cursor-pointer">
         <input type="checkbox"
@@ -3514,7 +3542,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <template x-if="fileSourceAType === 'run'">
             <div>
-              <!-- Task 16: Most recent first hint -->
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
               <select x-model="fileRunIdA" class="field-input field-select mt-1">
                 <option value="">Select run</option>
@@ -3692,7 +3719,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                         <div class="diff-filter-bar" x-show="(fileExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
                           <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
                             <option value="">All types</option>
-                            <option value="value_mismatch">Value diff</option>
+                            <option value="value_diff">Value diff</option>
                             <option value="missing_in_target">Missing →</option>
                             <option value="missing_in_source">Missing ←</option>
                           </select>
@@ -3943,7 +3970,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                       <div class="diff-filter-bar" x-show="(sqlExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
                         <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
                           <option value="">All types</option>
-                          <option value="value_mismatch">Value diff</option>
+                          <option value="value_diff">Value diff</option>
                           <option value="missing_in_target">Missing →</option>
                           <option value="missing_in_source">Missing ←</option>
                         </select>
@@ -4395,7 +4422,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="empty-state"><div class="empty-state-title">No mismatch details found</div></div>
         </template>
 
-        <!-- Task 18: Mismatch filter controls and Accept All Visible -->
         <template x-if="!drawer.loading && drawer.rows.length > 0">
           <div class="flex items-center gap-2 mb-3 flex-wrap">
             <div class="flex gap-1 text-xs">
@@ -4643,9 +4669,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 </template>
 
 
-<!-- ====================================================================
-     TASK 19 – HELP SYSTEM MODAL
-     ==================================================================== -->
 <template x-if="showingHelp">
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
        @click.self="showingHelp = false">
@@ -4663,6 +4686,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 </template>
 
+<script src="app-config.js"></script>
+<script src="app-help.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

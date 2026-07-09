@@ -135,6 +135,56 @@ def test_increments_error_count():
     assert run.error == 1
 
 
+def test_persists_per_test_results_from_junit_xml():
+    db = _session()
+    _make_run(db)
+
+    lines = [
+        "collected 3 items\n",
+        "tests/unit/test_foo.py::test_a PASSED   [ 33%]\n",
+        "tests/unit/test_foo.py::test_b FAILED   [ 66%]\n",
+        "tests/unit/test_foo.py::test_c ERROR    [100%]\n",
+        "",
+    ]
+    xml = """<?xml version="1.0" encoding="utf-8"?>
+    <testsuite tests="3" failures="1" errors="1" skipped="0">
+      <testcase classname="tests.unit.test_foo" name="test_a" time="0.100" />
+      <testcase classname="tests.unit.test_foo" name="test_b" time="0.200">
+        <failure message="assert 1 == 2">short failure</failure>
+      </testcase>
+      <testcase classname="tests.unit.test_foo" name="test_c" time="0.300">
+        <error message="fixture failed">setup error</error>
+      </testcase>
+    </testsuite>
+    """
+
+    def popen_with_junit(cmd, **kwargs):
+        junit_arg = next(arg for arg in cmd if arg.startswith("--junitxml="))
+        junit_path = junit_arg.split("=", 1)[1]
+        with open(junit_path, "w", encoding="utf-8") as f:
+            f.write(xml)
+        return _fake_process(lines, exit_code=1)
+
+    with patch("subprocess.Popen", side_effect=popen_with_junit):
+        _executor(db).execute()
+
+    run = RunRepository(db).get_run("run-p1")
+    assert run.status == "ERROR"
+    assert run.total_tests == 3
+    assert run.passed == 1
+    assert run.failed == 1
+    assert run.error == 1
+    assert [result.query_name for result in run.results] == [
+        "tests.unit.test_foo::test_a",
+        "tests.unit.test_foo::test_b",
+        "tests.unit.test_foo::test_c",
+    ]
+    assert [result.status for result in run.results] == ["PASSED", "FAILED", "ERROR"]
+    assert run.results[1].duration_seconds == pytest.approx(0.2)
+    assert "assert 1 == 2" in run.results[1].error_message
+    assert run.results[1].value_mismatch_count == 1
+
+
 # --- terminal status mapping ---
 
 def test_exit_0_sets_passed():

@@ -88,6 +88,66 @@ def test_authenticate_defaults_to_secEnterprise(env_config):
     assert mock_post.call_args[1]["json"]["auth"] == "secEnterprise"
 
 
+def test_authenticate_returns_logon_token(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"X-SAP-LogonToken": "tok"}
+    with patch.object(client._session, "post", return_value=mock_response):
+        token = client.authenticate()
+
+    assert token == "tok"
+    assert client.logon_token == "tok"
+
+
+def test_use_logon_token_sets_header_and_skips_logon(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+    client.use_logon_token("external-token")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"documents": []}
+    with patch.object(client._session, "post") as mock_post, \
+         patch.object(client._session, "get", return_value=mock_response):
+        assert client.list_documents() == []
+
+    mock_post.assert_not_called()
+    assert client._session.headers["X-SAP-LogonToken"] == "external-token"
+
+
+def test_logout_does_not_logoff_caller_owned_token(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+    client.use_logon_token("external-token")
+
+    with patch.object(client._session, "post") as mock_post:
+        client.logout()
+
+    mock_post.assert_not_called()
+    assert client.logon_token is None
+
+
+def test_logout_posts_when_client_owns_token(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+    client.use_logon_token("owned-token", owns_token=True)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+        client.logout()
+
+    assert mock_post.call_args[0][0].endswith("/biprws/logoff")
+    assert client.logon_token is None
+
+
 # ---------------------------------------------------------------------------
 # list_documents
 # ---------------------------------------------------------------------------

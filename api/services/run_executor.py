@@ -940,8 +940,28 @@ class RunExecutor:
             from etl_framework.config.models import resolve_api_endpoint
             from etl_framework.rest_api.client import APIEndpointClient
 
+            if not job.params.get("target_api_endpoint"):
+                return ReconciliationResult(
+                    query_name=job.name,
+                    source_env=self._source_env,
+                    target_env=self._target_env,
+                    source_row_count=0,
+                    target_row_count=0,
+                    matched_count=0,
+                    missing_in_target_count=0,
+                    missing_in_source_count=0,
+                    value_mismatch_count=0,
+                    mismatches=[],
+                    status=TestStatus.SKIPPED,
+                    executed_at=datetime.now(timezone.utc),
+                    duration_seconds=0.0,
+                )
+
             api_endpoints = self._config_snapshot.get("api_endpoints") or {}
-            endpoints_snapshot = {"api_endpoints": api_endpoints}
+            endpoints_snapshot = {
+                "api_endpoints": api_endpoints,
+                "api_base_host": self._config_snapshot.get("api_base_host") or "",
+            }
             src_entry = resolve_api_endpoint(endpoints_snapshot, job.params["source_api_endpoint"])
             tgt_entry = resolve_api_endpoint(endpoints_snapshot, job.params["target_api_endpoint"])
 

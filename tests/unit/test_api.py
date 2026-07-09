@@ -490,6 +490,67 @@ def test_metrics_payload_can_be_built_from_run_results():
     assert metrics["tests"][0]["total_issues"] == 1
 
 
+def test_run_status_detail_and_metrics_use_effective_result_status(client, monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.models import TestResult
+    from etl_framework.repository.repository import RunRepository
+
+    monkeypatch.chdir(tmp_path)
+    run_id = "run-effective-status"
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        repo.create_run(run_id=run_id, source_env="dev", target_env="prod")
+        repo.update_run_status(
+            run_id,
+            "FAILED",
+            completed_at=datetime.now(timezone.utc),
+            total_tests=1,
+            passed=0,
+            failed=1,
+        )
+        db.add(TestResult(
+            run_id=run_id,
+            query_name="orders",
+            status="FAILED",
+            override_status="PASSED",
+            override_reason="accepted remediation",
+            duration_seconds=0.5,
+            source_row_count=10,
+            target_row_count=10,
+            value_mismatch_count=1,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+        ))
+        db.commit()
+
+    status = client.get(f"/api/runs/{run_id}/status")
+    assert status.status_code == 200
+    assert status.json()["status"] == "PASSED"
+    assert status.json()["passed"] == 1
+    assert status.json()["failed"] == 0
+
+    detail = client.get(f"/api/runs/{run_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "PASSED"
+    assert detail.json()["results"][0]["status"] == "FAILED"
+    assert detail.json()["results"][0]["effective_status"] == "PASSED"
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    logs.joinpath(f"metrics_{run_id}.json").write_text(
+        '{"run_id":"run-effective-status","total_tests":1,"passed":0,"failed":1,"slow":0,"tests":[]}',
+        encoding="utf-8",
+    )
+    metrics = client.get(f"/api/runs/{run_id}/metrics")
+    assert metrics.status_code == 200
+    assert metrics.json()["source"] == "database"
+    assert metrics.json()["passed"] == 1
+    assert metrics.json()["failed"] == 0
+    assert metrics.json()["tests"][0]["status"] == "PASSED"
+    assert metrics.json()["tests"][0]["raw_status"] == "FAILED"
+
+
 def test_get_run_not_found(client):
     resp = client.get("/api/runs/nonexistent-run-id")
     assert resp.status_code == 404
@@ -810,6 +871,21 @@ def test_create_api_reconciliation_job_succeeds(client):
             "query": "",
             "key_columns": ["id"],
             "params": {"source_api_endpoint": "orders_a", "target_api_endpoint": "orders_b"},
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["job_type"] == "api_reconciliation"
+
+
+def test_create_api_reconciliation_job_without_target_succeeds(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "draft_api_job",
+            "job_type": "api_reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "params": {"source_api_endpoint": "orders_a"},
         },
     )
     assert resp.status_code == 201

@@ -515,7 +515,7 @@ class CompareService:
         """Load one side of a recon-file compare.
 
         Returns dict[str, dict] for stored-run and HTML sources,
-        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .tsv, .txt).
+        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .xml, .tsv, .txt).
         """
         stored_run_id = req.stored_run_id if side == "a" else req.stored_run_id_b
         file_path = req.file_a_path if side == "a" else req.file_b_path
@@ -577,8 +577,12 @@ class CompareService:
         for row in soup.select("table tr"):
             cells = [td.get_text(strip=True) for td in row.find_all("td")]
             if len(cells) >= 2:
-                name, status = cells[0], cells[1].upper()
-                if status in ("PASSED", "FAILED", "ERROR", "SLOW"):
+                name, status_text = cells[0], cells[1].upper()
+                status = next(
+                    (candidate for candidate in ("PASSED", "FAILED", "ERROR", "SLOW") if status_text.startswith(candidate)),
+                    None,
+                )
+                if status is not None:
                     def parse_int(index: int) -> int:
                         if len(cells) <= index:
                             return 0

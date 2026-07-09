@@ -128,15 +128,26 @@ class ApiEndpointEntry(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = ""
-    base_url: str
+    base_url: str = ""
+    path: str = ""
     method: Literal["GET", "POST"] = "GET"
 
-    auth_type: Literal["none", "api_key", "bearer", "basic"] = "none"
+    auth_type: Literal[
+        "none",
+        "api_key",
+        "bearer",
+        "basic",
+        "sap_bo_logontoken",
+        "sap_bo_basic",
+    ] = "none"
     api_key_header: str = "X-API-Key"
     api_key: str = ""
     bearer_token: str = ""
     basic_username: str = ""
     basic_password: str = ""
+    sap_bo_logon_token: str = ""
+    sap_bo_auth_type: Literal["secEnterprise", "secWinAD", "secLDAP", "secSAPR3"] = "secEnterprise"
+    sap_bo_logon_url: str = ""
 
     headers: dict[str, str] = Field(default_factory=dict)
     query_params: dict[str, str] = Field(default_factory=dict)
@@ -145,7 +156,7 @@ class ApiEndpointEntry(BaseModel):
     timeout: int = 30
     verify_ssl: bool = True
 
-    response_format: Literal["json", "csv"] = "json"
+    response_format: Literal["json", "csv", "xlsx", "xls"] = "json"
     json_root_path: str = ""
 
     pagination_type: Literal["none", "cursor", "page"] = "none"
@@ -160,8 +171,16 @@ class ApiEndpointEntry(BaseModel):
     @classmethod
     def validate_base_url(cls, v: str) -> str:
         from urllib.parse import urlparse
-        if not urlparse(v).scheme:
+        if v and not urlparse(v).scheme:
             raise ValueError("base_url must include http:// or https://")
+        return v
+
+    @field_validator("sap_bo_logon_url")
+    @classmethod
+    def validate_sap_bo_logon_url(cls, v: str) -> str:
+        from urllib.parse import urlparse
+        if v and not urlparse(v).scheme:
+            raise ValueError("sap_bo_logon_url must include http:// or https://")
         return v
 
     @field_validator("timeout")
@@ -177,4 +196,14 @@ def resolve_api_endpoint(config_json: dict, name: str) -> ApiEndpointEntry:
     endpoints = config_json.get("api_endpoints") or {}
     if name not in endpoints:
         raise ValueError(f"api_endpoints entry '{name}' not found in config")
-    return ApiEndpointEntry(name=name, **endpoints[name])
+    entry = dict(endpoints[name])
+    if not entry.get("base_url"):
+        base_host = config_json.get("api_base_host") or ""
+        path = entry.get("path") or ""
+        if not base_host or not path:
+            raise ValueError(
+                f"api_endpoints entry '{name}' must define base_url, "
+                "or path plus a top-level api_base_host"
+            )
+        entry["base_url"] = base_host.rstrip("/") + "/" + path.lstrip("/")
+    return ApiEndpointEntry(name=name, **entry)

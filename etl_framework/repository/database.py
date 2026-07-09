@@ -321,6 +321,17 @@ def _ensure_compare_columns(bind) -> None:
             if "selection_version" not in scheduled_run_cols:
                 conn.execute(text("ALTER TABLE scheduled_runs ADD COLUMN selection_version INTEGER"))
 
+        # --- App-wide settings (single row) ---
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS app_settings ("
+            "id INTEGER PRIMARY KEY, "
+            "timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', "
+            "updated_at DATETIME)"
+        ))
+        conn.execute(text(
+            "INSERT OR IGNORE INTO app_settings (id, timezone) VALUES (1, 'UTC')"
+        ))
+
 
 def _backfill_schedule_selections(bind) -> None:
     """One-time backfill: give every pre-existing ScheduledRun row a JobSelection.

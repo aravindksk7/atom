@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+import base64
+import binascii
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -13,14 +16,17 @@ from api.schemas import (
     AutomicJobCreateRequest,
     AutomicLookupRequest,
     BODocOut,
+    BOAuthSessionOut,
     BOJobCreateRequest,
+    BOLogoffRequest,
+    BOLogonRequest,
     BOReportOut,
     JobDefinition,
     BOTestRequest,
     RestApiPreviewRequest,
     RestApiTestRequest,
 )
-from api.services.adapter_service import AdapterService
+from api.services.adapter_service import AdapterService, SAPBOAuthContext
 from etl_framework.repository.repository import ConfigRepository, JobRepository
 from api.services.audit_service import AuditService
 
@@ -38,33 +44,99 @@ def get_adapter_service(db: Session = Depends(get_session)) -> AdapterService:
     return AdapterService(ConfigRepository(db))
 
 
+def _sap_bo_auth_from_request(request: Request, auth_type: str | None = None) -> SAPBOAuthContext | None:
+    token = (request.headers.get("x-sap-logontoken") or "").strip()
+    if token:
+        return SAPBOAuthContext(scheme="x-sap-logontoken", token=token, auth_type=auth_type)
+
+    auth = (request.headers.get("authorization") or "").strip()
+    if not auth.lower().startswith("basic "):
+        return None
+
+    raw = auth[6:].strip()
+    try:
+        decoded = base64.b64decode(raw, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid SAP BO Basic Authorization header",
+            headers={"WWW-Authenticate": "Basic"},
+        ) from exc
+    if ":" not in decoded:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid SAP BO Basic Authorization header",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    username, password = decoded.split(":", 1)
+    if not username:
+        raise HTTPException(
+            status_code=401,
+            detail="SAP BO Basic username is required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return SAPBOAuthContext(
+        scheme="basic",
+        username=username,
+        password=password,
+        auth_type=auth_type,
+    )
+
+
 # ---------------------------------------------------------------------------
 # SAP BO
 # ---------------------------------------------------------------------------
 
+@router.post("/sap-bo/logon", response_model=BOAuthSessionOut)
+def logon_bo_session(
+    body: BOLogonRequest,
+    request: Request,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.create_bo_session(
+        body.config_id,
+        _sap_bo_auth_from_request(request, auth_type=body.auth_type),
+    )
+
+
+@router.post("/sap-bo/logoff", response_model=BOAuthSessionOut)
+def logoff_bo_session(
+    body: BOLogoffRequest,
+    request: Request,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    token = (request.headers.get("x-sap-logontoken") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="X-SAP-LogonToken header is required")
+    return service.logoff_bo_session(body.config_id, token)
+
+
 @router.post("/sap-bo/test", response_model=AdapterTestOut)
 def test_bo_connection(
     body: BOTestRequest,
+    request: Request,
     service: AdapterService = Depends(get_adapter_service),
 ):
-    return service.test_bo_connection(body.config_id)
+    return service.test_bo_connection(body.config_id, _sap_bo_auth_from_request(request))
 
 
 @router.get("/sap-bo/documents", response_model=list[BODocOut])
 def list_bo_documents(
     config_id: int,
+    request: Request,
     service: AdapterService = Depends(get_adapter_service),
 ):
-    return service.list_bo_documents(config_id)
+    return service.list_bo_documents(config_id, _sap_bo_auth_from_request(request))
 
 
 @router.get("/sap-bo/documents/{doc_id}/reports", response_model=list[BOReportOut])
 def list_bo_reports(
     doc_id: str,
     config_id: int,
+    request: Request,
     service: AdapterService = Depends(get_adapter_service),
 ):
-    return service.list_bo_reports(config_id, doc_id)
+    return service.list_bo_reports(config_id, doc_id, _sap_bo_auth_from_request(request))
 
 
 @router.get("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
@@ -72,10 +144,17 @@ def download_bo_report(
     doc_id: str,
     report_id: str,
     config_id: int,
+    request: Request,
     format: str = "xlsx",
     service: AdapterService = Depends(get_adapter_service),
 ):
-    content = service.download_bo_report(config_id, doc_id, report_id, fmt=format)
+    content = service.download_bo_report(
+        config_id,
+        doc_id,
+        report_id,
+        fmt=format,
+        auth=_sap_bo_auth_from_request(request),
+    )
     mime = _MIME_MAP.get(format, "application/octet-stream")
     ext = _EXT_MAP.get(format, "bin")
     return Response(

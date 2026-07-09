@@ -17,19 +17,77 @@ def test_read_json_records():
     assert len(df) == 2
 
 
+def test_read_json_nested_records():
+    data = {"payload": {"items": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]}}
+    df = read_tabular(content_b64=b64(json.dumps(data).encode()), file_name="data.json")
+    assert list(df.columns) == ["id", "name"]
+    assert len(df) == 2
+
+
 def test_read_xml_repeated_records():
-    raw = b"""<?xml version="1.0"?>
-<dataset>
-  <record><id>1</id><name>Alice</name></record>
-  <record><id>2</id><name>Bob</name></record>
-</dataset>
-"""
+    raw = b"""
+    <orders>
+      <order><id>1</id><name>Alice</name><amount>10.5</amount></order>
+      <order><id>2</id><name>Bob</name><amount>20</amount></order>
+    </orders>
+    """
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+    assert list(df.columns) == ["id", "name", "amount"]
+    assert len(df) == 2
+    assert df.iloc[0]["name"] == "Alice"
+
+
+def test_read_xml_nested_record_container():
+    raw = b"""
+    <response>
+      <orders>
+        <order><id>1</id><name>Alice</name></order>
+        <order><id>2</id><name>Bob</name></order>
+      </orders>
+    </response>
+    """
     df = read_tabular(content_b64=b64(raw), file_name="data.xml")
     assert list(df.columns) == ["id", "name"]
-    assert df.to_dict("records") == [
-        {"id": "1", "name": "Alice"},
-        {"id": "2", "name": "Bob"},
-    ]
+    assert len(df) == 2
+
+
+def test_read_xml_attributes_as_columns():
+    raw = b"""
+    <rows>
+      <row id="1"><name>Alice</name></row>
+      <row id="2"><name>Bob</name></row>
+    </rows>
+    """
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+    assert list(df.columns) == ["id", "name"]
+    assert df.iloc[1]["id"] == "2"
+
+
+def test_json_and_xml_records_normalize_to_comparable_columns():
+    json_data = [{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]
+    xml_raw = b"""
+    <rows>
+      <row><id>1</id><name>Alice</name></row>
+      <row><id>2</id><name>Bob</name></row>
+    </rows>
+    """
+    json_df = read_tabular(content_b64=b64(json.dumps(json_data).encode()), file_name="data.json")
+    xml_df = read_tabular(content_b64=b64(xml_raw), file_name="data.xml")
+    assert list(json_df.columns) == list(xml_df.columns)
+    assert len(json_df) == len(xml_df) == 2
+
+
+def test_xml_with_dtd_raises_400():
+    raw = b'<!DOCTYPE rows [<!ENTITY x "y">]><rows><row><id>&x;</id></row></rows>'
+    with pytest.raises(HTTPException) as exc_info:
+        read_tabular(content_b64=b64(raw), file_name="data.xml")
+    assert exc_info.value.status_code == 400
+
+
+def test_bad_xml_raises_400():
+    with pytest.raises(HTTPException) as exc_info:
+        read_tabular(content_b64=b64(b"<rows><row></rows>"), file_name="data.xml")
+    assert exc_info.value.status_code == 400
 
 
 def test_read_json_absolute_path_under_upload_base(tmp_path, monkeypatch):

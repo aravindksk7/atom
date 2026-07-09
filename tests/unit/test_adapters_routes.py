@@ -1,6 +1,7 @@
 """Tests for /api/adapters routes."""
 from __future__ import annotations
 
+import base64
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.schemas import (
-    AdapterTestOut, BODocOut, BOReportOut,
+    AdapterTestOut, BODocOut, BOAuthSessionOut, BOReportOut,
     AutomicJobStatusOut, JobDefinition,
 )
 from etl_framework.repository.database import Base
@@ -50,6 +51,20 @@ def mock_adapter_service():
         BOReportOut(id="1", name="Page 1", report_index=0),
     ]
     svc.download_bo_report.return_value = b"PDF content"
+    svc.create_bo_session.return_value = BOAuthSessionOut(
+        ok=True,
+        message="SAP BO logon successful",
+        auth_scheme="basic",
+        token="sap-token",
+        latency_ms=11,
+    )
+    svc.logoff_bo_session.return_value = BOAuthSessionOut(
+        ok=True,
+        message="SAP BO logoff successful",
+        auth_scheme="x-sap-logontoken",
+        token=None,
+        latency_ms=8,
+    )
     svc.lookup_automic_job.return_value = AutomicJobStatusOut(
         identifier="MY_JOB", identifier_type="job_name",
         status="PASSED", environment="dev",
@@ -71,6 +86,58 @@ def test_test_bo_connection_returns_200(client):
     assert resp.json()["latency_ms"] == 12
 
 
+def test_sap_bo_logon_accepts_basic_credentials(client, mock_adapter_service):
+    raw = base64.b64encode(b"bo-user:bo-pass").decode("ascii")
+    resp = client.post(
+        "/api/adapters/sap-bo/logon",
+        json={"config_id": 1, "auth_type": "secWinAD"},
+        headers={"Authorization": f"Basic {raw}"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["token"] == "sap-token"
+    auth_ctx = mock_adapter_service.create_bo_session.call_args.args[1]
+    assert auth_ctx.scheme == "basic"
+    assert auth_ctx.username == "bo-user"
+    assert auth_ctx.password == "bo-pass"
+    assert auth_ctx.auth_type == "secWinAD"
+
+
+def test_sap_bo_logon_accepts_x_sap_logontoken(client, mock_adapter_service):
+    mock_adapter_service.create_bo_session.return_value = BOAuthSessionOut(
+        ok=True,
+        message="SAP BO token is valid",
+        auth_scheme="x-sap-logontoken",
+        token=None,
+        latency_ms=7,
+    )
+    resp = client.post(
+        "/api/adapters/sap-bo/logon",
+        json={"config_id": 1},
+        headers={"X-SAP-LogonToken": "existing-token"},
+    )
+
+    assert resp.status_code == 200
+    auth_ctx = mock_adapter_service.create_bo_session.call_args.args[1]
+    assert auth_ctx.scheme == "x-sap-logontoken"
+    assert auth_ctx.token == "existing-token"
+
+
+def test_sap_bo_logoff_requires_token_header(client):
+    resp = client.post("/api/adapters/sap-bo/logoff", json={"config_id": 1})
+    assert resp.status_code == 400
+
+
+def test_sap_bo_logoff_passes_token(client, mock_adapter_service):
+    resp = client.post(
+        "/api/adapters/sap-bo/logoff",
+        json={"config_id": 1},
+        headers={"X-SAP-LogonToken": "sap-token"},
+    )
+    assert resp.status_code == 200
+    assert mock_adapter_service.logoff_bo_session.call_args.args == (1, "sap-token")
+
+
 def test_list_bo_documents_returns_list(client):
     resp = client.get("/api/adapters/sap-bo/documents?config_id=1")
     assert resp.status_code == 200
@@ -78,6 +145,18 @@ def test_list_bo_documents_returns_list(client):
     assert len(data) == 1
     assert data[0]["id"] == "101"
     assert data[0]["folder"] == "/Finance"
+
+
+def test_list_bo_documents_passes_x_sap_logontoken(client, mock_adapter_service):
+    resp = client.get(
+        "/api/adapters/sap-bo/documents?config_id=1",
+        headers={"X-SAP-LogonToken": "existing-token"},
+    )
+
+    assert resp.status_code == 200
+    auth_ctx = mock_adapter_service.list_bo_documents.call_args.args[1]
+    assert auth_ctx.scheme == "x-sap-logontoken"
+    assert auth_ctx.token == "existing-token"
 
 
 def test_list_bo_reports_for_document(client):

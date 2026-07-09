@@ -2,9 +2,21 @@ import os
 from fastapi import HTTPException
 from etl_framework.repository.base import AbstractTestRunRepository
 from etl_framework.reporting.generator import ReportGenerator
+from api.services.run_report import build_run_report_snapshot
 import logging
 
 logger = logging.getLogger("api.services.artifact_service")
+
+
+def _current_app_timezone() -> str:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import SettingsRepository
+    db = SessionLocal()
+    try:
+        return SettingsRepository(db).get_timezone()
+    finally:
+        db.close()
+
 
 class ArtifactService:
     def __init__(self, repository: AbstractTestRunRepository, report_dir: str = "./reports"):
@@ -17,8 +29,8 @@ class ArtifactService:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
 
         try:
-            generator = ReportGenerator(output_dir=self._report_dir)
-            report_path = generator.generate(run)
+            generator = ReportGenerator(output_dir=self._report_dir, timezone=_current_app_timezone())
+            report_path = generator.generate(build_run_report_snapshot(run, include_mismatches=True))
             return report_path
         except Exception as e:
             logger.error(f"Failed to generate HTML report for {run_id}: {e}", exc_info=True)
