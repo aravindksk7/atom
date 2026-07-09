@@ -87,6 +87,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
 - **Run cancellation** — send `POST /api/runs/{run_id}/cancel` at any time to cooperatively stop an active ETL run. The executor finishes its current job step, cancels all remaining steps, and sets the run to `CANCELLED`. Safe to call on already-terminal runs (returns `cancel_requested: false`).
 - **Pytest suite runner** — trigger the project's pytest suite as a tracked run with `POST /api/runs/test-suite`. Progress (collected count, passed/failed/error counters) streams via the same SSE endpoint; the run appears in History with `run_type=test_suite`. Supports the cancel endpoint to terminate a running test process.
+- **Cooperative Cancellation**: A `cancel_requested` flag is added to the `TestRun` model, acting as a shared signal for cancellation. The `RunExecutor` will check this flag between steps.
 - **Trend caching** — trend responses are memoised in-process with a short TTL; the cache is invalidated automatically when matching result rows change.
 - **dbt artifact adapter** — `dbt_artifact` job type parses `run_results.json` (and optionally `manifest.json`) and maps dbt test statuses to normal run results, with failing/error nodes recorded as mismatch details.
 - **Freshness checks** — `freshness` job type queries a timestamp column and fails if the most recent record is older than a configurable `max_age_hours` threshold.
@@ -96,6 +97,9 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **Profile API** — `GET /api/jobs/{job}/profile` returns the latest column profile; `GET /api/jobs/{job}/profile/history?column=<col>` returns the metric history for a column; `POST /api/jobs/{job}/suggest-rules` auto-generates DQ rules from the latest profile.
 - **Schema history API** — `GET /api/jobs/{job}/schema-history?environment=source` returns all snapshots with per-snapshot diffs.
 - **Profile and Schema sub-tabs** — the History tab includes Profile and Schema sub-tabs for browsing stored statistics and snapshot diffs directly in the UI.
+- **Coverage matrix** — `GET /api/coverage` maps every table/column seen by the framework to the jobs and DQ rules covering it, with `tested` / `observed` / `untested` levels and a gap filter in the History → Coverage sub-tab.
+- **Flaky-test detection** — `GET /api/coverage/flaky?window=20` scores each job by pass/fail flip-flops across recent runs (transitions ÷ window); scores ≥ 0.3 are flagged.
+- **Mismatch segment drill-down** — configure `params.segment_columns` on a reconciliation job (or let the framework auto-pick low-cardinality columns from the latest profile) and each failed result stores a per-segment mismatch summary; `POST /api/runs/{run_id}/results/{result_id}/drilldown` re-queries live per-segment row counts on both sides.
 - **Data Contracts** — define named contracts that point at a source job and enforce ownership, SLA, and data quality expectations:
   - Contracts are stored in `/api/contracts` as first-class entities with `name`, `source_job`, `owner`, `sla_hours`, `consumers`, and `breach_severity`.
   - When a source job run **fails**, a breach opens automatically and a `contract.breached` webhook fires to configured endpoints.
@@ -148,6 +152,7 @@ Core framework
   api/services/run_executor.py          — retry, DAG resolution, DQ evaluation, all job types; cooperative cancel check after each step
   api/services/pytest_runner.py         — spawn pytest subprocess, parse output, stream progress, support cancel
   api/services/contract_breach_checker.py — post-run hook: open/resolve contract breaches
+  api/services/run_cancel.py            - NEW: handles the logic for run cancellation.
   api/services/audit_service.py         — actor extraction + AuditRepository facade
   api/services/dbt_artifact_parser.py   — parse run_results.json / manifest.json
   api/services/profile_service.py       — compute_profile(), detect_drift()
@@ -1277,7 +1282,7 @@ Use this tab to:
 - See passed, failed, slow, and error counters.
 - Track the current job where progress data is available.
 - Receive live updates through `GET /api/runs/{run_id}/stream`; the browser falls back to 5-second polling if SSE is unavailable.
-- **Cancel** an active ETL run or pytest suite run via `POST /api/runs/{run_id}/cancel` (see [Cancel A Run](#cancel-a-run)).
+- **Cancel** an active ETL run or pytest suite run, with a confirmation dialog to prevent accidental clicks.
 
 ### History
 
@@ -2245,6 +2250,26 @@ Invoke-WebRequest -Headers $h "http://127.0.0.1:8000/api/runs/<run_id>/export" -
 # Delete run
 Invoke-RestMethod -Method Delete -Headers $h "http://127.0.0.1:8000/api/runs/<run_id>"
 ```
+
+### Coverage Matrix And Flaky Tests
+
+```powershell
+# Table/column coverage matrix (tested / observed / untested)
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/coverage"
+
+# Flaky-test report (status flip-flop score over the last N runs)
+Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/coverage/flaky?window=20"
+```
+
+### Segment Drilldown
+
+```powershell
+# Live re-query of source vs target counts for a segment column
+$body = @{ segment_column = "region" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Headers $h -Uri "http://127.0.0.1:8000/api/runs/<run_id>/results/<result_id>/drilldown" -Body $body -ContentType "application/json"
+```
+
+Requires `params.segment_columns` set on the job (or auto-picked low-cardinality columns from the latest profile) — see [Mismatch Segment Drill-Down](#capabilities). Only valid for `reconciliation` job type; returns `400` otherwise.
 
 ## ETL Test Capabilities
 
