@@ -190,12 +190,33 @@ class MismatchDetail(Base):
     source_value = Column(Text, nullable=True)
     target_value = Column(Text, nullable=True)
     mismatch_type = Column(String(50), nullable=True)
+    delta = Column(Float, nullable=True)
+    relative_delta = Column(Float, nullable=True)
     accepted      = Column(Boolean, nullable=False, default=False)
     accepted_note = Column(Text, nullable=True)
     accepted_at   = Column(DateTime(timezone=True), nullable=True)
     accepted_by   = Column(String(255), nullable=True)
 
     test_result = relationship("TestResult", back_populates="mismatches")
+
+
+class DifferenceExportJob(Base):
+    __tablename__ = "difference_export_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    export_id = Column(String(36), nullable=False, unique=True, index=True)
+    run_id = Column(String(36), ForeignKey("test_runs.run_id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    format = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    artifact_path = Column(Text, nullable=True)
+    row_count = Column(Integer, default=0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    recomputed_at = Column(DateTime(timezone=True), nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +301,7 @@ class AppSettings(Base):
 
     id = Column(Integer, primary_key=True)
     timezone = Column(String(64), nullable=False, default="UTC")
+    upload_retention_days = Column(Integer, nullable=False, default=30)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 

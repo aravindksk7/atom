@@ -255,6 +255,13 @@ class HealthCheckRequest(BaseModel):
     environments: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class ColumnMismatchStatOut(BaseModel):
+    column: str
+    mismatch_count: int
+    compared_rows: int
+    match_pct: float | None = None
+
+
 class TestResultOut(BaseModel):
     id: int
     query_name: str
@@ -273,6 +280,8 @@ class TestResultOut(BaseModel):
     override_at: datetime | None = None
     sample_rows: list[dict] | None = None
     segment_summary: dict | None = None
+    mismatch_summary: dict[str, Any] | None = None
+    column_stats: list[ColumnMismatchStatOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -696,6 +705,25 @@ class MismatchAcceptOut(BaseModel):
     accepted_at: datetime | None = None
     accepted_by: str | None = None
     result_status_updated: bool = False
+
+
+class DifferenceExportRequest(BaseModel):
+    format: Literal["csv", "parquet"] = "csv"
+
+
+class DifferenceExportStatusOut(BaseModel):
+    export_id: str
+    run_id: str
+    format: Literal["csv", "parquet"]
+    status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"]
+    row_count: int = 0
+    error_message: str | None = None
+    artifact_path: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    recomputed_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

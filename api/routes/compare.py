@@ -26,6 +26,7 @@ from etl_framework.repository.models import SavedConfig
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.audit_service import AuditService
 from api.services.run_report import build_run_report_snapshot
+from api.services.upload_store import sanitize_compare_request
 
 router = APIRouter(tags=["compare"])
 logger = logging.getLogger("api.routes.compare")
@@ -195,12 +196,14 @@ def compare_bo_report(
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
     run_id = str(uuid.uuid4())
+    snapshot = sanitize_compare_request(run_id, "bo_report", body.model_dump(mode="json"))
+    compare_body = BOCompareRequest(**snapshot["request"])
     repo = RunRepository(db)
     repo.create_run(
         run_id=run_id,
         source_env=body.label_a,
         target_env=body.label_b,
-        config_snapshot=None,
+        config_snapshot=snapshot,
         run_type="bo_comparison",
     )
     AuditService(db).log(
@@ -210,7 +213,7 @@ def compare_bo_report(
         run_id,
         {"run_type": "bo_comparison", "label_a": body.label_a, "label_b": body.label_b},
     )
-    background_tasks.add_task(_run_bo_bg, body, run_id)
+    background_tasks.add_task(_run_bo_bg, compare_body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
 
@@ -306,11 +309,16 @@ def compare_sql(
 ) -> RunStatusOut:
     _check_sql_connection_names(body, db)
     run_id = str(uuid.uuid4())
+    snapshot = {
+        "compare_request_type": "sql",
+        "request": body.model_dump(mode="json"),
+    }
     repo = RunRepository(db)
     repo.create_run(
         run_id=run_id,
         source_env=body.label_a,
         target_env=body.label_b,
+        config_snapshot=snapshot,
         run_type="sql_comparison",
     )
     AuditService(db).log(
@@ -333,11 +341,14 @@ def compare_recon_file(
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
     run_id = str(uuid.uuid4())
+    snapshot = sanitize_compare_request(run_id, "recon_file", body.model_dump(mode="json"))
+    compare_body = ReconFileCompareRequest(**snapshot["request"])
     repo = RunRepository(db)
     repo.create_run(
         run_id=run_id,
         source_env=body.label_a,
         target_env=body.label_b,
+        config_snapshot=snapshot,
         run_type="recon_file",
     )
     AuditService(db).log(
@@ -347,7 +358,7 @@ def compare_recon_file(
         run_id,
         {"run_type": "recon_file", "label_a": body.label_a, "label_b": body.label_b},
     )
-    background_tasks.add_task(_run_recon_file_bg, body, run_id)
+    background_tasks.add_task(_run_recon_file_bg, compare_body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
 

@@ -343,6 +343,8 @@ class RunRepository:
                     "source_value": str(m.source_value) if m.source_value is not None else None,
                     "target_value": str(m.target_value) if m.target_value is not None else None,
                     "mismatch_type": m.mismatch_type,
+                    "delta": m.delta,
+                    "relative_delta": m.relative_delta,
                 }
                 for m in mismatches
             ],
@@ -1062,7 +1064,7 @@ class SchemaSnapshotRepository:
 # ---------------------------------------------------------------------------
 
 class SettingsRepository:
-    """Single-row app-wide settings (id=1). Currently holds just the display/schedule timezone."""
+    """Single-row app-wide settings (id=1)."""
 
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -1070,7 +1072,7 @@ class SettingsRepository:
     def _get_or_create(self) -> AppSettings:
         row = self._db.get(AppSettings, 1)
         if row is None:
-            row = AppSettings(id=1, timezone="UTC")
+            row = AppSettings(id=1, timezone="UTC", upload_retention_days=30)
             self._db.add(row)
             self._db.commit()
             self._db.refresh(row)
@@ -1078,6 +1080,9 @@ class SettingsRepository:
 
     def get_timezone(self) -> str:
         return self._get_or_create().timezone
+
+    def get_upload_retention_days(self) -> int:
+        return int(self._get_or_create().upload_retention_days or 30)
 
     def set_timezone(self, tz_name: str) -> AppSettings:
         from zoneinfo import ZoneInfo
@@ -1087,6 +1092,16 @@ class SettingsRepository:
             raise ValueError(f"Unknown timezone: {tz_name}") from exc
         row = self._get_or_create()
         row.timezone = tz_name
+        row.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(row)
+        return row
+
+    def set_upload_retention_days(self, days: int) -> AppSettings:
+        if days < 1:
+            raise ValueError("upload_retention_days must be at least 1")
+        row = self._get_or_create()
+        row.upload_retention_days = int(days)
         row.updated_at = datetime.now(timezone.utc)
         self._db.commit()
         self._db.refresh(row)

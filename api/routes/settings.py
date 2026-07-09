@@ -13,26 +13,46 @@ router = APIRouter(tags=["settings"])
 
 class SettingsOut(BaseModel):
     timezone: str
+    upload_retention_days: int = 30
 
 
 class SettingsUpdate(BaseModel):
-    timezone: str
+    timezone: str | None = None
+    upload_retention_days: int | None = None
 
 
 @router.get("", response_model=SettingsOut)
 def get_settings(db: Session = Depends(get_session)):
-    return SettingsOut(timezone=SettingsRepository(db).get_timezone())
+    repo = SettingsRepository(db)
+    return SettingsOut(
+        timezone=repo.get_timezone(),
+        upload_retention_days=repo.get_upload_retention_days(),
+    )
 
 
 @router.put("", response_model=SettingsOut, dependencies=[Depends(require_admin)])
 def update_settings(body: SettingsUpdate, request: Request, db: Session = Depends(get_session)):
+    repo = SettingsRepository(db)
     try:
-        row = SettingsRepository(db).set_timezone(body.timezone)
+        if body.timezone is not None:
+            row = repo.set_timezone(body.timezone)
+            from api.services import scheduler as _sched_svc
+            _sched_svc.refresh_all_timezones()
+        else:
+            row = repo._get_or_create()
+        if body.upload_retention_days is not None:
+            row = repo.set_upload_retention_days(body.upload_retention_days)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    from api.services import scheduler as _sched_svc
-    _sched_svc.refresh_all_timezones()
-
-    AuditService(db).log(request, "settings.timezone_changed", "settings", 1, {"timezone": row.timezone})
-    return SettingsOut(timezone=row.timezone)
+    AuditService(db).log(
+        request,
+        "settings.updated",
+        "settings",
+        1,
+        {"timezone": row.timezone, "upload_retention_days": row.upload_retention_days},
+    )
+    return SettingsOut(
+        timezone=row.timezone,
+        upload_retention_days=int(row.upload_retention_days or 30),
+    )

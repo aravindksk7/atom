@@ -66,7 +66,17 @@ class SamplingBackend:
             missing_in_source_count=mis_count,
             value_mismatch_count=value_count,
             mismatches=mismatches,
-            mismatch_summary=self._build_mismatch_summary(mismatches, mit_count, mis_count, value_count),
+            mismatch_summary=self._build_mismatch_summary(
+                mismatches,
+                mit_count,
+                mis_count,
+                value_count,
+                {
+                    str(col): max(len(df_source) - mit_count, 0)
+                    for col in df_source.columns
+                    if col not in getattr(self._inner, "_key_columns", [])
+                },
+            ),
         )
 
     @staticmethod
@@ -75,16 +85,24 @@ class SamplingBackend:
         missing_in_target_count: int,
         missing_in_source_count: int,
         value_mismatch_count: int,
+        compared_rows_by_column: dict[str, int] | None = None,
     ) -> dict[str, dict[str, int]]:
         by_column: dict[str, int] = {}
         for mismatch in mismatches:
             if mismatch.mismatch_type in {"value_diff", "value_mismatch"}:
                 by_column[mismatch.column_name] = by_column.get(mismatch.column_name, 0) + 1
         missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
+        compared = {
+            str(column): int(count)
+            for column, count in (compared_rows_by_column or {}).items()
+            if int(count) >= 0
+        }
         if missing_rows > 0:
             by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
+            compared["<row>"] = compared.get("<row>", 0) + missing_rows
         return {
             "by_column": by_column,
+            "compared_rows_by_column": compared,
             "by_type": {
                 "value_diff": int(value_mismatch_count or 0),
                 "missing_in_target": int(missing_in_target_count or 0),

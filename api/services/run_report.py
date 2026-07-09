@@ -72,6 +72,45 @@ class ReportResult:
         return counts
 
     @property
+    def compared_rows_by_column(self) -> dict[str, int]:
+        if not isinstance(self.mismatch_summary, dict):
+            return {}
+        raw_counts = self.mismatch_summary.get("compared_rows_by_column")
+        if not isinstance(raw_counts, dict):
+            return {}
+        counts: dict[str, int] = {}
+        for raw_key, raw_value in raw_counts.items():
+            try:
+                counts[str(raw_key)] = int(raw_value or 0)
+            except (TypeError, ValueError):
+                continue
+        return counts
+
+    @property
+    def column_stats(self) -> list[dict[str, Any]]:
+        mismatches = self.mismatch_by_column
+        compared = self.compared_rows_by_column
+        columns = set(mismatches) | set(compared)
+        fallback_compared = max(self.source_row_count or 0, self.target_row_count or 0)
+        rows: list[dict[str, Any]] = []
+        for column in columns:
+            mismatch_count = int(mismatches.get(column, 0) or 0)
+            compared_rows = int(compared.get(column, fallback_compared) or 0)
+            if compared_rows <= 0 and mismatch_count > 0:
+                compared_rows = max(fallback_compared, mismatch_count)
+            match_pct = None
+            if compared_rows > 0:
+                match_pct = round(max(0.0, 100.0 * (1.0 - mismatch_count / compared_rows)), 4)
+            rows.append({
+                "column": column,
+                "mismatch_count": mismatch_count,
+                "compared_rows": compared_rows,
+                "match_pct": match_pct,
+            })
+        rows.sort(key=lambda item: (-item["mismatch_count"], item["column"] == "<row>", item["column"].lower()))
+        return rows
+
+    @property
     def mismatch_by_type(self) -> dict[str, int]:
         counts = {
             "value_diff": 0,

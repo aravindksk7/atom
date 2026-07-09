@@ -11,13 +11,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
 from api.routes.configs import _preserve_masked_secrets
 from api.schemas import (
+    ColumnMismatchStatOut,
+    DifferenceExportRequest,
+    DifferenceExportStatusOut,
     DrilldownOut,
     DrilldownRequest,
     DrilldownRow,
@@ -49,6 +52,17 @@ from api.services.mismatch_export import (
     mismatch_csv_response,
     mismatch_xlsx_response,
 )
+from api.services.difference_export import (
+    create_or_reuse_export_job,
+    export_filename,
+    export_status_out,
+    media_type_for,
+    run_difference_export_job,
+    stored_completeness_summary,
+    stored_rows_are_complete,
+    validate_difference_format,
+    write_stored_differences,
+)
 from api.services.run_report import build_run_report_snapshot
 from etl_framework.config.models import resolve_connection as _resolve_connection
 from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
@@ -61,6 +75,7 @@ _TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 
 def _test_result_out(result) -> TestResultOut:
+    mismatch_summary = getattr(result, "mismatch_summary", None)
     return TestResultOut(
         id=result.id,
         query_name=result.query_name,
@@ -79,7 +94,53 @@ def _test_result_out(result) -> TestResultOut:
         override_at=result.override_at,
         sample_rows=result.sample_rows,
         segment_summary=result.segment_summary,
+        mismatch_summary=mismatch_summary,
+        column_stats=_column_stats_from_summary(
+            mismatch_summary,
+            source_row_count=result.source_row_count,
+            target_row_count=result.target_row_count,
+        ),
     )
+
+
+def _column_stats_from_summary(
+    mismatch_summary: dict | None,
+    source_row_count: int = 0,
+    target_row_count: int = 0,
+) -> list[ColumnMismatchStatOut]:
+    if not isinstance(mismatch_summary, dict):
+        return []
+    raw_mismatches = mismatch_summary.get("by_column") or {}
+    raw_compared = mismatch_summary.get("compared_rows_by_column") or {}
+    if not isinstance(raw_mismatches, dict):
+        raw_mismatches = {}
+    if not isinstance(raw_compared, dict):
+        raw_compared = {}
+    columns = set(str(col) for col in raw_compared) | set(str(col) for col in raw_mismatches)
+    fallback_compared = max(int(source_row_count or 0), int(target_row_count or 0))
+    rows: list[ColumnMismatchStatOut] = []
+    for column in columns:
+        try:
+            mismatch_count = int(raw_mismatches.get(column, 0) or 0)
+        except (TypeError, ValueError):
+            mismatch_count = 0
+        try:
+            compared_rows = int(raw_compared.get(column, fallback_compared) or 0)
+        except (TypeError, ValueError):
+            compared_rows = fallback_compared
+        if compared_rows <= 0 and mismatch_count > 0:
+            compared_rows = max(fallback_compared, mismatch_count)
+        match_pct = None
+        if compared_rows > 0:
+            match_pct = round(max(0.0, 100.0 * (1.0 - (mismatch_count / compared_rows))), 4)
+        rows.append(ColumnMismatchStatOut(
+            column=column,
+            mismatch_count=mismatch_count,
+            compared_rows=compared_rows,
+            match_pct=match_pct,
+        ))
+    rows.sort(key=lambda item: (-item.mismatch_count, item.column == "<row>", item.column.lower()))
+    return rows
 
 
 def _wants_html(request: Request, fmt: str | None) -> bool:
@@ -507,6 +568,8 @@ def list_result_mismatches(
             source_value=m.source_value,
             target_value=m.target_value,
             mismatch_type=m.mismatch_type,
+            delta=m.delta,
+            relative_delta=m.relative_delta,
             accepted=m.accepted,
             accepted_note=m.accepted_note,
             accepted_at=m.accepted_at,
@@ -542,6 +605,102 @@ def download_mismatches(
     if format == "xlsx":
         return mismatch_xlsx_response(run_id, snapshot, rows)
     return mismatch_csv_response(run_id, rows)
+
+
+@router.get("/{run_id}/differences/download")
+def download_all_differences(
+    run_id: str,
+    format: str = "csv",
+    db: Session = Depends(get_session),
+):
+    """Download all differences when stored DB rows are known to be complete."""
+    fmt = validate_difference_format(format)
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not stored_rows_are_complete(db, run):
+        summary = stored_completeness_summary(db, run)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "requires_export_job": True,
+                "run_id": run_id,
+                "format": fmt,
+                **summary,
+            },
+        )
+    try:
+        path, _ = write_stored_differences(db, run, fmt)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type=media_type_for(fmt),
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(run_id, fmt)}"'},
+    )
+
+
+@router.post("/{run_id}/exports", response_model=DifferenceExportStatusOut, status_code=202)
+def create_difference_export(
+    run_id: str,
+    body: DifferenceExportRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
+    fmt = validate_difference_format(body.format)
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    job, created = create_or_reuse_export_job(db, run_id, fmt)
+    if created and job.status == "PENDING":
+        background_tasks.add_task(run_difference_export_job, job.export_id)
+    return export_status_out(job)
+
+
+@router.get("/{run_id}/exports/{export_id}", response_model=DifferenceExportStatusOut)
+def get_difference_export(
+    run_id: str,
+    export_id: str,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import DifferenceExportJob
+
+    job = (
+        db.query(DifferenceExportJob)
+        .filter(DifferenceExportJob.run_id == run_id, DifferenceExportJob.export_id == export_id)
+        .first()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    return export_status_out(job)
+
+
+@router.get("/{run_id}/exports/{export_id}/download")
+def download_difference_export(
+    run_id: str,
+    export_id: str,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import DifferenceExportJob
+
+    job = (
+        db.query(DifferenceExportJob)
+        .filter(DifferenceExportJob.run_id == run_id, DifferenceExportJob.export_id == export_id)
+        .first()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    if job.status != "COMPLETED" or not job.artifact_path:
+        raise HTTPException(status_code=409, detail=f"Export job is {job.status}")
+    path = Path(job.artifact_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Export artifact not found")
+    return FileResponse(
+        path,
+        media_type=media_type_for(job.format),
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(run_id, job.format, export_id)}"'},
+    )
 
 
 @router.patch(

@@ -494,6 +494,7 @@ class RunExecutor:
             mismatches=new_mismatches,
             value_mismatch_count=result.value_mismatch_count + len(extra),
             status=new_status,
+            mismatch_summary=self._append_extra_to_mismatch_summary(result, extra),
         )
 
     def _apply_pass_condition(
@@ -552,9 +553,33 @@ class RunExecutor:
             mismatches=result.mismatches + extra,
             value_mismatch_count=result.value_mismatch_count + len(extra),
             status=_TS.FAILED,
+            mismatch_summary=self._append_extra_to_mismatch_summary(result, extra),
         )
 
     # ── Freshness ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _append_extra_to_mismatch_summary(
+        result: ReconciliationResult,
+        extra: list[MismatchRecord],
+    ) -> dict[str, dict[str, int]]:
+        summary = dict(result.mismatch_summary or {})
+        by_column = dict(summary.get("by_column") or {})
+        by_type = dict(summary.get("by_type") or {})
+        compared = dict(summary.get("compared_rows_by_column") or {})
+        fallback_compared = max(int(result.source_row_count or 0), int(result.target_row_count or 0), 1)
+        for mismatch in extra:
+            column = str(mismatch.column_name or "(none)")
+            by_column[column] = int(by_column.get(column, 0) or 0) + 1
+            compared[column] = max(int(compared.get(column, 0) or 0), fallback_compared)
+            mtype = str(mismatch.mismatch_type or "value_diff")
+            by_type[mtype] = int(by_type.get(mtype, 0) or 0) + 1
+            by_type["value_diff"] = int(by_type.get("value_diff", 0) or 0) + 1
+        return {
+            "by_column": by_column,
+            "compared_rows_by_column": compared,
+            "by_type": by_type,
+        }
 
     def _build_case_freshness(self, job: JobDefinition):
         def run_freshness() -> ReconciliationResult:

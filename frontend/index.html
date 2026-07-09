@@ -1871,6 +1871,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <button @click="navigateToRunArtifact(selectedRun.run_id, 'metrics')" class="text-indigo-500 hover:underline text-xs">Metrics</button>
             <button @click="navigateToRunArtifact(selectedRun.run_id, 'logs')" class="text-indigo-500 hover:underline text-xs">Logs</button>
             <button @click="downloadRunCsv(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Export CSV</button>
+            <button @click="downloadAllDifferences(selectedRun.run_id, 'csv')"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'csv')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'csv')"></button>
+            <button @click="downloadAllDifferences(selectedRun.run_id, 'parquet')"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'parquet')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'parquet')"></button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
@@ -2028,33 +2036,39 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             </button>
                           </div>
                         </template>
-                        <!-- Mismatch Distribution -->
+                        <!-- Complete column statistics -->
                         <div class="px-3 py-2 border-t border-slate-100 mt-2">
-                          <button @click="loadMismatchDist(selectedRun.run_id, r)"
-                                  x-show="!mismatchDist[r.id]"
-                                  class="text-indigo-500 hover:underline text-xs">
-                            Load Stored Detail Distribution
-                          </button>
-                          <div class="text-[11px] text-slate-400 mt-1">
-                            Distribution is based on stored detail rows; aggregate totals are shown above.
+                          <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="text-xs text-muted font-semibold">All columns</div>
+                            <input x-model="columnStatFilters[columnStatKey('history', r)]"
+                                   class="field-input text-xs py-1 max-w-48"
+                                   placeholder="Filter columns" />
                           </div>
-                          <template x-if="mismatchDist[r.id]">
-                            <div>
-                              <div class="text-xs text-muted font-semibold mb-1">Top stored detail patterns</div>
-                              <template x-for="d in (mismatchDist[r.id] || []).slice(0,5)" :key="d.column + d.source + d.target">
-                                <div class="flex items-center gap-2 text-xs py-0.5">
-                                  <span class="font-mono text-indigo-600 w-24 truncate" x-text="d.column"></span>
-                                  <span class="text-rose-500 font-mono truncate max-w-24" x-text="d.source ?? '∅'"></span>
-                                  <span class="text-muted">→</span>
-                                  <span class="text-emerald-600 font-mono truncate max-w-24" x-text="d.target ?? '∅'"></span>
-                                  <span class="ml-auto text-slate-500 font-semibold" x-text="d.count + 'x'"></span>
-                                </div>
-                              </template>
-                              <template x-if="!mismatchDist[r.id] || mismatchDist[r.id].length === 0">
-                                <div class="text-muted text-xs">No stored detail distribution data</div>
-                              </template>
-                            </div>
-                          </template>
+                          <div class="overflow-auto max-h-48 border border-slate-100 rounded">
+                            <table class="mismatch-diff-table">
+                              <thead>
+                                <tr>
+                                  <th @click="setColumnStatSort('history', r, 'column')" class="cursor-pointer">Column</th>
+                                  <th @click="setColumnStatSort('history', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                                  <th @click="setColumnStatSort('history', r, 'compared_rows')" class="cursor-pointer">Compared</th>
+                                  <th @click="setColumnStatSort('history', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <template x-if="!r.column_stats || !r.column_stats.length">
+                                  <tr><td colspan="4" class="text-muted text-center py-2">No column statistics available</td></tr>
+                                </template>
+                                <template x-for="stat in columnStatsFor(r, 'history')" :key="stat.column">
+                                  <tr>
+                                    <td class="font-mono text-xs" x-text="stat.column"></td>
+                                    <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                                    <td x-text="stat.compared_rows"></td>
+                                    <td x-text="matchPctText(stat.match_pct)"></td>
+                                  </tr>
+                                </template>
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                         <!-- Segment breakdown (stored at run time) -->
                         <template x-if="r.segment_summary">
@@ -3367,6 +3381,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <button @click="exportCompareSettings()" class="btn-outline btn-sm text-xs">
               ↓ Export Settings
             </button>
+            <button @click="downloadAllDifferences(boCompareResult.run_id, 'csv')"
+                    :disabled="isDifferenceExportBusy(boCompareResult.run_id, 'csv')"
+                    class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                    x-text="'All CSV ' + differenceExportLabel(boCompareResult.run_id, 'csv')"></button>
+            <button @click="downloadAllDifferences(boCompareResult.run_id, 'parquet')"
+                    :disabled="isDifferenceExportBusy(boCompareResult.run_id, 'parquet')"
+                    class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                    x-text="'All Parquet ' + differenceExportLabel(boCompareResult.run_id, 'parquet')"></button>
             <button @click="reportRunId = boCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
           </div>
         </div>
@@ -3681,6 +3703,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <button @click="downloadCompareResults('csv')" class="btn-secondary btn-sm text-xs">⬇ CSV</button>
               <button @click="downloadCompareResults('xlsx')" class="btn-secondary btn-sm text-xs">⬇ Excel</button>
               <button @click="downloadCompareResults('html')" class="btn-secondary btn-sm text-xs">⬇ HTML Report</button>
+              <button @click="downloadAllDifferences(fileCompareResult.run_id, 'csv')"
+                      :disabled="isDifferenceExportBusy(fileCompareResult.run_id, 'csv')"
+                      class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                      x-text="'All CSV ' + differenceExportLabel(fileCompareResult.run_id, 'csv')"></button>
+              <button @click="downloadAllDifferences(fileCompareResult.run_id, 'parquet')"
+                      :disabled="isDifferenceExportBusy(fileCompareResult.run_id, 'parquet')"
+                      class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                      x-text="'All Parquet ' + differenceExportLabel(fileCompareResult.run_id, 'parquet')"></button>
               <button @click="reportRunId = fileCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
             </div>
           </div>
@@ -3716,22 +3746,42 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                           <span x-text="detailRowsLabel(fileExpandedDiffs[r.query_name].data, r)"></span>
                           <span x-show="fileExpandedDiffs[r.query_name].hasMore || fileExpandedDiffs[r.query_name].data.length >= 5000"
                                 class="text-amber-600 font-medium">
-                            Stored detail rows are capped; aggregate counts include all records.
+                            Stored detail rows are capped; use All CSV or All Parquet for every difference.
                           </span>
                         </div>
-                        <!-- Column summary mini-chart -->
-                        <div class="col-summary" x-show="colSummary(fileExpandedDiffs[r.query_name]?.data).length > 1">
-                          <div class="col-summary-label">Loaded detail rows by column</div>
-                          <template x-for="item in colSummary(fileExpandedDiffs[r.query_name]?.data)" :key="item.col">
-                            <div class="col-bar-row"
-                                 @click="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col = item.col">
-                              <span class="col-bar-name" x-text="item.col"></span>
-                              <div class="col-bar-track">
-                                <div class="col-bar-fill" :style="`width:${item.pct}%`"></div>
-                              </div>
-                              <span class="col-bar-count" x-text="item.count"></span>
-                            </div>
-                          </template>
+                        <!-- Complete column statistics -->
+                        <div class="px-3 py-2 border-b border-slate-100">
+                          <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="text-xs text-muted font-semibold">All columns</div>
+                            <input x-model="columnStatFilters[columnStatKey('file', r)]"
+                                   class="field-input text-xs py-1 max-w-48"
+                                   placeholder="Filter columns" />
+                          </div>
+                          <div class="overflow-auto max-h-48 border border-slate-100 rounded">
+                            <table class="mismatch-diff-table">
+                              <thead>
+                                <tr>
+                                  <th @click="setColumnStatSort('file', r, 'column')" class="cursor-pointer">Column</th>
+                                  <th @click="setColumnStatSort('file', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                                  <th @click="setColumnStatSort('file', r, 'compared_rows')" class="cursor-pointer">Compared</th>
+                                  <th @click="setColumnStatSort('file', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <template x-if="!r.column_stats || !r.column_stats.length">
+                                  <tr><td colspan="4" class="text-muted text-center py-2">No column statistics available</td></tr>
+                                </template>
+                                <template x-for="stat in columnStatsFor(r, 'file')" :key="stat.column">
+                                  <tr>
+                                    <td class="font-mono text-xs" x-text="stat.column"></td>
+                                    <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                                    <td x-text="stat.compared_rows"></td>
+                                    <td x-text="matchPctText(stat.match_pct)"></td>
+                                  </tr>
+                                </template>
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                         <!-- Filter bar -->
                         <div class="diff-filter-bar" x-show="(fileExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
@@ -3944,7 +3994,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="card">
         <div class="flex items-center justify-between mb-3">
           <div class="font-semibold text-slate-700">SQL Comparison Results</div>
-          <button @click="reportRunId = sqlCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+          <div class="flex gap-2 items-center">
+            <button @click="downloadAllDifferences(sqlCompareResult.run_id, 'csv')"
+                    :disabled="isDifferenceExportBusy(sqlCompareResult.run_id, 'csv')"
+                    class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                    x-text="'All CSV ' + differenceExportLabel(sqlCompareResult.run_id, 'csv')"></button>
+            <button @click="downloadAllDifferences(sqlCompareResult.run_id, 'parquet')"
+                    :disabled="isDifferenceExportBusy(sqlCompareResult.run_id, 'parquet')"
+                    class="btn-secondary btn-sm text-xs disabled:opacity-40"
+                    x-text="'All Parquet ' + differenceExportLabel(sqlCompareResult.run_id, 'parquet')"></button>
+            <button @click="reportRunId = sqlCompareResult.run_id; reportLoaded = false; currentView = 'reports'" class="btn-secondary btn-sm">Open in Reports →</button>
+          </div>
         </div>
         <div class="flex gap-2 flex-wrap mb-3">
           <span class="badge" :class="statusBadgeClass(sqlCompareResult.status)" x-text="sqlCompareResult.status"></span>
@@ -3977,22 +4037,42 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                         <span x-text="detailRowsLabel(sqlExpandedDiffs[r.query_name].data, r)"></span>
                         <span x-show="totalMismatches(r) > sqlExpandedDiffs[r.query_name].data.length"
                               class="text-amber-600 font-medium">
-                          Loaded detail rows are capped; aggregate counts include all records.
+                          Loaded detail rows are capped; use All CSV or All Parquet for every difference.
                         </span>
                       </div>
-                      <!-- Column summary mini-chart -->
-                      <div class="col-summary" x-show="colSummary(sqlExpandedDiffs[r.query_name]?.data).length > 1">
-                        <div class="col-summary-label">Loaded detail rows by column</div>
-                        <template x-for="item in colSummary(sqlExpandedDiffs[r.query_name]?.data)" :key="item.col">
-                          <div class="col-bar-row"
-                               @click="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col = item.col">
-                            <span class="col-bar-name" x-text="item.col"></span>
-                            <div class="col-bar-track">
-                              <div class="col-bar-fill" :style="`width:${item.pct}%`"></div>
-                            </div>
-                            <span class="col-bar-count" x-text="item.count"></span>
-                          </div>
-                        </template>
+                      <!-- Complete column statistics -->
+                      <div class="px-3 py-2 border-b border-slate-100">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                          <div class="text-xs text-muted font-semibold">All columns</div>
+                          <input x-model="columnStatFilters[columnStatKey('sql', r)]"
+                                 class="field-input text-xs py-1 max-w-48"
+                                 placeholder="Filter columns" />
+                        </div>
+                        <div class="overflow-auto max-h-48 border border-slate-100 rounded">
+                          <table class="mismatch-diff-table">
+                            <thead>
+                              <tr>
+                                <th @click="setColumnStatSort('sql', r, 'column')" class="cursor-pointer">Column</th>
+                                <th @click="setColumnStatSort('sql', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                                <th @click="setColumnStatSort('sql', r, 'compared_rows')" class="cursor-pointer">Compared</th>
+                                <th @click="setColumnStatSort('sql', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-if="!r.column_stats || !r.column_stats.length">
+                                <tr><td colspan="4" class="text-muted text-center py-2">No column statistics available</td></tr>
+                              </template>
+                              <template x-for="stat in columnStatsFor(r, 'sql')" :key="stat.column">
+                                <tr>
+                                  <td class="font-mono text-xs" x-text="stat.column"></td>
+                                  <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                                  <td x-text="stat.compared_rows"></td>
+                                  <td x-text="matchPctText(stat.match_pct)"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                       <!-- Filter bar -->
                       <div class="diff-filter-bar" x-show="(sqlExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
@@ -4057,6 +4137,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             </template>
                           </tbody>
                         </table>
+                      </div>
+                      <div x-show="sqlExpandedDiffs[r.query_name].hasMore" class="flex items-center gap-3 px-3 py-2 border-t border-slate-100">
+                        <button @click="loadMoreSQLDiffs(r.query_name)"
+                                :disabled="sqlExpandedDiffs[r.query_name].loadingMore"
+                                class="btn-secondary btn-sm text-xs disabled:opacity-40">
+                          <span x-show="!sqlExpandedDiffs[r.query_name].loadingMore">Load next 100 rows</span>
+                          <span x-show="sqlExpandedDiffs[r.query_name].loadingMore">Loading...</span>
+                        </button>
+                        <span class="text-xs text-slate-400" x-text="detailRowsLabel(sqlExpandedDiffs[r.query_name].data, r)"></span>
                       </div>
                     </div>
                   </template>
@@ -4268,7 +4357,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <table class="data-table text-xs">
               <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th><th>Delta</th></tr></thead>
               <tbody>
-                <template x-for="(m, idx) in mismatchDiffResult.new.slice(0, 50)" :key="idx">
+                <template x-for="(m, idx) in mismatchDiffResult.new.slice(0, mismatchDiffVisible.new)" :key="idx">
                   <tr>
                     <td class="font-mono" x-text="m.column_name"></td>
                     <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
@@ -4279,7 +4368,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </template>
               </tbody>
             </table>
-            <p x-show="mismatchDiffResult.new.length > 50" class="text-xs text-slate-400 mt-1" x-text="'Showing 50 of ' + mismatchDiffResult.new.length"></p>
+            <div x-show="mismatchDiffResult.new.length > mismatchDiffVisible.new" class="mt-2">
+              <button @click="showMoreMismatchDiff('new')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.new + ' of ' + mismatchDiffResult.new.length"></span>
+            </div>
           </div>
         </template>
         <template x-if="mismatchDiffResult.resolved.length">
@@ -4288,7 +4380,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <table class="data-table text-xs">
               <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th></tr></thead>
               <tbody>
-                <template x-for="(m, idx) in mismatchDiffResult.resolved.slice(0, 50)" :key="idx">
+                <template x-for="(m, idx) in mismatchDiffResult.resolved.slice(0, mismatchDiffVisible.resolved)" :key="idx">
                   <tr>
                     <td class="font-mono" x-text="m.column_name"></td>
                     <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
@@ -4298,7 +4390,33 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </template>
               </tbody>
             </table>
-            <p x-show="mismatchDiffResult.resolved.length > 50" class="text-xs text-slate-400 mt-1" x-text="'Showing 50 of ' + mismatchDiffResult.resolved.length"></p>
+            <div x-show="mismatchDiffResult.resolved.length > mismatchDiffVisible.resolved" class="mt-2">
+              <button @click="showMoreMismatchDiff('resolved')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.resolved + ' of ' + mismatchDiffResult.resolved.length"></span>
+            </div>
+          </div>
+        </template>
+        <template x-if="mismatchDiffResult.persistent.length">
+          <div>
+            <div class="text-xs font-semibold text-amber-600 mb-1">Persistent Mismatches</div>
+            <table class="data-table text-xs">
+              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th><th>Delta</th></tr></thead>
+              <tbody>
+                <template x-for="(m, idx) in mismatchDiffResult.persistent.slice(0, mismatchDiffVisible.persistent)" :key="idx">
+                  <tr>
+                    <td class="font-mono" x-text="m.column_name"></td>
+                    <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
+                    <td x-text="m.source_value ?? 'NULL'"></td>
+                    <td x-text="m.target_value ?? 'NULL'"></td>
+                    <td x-text="m.delta != null ? m.delta.toFixed(4) : '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div x-show="mismatchDiffResult.persistent.length > mismatchDiffVisible.persistent" class="mt-2">
+              <button @click="showMoreMismatchDiff('persistent')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.persistent + ' of ' + mismatchDiffResult.persistent.length"></span>
+            </div>
           </div>
         </template>
       </div>
@@ -4454,6 +4572,39 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </template>
         <template x-if="!drawer.loading && drawer.rows.length === 0">
           <div class="empty-state"><div class="empty-state-title">No mismatch details found</div></div>
+        </template>
+
+        <template x-if="drawer.result && drawer.result.column_stats && drawer.result.column_stats.length">
+          <div class="mb-3 border border-slate-100 rounded overflow-hidden">
+            <div class="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50">
+              <div class="text-xs text-muted font-semibold">All columns</div>
+              <input x-model="columnStatFilters[columnStatKey('drawer', drawer.result)]"
+                     class="field-input text-xs py-1 max-w-48"
+                     placeholder="Filter columns" />
+            </div>
+            <div class="overflow-auto max-h-48">
+              <table class="mismatch-diff-table">
+                <thead>
+                  <tr>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer">Column</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer">Compared</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer">Match %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="stat in columnStatsFor(drawer.result, 'drawer')" :key="stat.column">
+                    <tr>
+                      <td class="font-mono text-xs" x-text="stat.column"></td>
+                      <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                      <td x-text="stat.compared_rows"></td>
+                      <td x-text="matchPctText(stat.match_pct)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </template>
 
         <template x-if="!drawer.loading && drawer.rows.length > 0">

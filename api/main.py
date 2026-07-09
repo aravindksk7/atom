@@ -72,6 +72,14 @@ def on_startup():
     configure_logging()
     configure_tracing(enabled=False)
     init_db()
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import SettingsRepository
+    from api.services.upload_store import cleanup_expired_uploads
+    db = SessionLocal()
+    try:
+        cleanup_expired_uploads(SettingsRepository(db).get_upload_retention_days())
+    finally:
+        db.close()
     from api.services import scheduler as _sched
     _sched.start()
 

@@ -229,6 +229,44 @@
       </div>
     </div>
 
+    <div class="analytics-panel" id="all-columns-panel" style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <div class="analytics-title" style="margin-bottom:0">All Columns</div>
+        <input id="all-columns-filter" type="text" placeholder="Filter columns or tests..."
+               oninput="filterAllColumns()"
+               style="background:rgba(255,255,255,0.06);border:1px solid var(--border);color:var(--fg);border-radius:4px;padding:6px 8px;min-width:220px">
+      </div>
+      <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+        <table id="all-columns-table" style="margin:0">
+          <thead>
+            <tr>
+              <th onclick="sortAllColumns(0, 'text')" style="cursor:pointer">Test</th>
+              <th onclick="sortAllColumns(1, 'text')" style="cursor:pointer">Column</th>
+              <th onclick="sortAllColumns(2, 'num')" style="cursor:pointer">Mismatch Count</th>
+              <th onclick="sortAllColumns(3, 'num')" style="cursor:pointer">Compared Rows</th>
+              <th onclick="sortAllColumns(4, 'num')" style="cursor:pointer">Match %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for result in suite.reconciliation_results %}
+              {% for stat in result.column_stats %}
+              <tr data-all-column-row
+                  data-search="{{ result.query_name }} {{ stat.column }}">
+                <td style="font-family:monospace">{{ result.query_name }}</td>
+                <td style="font-family:monospace">{{ stat.column }}</td>
+                <td data-sort="{{ stat.mismatch_count }}">{{ stat.mismatch_count }}</td>
+                <td data-sort="{{ stat.compared_rows }}">{{ stat.compared_rows }}</td>
+                <td data-sort="{{ stat.match_pct if stat.match_pct is not none else -1 }}">
+                  {{ "%.2f"|format(stat.match_pct) if stat.match_pct is not none else "N/A" }}
+                </td>
+              </tr>
+              {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div id="recon">
       <div id="filter-toolbar">
         <select id="filter-test" onchange="filterState.test=this.value;applyFilters()">
@@ -317,7 +355,7 @@
             </summary>
             {% if total_mismatches > shown_mismatches %}
             <p style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
-              Detail rows are capped; aggregate counts above show the full mismatch total.
+              {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences.
             </p>
             {% endif %}
             <table>
@@ -373,7 +411,7 @@
           <details>
             <summary>{{ result.query_name }} Mismatches (0 detail rows stored of {{ result.total_issues }})</summary>
             <p style="margin:6px 0;color:var(--muted);font-size:0.9em">
-              No mismatch detail rows are stored for this result, but aggregate counts above show the full mismatch total.
+              0 of {{ result.total_issues }} rows shown; download the full differences export for all differences.
             </p>
           </details>
         {% endif %}
@@ -406,6 +444,29 @@
   function escHtml(s) {
     return String(s==null?'':s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  var allColumnsSort = { index: 2, dir: -1 };
+  function filterAllColumns() {
+    var q = (document.getElementById('all-columns-filter')?.value || '').toLowerCase();
+    document.querySelectorAll('[data-all-column-row]').forEach(function(row) {
+      row.style.display = (row.dataset.search || '').toLowerCase().includes(q) ? '' : 'none';
+    });
+  }
+  function sortAllColumns(index, kind) {
+    var table = document.getElementById('all-columns-table');
+    if(!table || !table.tBodies.length) return;
+    var tbody = table.tBodies[0];
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    var dir = allColumnsSort.index === index ? -allColumnsSort.dir : (kind === 'num' ? -1 : 1);
+    allColumnsSort = { index:index, dir:dir };
+    rows.sort(function(a,b) {
+      var av = a.cells[index]?.dataset.sort || a.cells[index]?.textContent || '';
+      var bv = b.cells[index]?.dataset.sort || b.cells[index]?.textContent || '';
+      if(kind === 'num') return (parseFloat(av) - parseFloat(bv)) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+    rows.forEach(function(row){ tbody.appendChild(row); });
   }
 
   function totalIssueCount() {

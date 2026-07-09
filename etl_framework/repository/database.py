@@ -84,6 +84,35 @@ def _ensure_compare_columns(bind) -> None:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN segment_summary JSON"))
         if "mismatch_summary" not in test_result_cols:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN mismatch_summary JSON"))
+        if "delta" not in mismatch_cols:
+            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN delta FLOAT"))
+        if "relative_delta" not in mismatch_cols:
+            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN relative_delta FLOAT"))
+
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS difference_export_jobs ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "export_id VARCHAR(36) NOT NULL UNIQUE, "
+            "run_id VARCHAR(36) NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE, "
+            "format VARCHAR(20) NOT NULL, "
+            "status VARCHAR(20) NOT NULL DEFAULT 'PENDING', "
+            "artifact_path TEXT, "
+            "row_count INTEGER NOT NULL DEFAULT 0, "
+            "error_message TEXT, "
+            "metadata_json JSON, "
+            "created_at DATETIME NOT NULL, "
+            "started_at DATETIME, "
+            "completed_at DATETIME, "
+            "recomputed_at DATETIME)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_difference_export_jobs_export_id "
+            "ON difference_export_jobs (export_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_difference_export_jobs_run_id "
+            "ON difference_export_jobs (run_id)"
+        ))
 
         # --- P0: new tables (created by create_all; ensure idempotent) ---
         conn.execute(text(
@@ -328,11 +357,21 @@ def _ensure_compare_columns(bind) -> None:
             "CREATE TABLE IF NOT EXISTS app_settings ("
             "id INTEGER PRIMARY KEY, "
             "timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', "
+            "upload_retention_days INTEGER NOT NULL DEFAULT 30, "
             "updated_at DATETIME)"
         ))
         conn.execute(text(
             "INSERT OR IGNORE INTO app_settings (id, timezone) VALUES (1, 'UTC')"
         ))
+        app_settings_cols = (
+            {col["name"] for col in inspector.get_columns("app_settings")}
+            if "app_settings" in tables else set()
+        )
+        if app_settings_cols and "upload_retention_days" not in app_settings_cols:
+            conn.execute(text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN upload_retention_days INTEGER NOT NULL DEFAULT 30"
+            ))
 
 
 def _backfill_schedule_selections(bind) -> None:

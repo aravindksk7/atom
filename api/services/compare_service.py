@@ -476,6 +476,22 @@ class CompareService:
                     status=TS.PASSED if status == "PASSED" else TS.FAILED,
                     executed_at=datetime.now(timezone.utc),
                     duration_seconds=0.0,
+                    mismatch_summary={
+                        "by_column": {
+                            metric: 1
+                            for metric in compared_metrics
+                            if a.get(metric) != b.get(metric)
+                        },
+                        "compared_rows_by_column": {
+                            metric: 1
+                            for metric in compared_metrics
+                        },
+                        "by_type": {
+                            "value_diff": max(0, differences),
+                            "missing_in_target": 0,
+                            "missing_in_source": 0,
+                        },
+                    },
                 )
                 tr = self._repo.add_test_result(run_id, synthetic)
                 if status != "PASSED":

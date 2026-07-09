@@ -116,7 +116,8 @@ class ReconciliationEngine:
                             status=TestStatus.PASSED,
                             executed_at=executed_at,
                             duration_seconds=time.monotonic() - t0,
-                            schema_diff=None,
+                        schema_diff=None,
+                        mismatch_summary=self._build_mismatch_summary(0, 0, 0),
                         )
                         return self._apply_slo(early_result, max_duration_seconds)
 
@@ -173,7 +174,29 @@ class ReconciliationEngine:
                         df_source_norm,
                         df_target_norm,
                     )
-                    mismatch_summary = None
+                    _, _, value_counts_by_column = self._find_value_mismatches(
+                        pd.merge(
+                            df_source_norm,
+                            df_target_norm,
+                            on=self._key_columns,
+                            how="outer",
+                            indicator=True,
+                            suffixes=("_src", "_tgt"),
+                        ).query("_merge == 'both'"),
+                        df_source_norm,
+                    )
+                    compared_rows_by_column = {
+                        str(col): int(matched_count)
+                        for col in df_source_norm.columns
+                        if col not in self._key_columns and not self._is_excluded_column(col)
+                    }
+                    mismatch_summary = self._build_mismatch_summary(
+                        mit_count,
+                        mis_count,
+                        value_count,
+                        value_counts_by_column,
+                        compared_rows_by_column,
+                    )
                 total_issues = mit_count + mis_count + value_count
                 result = ReconciliationResult(
                     query_name=query_name,
@@ -380,6 +403,11 @@ class ReconciliationEngine:
             both,
             df_source,
         )
+        compared_rows_by_column = {
+            str(col): int(len(both))
+            for col in df_source.columns
+            if col not in self._key_columns and not self._is_excluded_column(col)
+        }
 
         all_mismatches = (mit_records + mis_records + value_records)[: self._mismatch_row_limit]
         total_issues = mit_count + mis_count + value_count
@@ -412,6 +440,7 @@ class ReconciliationEngine:
                 mis_count,
                 value_count,
                 value_counts_by_column,
+                compared_rows_by_column,
             ),
         )
 
@@ -421,17 +450,25 @@ class ReconciliationEngine:
         missing_in_source_count: int,
         value_mismatch_count: int,
         value_counts_by_column: dict[str, int] | None = None,
+        compared_rows_by_column: dict[str, int] | None = None,
     ) -> dict[str, dict[str, int]]:
         by_column = {
             str(column): int(count)
             for column, count in (value_counts_by_column or {}).items()
             if int(count) > 0
         }
+        compared = {
+            str(column): int(count)
+            for column, count in (compared_rows_by_column or {}).items()
+            if int(count) >= 0
+        }
         missing_row_count = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
         if missing_row_count > 0:
             by_column["<row>"] = by_column.get("<row>", 0) + missing_row_count
+            compared["<row>"] = compared.get("<row>", 0) + missing_row_count
         return {
             "by_column": by_column,
+            "compared_rows_by_column": compared,
             "by_type": {
                 "value_diff": int(value_mismatch_count or 0),
                 "missing_in_target": int(missing_in_target_count or 0),

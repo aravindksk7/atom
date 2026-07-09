@@ -514,6 +514,12 @@ function app() {
     mismatchDiffRunLabelB: 'Run B',
     mismatchDiffLoading: false,
     mismatchDiffResult: null,
+    mismatchDiffVisible: { new: 50, resolved: 50, persistent: 50 },
+
+    // Full differences export jobs
+    differenceExports: {},
+    columnStatFilters: {},
+    columnStatSort: {},
 
     // Schema Explorer (Config tab)
     schemaExplorerId: null,
@@ -1748,6 +1754,40 @@ function app() {
       return parts.length ? parts.join(' / ') : '0';
     },
 
+    columnStatKey(scope, r) {
+      return `${scope}:${r?.id ?? r?.query_name ?? 'result'}`;
+    },
+
+    columnStatsFor(r, scope = 'default') {
+      const key = this.columnStatKey(scope, r);
+      const filter = (this.columnStatFilters[key] || '').toLowerCase();
+      const sort = this.columnStatSort[key] || { field: 'mismatch_count', dir: -1 };
+      const rows = [...(r?.column_stats || [])].filter(row => {
+        if (!filter) return true;
+        return String(row.column || '').toLowerCase().includes(filter);
+      });
+      rows.sort((a, b) => {
+        const av = a[sort.field];
+        const bv = b[sort.field];
+        if (typeof av === 'number' || typeof bv === 'number') {
+          return ((Number(av) || 0) - (Number(bv) || 0)) * sort.dir;
+        }
+        return String(av || '').localeCompare(String(bv || '')) * sort.dir;
+      });
+      return rows;
+    },
+
+    setColumnStatSort(scope, r, field) {
+      const key = this.columnStatKey(scope, r);
+      const current = this.columnStatSort[key] || { field: 'mismatch_count', dir: -1 };
+      const dir = current.field === field ? -current.dir : (field === 'column' ? 1 : -1);
+      this.columnStatSort = { ...this.columnStatSort, [key]: { field, dir } };
+    },
+
+    matchPctText(value) {
+      return value == null ? 'N/A' : `${Number(value).toFixed(2)}%`;
+    },
+
     detailRowsLabel(rows, r) {
       const loaded = Array.isArray(rows) ? rows.length : 0;
       const total = this.totalMismatches(r || {});
@@ -2389,14 +2429,29 @@ function app() {
         this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { ...cur, open: !cur.open } };
         return;
       }
-      this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: true, data: [], error: null, hasMore: false, offset: 0 } };
+      this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: true, loadingMore: false, data: [], error: null, hasMore: false, offset: 0, resultId: r.id } };
       try {
-        const details = await api('GET', `/api/runs/${runId}/mismatches?result_name=${encodeURIComponent(name)}&limit=100&offset=0`);
-        const rows = Array.isArray(details) ? details : (details.items || []);
-        const hasMore = Array.isArray(details) ? false : (details.has_more ?? false);
-        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, data: rows, error: null, hasMore, offset: rows.length } };
+        const rows = await api('GET', `/api/runs/${runId}/results/${r.id}/mismatches?limit=100&offset=0`);
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, loadingMore: false, data: rows || [], error: null, hasMore: (rows || []).length === 100, offset: 0, resultId: r.id } };
       } catch (e) {
-        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, data: [], error: e.message, hasMore: false, offset: 0 } };
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { open: true, loading: false, loadingMore: false, data: [], error: e.message, hasMore: false, offset: 0, resultId: r.id } };
+      }
+    },
+
+    async loadMoreSQLDiffs(name) {
+      const runId = this.sqlCompareResult?.run_id;
+      const cur = this.sqlExpandedDiffs[name];
+      if (!runId || !cur || cur.loadingMore) return;
+      const nextOffset = (cur.offset || 0) + 100;
+      this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { ...cur, loadingMore: true } };
+      try {
+        const rows = await api('GET', `/api/runs/${runId}/results/${cur.resultId}/mismatches?limit=100&offset=${nextOffset}`);
+        this.sqlExpandedDiffs = {
+          ...this.sqlExpandedDiffs,
+          [name]: { ...cur, loadingMore: false, data: [...cur.data, ...(rows || [])], offset: nextOffset, hasMore: (rows || []).length === 100 },
+        };
+      } catch (e) {
+        this.sqlExpandedDiffs = { ...this.sqlExpandedDiffs, [name]: { ...cur, loadingMore: false, error: e.message || 'Failed to load more' } };
       }
     },
 
@@ -2468,6 +2523,7 @@ function app() {
       }
       this.mismatchDiffLoading = true;
       this.mismatchDiffResult = null;
+      this.mismatchDiffVisible = { new: 50, resolved: 50, persistent: 50 };
       try {
         const payload = {
           run_id_a: this.mismatchDiffRunIdA.trim(),
@@ -2495,6 +2551,86 @@ function app() {
       } catch (e) {
         this.toast('error', 'Download failed', e.message);
       }
+    },
+
+    showMoreMismatchDiff(kind) {
+      this.mismatchDiffVisible = {
+        ...this.mismatchDiffVisible,
+        [kind]: (this.mismatchDiffVisible[kind] || 50) + 50,
+      };
+    },
+
+    differenceExportKey(runId, format) {
+      return `${runId}:${format}`;
+    },
+
+    differenceExportState(runId, format) {
+      return this.differenceExports[this.differenceExportKey(runId, format)] || {};
+    },
+
+    differenceExportLabel(runId, format) {
+      const st = this.differenceExportState(runId, format);
+      if (st.status === 'PENDING' || st.status === 'RUNNING') return 'Preparing...';
+      if (st.status === 'FAILED') return 'Retry';
+      return format.toUpperCase();
+    },
+
+    isDifferenceExportBusy(runId, format) {
+      const st = this.differenceExportState(runId, format);
+      return st.status === 'PENDING' || st.status === 'RUNNING';
+    },
+
+    async downloadAllDifferences(runId, format) {
+      if (!runId || this.isDifferenceExportBusy(runId, format)) return;
+      const key = this.differenceExportKey(runId, format);
+      this.differenceExports = { ...this.differenceExports, [key]: { status: 'CHECKING' } };
+      try {
+        const token = normalizeToken(sessionStorage.getItem('etl_token'));
+        const headers = token ? { Authorization: 'Bearer ' + token } : {};
+        const resp = await fetch(API + `/api/runs/${runId}/differences/download?format=${format}`, { headers });
+        if (resp.status === 202) {
+          const info = await resp.json();
+          this.differenceExports = { ...this.differenceExports, [key]: { status: 'PENDING', info } };
+          const job = await api('POST', `/api/runs/${runId}/exports`, { format });
+          this.differenceExports = { ...this.differenceExports, [key]: job };
+          await this.pollDifferenceExport(runId, job.export_id, format);
+          return;
+        }
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
+        }
+        const blob = await resp.blob();
+        const disposition = resp.headers.get('content-disposition') || '';
+        const fallback = `all_differences_${runId}.${format === 'parquet' ? 'parquet' : 'csv'}`;
+        const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
+        triggerDownload(blob, filename);
+        this.differenceExports = { ...this.differenceExports, [key]: { status: 'DOWNLOADED' } };
+      } catch (e) {
+        this.differenceExports = { ...this.differenceExports, [key]: { status: 'FAILED', error_message: e.message } };
+        this.toast('error', 'Full export failed', e.message);
+      }
+    },
+
+    async pollDifferenceExport(runId, exportId, format) {
+      const key = this.differenceExportKey(runId, format);
+      for (let attempt = 0; attempt < 240; attempt++) {
+        const status = await api('GET', `/api/runs/${runId}/exports/${exportId}`);
+        this.differenceExports = { ...this.differenceExports, [key]: status };
+        if (status.status === 'COMPLETED') {
+          const { blob, disposition } = await apiBlob(`/api/runs/${runId}/exports/${exportId}/download`);
+          const fallback = `all_differences_${runId}_${exportId}.${format === 'parquet' ? 'parquet' : 'csv'}`;
+          const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
+          triggerDownload(blob, filename);
+          this.differenceExports = { ...this.differenceExports, [key]: { ...status, status: 'DOWNLOADED' } };
+          return;
+        }
+        if (status.status === 'FAILED') {
+          throw new Error(status.error_message || 'Export job failed');
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      throw new Error('Export job timed out');
     },
 
     toggleAcceptForm(mismatchId) {

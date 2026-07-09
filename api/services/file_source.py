@@ -47,6 +47,9 @@ def _default_upload_bases() -> tuple[Path, ...]:
     default_base = _default_upload_base()
     if default_base is not None:
         bases.append(default_base)
+    if "COMPARE_UPLOAD_ROOT" in os.environ:
+        bases.append(Path(os.environ["COMPARE_UPLOAD_ROOT"]).resolve())
+    bases.append(Path("reports/uploads").resolve())
 
     deduped: list[Path] = []
     seen: set[str] = set()
