@@ -185,6 +185,7 @@ def _make_test_result(sample_rows):
     r.override_at = None
     r.sample_rows = sample_rows
     r.segment_summary = None
+    r.mismatch_summary = None
     return r
 
 

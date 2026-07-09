@@ -128,7 +128,7 @@ class TestReportTemplateSmoke:
         assert 'data-total-issues="12000"' in html
         assert ">12000</div>" in html
         assert "Showing first 2 of 12000" in html
-        assert "Detail rows are capped" in html
+        assert "download the full differences export for all differences" in html
 
     def test_effective_status_is_rendered_with_raw_status_note(self, tmp_path):
         suite = _make_suite()
