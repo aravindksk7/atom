@@ -26,6 +26,7 @@ class ReportResult:
     override_at: datetime | None = None
     sample_rows: list[dict] | None = None
     segment_summary: dict | None = None
+    mismatch_summary: dict | None = None
     mismatches: list[Any] = field(default_factory=list)
     schema_diff: Any = None
     total_issues_override: int | None = None
@@ -39,6 +40,54 @@ class ReportResult:
             + (self.missing_in_target_count or 0)
             + (self.missing_in_source_count or 0)
         )
+
+    def _summary_counts(self, key: str) -> dict[str, int]:
+        if not isinstance(self.mismatch_summary, dict):
+            return {}
+        raw_counts = self.mismatch_summary.get(key)
+        if not isinstance(raw_counts, dict):
+            return {}
+        counts: dict[str, int] = {}
+        for raw_key, raw_value in raw_counts.items():
+            try:
+                count = int(raw_value or 0)
+            except (TypeError, ValueError):
+                continue
+            if count > 0:
+                counts[str(raw_key)] = count
+        return counts
+
+    @property
+    def mismatch_by_column(self) -> dict[str, int]:
+        summary_counts = self._summary_counts("by_column")
+        if summary_counts:
+            return summary_counts
+        counts: dict[str, int] = {}
+        for mismatch in self.mismatches:
+            column = str(getattr(mismatch, "column_name", "") or "(none)")
+            counts[column] = counts.get(column, 0) + 1
+        missing_rows = (self.missing_in_target_count or 0) + (self.missing_in_source_count or 0)
+        if missing_rows > 0:
+            counts["<row>"] = missing_rows
+        return counts
+
+    @property
+    def mismatch_by_type(self) -> dict[str, int]:
+        counts = {
+            "value_diff": 0,
+            "missing_in_target": 0,
+            "missing_in_source": 0,
+        }
+        summary_counts = self._summary_counts("by_type")
+        if summary_counts:
+            counts.update(summary_counts)
+            return counts
+        counts.update({
+            "value_diff": self.value_mismatch_count or 0,
+            "missing_in_target": self.missing_in_target_count or 0,
+            "missing_in_source": self.missing_in_source_count or 0,
+        })
+        return counts
 
 
 @dataclass
@@ -168,6 +217,7 @@ def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> Run
             override_at=getattr(result, "override_at", None),
             sample_rows=getattr(result, "sample_rows", None),
             segment_summary=getattr(result, "segment_summary", None),
+            mismatch_summary=getattr(result, "mismatch_summary", None),
             mismatches=list(getattr(result, "mismatches", []) or []) if include_mismatches else [],
             schema_diff=getattr(result, "schema_diff", None),
             total_issues_override=getattr(result, "total_issues", None),

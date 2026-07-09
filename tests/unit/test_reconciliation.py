@@ -82,6 +82,32 @@ def test_identical_data_passes_with_zero_mismatches():
     assert result.total_issues == 0
 
 
+def test_capped_mismatch_details_keep_uncapped_column_aggregates():
+    row_count = 6_000
+    source = pd.DataFrame({
+        "id": range(row_count),
+        "amount": [10.0] * row_count,
+        "status": ["open"] * row_count,
+    })
+    target = pd.DataFrame({
+        "id": range(row_count),
+        "amount": [11.0] * row_count,
+        "status": ["closed"] * row_count,
+    })
+    engine = _make_engine(source, target, mismatch_row_limit=5_000)
+
+    result = engine.reconcile("SELECT 1", "orders")
+
+    assert len(result.mismatches) == 5_000
+    assert result.value_mismatch_count == 12_000
+    assert result.mismatch_by_column == {"amount": 6_000, "status": 6_000}
+    assert result.mismatch_by_type == {
+        "value_diff": 12_000,
+        "missing_in_target": 0,
+        "missing_in_source": 0,
+    }
+
+
 def test_missing_row_in_target_counted():
     source = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
     target = pd.DataFrame({"id": [1], "val": ["a"]})

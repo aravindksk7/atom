@@ -220,11 +220,11 @@
 
     <div class="analytics-row" id="analytics-row">
       <div class="analytics-panel" id="col-heatmap-panel">
-        <div class="analytics-title">Top Columns by Displayed Mismatch Count</div>
+        <div class="analytics-title">Top Columns by Mismatch Count</div>
         <div id="col-heatmap"><span style="color:var(--muted);font-size:0.85em">No mismatches recorded.</span></div>
       </div>
       <div class="analytics-panel" id="type-donut-panel">
-        <div class="analytics-title">Displayed Mismatch Type Breakdown</div>
+        <div class="analytics-title">Mismatch Type Breakdown</div>
         <div id="type-donut"><span style="color:var(--muted);font-size:0.85em">No mismatches recorded.</span></div>
       </div>
     </div>
@@ -389,6 +389,19 @@
   </div>
 
   <script>
+  var aggregateMismatchData = [
+    {% for result in suite.reconciliation_results %}
+    {
+      byColumn: {{ result.mismatch_by_column | default(none) | tojson }} || {},
+      byType: {{ result.mismatch_by_type | default(none) | tojson }} || {
+        value_diff: {{ result.value_mismatch_count | default(0) | int }},
+        missing_in_target: {{ result.missing_in_target_count | default(0) | int }},
+        missing_in_source: {{ result.missing_in_source_count | default(0) | int }}
+      },
+      totalIssues: {{ result.total_issues | int }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
   // ── Helpers ──────────────────────────────────────────────────────────────
   function escHtml(s) {
     return String(s==null?'':s)
@@ -400,6 +413,33 @@
     var raw = stat ? stat.dataset.totalIssues : '';
     var parsed = parseInt(raw || '0', 10);
     return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function addCount(target, key, value) {
+    var count = parseInt(value || 0, 10);
+    if(!key || isNaN(count) || count <= 0) return;
+    target[key] = (target[key] || 0) + count;
+  }
+
+  function aggregateColumnCounts() {
+    var counts = {};
+    aggregateMismatchData.forEach(function(item) {
+      Object.entries(item.byColumn || {}).forEach(function(entry) {
+        addCount(counts, entry[0], entry[1]);
+      });
+    });
+    return counts;
+  }
+
+  function aggregateTypeCounts() {
+    var counts = {value_diff:0, missing_in_target:0, missing_in_source:0};
+    aggregateMismatchData.forEach(function(item) {
+      Object.entries(item.byType || {}).forEach(function(entry) {
+        var key = entry[0] === 'value_mismatch' ? 'value_diff' : entry[0];
+        addCount(counts, key in counts ? key : 'value_diff', entry[1]);
+      });
+    });
+    return counts;
   }
 
   function updateFilterCount(shown, displayed) {
@@ -545,11 +585,13 @@
 
   // ── Column heat map ──────────────────────────────────────────────────────
   function buildHeatmap(){
-    var counts={};
-    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
-      var c=tr.dataset.column||'(none)';
-      counts[c]=(counts[c]||0)+1;
-    });
+    var counts=aggregateColumnCounts();
+    if(!Object.keys(counts).length) {
+      document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+        var c=tr.dataset.column||'(none)';
+        counts[c]=(counts[c]||0)+1;
+      });
+    }
     var stat=document.getElementById('stat-total-mm');
     if(stat) stat.textContent=totalIssueCount();
     var sorted=Object.entries(counts).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
@@ -581,12 +623,15 @@
 
   // ── Mismatch type donut ───────────────────────────────────────────────────
   function buildDonut(){
-    var counts={value_diff:0,missing_in_target:0,missing_in_source:0};
-    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
-      var t=tr.dataset.type === 'value_mismatch' ? 'value_diff' : tr.dataset.type;
-      if(t in counts) counts[t]++; else counts.value_diff++;
-    });
+    var counts=aggregateTypeCounts();
     var total=Object.values(counts).reduce(function(a,b){return a+b;},0);
+    if(!total) {
+      document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+        var t=tr.dataset.type === 'value_mismatch' ? 'value_diff' : tr.dataset.type;
+        if(t in counts) counts[t]++; else counts.value_diff++;
+      });
+      total=Object.values(counts).reduce(function(a,b){return a+b;},0);
+    }
     if(!total) return;
     var colors={value_diff:'#fbbf24',missing_in_target:'#38bdf8',missing_in_source:'#a78bfa'};
     var labels={value_diff:'Value diff',missing_in_target:'Missing →',missing_in_source:'Missing ←'};
@@ -615,7 +660,7 @@
       '<svg width="160" height="160" xmlns="http://www.w3.org/2000/svg">'+
       paths+
       '<text x="'+cx+'" y="'+(cy-6)+'" text-anchor="middle" font-size="22" font-weight="bold" fill="#f4f7fb">'+total+'</text>'+
-      '<text x="'+cx+'" y="'+(cy+14)+'" text-anchor="middle" font-size="11" fill="#8491a3">displayed</text>'+
+      '<text x="'+cx+'" y="'+(cy+14)+'" text-anchor="middle" font-size="11" fill="#8491a3">total</text>'+
       '</svg><div>'+legend+'</div></div>';
     var container=document.getElementById('type-donut');
     if(container) container.innerHTML=html;

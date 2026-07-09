@@ -82,6 +82,8 @@ def _ensure_compare_columns(bind) -> None:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN sample_rows JSON"))
         if "segment_summary" not in test_result_cols:
             conn.execute(text("ALTER TABLE test_results ADD COLUMN segment_summary JSON"))
+        if "mismatch_summary" not in test_result_cols:
+            conn.execute(text("ALTER TABLE test_results ADD COLUMN mismatch_summary JSON"))
 
         # --- P0: new tables (created by create_all; ensure idempotent) ---
         conn.execute(text(

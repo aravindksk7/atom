@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 import pandas as pd
 from etl_framework.reconciliation.models import MismatchRecord
 
@@ -12,6 +12,7 @@ class BackendCompareResult:
     missing_in_source_count: int
     value_mismatch_count: int
     mismatches: list[MismatchRecord]
+    mismatch_summary: dict[str, Any] | None = None
 
 
 @runtime_checkable

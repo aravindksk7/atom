@@ -321,6 +321,7 @@ class RunRepository:
             executed_at=result.executed_at,
             sample_rows=result.sample_rows,
             segment_summary=result.segment_summary,
+            mismatch_summary=result.mismatch_summary,
         )
         self._db.add(tr)
         self._db.commit()

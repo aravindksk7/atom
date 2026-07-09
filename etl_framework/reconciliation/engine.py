@@ -166,12 +166,14 @@ class ReconciliationEngine:
                     mit_count = backend_result.missing_in_target_count
                     mis_count = backend_result.missing_in_source_count
                     value_count = backend_result.value_mismatch_count
+                    mismatch_summary = backend_result.mismatch_summary
                 else:
                     mismatch_list = self._backend.compare(df_source_norm, df_target_norm)
                     matched_count, mit_count, mis_count, value_count = self._count_mismatches(
                         df_source_norm,
                         df_target_norm,
                     )
+                    mismatch_summary = None
                 total_issues = mit_count + mis_count + value_count
                 result = ReconciliationResult(
                     query_name=query_name,
@@ -188,6 +190,11 @@ class ReconciliationEngine:
                     executed_at=executed_at,
                     duration_seconds=0.0,
                     schema_diff=schema_diff,
+                    mismatch_summary=mismatch_summary or self._build_mismatch_summary(
+                        mit_count,
+                        mis_count,
+                        value_count,
+                    ),
                 )
             else:
                 result = self._compare(df_source_norm, df_target_norm, query_name, executed_at,
@@ -369,7 +376,10 @@ class ReconciliationEngine:
         mis_records = self._rows_to_mismatch_records(
             missing_in_source, "missing_in_source"
         )
-        value_records, value_count = self._find_value_mismatches(both, df_source)
+        value_records, value_count, value_counts_by_column = self._find_value_mismatches(
+            both,
+            df_source,
+        )
 
         all_mismatches = (mit_records + mis_records + value_records)[: self._mismatch_row_limit]
         total_issues = mit_count + mis_count + value_count
@@ -397,7 +407,37 @@ class ReconciliationEngine:
             executed_at=executed_at,
             duration_seconds=0.0,
             schema_diff=schema_diff,
+            mismatch_summary=self._build_mismatch_summary(
+                mit_count,
+                mis_count,
+                value_count,
+                value_counts_by_column,
+            ),
         )
+
+    @staticmethod
+    def _build_mismatch_summary(
+        missing_in_target_count: int,
+        missing_in_source_count: int,
+        value_mismatch_count: int,
+        value_counts_by_column: dict[str, int] | None = None,
+    ) -> dict[str, dict[str, int]]:
+        by_column = {
+            str(column): int(count)
+            for column, count in (value_counts_by_column or {}).items()
+            if int(count) > 0
+        }
+        missing_row_count = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
+        if missing_row_count > 0:
+            by_column["<row>"] = by_column.get("<row>", 0) + missing_row_count
+        return {
+            "by_column": by_column,
+            "by_type": {
+                "value_diff": int(value_mismatch_count or 0),
+                "missing_in_target": int(missing_in_target_count or 0),
+                "missing_in_source": int(missing_in_source_count or 0),
+            },
+        }
 
     def _rows_to_mismatch_records(
         self,
@@ -581,7 +621,7 @@ class ReconciliationEngine:
         self,
         both: pd.DataFrame,
         df_source: pd.DataFrame,
-    ) -> tuple[list[MismatchRecord], int]:
+    ) -> tuple[list[MismatchRecord], int, dict[str, int]]:
         compare_cols = [
             c for c in df_source.columns
             if c not in self._key_columns and not self._is_excluded_column(c)
@@ -602,12 +642,15 @@ class ReconciliationEngine:
 
         records: list[MismatchRecord] = []
         count = 0
-        for col_records, col_count in col_results:  # type: ignore[misc]
+        counts_by_column: dict[str, int] = {}
+        for col, (col_records, col_count) in zip(compare_cols, col_results):  # type: ignore[misc]
             count += col_count
+            if col_count:
+                counts_by_column[str(col)] = col_count
             remaining = self._mismatch_row_limit - len(records)
             if remaining > 0:
                 records.extend(col_records[:remaining])
-        return records, count
+        return records, count, counts_by_column
 
     def _apply_slo(
         self,

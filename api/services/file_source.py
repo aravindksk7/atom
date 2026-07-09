@@ -15,6 +15,17 @@ from fastapi import HTTPException
 _WINDOWS_TEMP_BASE = Path("C:/temp") if os.name == "nt" else None
 
 
+def _parse_base_dirs(value: str | None) -> list[Path]:
+    if not value:
+        return []
+    bases: list[Path] = []
+    for raw_part in value.split(os.pathsep):
+        part = raw_part.strip().strip('"')
+        if part:
+            bases.append(Path(part).resolve())
+    return bases
+
+
 def _default_upload_base() -> Path | None:
     if "UPLOAD_BASE_DIR" in os.environ:
         return Path(os.environ["UPLOAD_BASE_DIR"]).resolve()
@@ -23,10 +34,35 @@ def _default_upload_base() -> Path | None:
     return None
 
 
-# Filesystem-path uploads are scoped to UPLOAD_BASE_DIR when set. On local
-# Windows installs, C:\temp is allowed by default because the Compare UI and
-# docs use server-side temp paths for manual file comparisons.
-_UPLOAD_BASE: Path | None = _default_upload_base()
+def _default_upload_bases() -> tuple[Path, ...]:
+    """Return configured server-side file roots.
+
+    `SERVER_FILE_ALLOWED_DIRS` is the preferred on-prem setting and accepts
+    an os.pathsep-separated list. `UPLOAD_BASE_DIRS` is accepted as a legacy
+    plural alias, and `UPLOAD_BASE_DIR` remains the single-directory setting.
+    """
+    bases: list[Path] = []
+    bases.extend(_parse_base_dirs(os.environ.get("SERVER_FILE_ALLOWED_DIRS")))
+    bases.extend(_parse_base_dirs(os.environ.get("UPLOAD_BASE_DIRS")))
+    default_base = _default_upload_base()
+    if default_base is not None:
+        bases.append(default_base)
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for base in bases:
+        key = os.path.normcase(str(base))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(base)
+    return tuple(deduped)
+
+
+# Filesystem-path uploads are scoped to SERVER_FILE_ALLOWED_DIRS/UPLOAD_BASE_DIR
+# when set. On local Windows installs, C:\temp is allowed by default because the
+# Compare UI and docs use server-side temp paths for manual file comparisons.
+_UPLOAD_BASES: tuple[Path, ...] = _default_upload_bases()
+_UPLOAD_BASE: Path | None = _UPLOAD_BASES[0] if _UPLOAD_BASES else None
 
 _SUPPORTED_FORMATS_DETAIL = "Use .csv, .xlsx, .xls, .json, .xml, or .tsv"
 
@@ -297,21 +333,58 @@ def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:
     )
 
 
+def _allowed_bases() -> tuple[Path, ...]:
+    bases: list[Path] = []
+    if _UPLOAD_BASE is not None:
+        bases.append(_UPLOAD_BASE.resolve())
+    bases.extend(base.resolve() for base in _UPLOAD_BASES)
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for base in bases:
+        key = os.path.normcase(str(base))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(base)
+    return tuple(deduped)
+
+
+def _allowed_bases_detail(bases: tuple[Path, ...]) -> str:
+    return ", ".join(str(base) for base in bases)
+
+
 def _resolve_allowed_path(path: str) -> Path:
-    if _UPLOAD_BASE is None:
+    bases = _allowed_bases()
+    if not bases:
         raise HTTPException(
             status_code=400,
-            detail="Server-side file paths are disabled. Set UPLOAD_BASE_DIR or use content_b64 upload.",
+            detail=(
+                "Server-side file paths are disabled. Set SERVER_FILE_ALLOWED_DIRS "
+                "or UPLOAD_BASE_DIR, or use content_b64 upload."
+            ),
         )
-    base = _UPLOAD_BASE.resolve()
     candidate = Path(path)
-    resolved = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+        for base in bases:
+            try:
+                resolved.relative_to(base)
+                return resolved
+            except ValueError:
+                continue
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file path. Allowed server-side base directories: {_allowed_bases_detail(bases)}",
+        )
+
+    base = bases[0]
+    resolved = (base / candidate).resolve()
     try:
         resolved.relative_to(base)
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file path. Allowed base directory: {base}",
+            detail=f"Invalid file path. Allowed server-side base directories: {_allowed_bases_detail(bases)}",
         )
     return resolved
 

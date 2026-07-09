@@ -149,6 +149,7 @@ class TestResult(Base):
     executed_at = Column(DateTime(timezone=True), nullable=True)
     sample_rows = Column(JSON, nullable=True)
     segment_summary = Column(JSON, nullable=True)
+    mismatch_summary = Column(JSON, nullable=True)
 
     # Override fields for marking test outcomes as passing even when they fail
     override_status = Column(String(20), nullable=True)

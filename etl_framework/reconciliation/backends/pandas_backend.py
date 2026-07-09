@@ -90,9 +90,16 @@ class PandasBackend:
                 missing_in_source_count=missing_in_source_count,
                 value_mismatch_count=0,
                 mismatches=mismatches,
+                mismatch_summary=self._build_mismatch_summary(
+                    missing_in_target_count,
+                    missing_in_source_count,
+                    0,
+                    {},
+                ),
             )
 
         value_mismatch_count = 0
+        value_counts_by_column: dict[str, int] = {}
         key_count = len(self._key_columns)
         for col in value_cols:
             src_col = f"{col}_src" if f"{col}_src" in both.columns else col
@@ -127,7 +134,10 @@ class PandasBackend:
 
             match_mask = (both_na & self._null_equals_null) | (neither_na & val_eq)
             mismatch_mask = ~match_mask
-            value_mismatch_count += int(mismatch_mask.sum())
+            col_count = int(mismatch_mask.sum())
+            value_mismatch_count += col_count
+            if col_count:
+                value_counts_by_column[str(col)] = col_count
 
             budget = self._mismatch_row_limit - len(mismatches)
             if budget <= 0:
@@ -149,4 +159,34 @@ class PandasBackend:
             missing_in_source_count=missing_in_source_count,
             value_mismatch_count=value_mismatch_count,
             mismatches=mismatches,
+            mismatch_summary=self._build_mismatch_summary(
+                missing_in_target_count,
+                missing_in_source_count,
+                value_mismatch_count,
+                value_counts_by_column,
+            ),
         )
+
+    @staticmethod
+    def _build_mismatch_summary(
+        missing_in_target_count: int,
+        missing_in_source_count: int,
+        value_mismatch_count: int,
+        value_counts_by_column: dict[str, int],
+    ) -> dict[str, dict[str, int]]:
+        by_column = {
+            str(column): int(count)
+            for column, count in value_counts_by_column.items()
+            if int(count) > 0
+        }
+        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
+        if missing_rows > 0:
+            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
+        return {
+            "by_column": by_column,
+            "by_type": {
+                "value_diff": int(value_mismatch_count or 0),
+                "missing_in_target": int(missing_in_target_count or 0),
+                "missing_in_source": int(missing_in_source_count or 0),
+            },
+        }

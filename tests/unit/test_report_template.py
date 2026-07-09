@@ -3,6 +3,7 @@ key HTML landmarks introduced by the enhanced diff display feature."""
 import types
 from datetime import datetime, timezone
 
+from api.services.run_report import ReportResult, RunReportSnapshot
 from etl_framework.reporting.generator import ReportGenerator
 
 
@@ -151,3 +152,62 @@ def test_accepted_at_rendered_via_to_local_filter(tmp_path):
     html = _render(_make_suite([mm]), tmp_path)
     expected = accepted_dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
     assert expected in html
+
+
+def test_analytics_use_uncapped_aggregate_counts(tmp_path):
+    result = ReportResult(
+        id=1,
+        query_name="orders",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=1.0,
+        source_row_count=6_000,
+        target_row_count=6_000,
+        value_mismatch_count=12_000,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        mismatch_summary={
+            "by_column": {"amount": 6_000, "status": 6_000},
+            "by_type": {
+                "value_diff": 12_000,
+                "missing_in_target": 0,
+                "missing_in_source": 0,
+            },
+        },
+        mismatches=[],
+    )
+    snapshot = RunReportSnapshot(
+        run_id="run-1",
+        status="FAILED",
+        raw_status="FAILED",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        source_env="source",
+        target_env="target",
+        config_snapshot=None,
+        run_type="reconciliation",
+        pair_id=None,
+        total_tests=1,
+        passed=0,
+        failed=1,
+        slow=0,
+        error=0,
+        raw_total_tests=1,
+        raw_passed=0,
+        raw_failed=1,
+        raw_slow=0,
+        raw_error=0,
+        results=[result],
+        has_result_rows=True,
+    )
+
+    html = _render(snapshot, tmp_path)
+
+    assert "Top Columns by Mismatch Count" in html
+    assert "Mismatch Type Breakdown" in html
+    assert "Top Columns by Displayed Mismatch Count" not in html
+    assert "Displayed Mismatch Type Breakdown" not in html
+    assert '"amount": 6000' in html
+    assert '"status": 6000' in html
+    assert '"value_diff": 12000' in html
+    assert ">total<" in html

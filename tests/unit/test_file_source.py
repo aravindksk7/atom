@@ -17,6 +17,44 @@ def test_read_tabular_from_csv_path(tmp_path, monkeypatch):
     assert len(df) == 2
 
 
+def test_read_tabular_absolute_path_under_secondary_allowed_base(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    base_a = tmp_path / "drop-a"
+    base_b = tmp_path / "drop-b"
+    base_a.mkdir()
+    base_b.mkdir()
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", base_a.resolve())
+    monkeypatch.setattr(fs, "_UPLOAD_BASES", (base_a.resolve(), base_b.resolve()))
+
+    f = base_b / "data.csv"
+    f.write_text("id,amount\n1,100\n", encoding="utf-8")
+
+    df = fs.read_tabular(path=str(f))
+
+    assert df.to_dict("records") == [{"id": 1, "amount": 100}]
+
+
+def test_read_tabular_rejects_absolute_path_outside_allowed_bases(tmp_path, monkeypatch):
+    import api.services.file_source as fs
+
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    monkeypatch.setattr(fs, "_UPLOAD_BASE", allowed.resolve())
+    monkeypatch.setattr(fs, "_UPLOAD_BASES", (allowed.resolve(),))
+
+    f = outside / "data.csv"
+    f.write_text("id,amount\n1,100\n", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as exc_info:
+        fs.read_tabular(path=str(f))
+
+    assert exc_info.value.status_code == 400
+    assert "Allowed server-side base directories" in exc_info.value.detail
+
+
 def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path, monkeypatch):
     import api.services.file_source as fs
     monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path)

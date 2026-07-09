@@ -66,7 +66,31 @@ class SamplingBackend:
             missing_in_source_count=mis_count,
             value_mismatch_count=value_count,
             mismatches=mismatches,
+            mismatch_summary=self._build_mismatch_summary(mismatches, mit_count, mis_count, value_count),
         )
+
+    @staticmethod
+    def _build_mismatch_summary(
+        mismatches: list[MismatchRecord],
+        missing_in_target_count: int,
+        missing_in_source_count: int,
+        value_mismatch_count: int,
+    ) -> dict[str, dict[str, int]]:
+        by_column: dict[str, int] = {}
+        for mismatch in mismatches:
+            if mismatch.mismatch_type in {"value_diff", "value_mismatch"}:
+                by_column[mismatch.column_name] = by_column.get(mismatch.column_name, 0) + 1
+        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
+        if missing_rows > 0:
+            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
+        return {
+            "by_column": by_column,
+            "by_type": {
+                "value_diff": int(value_mismatch_count or 0),
+                "missing_in_target": int(missing_in_target_count or 0),
+                "missing_in_source": int(missing_in_source_count or 0),
+            },
+        }
 
     @property
     def sample_frac(self) -> float:

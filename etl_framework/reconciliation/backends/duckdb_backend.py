@@ -70,7 +70,7 @@ class DuckDBBackend:
                 src_marker,
                 tgt_marker,
             )
-            matched_count, mit_count, mis_count, value_count = self._fetch_counts(
+            matched_count, mit_count, mis_count, value_count, value_counts_by_column = self._fetch_counts(
                 con,
                 join_sql,
                 value_specs,
@@ -93,6 +93,12 @@ class DuckDBBackend:
             missing_in_source_count=mis_count,
             value_mismatch_count=value_count,
             mismatches=mismatches,
+            mismatch_summary=self._build_mismatch_summary(
+                mit_count,
+                mis_count,
+                value_count,
+                value_counts_by_column,
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -143,12 +149,16 @@ class DuckDBBackend:
         join_sql: str,
         value_specs: list[tuple[str, str, str]],
         df_source: pd.DataFrame,
-    ) -> tuple[int, int, int, int]:
+    ) -> tuple[int, int, int, int, dict[str, int]]:
         value_terms = [
-            self._count_term(col, src_alias, tgt_alias, df_source[col])
+            (col, self._count_term(col, src_alias, tgt_alias, df_source[col]))
             for col, src_alias, tgt_alias in value_specs
         ]
-        value_count_sql = " + ".join(value_terms) if value_terms else "0"
+        value_count_sql = " + ".join(term for _, term in value_terms) if value_terms else "0"
+        per_column_sql = "".join(
+            f", {term} AS {self._q(f'__count_{idx}')}"
+            for idx, (_, term) in enumerate(value_terms)
+        )
         sql = f"""
             WITH joined AS ({join_sql})
             SELECT
@@ -156,10 +166,20 @@ class DuckDBBackend:
                 COALESCE(SUM(CASE WHEN __in_src__ AND NOT __in_tgt__ THEN 1 ELSE 0 END), 0) AS missing_in_target_count,
                 COALESCE(SUM(CASE WHEN NOT __in_src__ AND __in_tgt__ THEN 1 ELSE 0 END), 0) AS missing_in_source_count,
                 {value_count_sql} AS value_mismatch_count
+                {per_column_sql}
             FROM joined
         """
         row = con.execute(sql).fetchone()
-        return tuple(int(value or 0) for value in row)  # type: ignore[return-value]
+        matched_count, mit_count, mis_count, value_count = (
+            int(value or 0)
+            for value in row[:4]
+        )
+        value_counts_by_column = {
+            str(col): int(row[4 + idx] or 0)
+            for idx, (col, _) in enumerate(value_terms)
+            if int(row[4 + idx] or 0) > 0
+        }
+        return matched_count, mit_count, mis_count, value_count, value_counts_by_column
 
     def _fetch_mismatch_records(
         self,
@@ -255,6 +275,30 @@ class DuckDBBackend:
             "COALESCE(SUM(CASE WHEN __in_src__ AND __in_tgt__ "
             f"AND {condition} THEN 1 ELSE 0 END), 0)"
         )
+
+    @staticmethod
+    def _build_mismatch_summary(
+        missing_in_target_count: int,
+        missing_in_source_count: int,
+        value_mismatch_count: int,
+        value_counts_by_column: dict[str, int],
+    ) -> dict[str, dict[str, int]]:
+        by_column = {
+            str(column): int(count)
+            for column, count in value_counts_by_column.items()
+            if int(count) > 0
+        }
+        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
+        if missing_rows > 0:
+            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
+        return {
+            "by_column": by_column,
+            "by_type": {
+                "value_diff": int(value_mismatch_count or 0),
+                "missing_in_target": int(missing_in_target_count or 0),
+                "missing_in_source": int(missing_in_source_count or 0),
+            },
+        }
 
     def _mismatch_condition(self, src_alias: str, tgt_alias: str, source_series: pd.Series) -> str:
         src = self._q(src_alias)
