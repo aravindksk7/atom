@@ -79,7 +79,7 @@ async function apiPaged(path) {
   return {
     items,
     total: parseInt(resp.headers.get('x-total-count') || String(items.length), 10),
-    storedComplete: resp.headers.get('x-stored-complete') !== 'false',
+    storedComplete: resp.headers.get('x-stored-complete') === 'true',
   };
 }
 
