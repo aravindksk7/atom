@@ -63,6 +63,36 @@ def test_read_xml_attributes_as_columns():
     assert df.iloc[1]["id"] == "2"
 
 
+def test_read_xml_attribute_keyed_field_value_pairs():
+    """Common name/value-pair idiom: repeated <field id="X">value</field>
+    children under one parent are identified by a unique id attribute, not
+    by tag name. They must become one column per id (order-independent),
+    not positional field/field_2/field.id/field.id_2 duplicates.
+    """
+    raw = b"""
+    <records>
+      <record>
+        <fields>
+          <field id="ISIN Code">AU0001</field>
+          <field id="ASX Code">XYZ</field>
+        </fields>
+      </record>
+      <record>
+        <fields>
+          <field id="ASX Code">ABC</field>
+          <field id="ISIN Code">AU0002</field>
+        </fields>
+      </record>
+    </records>
+    """
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+    assert len(df) == 2
+    assert set(df.columns) == {"fields.ISIN Code", "fields.ASX Code"}
+    assert df.iloc[0]["fields.ISIN Code"] == "AU0001"
+    assert df.iloc[1]["fields.ASX Code"] == "ABC"
+    assert df.iloc[1]["fields.ISIN Code"] == "AU0002"
+
+
 def test_json_and_xml_records_normalize_to_comparable_columns():
     json_data = [{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]
     xml_raw = b"""
@@ -125,6 +155,42 @@ def test_read_xml_repeated_records_streams_without_full_dom_parse(monkeypatch):
     assert len(df) == 50
     assert df.iloc[0].to_dict() == {"id": "0", "name": "User0"}
     assert df.iloc[49].to_dict() == {"id": "49", "name": "User49"}
+
+
+def test_read_xml_deeply_nested_repeated_records(monkeypatch):
+    """Regression: records repeated several levels below a chain of
+    single-child wrapper elements (envelope > body > container > list >
+    record*) were collapsed into one row for the whole document instead of
+    one row per record, because record-detection only unwrapped one level
+    of nesting. This blows up column count (one column per repeated
+    descendant across the whole file) and makes comparisons unusably slow.
+    """
+    import xml.etree.ElementTree as ET
+
+    raw = b"""
+    <envelope>
+      <body>
+        <container>
+          <list>
+            <record id="1"><name>Alice</name></record>
+            <record id="2"><name>Bob</name></record>
+            <record id="3"><name>Cara</name></record>
+          </list>
+        </container>
+      </body>
+    </envelope>
+    """
+
+    def _forbidden_fromstring(*args, **kwargs):
+        raise AssertionError("full-DOM ET.fromstring() should not be used for repeated-record XML")
+
+    monkeypatch.setattr(ET, "fromstring", _forbidden_fromstring)
+
+    df = read_tabular(content_b64=b64(raw), file_name="data.xml")
+
+    assert len(df) == 3
+    assert list(df.columns) == ["id", "name"]
+    assert df.iloc[1]["name"] == "Bob"
 
 
 def test_read_xml_absolute_path_under_upload_base(tmp_path, monkeypatch):

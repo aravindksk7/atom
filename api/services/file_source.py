@@ -154,6 +154,30 @@ def _next_unique_path(base: str, existing: set[str], counters: dict[str, int]) -
     return f"{base}_{idx}"
 
 
+def _attribute_keyed_group_name(children: list[ElementTree.Element], tag: str) -> str | None:
+    """Detect the common name/value-pair idiom: repeated same-tag siblings
+    where a single attribute (e.g. ``id``) uniquely names each occurrence
+    and the element has no children of its own, e.g.
+    ``<field id="ISIN Code">AU000...</field>``. Returns the shared
+    attribute name if every sibling with this tag qualifies, else None.
+    """
+    same_tag = [child for child in children if _strip_namespace(child.tag) == tag]
+    attr_name: str | None = None
+    seen_values: set[str] = set()
+    for child in same_tag:
+        if list(child) or len(child.attrib) != 1:
+            return None
+        ((name, value),) = child.attrib.items()
+        if attr_name is None:
+            attr_name = name
+        elif name != attr_name:
+            return None
+        if value in seen_values:
+            return None
+        seen_values.add(value)
+    return attr_name
+
+
 def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict[str, Any]:
     row: dict[str, Any] = {}
 
@@ -171,10 +195,24 @@ def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict
         child_tag = _strip_namespace(child.tag)
         child_counts[child_tag] = child_counts.get(child_tag, 0) + 1
 
+    keyed_group_names: dict[str, str] = {}
+    for child_tag, count in child_counts.items():
+        if count <= 1:
+            continue
+        attr_name = _attribute_keyed_group_name(children, child_tag)
+        if attr_name is not None:
+            keyed_group_names[child_tag] = attr_name
+
     seen: set[str] = set(row)
     duplicate_counters: dict[str, int] = {}
     for child in children:
         child_tag = _strip_namespace(child.tag)
+        if child_tag in keyed_group_names:
+            key_name = child.attrib[keyed_group_names[child_tag]]
+            output_key = f"{prefix}.{key_name}" if prefix else key_name
+            row[output_key] = (child.text or "").strip()
+            seen.add(output_key)
+            continue
         child_prefix = f"{prefix}.{child_tag}" if prefix else child_tag
         flattened = _flatten_xml_element(child, child_prefix)
         for key, value in flattened.items():
@@ -187,66 +225,64 @@ def _flatten_xml_element(element: ElementTree.Element, prefix: str = "") -> dict
     return row
 
 
-def _select_nested_xml_records(element: ElementTree.Element) -> list[ElementTree.Element] | None:
-    """Return likely record children for one top-level wrapper element.
+_PREFERRED_RECORD_TAGS = ("record", "row", "item", "entry")
 
-    Some XML exports use a single wrapper under the root, e.g.
-    ``<response><orders><order>...</order></orders></response>``.  Flattening
-    that wrapper as one row creates one column per repeated child occurrence
-    (``order.id``, ``order.id_2``, ...), which is both semantically wrong and
-    very slow for tens of thousands of records.  This mirrors the DOM fallback
-    heuristic before flattening the wrapper.
+
+def _find_repeated_group(
+    element: ElementTree.Element, max_depth: int = 8
+) -> list[ElementTree.Element] | None:
+    """Walk down through wrapper chains to find the outermost repeated
+    sibling elements representing one row each.
+
+    Some XML exports wrap the record list several levels below the element
+    being inspected, e.g. ``envelope > body > container > list > record*``,
+    not just a single level (``response > orders > order*``). Flattening a
+    wrapper before finding the real repeat creates one column per repeated
+    descendant across the *whole* subtree, which is both semantically wrong
+    (positional columns don't line up between differently-shaped records)
+    and very slow for large documents. This descends through any chain of
+    elements that have exactly one child, or exactly one child with children
+    of its own, until it finds a level with repeated (or preferred-named)
+    siblings.
     """
-    children = list(element)
-    if len(children) <= 1:
+    current = element
+    for _ in range(max_depth):
+        children = list(current)
+        if not children:
+            return None
+
+        for tag in _PREFERRED_RECORD_TAGS:
+            matches = [child for child in children if _strip_namespace(child.tag).lower() == tag]
+            if matches:
+                return matches
+
+        counts: dict[str, int] = {}
+        for child in children:
+            tag = _strip_namespace(child.tag)
+            counts[tag] = counts.get(tag, 0) + 1
+        repeated_tags = {tag for tag, count in counts.items() if count > 1}
+        if repeated_tags:
+            return [child for child in children if _strip_namespace(child.tag) in repeated_tags]
+
+        containers = [child for child in children if list(child)]
+        if len(containers) == 1:
+            current = containers[0]
+            continue
+
         return None
-
-    preferred = ("record", "row", "item", "entry")
-    for tag in preferred:
-        matches = [child for child in children if _strip_namespace(child.tag).lower() == tag]
-        if matches:
-            return matches
-
-    counts: dict[str, int] = {}
-    for child in children:
-        tag = _strip_namespace(child.tag)
-        counts[tag] = counts.get(tag, 0) + 1
-
-    repeated_tags = {tag for tag, count in counts.items() if count > 1}
-    if repeated_tags:
-        return [child for child in children if _strip_namespace(child.tag) in repeated_tags]
-
     return None
+
+
+def _select_nested_xml_records(element: ElementTree.Element) -> list[ElementTree.Element] | None:
+    """Return likely record descendants for one top-level wrapper element."""
+    return _find_repeated_group(element)
 
 
 def _select_xml_records(root: ElementTree.Element) -> list[ElementTree.Element]:
     children = list(root)
     if not children:
         return [root]
-
-    preferred = ("record", "row", "item", "entry")
-    for tag in preferred:
-        matches = [child for child in children if _strip_namespace(child.tag).lower() == tag]
-        if matches:
-            return matches
-
-    counts: dict[str, int] = {}
-    for child in children:
-        tag = _strip_namespace(child.tag)
-        counts[tag] = counts.get(tag, 0) + 1
-
-    repeated_tags = {tag for tag, count in counts.items() if count > 1}
-    if repeated_tags:
-        return [child for child in children if _strip_namespace(child.tag) in repeated_tags]
-
-    for child in children:
-        grandchildren = list(child)
-        if len(grandchildren) > 1:
-            grandchild_tags = [_strip_namespace(grandchild.tag) for grandchild in grandchildren]
-            if len(set(grandchild_tags)) == 1:
-                return grandchildren
-
-    return [root]
+    return _find_repeated_group(root) or [root]
 
 
 def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
@@ -254,6 +290,8 @@ def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
     clear it immediately, so peak memory holds one record's worth of DOM at
     a time instead of the whole parsed document tree.
     """
+    depth1_counts = _count_depth1_tags(raw)
+
     context = ElementTree.iterparse(io.BytesIO(raw), events=("start", "end"))
     _, root = next(context)
     depth = 1
@@ -264,16 +302,45 @@ def _stream_xml_candidates(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
             continue
         depth -= 1
         if depth == 1:
-            nested_records = _select_nested_xml_records(elem)
-            if nested_records is None:
-                candidates.append((_strip_namespace(elem.tag), _flatten_xml_element(elem)))
+            tag = _strip_namespace(elem.tag)
+            if depth1_counts.get(tag, 0) > 1:
+                # This tag already repeats among its own root-level siblings --
+                # that IS the record boundary. Don't look for a further nested
+                # list inside it: any repeated children of its own are just
+                # multi-valued fields belonging to this one row, not more rows.
+                candidates.append((tag, _flatten_xml_element(elem)))
             else:
-                candidates.extend(
-                    (_strip_namespace(record.tag), _flatten_xml_element(record))
-                    for record in nested_records
-                )
+                nested_records = _select_nested_xml_records(elem)
+                if nested_records is None:
+                    candidates.append((tag, _flatten_xml_element(elem)))
+                else:
+                    candidates.extend(
+                        (_strip_namespace(record.tag), _flatten_xml_element(record))
+                        for record in nested_records
+                    )
             elem.clear()
     return candidates
+
+
+def _count_depth1_tags(raw: bytes) -> dict[str, int]:
+    """Cheap pre-pass: count root-level child tags without flattening, so
+    the real pass can tell a genuine root-level repeat (the record boundary)
+    apart from a singleton wrapper that might hide records further down.
+    """
+    context = ElementTree.iterparse(io.BytesIO(raw), events=("start", "end"))
+    _, root = next(context)
+    depth = 1
+    counts: dict[str, int] = {}
+    for event, elem in context:
+        if event == "start":
+            depth += 1
+            continue
+        depth -= 1
+        if depth == 1:
+            tag = _strip_namespace(elem.tag)
+            counts[tag] = counts.get(tag, 0) + 1
+            elem.clear()
+    return counts
 
 
 def _read_xml_bytes_dom(raw: bytes) -> pd.DataFrame:
