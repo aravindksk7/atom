@@ -95,6 +95,8 @@ class DifferenceWriter:
             self._file = path.open("w", newline="", encoding="utf-8")
             self._csv_writer = csv.DictWriter(self._file, fieldnames=DIFFERENCE_FIELDS)
             self._csv_writer.writeheader()
+        elif fmt == "json":
+            self._file = path.open("w", encoding="utf-8")
         elif fmt == "parquet":
             try:
                 import pyarrow as pa  # noqa: F401
@@ -117,6 +119,9 @@ class DifferenceWriter:
         if self.format == "csv":
             assert self._csv_writer is not None
             self._csv_writer.writerow(normalized)
+        elif self.format == "json":
+            assert self._file is not None
+            self._file.write(json.dumps(normalized, ensure_ascii=False) + "\n")
         else:
             self._batch.append(normalized)
             if len(self._batch) >= self._batch_size:
@@ -167,8 +172,8 @@ class DifferenceWriter:
 
 def validate_difference_format(fmt: str) -> str:
     normalized = fmt.lower().strip()
-    if normalized not in {"csv", "parquet"}:
-        raise HTTPException(status_code=422, detail="format must be csv or parquet")
+    if normalized not in {"csv", "parquet", "json"}:
+        raise HTTPException(status_code=422, detail="format must be csv, parquet, or json")
     return normalized
 
 
@@ -218,11 +223,18 @@ def export_dir(run_id: str) -> Path:
 def media_type_for(fmt: str) -> str:
     if fmt == "parquet":
         return "application/vnd.apache.parquet"
+    if fmt == "json":
+        return "application/x-ndjson"
     return "text/csv"
 
 
 def export_filename(run_id: str, fmt: str, export_id: str | None = None) -> str:
-    suffix = "parquet" if fmt == "parquet" else "csv"
+    if fmt == "parquet":
+        suffix = "parquet"
+    elif fmt == "json":
+        suffix = "jsonl"
+    else:
+        suffix = "csv"
     stem = f"all_differences_{run_id}"
     if export_id:
         stem += f"_{export_id}"
