@@ -371,7 +371,8 @@
             </summary>
             {% if total_mismatches > shown_mismatches %}
             <p style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
-              {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences.
+              {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
             </p>
             {% endif %}
             <table>
@@ -428,7 +429,8 @@
           <details>
             <summary>{{ result.query_name }} Mismatches (0 detail rows stored of {{ result.total_issues }})</summary>
             <p style="margin:6px 0;color:var(--muted);font-size:0.9em">
-              0 of {{ result.total_issues }} rows shown; download the full differences export for all differences.
+              0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
             </p>
           </details>
         {% endif %}
@@ -703,6 +705,14 @@
     if(el) el.textContent = accepted + ' / ' + open;
   }
 
+  function wireDifferencesLinks(){
+    document.querySelectorAll('a[data-differences-link]').forEach(function(a){
+      var run=a.dataset.run, result=a.dataset.result;
+      a.href = window.location.origin + '/?tab=differences&run=' + encodeURIComponent(run) + '&result=' + encodeURIComponent(result);
+      a.target = '_top';
+    });
+  }
+
   function filterByCol(col){
     var sel=document.getElementById('filter-col'); if(sel) sel.value=col;
     filterState.col=col; applyFilters();
@@ -780,6 +790,7 @@
     buildHeatmap();
     buildDonut();
     computeAcceptedStats();
+    wireDifferencesLinks();
     fillDuration();
     buildNavList();
     var rows=document.querySelectorAll('tr[data-mismatch]').length;
