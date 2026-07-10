@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import case, insert
+from sqlalchemy import case, insert, or_, cast, String, func
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.models import (
@@ -370,22 +370,75 @@ class RunRepository:
         )
         return result[0] if result else None
 
+    def _mismatch_base_query(self, result_id: int):
+        return self._db.query(MismatchDetail).filter(MismatchDetail.test_result_id == result_id)
+
+    def _apply_mismatch_filters(
+        self,
+        query,
+        *,
+        search: str | None = None,
+        column: str | None = None,
+        mismatch_type: str | None = None,
+        accepted: bool | None = None,
+    ):
+        if column:
+            query = query.filter(MismatchDetail.column_name == column)
+        if mismatch_type:
+            query = query.filter(MismatchDetail.mismatch_type == mismatch_type)
+        if accepted is not None:
+            query = query.filter(MismatchDetail.accepted == accepted)
+        if search:
+            like = f"%{search.lower()}%"
+            query = query.filter(or_(
+                func.lower(MismatchDetail.column_name).like(like),
+                func.lower(MismatchDetail.source_value).like(like),
+                func.lower(MismatchDetail.target_value).like(like),
+                func.lower(cast(MismatchDetail.key_values, String)).like(like),
+            ))
+        return query
+
     def list_mismatches(
-        self, result_id: int, limit: int = 100, offset: int = 0
+        self,
+        result_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        column: str | None = None,
+        mismatch_type: str | None = None,
+        accepted: bool | None = None,
+        sort: str = "id",
     ) -> list[MismatchDetail]:
-        mismatch_order = case(
-            (MismatchDetail.mismatch_type == "missing_in_target", 0),
-            (MismatchDetail.mismatch_type == "missing_in_source", 1),
-            else_=2,
+        query = self._apply_mismatch_filters(
+            self._mismatch_base_query(result_id),
+            search=search, column=column, mismatch_type=mismatch_type, accepted=accepted,
         )
-        return (
-            self._db.query(MismatchDetail)
-            .filter(MismatchDetail.test_result_id == result_id)
-            .order_by(mismatch_order, MismatchDetail.id)
-            .offset(offset)
-            .limit(limit)
-            .all()
+        if sort == "column":
+            order = (MismatchDetail.column_name, MismatchDetail.id)
+        elif sort == "mismatch_type":
+            order = (MismatchDetail.mismatch_type, MismatchDetail.id)
+        else:
+            mismatch_order = case(
+                (MismatchDetail.mismatch_type == "missing_in_target", 0),
+                (MismatchDetail.mismatch_type == "missing_in_source", 1),
+                else_=2,
+            )
+            order = (mismatch_order, MismatchDetail.id)
+        return query.order_by(*order).offset(offset).limit(limit).all()
+
+    def count_mismatches(
+        self,
+        result_id: int,
+        search: str | None = None,
+        column: str | None = None,
+        mismatch_type: str | None = None,
+        accepted: bool | None = None,
+    ) -> int:
+        query = self._apply_mismatch_filters(
+            self._db.query(func.count(MismatchDetail.id)).filter(MismatchDetail.test_result_id == result_id),
+            search=search, column=column, mismatch_type=mismatch_type, accepted=accepted,
         )
+        return int(query.scalar() or 0)
 
     def accept_mismatch(
         self,
