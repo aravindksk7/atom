@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import json
+import uuid
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 def test_writer_json_format_writes_one_object_per_line(tmp_path):
@@ -67,3 +72,33 @@ def test_export_filename_csv_and_parquet_unaffected():
 
     assert export_filename("run-1", "csv").endswith(".csv")
     assert export_filename("run-1", "parquet").endswith(".parquet")
+
+
+def test_create_export_job_accepts_json_format(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from etl_framework.repository.database import Base
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test-runner")
+        run_id = str(uuid.uuid4())
+        RunRepository(db).create_run(run_id, "dev", "qa", {})
+
+    client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+    resp = client.post(f"/api/runs/{run_id}/exports", json={"format": "json"})
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["format"] == "json"
+    assert data["status"] in ("PENDING", "RUNNING", "COMPLETED", "FAILED")
