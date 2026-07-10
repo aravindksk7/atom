@@ -2,11 +2,6 @@
 from __future__ import annotations
 
 import json
-import uuid
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 def test_writer_json_format_writes_one_object_per_line(tmp_path):

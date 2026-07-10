@@ -96,7 +96,7 @@ class DifferenceWriter:
             self._csv_writer = csv.DictWriter(self._file, fieldnames=DIFFERENCE_FIELDS)
             self._csv_writer.writeheader()
         elif fmt == "json":
-            self._file = path.open("w", encoding="utf-8")
+            self._file = path.open("w", encoding="utf-8", newline="")
         elif fmt == "parquet":
             try:
                 import pyarrow as pa  # noqa: F401
