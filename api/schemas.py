@@ -331,7 +331,7 @@ class MismatchTestInsight(BaseModel):
 
 class RunMismatchInsightsOut(BaseModel):
     run_id: str
-    top_columns: list[MismatchColumnInsight] = Field(default_factory=list)
+    top_columns: list[MismatchColumnInsight] = Field(default_factory=list, description="Top 10 columns by mismatch count, descending")
     type_totals: dict[str, int] = Field(default_factory=dict)
     accepted_count: int = 0
     open_count: int = 0
