@@ -743,13 +743,13 @@ class MismatchAcceptOut(BaseModel):
 
 
 class DifferenceExportRequest(BaseModel):
-    format: Literal["csv", "parquet"] = "csv"
+    format: Literal["csv", "parquet", "json"] = "csv"
 
 
 class DifferenceExportStatusOut(BaseModel):
     export_id: str
     run_id: str
-    format: Literal["csv", "parquet"]
+    format: Literal["csv", "parquet", "json"]
     status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"]
     row_count: int = 0
     error_message: str | None = None
