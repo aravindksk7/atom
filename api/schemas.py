@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date, datetime
+from enum import Enum
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -301,6 +302,40 @@ class MismatchOut(BaseModel):
     accepted_by: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class MismatchTypeFilter(str, Enum):
+    value_diff = "value_diff"
+    missing_in_target = "missing_in_target"
+    missing_in_source = "missing_in_source"
+
+
+class MismatchSortField(str, Enum):
+    id = "id"
+    column = "column"
+    mismatch_type = "mismatch_type"
+
+
+class MismatchColumnInsight(BaseModel):
+    column: str
+    count: int
+
+
+class MismatchTestInsight(BaseModel):
+    result_id: int
+    query_name: str
+    total_issues: int
+    stored_rows: int
+    stored_complete: bool
+
+
+class RunMismatchInsightsOut(BaseModel):
+    run_id: str
+    top_columns: list[MismatchColumnInsight] = Field(default_factory=list)
+    type_totals: dict[str, int] = Field(default_factory=dict)
+    accepted_count: int = 0
+    open_count: int = 0
+    tests: list[MismatchTestInsight] = Field(default_factory=list)
 
 
 class DrilldownRequest(BaseModel):
