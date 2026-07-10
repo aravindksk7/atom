@@ -122,6 +122,19 @@ def test_list_mismatches_sort_by_column(db_session):
     assert columns == sorted(columns)
 
 
+def test_list_mismatches_default_order_unchanged(db_session):
+    """No sort arg: missing_in_target rows first, then missing_in_source, then everything else, ordered by id within each group."""
+    from etl_framework.repository.repository import RunRepository
+
+    result_id = _seed(db_session)
+    repo = RunRepository(db_session)
+
+    rows = repo.list_mismatches(result_id=result_id)
+    types = [r.mismatch_type for r in rows]
+    # _seed() inserts ids 1-3 as value_diff, id 4 as missing_in_target, id 5 as missing_in_source
+    assert types == ["missing_in_target", "missing_in_source", "value_diff", "value_diff", "value_diff"]
+
+
 def test_list_mismatches_pagination(db_session):
     from etl_framework.repository.repository import RunRepository
 
