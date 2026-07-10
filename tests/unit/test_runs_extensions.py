@@ -144,10 +144,12 @@ def test_mismatches_respects_pagination_params(client, mock_run_repo):
     run = MagicMock()
     mock_run_repo.get_run.return_value = run
     mock_run_repo.list_mismatches.return_value = []
+    mock_run_repo.count_mismatches.return_value = 0
 
     client.get("/api/runs/r1/results/42/mismatches?limit=25&offset=50")
     mock_run_repo.list_mismatches.assert_called_once_with(
-        result_id=42, limit=25, offset=50
+        result_id=42, limit=25, offset=50,
+        search=None, column=None, mismatch_type=None, accepted=None, sort="id",
     )
 
 
@@ -155,11 +157,57 @@ def test_mismatches_default_pagination_is_100_0(client, mock_run_repo):
     run = MagicMock()
     mock_run_repo.get_run.return_value = run
     mock_run_repo.list_mismatches.return_value = []
+    mock_run_repo.count_mismatches.return_value = 0
 
     client.get("/api/runs/r1/results/7/mismatches")
     mock_run_repo.list_mismatches.assert_called_once_with(
-        result_id=7, limit=100, offset=0
+        result_id=7, limit=100, offset=0,
+        search=None, column=None, mismatch_type=None, accepted=None, sort="id",
     )
+
+
+def test_mismatches_forwards_filters(client, mock_run_repo):
+    run = MagicMock()
+    mock_run_repo.get_run.return_value = run
+    mock_run_repo.list_mismatches.return_value = []
+    mock_run_repo.count_mismatches.return_value = 0
+
+    client.get(
+        "/api/runs/r1/results/42/mismatches"
+        "?search=foo&column=amount&mismatch_type=value_diff&accepted=true&sort=column"
+    )
+    mock_run_repo.list_mismatches.assert_called_once_with(
+        result_id=42, limit=100, offset=0,
+        search="foo", column="amount", mismatch_type="value_diff", accepted=True, sort="column",
+    )
+
+
+def test_mismatches_sets_total_count_header(client, mock_run_repo):
+    run = MagicMock()
+    mock_run_repo.get_run.return_value = run
+    mock_run_repo.list_mismatches.return_value = [_make_mismatch(1)]
+    mock_run_repo.count_mismatches.return_value = 42
+
+    resp = client.get("/api/runs/r1/results/42/mismatches")
+    assert resp.headers["x-total-count"] == "42"
+
+
+def test_mismatches_rejects_bad_mismatch_type(client, mock_run_repo):
+    mock_run_repo.get_run.return_value = MagicMock()
+    resp = client.get("/api/runs/r1/results/1/mismatches?mismatch_type=bogus")
+    assert resp.status_code == 422
+
+
+def test_mismatches_rejects_bad_accepted(client, mock_run_repo):
+    mock_run_repo.get_run.return_value = MagicMock()
+    resp = client.get("/api/runs/r1/results/1/mismatches?accepted=maybe")
+    assert resp.status_code == 422
+
+
+def test_mismatches_rejects_bad_sort(client, mock_run_repo):
+    mock_run_repo.get_run.return_value = MagicMock()
+    resp = client.get("/api/runs/r1/results/1/mismatches?sort=bogus")
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

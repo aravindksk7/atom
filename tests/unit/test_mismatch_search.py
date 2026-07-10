@@ -158,3 +158,52 @@ def test_count_mismatches_respects_same_filters_as_list(db_session):
     assert repo.count_mismatches(result_id=result_id, column="amount") == 2
     assert repo.count_mismatches(result_id=result_id, mismatch_type="value_diff") == 3
     assert repo.count_mismatches(result_id=result_id, search="closed") == 1
+
+
+def test_stored_complete_flag_via_endpoint(monkeypatch):
+    """stored_complete should be false when total_issues exceeds stored detail rows."""
+    import uuid as _uuid
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine as _create_engine
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+    from sqlalchemy.pool import StaticPool as _StaticPool
+
+    from api.main import app
+    from etl_framework.repository.database import Base
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    engine = _create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=_StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", _sessionmaker(bind=engine))
+
+    with Session(engine) as setup_db:
+        raw, _ = TokenRepository(setup_db).create("test-runner")
+        repo = RunRepository(setup_db)
+        run_id = str(_uuid.uuid4())
+        repo.create_run(run_id, "dev", "qa", {})
+        result = repo.add_test_result(run_id, ReconciliationResult(
+            query_name="orders", source_env="dev", target_env="qa",
+            source_row_count=10, target_row_count=10, matched_count=0,
+            missing_in_target_count=0, missing_in_source_count=0,
+            value_mismatch_count=100, mismatches=[],
+            status=TestStatus.FAILED, executed_at=datetime.now(timezone.utc),
+            duration_seconds=1.0,
+        ))
+        repo.add_mismatch_details(result.id, [
+            MismatchRecord(key_values={"id": i}, column_name="amount", source_value=str(i),
+                           target_value=str(i + 1), mismatch_type="value_diff")
+            for i in range(3)
+        ])
+        result_id = result.id
+
+    client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+    resp = client.get(f"/api/runs/{run_id}/results/{result_id}/mismatches")
+    assert resp.status_code == 200
+    assert resp.headers["x-stored-complete"] == "false"
+    assert resp.headers["x-total-count"] == "3"

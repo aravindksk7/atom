@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, JSONResponse, StreamingResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -27,9 +27,14 @@ from api.schemas import (
     GeneratedArtifactOut,
     MismatchAcceptOut,
     MismatchAcceptRequest,
+    MismatchColumnInsight,
     MismatchOut,
+    MismatchSortField,
+    MismatchTestInsight,
+    MismatchTypeFilter,
     RunCompareOut,
     RunDetailOut,
+    RunMismatchInsightsOut,
     RunProgressOut,
     RunStatusOut,
     RunStepOut,
@@ -53,12 +58,14 @@ from api.services.mismatch_export import (
     mismatch_xlsx_response,
 )
 from api.services.difference_export import (
+    accepted_counts,
     create_or_reuse_export_job,
     export_filename,
     export_status_out,
     media_type_for,
     run_difference_export_job,
     stored_completeness_summary,
+    stored_detail_counts,
     stored_rows_are_complete,
     validate_difference_format,
     write_stored_differences,
@@ -552,14 +559,48 @@ def get_run_progress(run_id: str, db: Session = Depends(get_session)):
 def list_result_mismatches(
     run_id: str,
     result_id: int,
+    response: Response,
     limit: int = 100,
     offset: int = 0,
+    search: str | None = None,
+    column: str | None = None,
+    mismatch_type: MismatchTypeFilter | None = None,
+    accepted: bool | None = None,
+    sort: MismatchSortField = MismatchSortField.id,
     db: Session = Depends(get_session),
 ):
+    from etl_framework.repository.models import TestResult
+
     repo = RunRepository(db)
     if repo.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    rows = repo.list_mismatches(result_id=result_id, limit=limit, offset=offset)
+
+    mismatch_type_value = mismatch_type.value if mismatch_type else None
+    rows = repo.list_mismatches(
+        result_id=result_id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        column=column,
+        mismatch_type=mismatch_type_value,
+        accepted=accepted,
+        sort=sort.value,
+    )
+    total = repo.count_mismatches(
+        result_id=result_id,
+        search=search,
+        column=column,
+        mismatch_type=mismatch_type_value,
+        accepted=accepted,
+    )
+    response.headers["X-Total-Count"] = str(total)
+
+    test_result = db.get(TestResult, result_id)
+    if test_result is not None and test_result.run_id == run_id:
+        stored_total = repo.count_mismatches(result_id=result_id)
+        stored_complete = stored_total >= int(test_result.total_issues or 0)
+        response.headers["X-Stored-Complete"] = "true" if stored_complete else "false"
+
     return [
         MismatchOut(
             id=m.id,
