@@ -220,6 +220,10 @@
           <div id="stat-duration" style="font-size:1.8em;font-weight:700;color:#60a5fa">…</div>
           <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Total Duration</div>
         </div>
+        <div style="flex:1;min-width:120px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:8px;padding:12px 16px">
+          <div id="stat-accepted" style="font-size:1.8em;font-weight:700;color:#86efac">0 / 0</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Accepted / Open (shown)</div>
+        </div>
       </div>
       {% if suite.test_cases | length > 0 %}
       <div style="background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:10px;margin-bottom:6px">
@@ -387,7 +391,8 @@
                     data-type="{{ mm.mismatch_type }}"
                     data-key="{{ mm.key_values | tojson }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
-                    data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}">
+                    data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}"
+                    data-accepted="{{ 'true' if mm.accepted else 'false' }}">
                   <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
                   <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values | tojson }}</td>
@@ -689,6 +694,15 @@
     if(container) container.innerHTML='<svg width="'+svgW+'" height="'+svgH+'" xmlns="http://www.w3.org/2000/svg">'+bars+'</svg>';
   }
 
+  function computeAcceptedStats(){
+    var accepted=0, open=0;
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+      if(tr.dataset.accepted==='true') accepted++; else open++;
+    });
+    var el=document.getElementById('stat-accepted');
+    if(el) el.textContent = accepted + ' / ' + open;
+  }
+
   function filterByCol(col){
     var sel=document.getElementById('filter-col'); if(sel) sel.value=col;
     filterState.col=col; applyFilters();
@@ -765,6 +779,7 @@
     applyDiff();
     buildHeatmap();
     buildDonut();
+    computeAcceptedStats();
     fillDuration();
     buildNavList();
     var rows=document.querySelectorAll('tr[data-mismatch]').length;
