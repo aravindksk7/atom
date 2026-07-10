@@ -195,6 +195,20 @@ def stored_completeness_summary(db: Session, run: TestRun) -> dict[str, int]:
     return {"stored_rows": stored, "total_issues": total}
 
 
+def accepted_counts(db: Session, run_id: str) -> dict[str, int]:
+    rows = (
+        db.query(MismatchDetail.accepted, func.count(MismatchDetail.id))
+        .join(TestResult, TestResult.id == MismatchDetail.test_result_id)
+        .filter(TestResult.run_id == run_id)
+        .group_by(MismatchDetail.accepted)
+        .all()
+    )
+    counts = {"accepted": 0, "open": 0}
+    for accepted, count in rows:
+        counts["accepted" if accepted else "open"] += int(count)
+    return counts
+
+
 def export_dir(run_id: str) -> Path:
     path = EXPORT_ROOT / run_id
     path.mkdir(parents=True, exist_ok=True)
