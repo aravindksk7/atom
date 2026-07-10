@@ -65,6 +65,24 @@ async function apiBlob(path) {
   return { blob: await resp.blob(), disposition: resp.headers.get('content-disposition') || '' };
 }
 
+async function apiPaged(path) {
+  const token = normalizeToken(sessionStorage.getItem('etl_token'));
+  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+  const resp = await fetch(API + path, { headers });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
+    error.status = resp.status;
+    throw error;
+  }
+  const items = await resp.json();
+  return {
+    items,
+    total: parseInt(resp.headers.get('x-total-count') || String(items.length), 10),
+    storedComplete: resp.headers.get('x-stored-complete') !== 'false',
+  };
+}
+
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -168,6 +186,8 @@ function app() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M6 8h12l-1 5a5 5 0 0 1-10 0L6 8z"></path><path d="M10 19v3M14 19v3"></path></svg>' },
       { id: 'reports',  label: 'Reports',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>' },
+      { id: 'differences', label: 'Differences',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' },
       { id: 'compare',  label: 'Compare',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 5h18"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 19H3"></path></svg>' },
       { id: 'contracts', label: 'Contracts',
@@ -357,6 +377,29 @@ function app() {
     reportLogQuery: '',
     reportLogLevel: '',
     reportLogLimit: 500,
+
+    // -----------------------------------------------------------
+    // Differences Explorer tab
+    // -----------------------------------------------------------
+    diffRunId: '',
+    diffResultId: null,
+    diffRunDetail: null,
+    diffTestOptions: [],
+    diffColumnOptions: [],
+    diffSearch: '',
+    diffColumn: '',
+    diffType: '',
+    diffAccepted: '',
+    diffSort: 'id',
+    diffPage: 0,
+    diffPageSize: 100,
+    diffRows: [],
+    diffTotal: 0,
+    diffStoredComplete: true,
+    diffLoading: false,
+    diffInsights: null,
+    diffInsightsLoading: false,
+
     allLogEvents: [],
     allLogEventsLoading: false,
     logFilterQuery: '',
