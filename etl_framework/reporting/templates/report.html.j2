@@ -354,25 +354,39 @@
       </table>
     </div>
 
-    <div id="mismatches-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    {% set ns = namespace(any_truncated=false) %}
+    {% for result in suite.reconciliation_results %}
+      {% if result.total_issues > (result.mismatches | length) %}{% set ns.any_truncated = true %}{% endif %}
+    {% endfor %}
+    <div id="mismatches-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <h2 style="margin:0">Mismatch Details</h2>
       <button class="expand-all-btn" onclick="setAllDetails(true)">Expand All</button>
       <button class="expand-all-btn" onclick="setAllDetails(false)">Collapse All</button>
+      {% if ns.any_truncated %}
+      <button id="load-all-btn-global" class="expand-all-btn" data-run="{{ suite.run_id }}"
+              onclick="loadAllDifferencesGlobal(this)">Load all differences (entire run)</button>
+      <span id="load-all-status-global" style="font-size:0.82em;color:var(--muted)"></span>
+      {% endif %}
     </div>
     <div id="mismatches">
       {% for result in suite.reconciliation_results %}
+        {% set shown_mismatches = result.mismatches | length %}
+        {% set total_mismatches = result.total_issues %}
         {% if result.mismatches %}
-          {% set shown_mismatches = result.mismatches | length %}
-          {% set total_mismatches = result.total_issues %}
+          <div class="mismatch-section" data-result-id="{{ result.id }}" data-query-name="{{ result.query_name }}"
+               data-source-env="{{ suite.source_env }}" data-target-env="{{ suite.target_env }}">
           <details>
             <summary>
               {{ result.query_name }} Mismatches
-              (Showing first {{ shown_mismatches }}{% if total_mismatches > shown_mismatches %} of {{ total_mismatches }}{% endif %})
+              (<span id="mismatch-count-{{ result.id }}">Showing first {{ shown_mismatches }}{% if total_mismatches > shown_mismatches %} of {{ total_mismatches }}{% endif %}</span>)
             </summary>
             {% if total_mismatches > shown_mismatches %}
-            <p style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
-              {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,
-              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
+            <p id="truncation-note-{{ result.id }}" style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
+              <span id="truncation-text-{{ result.id }}">{{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,</span>
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
+              or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
+                         onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
+              <span id="load-all-status-{{ result.id }}" style="font-size:0.9em;color:var(--muted)"></span>
             </p>
             {% endif %}
             <table>
@@ -384,7 +398,7 @@
                   <th colspan="2">Values ({{ suite.source_env }} → {{ suite.target_env }})</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="mismatch-tbody-{{ result.id }}">
                 {% for mm in result.mismatches %}
                 <tr data-mismatch
                     data-test="{{ result.query_name }}"
@@ -425,14 +439,32 @@
               </tbody>
             </table>
           </details>
+          </div>
         {% elif result.total_issues > 0 %}
+          <div class="mismatch-section" data-result-id="{{ result.id }}" data-query-name="{{ result.query_name }}"
+               data-source-env="{{ suite.source_env }}" data-target-env="{{ suite.target_env }}">
           <details>
-            <summary>{{ result.query_name }} Mismatches (0 detail rows stored of {{ result.total_issues }})</summary>
-            <p style="margin:6px 0;color:var(--muted);font-size:0.9em">
-              0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,
-              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
+            <summary>{{ result.query_name }} Mismatches (<span id="mismatch-count-{{ result.id }}">0 detail rows stored of {{ result.total_issues }}</span>)</summary>
+            <p id="truncation-note-{{ result.id }}" style="margin:6px 0;color:var(--muted);font-size:0.9em">
+              <span id="truncation-text-{{ result.id }}">0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,</span>
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
+              or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
+                         onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
+              <span id="load-all-status-{{ result.id }}" style="font-size:0.9em;color:var(--muted)"></span>
             </p>
+            <table style="display:none">
+              <thead>
+                <tr>
+                  <th>Mismatch Type</th>
+                  <th>Column</th>
+                  <th>Row Key Values</th>
+                  <th colspan="2">Values ({{ suite.source_env }} → {{ suite.target_env }})</th>
+                </tr>
+              </thead>
+              <tbody id="mismatch-tbody-{{ result.id }}"></tbody>
+            </table>
           </details>
+          </div>
         {% endif %}
       {% endfor %}
     </div>
@@ -620,9 +652,11 @@
     var cols = new Set();
     document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){cols.add(tr.dataset.column);});
     var sel=document.getElementById('filter-col'); if(!sel) return;
+    var existing = new Set([].slice.call(sel.options).map(function(o){return o.value;}));
     cols.forEach(function(col){
-      if(!col) return;
+      if(!col || existing.has(col)) return;
       var opt=document.createElement('option'); opt.value=col; opt.textContent=col; sel.appendChild(opt);
+      existing.add(col);
     });
   }
 
@@ -710,6 +744,204 @@
       var run=a.dataset.run, result=a.dataset.result;
       a.href = window.location.origin + '/?tab=differences&run=' + encodeURIComponent(run) + '&result=' + encodeURIComponent(result);
       a.target = '_top';
+    });
+  }
+
+  // ── Load all differences (inline, into this report) ─────────────────────
+  function reportAuthToken(){
+    var raw = sessionStorage.getItem('etl_token') || '';
+    return raw.replace(/^Bearer\s+/i, '').trim();
+  }
+
+  function reportAuthHeaders(extra){
+    var token = reportAuthToken();
+    var headers = extra ? JSON.parse(JSON.stringify(extra)) : {};
+    if(token) headers['Authorization'] = 'Bearer ' + token;
+    return headers;
+  }
+
+  function mismatchTypeBadgeClass(type){
+    return (type === 'value_diff' || type === 'value_mismatch') ? 'badge-amber' : 'badge-gray';
+  }
+
+  function mismatchRowKey(columnName, mismatchType, keyValuesText){
+    return (columnName || '') + '||' + (mismatchType || '') + '||' + (keyValuesText || '');
+  }
+
+  function buildMismatchRow(row, sourceEnv, targetEnv, acceptedKeys){
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-mismatch', '');
+    tr.dataset.test = row.test_name || '';
+    tr.dataset.column = row.column_name || '';
+    tr.dataset.type = row.mismatch_type || '';
+    tr.dataset.key = typeof row.key_values === 'string' ? row.key_values : JSON.stringify(row.key_values || {});
+    tr.dataset.src = row.source_value || '';
+    tr.dataset.tgt = row.target_value || '';
+    // The recompute export has no accepted field (DIFFERENCE_FIELDS doesn't carry it) — carry
+    // forward acceptance state from the rows this injection is about to replace, matched by
+    // column+type+key, so re-loading a test doesn't silently un-accept its already-accepted rows.
+    tr.dataset.accepted = (acceptedKeys && acceptedKeys.has(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key))) ? 'true' : 'false';
+    tr.innerHTML =
+      '<td><span class="badge ' + mismatchTypeBadgeClass(row.mismatch_type) + '">' + escHtml(row.mismatch_type) + '</span></td>' +
+      '<td>' + escHtml(row.column_name) + '</td>' +
+      '<td style="font-family: monospace; font-size: 0.85em;">' + escHtml(tr.dataset.key) + '</td>' +
+      '<td class="diff-values-cell" colspan="2">' +
+        '<div class="diff-panels">' +
+          '<div class="diff-panel diff-panel-src">' +
+            '<span class="diff-panel-label">' + escHtml(sourceEnv) + '</span>' +
+            '<span class="diff-panel-val" data-role="src-diff" data-raw="' + escHtml(tr.dataset.src) + '"></span>' +
+            '<button class="copy-btn" onclick="copyVal(this, this.closest(\'tr\').dataset.src)" title="Copy source value">⎘</button>' +
+          '</div>' +
+          '<div class="diff-panel diff-panel-tgt">' +
+            '<span class="diff-panel-label">' + escHtml(targetEnv) + '</span>' +
+            '<span class="diff-panel-val" data-role="tgt-diff" data-raw="' + escHtml(tr.dataset.tgt) + '"></span>' +
+            '<button class="copy-btn" onclick="copyVal(this, this.closest(\'tr\').dataset.tgt)" title="Copy target value">⎘</button>' +
+          '</div>' +
+        '</div>' +
+      '</td>';
+    return tr;
+  }
+
+  function injectRowsForSection(section, rows){
+    var tbody = section.querySelector('tbody[id^="mismatch-tbody-"]');
+    if(!tbody) return;
+    var table = tbody.closest('table');
+    if(table && table.style.display === 'none') table.style.display = '';
+    var acceptedKeys = new Set();
+    tbody.querySelectorAll('tr[data-mismatch][data-accepted="true"]').forEach(function(tr){
+      acceptedKeys.add(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key));
+    });
+    var frag = document.createDocumentFragment();
+    rows.forEach(function(row){
+      frag.appendChild(buildMismatchRow(row, section.dataset.sourceEnv, section.dataset.targetEnv, acceptedKeys));
+    });
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
+    var countEl = document.getElementById('mismatch-count-' + section.dataset.resultId);
+    if(countEl) countEl.textContent = 'Showing all ' + rows.length + ' of ' + rows.length;
+    var textEl = document.getElementById('truncation-text-' + section.dataset.resultId);
+    if(textEl) textEl.textContent = 'Showing all ' + rows.length + ' of ' + rows.length + ' differences.';
+  }
+
+  function refreshAfterInjection(){
+    populateColFilter();
+    applyDiff();
+    computeAcceptedStats();
+    applyFilters();
+  }
+
+  function setLoadAllBusy(btn, statusEl, label){
+    btn.disabled = true;
+    btn.textContent = label;
+    if(statusEl) statusEl.textContent = '';
+  }
+
+  function setLoadAllFailed(btn, statusEl, message){
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+    if(statusEl) statusEl.textContent = message;
+  }
+
+  function setLoadAllDone(btn, statusEl){
+    btn.disabled = true;
+    btn.textContent = 'Loaded';
+    if(statusEl) statusEl.textContent = '';
+  }
+
+  function startOrReuseExportJob(runId){
+    return fetch(window.location.origin + '/api/runs/' + encodeURIComponent(runId) + '/exports', {
+      method: 'POST',
+      headers: reportAuthHeaders({'Content-Type': 'application/json'}),
+      body: JSON.stringify({format: 'json'}),
+    }).then(function(resp){
+      if(!resp.ok) throw new Error('Failed to start export job (HTTP ' + resp.status + ')');
+      return resp.json();
+    });
+  }
+
+  function pollExportJobUntilComplete(runId, exportId){
+    var attempt = 0;
+    function poll(){
+      return fetch(window.location.origin + '/api/runs/' + encodeURIComponent(runId) + '/exports/' + encodeURIComponent(exportId), {
+        headers: reportAuthHeaders(),
+      }).then(function(resp){
+        if(!resp.ok) throw new Error('Failed to check export status (HTTP ' + resp.status + ')');
+        return resp.json();
+      }).then(function(status){
+        if(status.status === 'COMPLETED') return status;
+        if(status.status === 'FAILED') throw new Error(status.error_message || 'Export job failed');
+        attempt++;
+        if(attempt >= 240) throw new Error('Export job timed out');
+        return new Promise(function(resolve){ setTimeout(resolve, 2000); }).then(poll);
+      });
+    }
+    return poll();
+  }
+
+  function fetchExportRows(runId, exportId){
+    return fetch(window.location.origin + '/api/runs/' + encodeURIComponent(runId) + '/exports/' + encodeURIComponent(exportId) + '/download', {
+      headers: reportAuthHeaders(),
+    }).then(function(resp){
+      if(!resp.ok) throw new Error('Failed to download export (HTTP ' + resp.status + ')');
+      return resp.text();
+    }).then(function(text){
+      return text.split('\n').filter(function(line){ return line.trim().length; }).map(function(line){
+        try { return JSON.parse(line); } catch(e){ return null; }
+      }).filter(function(row){ return row !== null; });
+    });
+  }
+
+  function loadAllDifferencesForSection(btn){
+    var section = btn.closest('.mismatch-section');
+    var runId = btn.dataset.run;
+    var statusEl = document.getElementById('load-all-status-' + btn.dataset.result);
+    setLoadAllBusy(btn, statusEl, 'Preparing…');
+    var jobExportId;
+    startOrReuseExportJob(runId).then(function(job){
+      jobExportId = job.export_id;
+      return pollExportJobUntilComplete(runId, jobExportId);
+    }).then(function(){
+      return fetchExportRows(runId, jobExportId);
+    }).then(function(rows){
+      var mine = rows.filter(function(r){ return r.test_name === section.dataset.queryName; });
+      injectRowsForSection(section, mine);
+      refreshAfterInjection();
+      setLoadAllDone(btn, statusEl);
+    }).catch(function(err){
+      setLoadAllFailed(btn, statusEl, 'Failed to load all differences: ' + err.message);
+    });
+  }
+
+  function loadAllDifferencesGlobal(btn){
+    var runId = btn.dataset.run;
+    var statusEl = document.getElementById('load-all-status-global');
+    setLoadAllBusy(btn, statusEl, 'Preparing…');
+    var jobExportId;
+    startOrReuseExportJob(runId).then(function(job){
+      jobExportId = job.export_id;
+      return pollExportJobUntilComplete(runId, jobExportId);
+    }).then(function(){
+      return fetchExportRows(runId, jobExportId);
+    }).then(function(rows){
+      var byTest = {};
+      rows.forEach(function(r){
+        (byTest[r.test_name] = byTest[r.test_name] || []).push(r);
+      });
+      document.querySelectorAll('.mismatch-section[data-result-id]').forEach(function(section){
+        // Only sections that were actually truncated have a load-all button; skip
+        // already-complete sections so their accepted-detail rows aren't wiped for no reason.
+        var sectionBtn = document.getElementById('load-all-btn-' + section.dataset.resultId);
+        if(!sectionBtn) return;
+        var mine = byTest[section.dataset.queryName] || [];
+        if(!mine.length) return;
+        injectRowsForSection(section, mine);
+        var sectionStatus = document.getElementById('load-all-status-' + section.dataset.resultId);
+        setLoadAllDone(sectionBtn, sectionStatus);
+      });
+      refreshAfterInjection();
+      setLoadAllDone(btn, statusEl);
+    }).catch(function(err){
+      setLoadAllFailed(btn, statusEl, 'Failed to load all differences: ' + err.message);
     });
   }
 
