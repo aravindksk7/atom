@@ -382,7 +382,7 @@
             </summary>
             {% if total_mismatches > shown_mismatches %}
             <p id="truncation-note-{{ result.id }}" style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
-              {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,
+              <span id="truncation-text-{{ result.id }}">{{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,</span>
               or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
               or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
                          onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
@@ -446,7 +446,7 @@
           <details>
             <summary>{{ result.query_name }} Mismatches (<span id="mismatch-count-{{ result.id }}">0 detail rows stored of {{ result.total_issues }}</span>)</summary>
             <p id="truncation-note-{{ result.id }}" style="margin:6px 0;color:var(--muted);font-size:0.9em">
-              0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,
+              <span id="truncation-text-{{ result.id }}">0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,</span>
               or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
               or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
                          onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
@@ -764,7 +764,11 @@
     return (type === 'value_diff' || type === 'value_mismatch') ? 'badge-amber' : 'badge-gray';
   }
 
-  function buildMismatchRow(row, sourceEnv, targetEnv){
+  function mismatchRowKey(columnName, mismatchType, keyValuesText){
+    return (columnName || '') + '||' + (mismatchType || '') + '||' + (keyValuesText || '');
+  }
+
+  function buildMismatchRow(row, sourceEnv, targetEnv, acceptedKeys){
     var tr = document.createElement('tr');
     tr.setAttribute('data-mismatch', '');
     tr.dataset.test = row.test_name || '';
@@ -773,7 +777,10 @@
     tr.dataset.key = typeof row.key_values === 'string' ? row.key_values : JSON.stringify(row.key_values || {});
     tr.dataset.src = row.source_value || '';
     tr.dataset.tgt = row.target_value || '';
-    tr.dataset.accepted = 'false';
+    // The recompute export has no accepted field (DIFFERENCE_FIELDS doesn't carry it) — carry
+    // forward acceptance state from the rows this injection is about to replace, matched by
+    // column+type+key, so re-loading a test doesn't silently un-accept its already-accepted rows.
+    tr.dataset.accepted = (acceptedKeys && acceptedKeys.has(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key))) ? 'true' : 'false';
     tr.innerHTML =
       '<td><span class="badge ' + mismatchTypeBadgeClass(row.mismatch_type) + '">' + escHtml(row.mismatch_type) + '</span></td>' +
       '<td>' + escHtml(row.column_name) + '</td>' +
@@ -800,16 +807,20 @@
     if(!tbody) return;
     var table = tbody.closest('table');
     if(table && table.style.display === 'none') table.style.display = '';
+    var acceptedKeys = new Set();
+    tbody.querySelectorAll('tr[data-mismatch][data-accepted="true"]').forEach(function(tr){
+      acceptedKeys.add(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key));
+    });
     var frag = document.createDocumentFragment();
     rows.forEach(function(row){
-      frag.appendChild(buildMismatchRow(row, section.dataset.sourceEnv, section.dataset.targetEnv));
+      frag.appendChild(buildMismatchRow(row, section.dataset.sourceEnv, section.dataset.targetEnv, acceptedKeys));
     });
     tbody.innerHTML = '';
     tbody.appendChild(frag);
     var countEl = document.getElementById('mismatch-count-' + section.dataset.resultId);
     if(countEl) countEl.textContent = 'Showing all ' + rows.length + ' of ' + rows.length;
-    var noteEl = document.getElementById('truncation-note-' + section.dataset.resultId);
-    if(noteEl) noteEl.textContent = 'Showing all ' + rows.length + ' of ' + rows.length + ' differences.';
+    var textEl = document.getElementById('truncation-text-' + section.dataset.resultId);
+    if(textEl) textEl.textContent = 'Showing all ' + rows.length + ' of ' + rows.length + ' differences.';
   }
 
   function refreshAfterInjection(){
