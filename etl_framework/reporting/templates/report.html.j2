@@ -354,25 +354,39 @@
       </table>
     </div>
 
-    <div id="mismatches-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    {% set ns = namespace(any_truncated=false) %}
+    {% for result in suite.reconciliation_results %}
+      {% if result.total_issues > (result.mismatches | length) %}{% set ns.any_truncated = true %}{% endif %}
+    {% endfor %}
+    <div id="mismatches-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <h2 style="margin:0">Mismatch Details</h2>
       <button class="expand-all-btn" onclick="setAllDetails(true)">Expand All</button>
       <button class="expand-all-btn" onclick="setAllDetails(false)">Collapse All</button>
+      {% if ns.any_truncated %}
+      <button id="load-all-btn-global" class="expand-all-btn" data-run="{{ suite.run_id }}"
+              onclick="loadAllDifferencesGlobal(this)">Load all differences (entire run)</button>
+      <span id="load-all-status-global" style="font-size:0.82em;color:var(--muted)"></span>
+      {% endif %}
     </div>
     <div id="mismatches">
       {% for result in suite.reconciliation_results %}
+        {% set shown_mismatches = result.mismatches | length %}
+        {% set total_mismatches = result.total_issues %}
         {% if result.mismatches %}
-          {% set shown_mismatches = result.mismatches | length %}
-          {% set total_mismatches = result.total_issues %}
+          <div class="mismatch-section" data-result-id="{{ result.id }}" data-query-name="{{ result.query_name }}"
+               data-source-env="{{ suite.source_env }}" data-target-env="{{ suite.target_env }}">
           <details>
             <summary>
               {{ result.query_name }} Mismatches
-              (Showing first {{ shown_mismatches }}{% if total_mismatches > shown_mismatches %} of {{ total_mismatches }}{% endif %})
+              (<span id="mismatch-count-{{ result.id }}">Showing first {{ shown_mismatches }}{% if total_mismatches > shown_mismatches %} of {{ total_mismatches }}{% endif %}</span>)
             </summary>
             {% if total_mismatches > shown_mismatches %}
-            <p style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
+            <p id="truncation-note-{{ result.id }}" style="margin:6px 0 12px;color:var(--muted);font-size:0.85em">
               {{ shown_mismatches }} of {{ total_mismatches }} rows shown; download the full differences export for all differences,
-              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
+              or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
+                         onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
+              <span id="load-all-status-{{ result.id }}" style="font-size:0.9em;color:var(--muted)"></span>
             </p>
             {% endif %}
             <table>
@@ -384,7 +398,7 @@
                   <th colspan="2">Values ({{ suite.source_env }} → {{ suite.target_env }})</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="mismatch-tbody-{{ result.id }}">
                 {% for mm in result.mismatches %}
                 <tr data-mismatch
                     data-test="{{ result.query_name }}"
@@ -425,14 +439,32 @@
               </tbody>
             </table>
           </details>
+          </div>
         {% elif result.total_issues > 0 %}
+          <div class="mismatch-section" data-result-id="{{ result.id }}" data-query-name="{{ result.query_name }}"
+               data-source-env="{{ suite.source_env }}" data-target-env="{{ suite.target_env }}">
           <details>
-            <summary>{{ result.query_name }} Mismatches (0 detail rows stored of {{ result.total_issues }})</summary>
-            <p style="margin:6px 0;color:var(--muted);font-size:0.9em">
+            <summary>{{ result.query_name }} Mismatches (<span id="mismatch-count-{{ result.id }}">0 detail rows stored of {{ result.total_issues }}</span>)</summary>
+            <p id="truncation-note-{{ result.id }}" style="margin:6px 0;color:var(--muted);font-size:0.9em">
               0 of {{ result.total_issues }} rows shown; download the full differences export for all differences,
-              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>.
+              or <a href="#" data-differences-link data-run="{{ suite.run_id }}" data-result="{{ result.id }}" style="color:var(--accent)">open in Differences Explorer &#8599;</a>,
+              or <button id="load-all-btn-{{ result.id }}" class="expand-all-btn" data-result="{{ result.id }}" data-run="{{ suite.run_id }}"
+                         onclick="loadAllDifferencesForSection(this)">Load all for this test</button>
+              <span id="load-all-status-{{ result.id }}" style="font-size:0.9em;color:var(--muted)"></span>
             </p>
+            <table style="display:none">
+              <thead>
+                <tr>
+                  <th>Mismatch Type</th>
+                  <th>Column</th>
+                  <th>Row Key Values</th>
+                  <th colspan="2">Values ({{ suite.source_env }} → {{ suite.target_env }})</th>
+                </tr>
+              </thead>
+              <tbody id="mismatch-tbody-{{ result.id }}"></tbody>
+            </table>
           </details>
+          </div>
         {% endif %}
       {% endfor %}
     </div>
