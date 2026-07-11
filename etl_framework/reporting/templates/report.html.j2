@@ -928,12 +928,15 @@
         (byTest[r.test_name] = byTest[r.test_name] || []).push(r);
       });
       document.querySelectorAll('.mismatch-section[data-result-id]').forEach(function(section){
+        // Only sections that were actually truncated have a load-all button; skip
+        // already-complete sections so their accepted-detail rows aren't wiped for no reason.
+        var sectionBtn = document.getElementById('load-all-btn-' + section.dataset.resultId);
+        if(!sectionBtn) return;
         var mine = byTest[section.dataset.queryName] || [];
         if(!mine.length) return;
         injectRowsForSection(section, mine);
-        var sectionBtn = document.getElementById('load-all-btn-' + section.dataset.resultId);
         var sectionStatus = document.getElementById('load-all-status-' + section.dataset.resultId);
-        if(sectionBtn) setLoadAllDone(sectionBtn, sectionStatus);
+        setLoadAllDone(sectionBtn, sectionStatus);
       });
       refreshAfterInjection();
       setLoadAllDone(btn, statusEl);

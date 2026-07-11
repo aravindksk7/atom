@@ -154,6 +154,118 @@ def test_accepted_at_rendered_via_to_local_filter(tmp_path):
     assert expected in html
 
 
+def _make_snapshot(results, run_id="run-load-all"):
+    return RunReportSnapshot(
+        run_id=run_id,
+        status="FAILED",
+        raw_status="FAILED",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        source_env="dev",
+        target_env="qa",
+        config_snapshot=None,
+        run_type="reconciliation",
+        pair_id=None,
+        total_tests=len(results),
+        passed=0,
+        failed=len(results),
+        slow=0,
+        error=0,
+        raw_total_tests=len(results),
+        raw_passed=0,
+        raw_failed=len(results),
+        raw_slow=0,
+        raw_error=0,
+        results=results,
+        has_result_rows=True,
+    )
+
+
+def test_load_all_buttons_present_when_truncated(tmp_path):
+    truncated = ReportResult(
+        id=1,
+        query_name="orders",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=1.0,
+        source_row_count=20,
+        target_row_count=20,
+        value_mismatch_count=1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        mismatches=[_make_mm("amount", "1", "2")],
+        total_issues_override=20,
+    )
+    complete = ReportResult(
+        id=2,
+        query_name="invoices",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=0.5,
+        source_row_count=1,
+        target_row_count=1,
+        value_mismatch_count=1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        mismatches=[_make_mm("amount", "1", "2")],
+    )
+
+    html = _render(_make_snapshot([truncated, complete]), tmp_path)
+
+    assert 'id="load-all-btn-global"' in html
+    assert 'id="load-all-btn-1"' in html
+    assert 'id="mismatch-tbody-1"' in html
+    assert 'id="truncation-text-1"' in html
+    # The complete (non-truncated) result gets no per-test load-all button.
+    assert 'id="load-all-btn-2"' not in html
+    assert 'id="mismatch-tbody-2"' in html
+
+
+def test_load_all_global_button_absent_when_nothing_truncated(tmp_path):
+    complete = ReportResult(
+        id=1,
+        query_name="orders",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=1.0,
+        source_row_count=1,
+        target_row_count=1,
+        value_mismatch_count=1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        mismatches=[_make_mm("amount", "1", "2")],
+    )
+
+    html = _render(_make_snapshot([complete]), tmp_path)
+
+    assert 'id="load-all-btn-global"' not in html
+    assert 'id="load-all-btn-1"' not in html
+
+
+def test_load_all_zero_stored_rows_skeleton_present(tmp_path):
+    zero_stored = ReportResult(
+        id=3,
+        query_name="products",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=1.0,
+        source_row_count=5,
+        target_row_count=5,
+        value_mismatch_count=0,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        mismatches=[],
+        total_issues_override=5,
+    )
+
+    html = _render(_make_snapshot([zero_stored]), tmp_path)
+
+    assert 'id="load-all-btn-global"' in html
+    assert 'id="load-all-btn-3"' in html
+    assert 'id="mismatch-tbody-3"' in html
+    assert 'id="truncation-text-3"' in html
+
+
 def test_analytics_use_uncapped_aggregate_counts(tmp_path):
     result = ReportResult(
         id=1,
