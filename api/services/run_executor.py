@@ -39,6 +39,7 @@ from etl_framework.utils.tracing import span
 
 HOLD_POLL_INTERVAL_SECONDS = int(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
 BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
+FILE_SOURCE_QUERY = "__file_source__"
 
 logger = logging.getLogger(__name__)
 
@@ -411,42 +412,20 @@ class RunExecutor:
             return self._build_case_automic(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
+        if job.job_type == "reconciliation" and self._uses_file_sources(job):
+            return self._build_case_file_reconciliation(job)
 
         def run_job() -> ReconciliationResult:
             source_engine, target_engine = self._build_engines(job)
-            segment_columns = self._resolve_segment_columns(job)
-            engine = ReconciliationEngine(
-                source_engine=source_engine,
-                target_engine=target_engine,
-                key_columns=job.key_columns or self._settings.key_columns,
-                exclude_columns=job.exclude_columns or self._settings.exclude_columns,
-                float_tolerance=self._settings.float_tolerance,
-                mismatch_row_limit=self._settings.mismatch_row_limit,
-                schema_mismatch_policy=self._settings.schema_mismatch_policy,
-                null_equals_null=self._settings.null_equals_null,
+            return self._run_reconciliation_job(
+                job,
+                source_engine,
+                target_engine,
+                query=job.query,
+                params=job.params,
                 chunk_size=self._settings.chunk_size,
                 use_hash_precheck=self._settings.use_hash_precheck,
-                backend=self._build_backend(job),
-                segment_columns=segment_columns,
             )
-            max_duration = self._settings.max_duration_seconds or None
-            result = engine.reconcile(
-                query=job.query,
-                query_name=job.name,
-                params=job.params,
-                max_duration_seconds=max_duration,
-            )
-            if job.rules:
-                result = self._apply_dq_rules(result, job, source_engine)
-            if job.pass_condition:
-                result = self._apply_pass_condition(result, job, source_engine)
-            if segment_columns:
-                try:
-                    summary = build_segment_summary(result.mismatches, segment_columns)
-                    result = dataclasses.replace(result, segment_summary=summary)
-                except Exception:
-                    logger.warning("segment summary failed for %s", job.name, exc_info=True)
-            return result
 
         max_retries = self._settings.max_retries
         retry_delay = self._settings.retry_delay_seconds
@@ -463,6 +442,69 @@ class RunExecutor:
             raise RuntimeError("unreachable")  # pragma: no cover
 
         return run_with_retry
+
+    def _build_case_file_reconciliation(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            if not self._has_file_source(job, "source") or not self._has_file_source(job, "target"):
+                raise ValueError("file-backed reconciliation jobs require source and target files")
+            engines = self._build_file_engines(job)
+            if engines is None:
+                raise ValueError("file-backed reconciliation jobs require source and target files")
+            source_engine, target_engine = engines
+            return self._run_reconciliation_job(
+                job,
+                source_engine,
+                target_engine,
+                query=FILE_SOURCE_QUERY,
+                params={},
+                chunk_size=0,
+                use_hash_precheck=False,
+            )
+        return run_job
+
+    def _run_reconciliation_job(
+        self,
+        job: JobDefinition,
+        source_engine,
+        target_engine,
+        *,
+        query: str,
+        params: dict[str, Any] | None,
+        chunk_size: int,
+        use_hash_precheck: bool,
+    ) -> ReconciliationResult:
+        segment_columns = self._resolve_segment_columns(job)
+        engine = ReconciliationEngine(
+            source_engine=source_engine,
+            target_engine=target_engine,
+            key_columns=job.key_columns or self._settings.key_columns,
+            exclude_columns=job.exclude_columns or self._settings.exclude_columns,
+            float_tolerance=self._settings.float_tolerance,
+            mismatch_row_limit=self._settings.mismatch_row_limit,
+            schema_mismatch_policy=self._settings.schema_mismatch_policy,
+            null_equals_null=self._settings.null_equals_null,
+            chunk_size=chunk_size,
+            use_hash_precheck=use_hash_precheck,
+            backend=self._build_backend(job),
+            segment_columns=segment_columns,
+        )
+        result = engine.reconcile(
+            query=query,
+            query_name=job.name,
+            params=params,
+            max_duration_seconds=self._settings.max_duration_seconds or None,
+        )
+        if job.rules:
+            result = self._apply_dq_rules(result, job, source_engine)
+        if job.pass_condition:
+            result = self._apply_pass_condition(result, job, source_engine)
+        if segment_columns:
+            try:
+                summary = build_segment_summary(result.mismatches, segment_columns)
+                result = dataclasses.replace(result, segment_summary=summary)
+            except Exception:
+                logger.warning("segment summary failed for %s", job.name, exc_info=True)
+        return result
 
     def _apply_dq_rules(
         self, result: ReconciliationResult, job: JobDefinition, source_engine
@@ -1072,7 +1114,57 @@ class RunExecutor:
             mismatch_row_limit=self._settings.mismatch_row_limit,
         )
 
+    def _job_file_value(self, job: JobDefinition, prefix: str, suffix: str) -> Any:
+        side = "a" if prefix == "source" else "b"
+        return (
+            job.params.get(f"{prefix}_file_{suffix}")
+            or job.params.get(f"file_{side}_{suffix}")
+        )
+
+    def _uses_file_sources(self, job: JobDefinition) -> bool:
+        return bool(
+            job.params.get("source_mode") == "files"
+            or self._has_file_source(job, "source")
+            or self._has_file_source(job, "target")
+        )
+
+    def _has_file_source(self, job: JobDefinition, prefix: str) -> bool:
+        return bool(
+            self._job_file_value(job, prefix, "path")
+            or self._job_file_value(job, prefix, "content_b64")
+        )
+
+    def _load_job_file_frame(self, job: JobDefinition, prefix: str) -> pd.DataFrame | None:
+        path = self._job_file_value(job, prefix, "path")
+        content_b64 = self._job_file_value(job, prefix, "content_b64")
+        file_name = self._job_file_value(job, prefix, "name") or path
+        if not path and not content_b64:
+            return None
+
+        from api.services.file_source import read_tabular
+
+        return read_tabular(path=path, content_b64=content_b64, file_name=file_name)
+
+    def _build_file_engines(self, job: JobDefinition):
+        source_df = self._load_job_file_frame(job, "source")
+        target_df = self._load_job_file_frame(job, "target")
+        if source_df is None and target_df is None:
+            return None
+
+        if source_df is None:
+            source_df = target_df.copy()
+        if target_df is None:
+            target_df = source_df.copy()
+
+        source_label = job.params.get("source_file_label") or job.params.get("label_a") or self._source_env
+        target_label = job.params.get("target_file_label") or job.params.get("label_b") or self._target_env
+        return FrameEngine(source_df, source_label), FrameEngine(target_df, target_label)
+
     def _build_engines(self, job: JobDefinition):
+        file_engines = self._build_file_engines(job)
+        if file_engines is not None:
+            return file_engines
+
         if self._settings.use_live_connections:
             src_creds = self._config_snapshot.get("source_credentials")
             tgt_creds = self._config_snapshot.get("target_credentials")

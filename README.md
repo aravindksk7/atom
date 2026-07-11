@@ -884,7 +884,7 @@ All job management is available from the **Job Catalog** card in the Launch tab 
 2. Enter a **Name** (unique, required).
 3. Enter an optional **Description** and comma-separated **Tags**.
 4. Select a **Job Type** — see [Job Types Reference](#job-types-reference) for full details on each type and its required settings.
-5. Fill in the type-specific fields that appear (SQL query, key columns, BO report IDs, etc.).
+5. Fill in the type-specific fields that appear (SQL query or file paths, key columns, BO report IDs, etc.).
 6. Optionally set **Depends On** — enter one or more job names whose results must be available before this job can run. The run executor resolves the execution order with a topological sort; jobs with failed upstreams are skipped automatically.
 7. Optionally add **DQ Rules** — click **+ Add Rule**, pick a rule type, and fill in the parameters. Multiple rules can be stacked on a single job.
 8. Optionally set a **Pass Condition** — override whether the job is considered passed based on row counts, mismatch thresholds, or a custom SQL assertion (see `PassCondition` fields below).
@@ -955,19 +955,22 @@ The framework supports nine job types. Each type has its own required parameters
 
 #### `reconciliation` (default)
 
-Compares two SQL queries (one per environment) row-by-row. This is the most common job type for ETL validation.
+Compares two SQL queries (one per environment) or two tabular files row-by-row. This is the most common job type for ETL validation.
 
 **Required fields:**
 
 | Field | Description |
 |---|---|
-| `query` | SQL query executed against both source and target environments |
+| `query` | SQL query executed against both source and target environments when `params.source_mode` is not `files` |
 | `key_columns` | One or more columns that uniquely identify a row (used to join the two result sets) |
 
 **Optional fields:**
 
 | Field | Default | Description |
 |---|---|---|
+| `params.source_mode` | `sql` | Set to `files` to load source/target data from server-side files |
+| `params.source_file_path` / `params.target_file_path` | — | CSV/XLSX/XLS/JSON/XML/TSV file paths scoped to `SERVER_FILE_ALLOWED_DIRS` or `UPLOAD_BASE_DIR` |
+| `params.source_file_label` / `params.target_file_label` | source/target env | Display labels for file-backed runs |
 | `exclude_columns` | `[]` | Columns to ignore during comparison (e.g. `last_updated`, audit timestamps) |
 | `rules` | `[]` | DQ rules evaluated against the source result set |
 | `depends_on` | `[]` | Job names that must complete (and pass) before this job runs |
@@ -975,13 +978,28 @@ Compares two SQL queries (one per environment) row-by-row. This is the most comm
 
 **How it works:**
 
-1. The query is run against the source and target databases.
+1. The query is run against the source and target databases, or file paths are read when `params.source_mode` is `files`.
 2. Rows are matched on `key_columns`.
 3. Value differences, rows missing from target, and rows missing from source are recorded as mismatch details.
 4. DQ rules (if configured) are applied to the source result set and any violations are added as additional mismatches.
 5. Status is `PASSED` if there are zero issues (or if `pass_condition` thresholds are all met), otherwise `FAILED`.
 
 Use `Validate Query` in the editor to run a dry-run EXPLAIN before saving; this checks SQL syntax against both environments without fetching any data.
+
+Example file-backed job:
+
+```json
+{
+  "name": "orders_file_recon",
+  "job_type": "reconciliation",
+  "key_columns": ["order_id"],
+  "params": {
+    "source_mode": "files",
+    "source_file_path": "C:\\temp\\orders_source.csv",
+    "target_file_path": "C:\\temp\\orders_target.csv"
+  }
+}
+```
 
 ---
 

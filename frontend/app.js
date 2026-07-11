@@ -1207,6 +1207,9 @@ function app() {
       sessionStorage.removeItem('etl_pending_query');
       this.jobModal = {
         name: '', description: '', job_type: 'reconciliation', query: _pendingQuery,
+        source_mode: 'sql',
+        source_file_path: '', target_file_path: '',
+        source_file_label: '', target_file_label: '',
         key_columns_raw: 'id', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
@@ -1244,6 +1247,11 @@ function app() {
         name: job.name, description: job.description || '',
         job_type: job.job_type || 'reconciliation',
         query: job.query || '', key_columns_raw: (job.key_columns || ['id']).join(', '),
+        source_mode: job.params?.source_mode || (job.params?.source_file_path || job.params?.file_a_path ? 'files' : 'sql'),
+        source_file_path: job.params?.source_file_path || job.params?.file_a_path || '',
+        target_file_path: job.params?.target_file_path || job.params?.file_b_path || '',
+        source_file_label: job.params?.source_file_label || job.params?.label_a || '',
+        target_file_label: job.params?.target_file_label || job.params?.label_b || '',
         tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
         depends_on_raw: (job.depends_on || []).join(', '),
         rules: (job.rules || []).map(r => ({ ...r })),
@@ -1348,6 +1356,17 @@ function app() {
     async saveJob() {
       const m = this.jobModal;
       const params = {};
+      const fileCapableJob = ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type);
+      const usesFileSource = fileCapableJob && m.source_mode === 'files';
+      if (usesFileSource) {
+        params.source_mode = 'files';
+        if (m.source_file_path) params.source_file_path = m.source_file_path;
+        if (m.source_file_label) params.source_file_label = m.source_file_label;
+        if (m.job_type === 'reconciliation') {
+          if (m.target_file_path) params.target_file_path = m.target_file_path;
+          if (m.target_file_label) params.target_file_label = m.target_file_label;
+        }
+      }
       if (m.job_type === 'automic_job') {
         if (m.automic_job_name) params.job_name = m.automic_job_name;
         if (m.automic_run_id) params.run_id = m.automic_run_id;
@@ -1401,7 +1420,7 @@ function app() {
       const body = {
         name: m.name, description: m.description,
         job_type: m.job_type,
-        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) ? m.query : '',
+        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource ? m.query : '',
         key_columns: keyColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
@@ -1427,8 +1446,12 @@ function app() {
     canSaveJob() {
       const m = this.jobModal;
       if (!m?.name) return false;
+      const hasKeys = Boolean(m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length);
       if (m.job_type === 'reconciliation') {
-        return Boolean(m.query?.trim() && m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length);
+        if (m.source_mode === 'files') {
+          return Boolean(m.source_file_path && m.target_file_path && hasKeys);
+        }
+        return Boolean(m.query?.trim() && hasKeys);
       }
       if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
       if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
@@ -1439,9 +1462,11 @@ function app() {
         );
       }
       if (m.job_type === 'dbt_artifact') return Boolean(m.dbt_run_results_path);
-      if (m.job_type === 'freshness') return Boolean(m.query?.trim() && m.freshness_ts_col);
-      if (m.job_type === 'profile') return Boolean(m.query?.trim());
-      if (m.job_type === 'schema_snapshot') return Boolean(m.query?.trim());
+      if (m.job_type === 'freshness') {
+        return Boolean((m.source_mode === 'files' ? m.source_file_path : m.query?.trim()) && m.freshness_ts_col);
+      }
+      if (m.job_type === 'profile') return Boolean(m.source_mode === 'files' ? m.source_file_path : m.query?.trim());
+      if (m.job_type === 'schema_snapshot') return Boolean(m.source_mode === 'files' ? m.source_file_path : m.query?.trim());
       if (m.job_type === 'cross_job_assertion') return Boolean(m.cja_source_job && m.cja_target_job);
       return true;
     },
@@ -4152,8 +4177,8 @@ function app() {
       const m = this.jobModal || {};
       const v = { sql: '', keyColumns: '', dependencies: '' };
 
-      // SQL validation: only for reconciliation jobs
-      if (m.job_type === 'reconciliation') {
+      // SQL validation: only for SQL-backed reconciliation jobs
+      if (m.job_type === 'reconciliation' && m.source_mode !== 'files') {
         const query = (m.query || '').trim();
         if (query && !/select/i.test(query)) {
           v.sql = 'Query should contain a SELECT statement';
@@ -4222,6 +4247,11 @@ function app() {
         job_type: m.job_type,
         description: m.description,
         query: m.query,
+        source_mode: m.source_mode,
+        source_file_path: m.source_file_path,
+        target_file_path: m.target_file_path,
+        source_file_label: m.source_file_label,
+        target_file_label: m.target_file_label,
         key_columns_raw: m.key_columns_raw,
         tags_raw: m.tags_raw,
         enabled: m.enabled,

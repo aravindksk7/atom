@@ -997,13 +997,20 @@
             <option value="api_reconciliation">api_reconciliation</option>
           </select>
         </div>
+        <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
+          <label class="field-label">Input Source</label>
+          <select x-model="jobModal.source_mode" class="field-input field-select">
+            <option value="sql">SQL Query</option>
+            <option value="files">Files</option>
+          </select>
+        </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" class="rounded" x-model="jobModal.enabled" /> Enabled
         </label>
       </div>
 
       <div x-show="jobModalTab === 'settings'" class="space-y-3">
-        <div x-show="jobModal.job_type === 'reconciliation'">
+        <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'files'">
           <label class="field-label">SQL Query</label>
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
@@ -1054,6 +1061,27 @@
               </table>
               <p x-show="jobModal.previewResult && jobModal.previewResult.rows?.length === 0"
                  class="text-xs text-slate-500 px-3 py-2">No rows returned.</p>
+            </div>
+          </div>
+        </div>
+        <div x-show="jobModal.source_mode === 'files' && ['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)"
+             class="border border-slate-200 rounded-lg p-3">
+          <div class="grid-2">
+            <div>
+              <label class="field-label" x-text="jobModal.job_type === 'reconciliation' ? 'Source File Path' : 'Input File Path'"></label>
+              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" />
+            </div>
+            <div x-show="jobModal.job_type === 'reconciliation'">
+              <label class="field-label">Target File Path</label>
+              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" />
+            </div>
+            <div>
+              <label class="field-label">Source Label</label>
+              <input x-model="jobModal.source_file_label" class="field-input" placeholder="Source file" />
+            </div>
+            <div x-show="jobModal.job_type === 'reconciliation'">
+              <label class="field-label">Target Label</label>
+              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Target file" />
             </div>
           </div>
         </div>
@@ -1115,7 +1143,7 @@
         </div>
         <!-- Freshness params -->
         <div x-show="jobModal.job_type === 'freshness'" class="space-y-3">
-          <div>
+          <div x-show="jobModal.source_mode !== 'files'">
             <label class="field-label">SQL Query (must return a timestamp column)</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
                       placeholder="SELECT MAX(created_at) as ts FROM orders"></textarea>
@@ -1133,7 +1161,7 @@
         </div>
         <!-- Profile params -->
         <div x-show="jobModal.job_type === 'profile'" class="space-y-3">
-          <div>
+          <div x-show="jobModal.source_mode !== 'files'">
             <label class="field-label">SQL Query</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
                       placeholder="SELECT * FROM orders"></textarea>
@@ -1151,7 +1179,7 @@
         </div>
         <!-- Schema Snapshot params -->
         <div x-show="jobModal.job_type === 'schema_snapshot'" class="space-y-3">
-          <div>
+          <div x-show="jobModal.source_mode !== 'files'">
             <label class="field-label">SQL Query (schema is captured from the result columns)</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
                       placeholder="SELECT * FROM orders LIMIT 0"></textarea>
@@ -1212,7 +1240,7 @@
           </div>
         </div>
         <!-- Validate query button (editing mode only) -->
-        <template x-if="jobModalEditing && jobModal.job_type === 'reconciliation'">
+        <template x-if="jobModalEditing && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'files'">
           <div>
             <div class="flex items-center gap-3">
               <button @click="validateJob()" class="btn-secondary btn-sm" :disabled="validateJobLoading">

@@ -368,6 +368,23 @@ class JobOut(BaseModel):
     tags: list[str] = []
 
 
+def _job_file_value(params: dict[str, Any], prefix: str, suffix: str) -> Any:
+    side = "a" if prefix == "source" else "b"
+    return params.get(f"{prefix}_file_{suffix}") or params.get(f"file_{side}_{suffix}")
+
+
+def _has_job_file_source(params: dict[str, Any], prefix: str) -> bool:
+    return bool(
+        _job_file_value(params, prefix, "path")
+        or _job_file_value(params, prefix, "content_b64")
+    )
+
+
+def _validate_job_file_source(params: dict[str, Any], prefix: str) -> None:
+    if _job_file_value(params, prefix, "content_b64") and not _job_file_value(params, prefix, "name"):
+        raise ValueError(f"{prefix} file uploads require a file name for format detection")
+
+
 class JobDefinition(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
@@ -404,19 +421,33 @@ class JobDefinition(BaseModel):
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
         elif self.job_type == "reconciliation":
-            if not self.query.strip():
+            uses_files = (
+                self.params.get("source_mode") == "files"
+                or _has_job_file_source(self.params, "source")
+                or _has_job_file_source(self.params, "target")
+            )
+            if uses_files:
+                _validate_job_file_source(self.params, "source")
+                _validate_job_file_source(self.params, "target")
+                if not _has_job_file_source(self.params, "source") or not _has_job_file_source(self.params, "target"):
+                    raise ValueError("file-backed reconciliation jobs require source and target files")
+            elif not self.query.strip():
                 raise ValueError("reconciliation jobs require a query")
             if not self.key_columns:
                 raise ValueError("reconciliation jobs require key_columns")
         elif self.job_type == "freshness":
             if not self.params.get("timestamp_column"):
                 raise ValueError("freshness jobs require 'timestamp_column' in params")
+            _validate_job_file_source(self.params, "source")
+            if not self.query.strip() and not _has_job_file_source(self.params, "source"):
+                raise ValueError("freshness jobs require a query or source file")
         elif self.job_type == "cross_job_assertion":
             if not self.params.get("source_job") or not self.params.get("target_job"):
                 raise ValueError("cross_job_assertion requires 'source_job' and 'target_job' in params")
         elif self.job_type in ("schema_snapshot", "profile"):
-            if not self.query.strip():
-                raise ValueError(f"{self.job_type} jobs require a query")
+            _validate_job_file_source(self.params, "source")
+            if not self.query.strip() and not _has_job_file_source(self.params, "source"):
+                raise ValueError(f"{self.job_type} jobs require a query or source file")
         return self
 
 
