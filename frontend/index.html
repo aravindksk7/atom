@@ -28,7 +28,7 @@
     <div class="flex gap-1 flex-1">
       <template x-for="tab in tabs" :key="tab.id">
         <button
-          @click="currentView = tab.id; if (tab.id === 'contracts') loadContracts(); if (tab.id === 'logs') startGlobalLogsPolling(); else stopGlobalLogsPolling();"
+          @click="onTabEnter(tab.id)"
           :class="currentView === tab.id ? 'active' : ''"
           class="tab-btn">
           <span class="tab-icon" x-html="tab.icon"></span>
@@ -1930,9 +1930,25 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
       <!-- Per-test reconcile report -->
       <div class="card overflow-hidden">
+        <template x-if="selectedResultCount() > 0">
+          <div class="flex items-center gap-3 px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+            <span class="text-xs font-semibold text-indigo-700" x-text="'Selected: ' + selectedResultCount() + ' tests'"></span>
+            <div class="flex gap-2 ml-auto">
+              <button @click="openBulkDecisionForm('bulk-accept')"
+                      class="btn-accept-confirm text-xs px-3 py-1.5">Accept all mismatches</button>
+              <button @click="openBulkDecisionForm('bulk-override')"
+                      class="btn-primary btn-sm text-xs">Pass with actions (bulk)</button>
+              <button @click="clearResultSelection()" class="btn-secondary btn-sm text-xs">Clear</button>
+            </div>
+          </div>
+        </template>
         <table class="data-table">
           <thead>
             <tr>
+              <th class="w-10">
+                <input type="checkbox" @change="$el.checked ? selectAllResults() : deselectAllResults()"
+                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length > 0" />
+              </th>
               <th>Test Name</th>
               <th>Status</th>
               <th>Duration</th>
@@ -1982,7 +1998,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </td>
                 </tr>
                 <tr x-show="outcomeOverrideForms[r.id]?.open || r.override_reason">
-                  <td colspan="7" class="px-4 py-3 bg-amber-50">
+                  <td colspan="8" class="px-4 py-3 bg-amber-50">
                     <template x-if="r.override_reason">
                       <div class="text-xs">
                         <strong>Agreed actions:</strong> <span x-text="r.override_reason"></span>
@@ -2003,12 +2019,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </tr>
                 <!-- Error row -->
                 <tr x-show="r.error_message">
-                  <td colspan="7" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                  <td colspan="8" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
                 </tr>
                 <!-- Inline mismatch diff rows -->
                 <template x-if="expandedMismatches[r.id] !== undefined">
                   <tr>
-                    <td colspan="7" class="p-0">
+                    <td colspan="8" class="p-0">
                       <div class="mismatch-expand-panel">
                         <div class="mismatch-expand-header">
                           <span x-text="'Mismatch details - ' + detailRowsLabel(expandedMismatches[r.id], r)"></span>
@@ -2030,7 +2046,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                           </thead>
                           <tbody>
                             <template x-if="expandedMismatches[r.id].length === 0">
-                              <tr><td colspan="7" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
+                              <tr><td colspan="8" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
                             </template>
                             <template x-for="m in expandedMismatches[r.id]" :key="m.id">
                               <tr :class="(m.accepted ? 'diff-accepted ' : '') + (m.mismatch_type === 'missing_in_target' ? 'diff-missing-target' : m.mismatch_type === 'missing_in_source' ? 'diff-missing-source' : 'diff-value')">
@@ -2158,7 +2174,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <!-- Sample of rows actually read from the source -->
                 <template x-if="expandedSampleRows[r.id]">
                   <tr>
-                    <td colspan="7" class="p-0">
+                    <td colspan="8" class="p-0">
                       <div class="mismatch-expand-panel">
                         <div class="mismatch-expand-header">
                           <span x-text="'Rows read from source — showing ' + (r.sample_rows || []).length + ' of ' + (r.source_row_count ?? (r.sample_rows || []).length)"></span>
@@ -2629,7 +2645,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <!-- Comparison rows -->
               <div class="compare-table">
                 <template x-for="t in compareResult.tests" :key="t.test_name">
-                  <div class="compare-row" :class="compareDelta(t).cls.includes('rose') ? 'compare-row-regressed' : compareDelta(t).cls.includes('emerald') ? 'compare-row-improved' : ''">
+                  <div class="compare-row" x-data="{ d: compareDelta(t) }"
+                       :class="d.cls.includes('rose') ? 'compare-row-regressed' : d.cls.includes('green') ? 'compare-row-improved' : ''">
                     <div class="compare-col-label font-mono text-xs" x-text="t.test_name"></div>
                     <div class="compare-col-a">
                       <template x-if="t.status_a">
@@ -2656,7 +2673,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                       <template x-if="!t.status_b"><span class="text-muted text-xs">—</span></template>
                     </div>
                     <div class="compare-col-delta flex items-center gap-2">
-                      <span :class="compareDelta(t).cls" x-text="compareDelta(t).label"></span>
+                      <span :class="d.cls" x-text="d.label"></span>
                       <template x-if="t.result_id_b && t.mismatches_b > 0">
                         <button class="text-indigo-500 hover:underline text-xs"
                           @click="openMismatchDrawer(compareResult.run_b.run_id, { id: t.result_id_b, query_name: t.test_name })">
@@ -3091,7 +3108,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
               <tbody>
                 <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
-                  <tr><td colspan="7" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                  <tr><td colspan="8" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
                 </template>
                 <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
                   <tr :class="(t.status||'').toUpperCase()==='FAILED' ? 'metric-row-failed' : (t.status||'').toUpperCase()==='SLOW' ? 'metric-row-slow' : ''">
@@ -3125,7 +3142,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="card">
         <div class="flex flex-col gap-3">
           <input
-            x-model="logFilterQuery"
+            x-model.debounce.300ms="logFilterQuery"
             class="field-input"
             placeholder="Search logs… (live)"
           />
@@ -3136,6 +3153,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <button class="level-chip" :class="logFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="logFilterLevel = logFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
             <button class="level-chip" :class="logFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="logFilterLevel = logFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
             <span class="text-muted text-xs ml-2" x-text="filteredLogEvents().length + ' / ' + allLogEvents.length + ' events'"></span>
+            <template x-if="allLogEventsTruncated">
+              <span class="text-xs text-amber ml-2" x-text="'Showing first 5,000 of ' + allLogEventsTotalLines.toLocaleString() + ' events'"></span>
+            </template>
           </div>
         </div>
       </div>
@@ -3247,6 +3267,22 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </template>
 
       <div class="card mb-4">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="text-xs font-semibold text-slate-600" x-text="diffTotal + ' matching rows'"></span>
+          <div class="flex gap-2 ml-auto">
+            <button @click="openMismatchDecisionForm('diff', 'accept')"
+                    class="btn-accept-confirm text-xs px-3 py-1.5" :disabled="diffTotal === 0">
+              Accept all <span x-text="diffTotal"></span> filtered
+            </button>
+            <button @click="openMismatchDecisionForm('diff', 'reject')"
+                    class="btn-outline btn-sm text-xs" :disabled="diffTotal === 0">
+              Reject all <span x-text="diffTotal"></span> filtered
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-4">
         <div class="flex gap-2 flex-wrap items-center">
           <input x-model="diffSearch" @input.debounce.300ms="applyDifferenceFilters()" class="field-input flex-1" placeholder="Search key values, column, source/target…" style="min-width:220px">
           <select x-model="diffColumn" @change="applyDifferenceFilters()" class="field-input field-select">
@@ -3259,10 +3295,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <option value="missing_in_target">Missing →</option>
             <option value="missing_in_source">Missing ←</option>
           </select>
-          <select x-model="diffAccepted" @change="applyDifferenceFilters()" class="field-input field-select">
-            <option value="">Accepted + open</option>
-            <option value="true">Accepted only</option>
-            <option value="false">Open only</option>
+          <select x-model="diffStatus" @change="applyDifferenceFilters()" class="field-input field-select">
+            <option value="">All statuses</option>
+            <option value="pending">Pending only</option>
+            <option value="accepted">Accepted only</option>
+            <option value="rejected">Rejected only</option>
           </select>
           <select x-model="diffSort" @change="applyDifferenceFilters()" class="field-input field-select">
             <option value="id">Default order</option>
@@ -3291,7 +3328,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
                 <td class="font-mono text-xs" x-text="m.source_value ?? 'NULL'"></td>
                 <td class="font-mono text-xs" x-text="m.target_value ?? 'NULL'"></td>
-                <td><span class="badge" :class="m.accepted ? 'badge-green' : 'badge-gray'" x-text="m.accepted ? 'Accepted' : 'Open'"></span></td>
+                <td><span class="badge" :class="m.accepted ? 'badge-green' : m.rejected ? 'badge-rose' : 'badge-gray'" x-text="m.accepted ? 'Accepted' : m.rejected ? 'Rejected' : 'Pending'"></span></td>
               </tr>
             </template>
           </tbody>
@@ -3584,7 +3621,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
             <tbody>
               <template x-for="r in boCompareResult.results" :key="r.id">
-                <tr>
+              <tr>
+                  <td>
+                    <input type="checkbox" @click.stop="$event.target.checked = !$event.target.checked; toggleResultSelection(r.id)"
+                           :checked="isResultSelected(r.id)" />
+                  </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
                   <td>
@@ -4786,11 +4827,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </button>
               </template>
             </div>
-            <div class="ml-auto">
-              <button @click="acceptAllVisibleMismatches()"
-                      class="btn-outline btn-sm text-xs"
-                      :disabled="filteredMismatches.filter(m => !m.accepted && !m.rejected).length === 0">
-                Accept All Visible
+            <div class="ml-auto flex gap-2">
+              <button @click="decideAllPendingDrawerMismatches('accept')"
+                      class="btn-accept-confirm text-xs px-3 py-1.5">
+                Accept All Pending
+              </button>
+              <button @click="decideAllPendingDrawerMismatches('reject')"
+                      class="btn-outline btn-sm text-xs">
+                Reject All Pending
               </button>
             </div>
           </div>
@@ -4877,7 +4921,70 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="section-title">Data Contracts</div>
       <div class="section-sub">Manage data contracts, track breach history, and enforce SLAs</div>
     </div>
-    <button @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
+    <div class="flex gap-2">
+      <button @click="showContractExamples = !showContractExamples" class="btn-outline btn-sm" :class="showContractExamples ? 'bg-indigo-50 border-indigo-300' : ''">Examples</button>
+      <button @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
+    </div>
+  </div>
+
+  <!-- Example contracts (industry-standard templates) -->
+  <div x-show="showContractExamples" x-cloak class="mt-4">
+    <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Example contracts — click "Use example" to prefill the form, or expand to see schema, quality &amp; usage</div>
+    <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(340px,1fr))">
+      <template x-for="ex in contractExamples" :key="ex.id">
+        <div class="card">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="text-sm font-semibold text-slate-800" x-text="ex.title"></div>
+              <div class="text-xs text-slate-500 mt-0.5" x-text="ex.summary"></div>
+            </div>
+            <button @click="useContractExample(ex)" class="btn-primary btn-sm text-xs flex-shrink-0">Use example</button>
+          </div>
+          <div class="flex flex-wrap gap-1 mt-2">
+            <span class="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" x-text="'job: ' + ex.contract.source_job"></span>
+            <span class="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" x-text="'SLA: ' + ex.contract.sla_hours + 'h'"></span>
+            <span class="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" x-text="ex.contract.breach_severity"></span>
+            <span class="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" x-text="ex.schema.length + ' fields'"></span>
+          </div>
+          <button @click="expandedExampleId = (expandedExampleId === ex.id ? null : ex.id)" class="text-xs text-indigo-600 hover:underline mt-2" x-text="expandedExampleId === ex.id ? 'Hide usage' : 'How to create &amp; use'"></button>
+          <div x-show="expandedExampleId === ex.id" class="mt-2 space-y-3">
+            <div>
+              <div class="text-[11px] font-semibold text-slate-500 uppercase mb-1">Schema (with examples)</div>
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-slate-400 text-left">
+                    <th class="py-1 pr-2 font-medium">Field</th>
+                    <th class="py-1 pr-2 font-medium">Type</th>
+                    <th class="py-1 pr-2 font-medium">Example</th>
+                    <th class="py-1 font-medium">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="f in ex.schema" :key="f.name">
+                    <tr class="border-t border-slate-100">
+                      <td class="py-1 pr-2 font-medium text-slate-700" x-text="f.name + (f.required ? ' *' : '')"></td>
+                      <td class="py-1 pr-2 text-slate-500" x-text="f.type"></td>
+                      <td class="py-1 pr-2 text-slate-500 font-mono" x-text="f.example"></td>
+                      <td class="py-1 text-slate-500" x-text="f.description"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <div class="text-[11px] font-semibold text-slate-500 uppercase mb-1">Quality rules</div>
+              <ul class="list-disc list-inside text-xs text-slate-600 space-y-0.5">
+                <template x-for="q in ex.quality" :key="q"><li x-text="q"></li></template>
+              </ul>
+            </div>
+            <div>
+              <div class="text-[11px] font-semibold text-slate-500 uppercase mb-1">How to create &amp; use</div>
+              <pre class="text-[11px] text-slate-700 bg-slate-50 rounded p-2 whitespace-pre-wrap" x-text="ex.usage"></pre>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
   </div>
 
   <div x-show="contractsLoading" class="text-slate-400 text-sm py-4">Loading contracts…</div>
@@ -5040,8 +5147,141 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 </template>
 
-<script src="app-config.js"></script>
-<script src="app-help.js"></script>
-<script src="app.js"></script>
-</body>
+<!-- ====================================================================
+     HELP CENTER
+     ==================================================================== -->
+<div x-show="currentView === 'help'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Help Center</div>
+      <div class="section-sub">End-user guide — detailed steps for every area of the app</div>
+    </div>
+  </div>
+
+  <div class="help-layout">
+    <aside class="help-sidebar">
+      <div class="help-search-wrap">
+        <svg class="help-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input class="help-search" type="text" placeholder="Search help…" x-model="helpSearch" aria-label="Search help" />
+      </div>
+      <nav class="help-nav">
+        <template x-for="s in helpFilteredSections()" :key="s.id">
+          <button class="help-nav-item" :class="helpActiveId === s.id ? 'active' : ''" @click="scrollToHelp(s.id)" x-text="s.title"></button>
+        </template>
+        <template x-if="helpFilteredSections().length === 0">
+          <div class="help-nav-empty">No matches</div>
+        </template>
+      </nav>
+    </aside>
+
+    <div class="help-content">
+      <template x-for="(s, i) in helpFilteredSections()" :key="s.id">
+        <section class="help-section" :id="'help-' + s.id">
+          <div class="help-section-head">
+            <span class="help-badge" x-text="String(i + 1).padStart(2, '0')"></span>
+            <div>
+              <h2 class="help-section-title" x-text="s.title"></h2>
+              <p class="help-section-intro" x-text="s.intro"></p>
+            </div>
+          </div>
+          <div class="help-steps">
+            <template x-for="(step, si) in s.steps" :key="step.title">
+              <div class="help-step" x-show="helpStepMatches(step, helpSearch.trim())">
+                <span class="help-step-num" x-text="String(si + 1).padStart(2, '0')"></span>
+                <div class="help-step-body">
+                  <h3 class="help-step-title" x-text="step.title"></h3>
+                  <p class="help-step-text" x-text="step.text"></p>
+                  <template x-if="step.where">
+                    <div class="help-where"><span class="help-where-label">Where</span><span x-text="step.where"></span></div>
+                  </template>
+                  <template x-if="step.tip">
+                    <div class="help-callout tip"><span class="help-callout-label">Tip</span><span x-text="step.tip"></span></div>
+                  </template>
+                  <template x-if="step.warn">
+                    <div class="help-callout warn"><span class="help-callout-label">Caution</span><span x-text="step.warn"></span></div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </section>
+      </template>
+
+      <template x-if="helpFilteredSections().length === 0">
+        <div class="help-empty">No help topics match "<span x-text="helpSearch"></span>".</div>
+      </template>
+    </div>
+  </div>
+</div>
+
+    <script src="app-config.js"></script>
+    <script src="help-content.js"></script>
+    <script src="app-help.js"></script>
+    <script src="contract-examples.js"></script>
+    <script src="features/compare.js"></script>
+    <script src="app.js"></script>
+
+    <template x-if="bulkDecisionForm.open">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeBulkDecisionForm()">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-base font-semibold text-slate-900"
+                 x-text="bulkDecisionForm.mode === 'bulk-accept' ? 'Accept all mismatches' : 'Bulk pass with actions'"></div>
+            <button @click="closeBulkDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="space-y-3">
+            <template x-if="bulkDecisionForm.mode === 'bulk-accept'">
+              <div>
+                <label class="field-label">Accept reason (applied to all selected mismatches)</label>
+                <textarea x-model="bulkDecisionForm.note" maxlength="1000" rows="3"
+                          class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+              </div>
+            </template>
+            <template x-if="bulkDecisionForm.mode === 'bulk-override'">
+              <div>
+                <label class="field-label">Agreed actions (applied to all selected tests)</label>
+                <textarea x-model="bulkDecisionForm.note" maxlength="4000" rows="4"
+                          class="field-input" placeholder="Describe the agreed actions required to accept these failed outcomes"></textarea>
+              </div>
+            </template>
+            <div class="flex gap-2 justify-end pt-2">
+              <button @click="closeBulkDecisionForm()" class="btn-secondary">Cancel</button>
+              <button @click="submitBulkDecision(selectedRun.run_id)" :disabled="bulkDecisionForm.saving"
+                      class="btn-primary">
+                <span x-show="!bulkDecisionForm.saving">Confirm</span>
+                <span x-show="bulkDecisionForm.saving">Saving...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="mismatchDecisionForm.open">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeMismatchDecisionForm()">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-base font-semibold text-slate-900"
+                 x-text="(mismatchDecisionForm.decision === 'accept' ? 'Accept' : 'Reject') + ' matching mismatches'"></div>
+            <button @click="closeMismatchDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="field-label" x-text="'Reason (applied to every matching mismatch)'"></label>
+              <textarea x-model="mismatchDecisionForm.note" maxlength="1000" rows="3"
+                        class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+            </div>
+            <div class="flex gap-2 justify-end pt-2">
+              <button @click="closeMismatchDecisionForm()" class="btn-secondary">Cancel</button>
+              <button @click="submitMismatchDecision()" :disabled="mismatchDecisionForm.saving"
+                      class="btn-primary">
+                <span x-show="!mismatchDecisionForm.saving">Confirm</span>
+                <span x-show="mismatchDecisionForm.saving">Saving...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </body>
 </html>

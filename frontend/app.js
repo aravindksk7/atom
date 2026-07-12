@@ -2490,6 +2490,55 @@ function _appRaw() {
       }
     },
 
+    openMismatchDecisionForm(scope, decision) {
+      this.mismatchDecisionForm = { open: true, scope, decision, note: '', saving: false };
+    },
+
+    closeMismatchDecisionForm() {
+      this.mismatchDecisionForm = { open: false, scope: null, decision: null, note: '', saving: false };
+    },
+
+    async submitMismatchDecision() {
+      const { scope, decision, note } = this.mismatchDecisionForm;
+      const trimmed = (note || '').trim();
+      if (!trimmed) {
+        this.toast('warn', 'Reason required', 'Enter a reason before deciding these mismatches');
+        return;
+      }
+      this.mismatchDecisionForm.saving = true;
+      try {
+        if (scope === 'diff') {
+          const body = { decision, note: trimmed };
+          if (this.diffSearch) body.search = this.diffSearch;
+          if (this.diffColumn) body.column = this.diffColumn;
+          if (this.diffType) body.mismatch_type = this.diffType;
+          if (this.diffStatus) body.status = this.diffStatus;
+          const result = await api('POST',
+            `/api/runs/${this.diffRunId}/results/${this.diffResultId}/mismatches/bulk-decide`, body);
+          this.closeMismatchDecisionForm();
+          this.toast('success', `${result.decided_count} mismatch(es) ${decision}ed`,
+            result.result_status_updated ? 'Test flipped to PASSED' : '');
+          this.diffPage = 0;
+          await this.fetchDifferenceRows();
+          await this.loadDifferenceInsights();
+        } else if (scope === 'drawer') {
+          const body = { decision, note: trimmed, status: 'pending' };
+          const result = await api('POST',
+            `/api/runs/${this.drawer.runId}/results/${this.drawer.result.id}/mismatches/bulk-decide`, body);
+          this.closeMismatchDecisionForm();
+          this.toast('success', `${result.decided_count} mismatch(es) ${decision}ed`,
+            result.result_status_updated ? 'Test flipped to PASSED' : '');
+          this.drawer.offset = 0;
+          this.drawer.loading = true;
+          await this._fetchMismatches();
+          if (result.decided_count > 0) await this.loadRuns();
+        }
+      } catch (e) {
+        this.mismatchDecisionForm.saving = false;
+        this.toast('error', 'Bulk decision failed', e.message);
+      }
+    },
+
     async loadReport() {
       if (!this.reportRunId) return;
       if (this.reportBlobUrl) { URL.revokeObjectURL(this.reportBlobUrl); this.reportBlobUrl = ''; }
@@ -3865,30 +3914,8 @@ function _appRaw() {
       return rows;
     },
 
-    async acceptAllVisibleMismatches() {
-      const pending = this.filteredMismatches.filter(m => !m.accepted && !m.rejected);
-      if (!pending.length) {
-        this.toast('warn', 'No pending mismatches', 'No pending mismatches visible to accept');
-        return;
-      }
-      const runId = this.drawer.runId;
-      const resultId = this.drawer.result && this.drawer.result.id;
-      if (!runId || !resultId) return;
-      let accepted = 0;
-      for (const m of pending) {
-        try {
-          const result = await api('PATCH',
-            `/api/runs/${runId}/results/${resultId}/mismatches/${m.id}/accept`,
-            { note: 'Bulk accepted' });
-          const patchRow = (row) => row.id === m.id
-            ? { ...row, accepted: result.accepted, accepted_note: result.accepted_note, accepted_at: result.accepted_at, accepted_by: result.accepted_by }
-            : row;
-          this.drawer.rows = this.drawer.rows.map(patchRow);
-          accepted++;
-        } catch {}
-      }
-      this.toast('success', `${accepted} mismatch(es) accepted`);
-      if (accepted > 0) await this.loadRuns();
+    async decideAllPendingDrawerMismatches(decision) {
+      this.openMismatchDecisionForm('drawer', decision);
     },
 
     ...HELP_METHODS,
