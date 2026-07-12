@@ -160,6 +160,53 @@ def test_count_mismatches_respects_same_filters_as_list(db_session):
     assert repo.count_mismatches(result_id=result_id, search="closed") == 1
 
 
+def test_list_mismatches_filters_by_rejected(db_session):
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.repository.models import MismatchDetail
+
+    result_id = _seed(db_session)
+    first = db_session.query(MismatchDetail).filter(MismatchDetail.test_result_id == result_id).first()
+    first.rejected = True
+    db_session.commit()
+
+    repo = RunRepository(db_session)
+    rejected_rows = repo.list_mismatches(result_id=result_id, rejected=True)
+    not_rejected_rows = repo.list_mismatches(result_id=result_id, rejected=False)
+    assert len(rejected_rows) == 1
+    assert len(not_rejected_rows) == 4
+
+
+def test_list_mismatches_filters_by_status(db_session):
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.repository.models import MismatchDetail
+
+    result_id = _seed(db_session)
+    rows = db_session.query(MismatchDetail).filter(MismatchDetail.test_result_id == result_id).order_by(MismatchDetail.id).all()
+    rows[0].accepted = True
+    rows[1].rejected = True
+    db_session.commit()
+
+    repo = RunRepository(db_session)
+    assert len(repo.list_mismatches(result_id=result_id, status="accepted")) == 1
+    assert len(repo.list_mismatches(result_id=result_id, status="rejected")) == 1
+    assert len(repo.list_mismatches(result_id=result_id, status="pending")) == 3
+
+
+def test_count_mismatches_respects_rejected_and_status_filters(db_session):
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.repository.models import MismatchDetail
+
+    result_id = _seed(db_session)
+    first = db_session.query(MismatchDetail).filter(MismatchDetail.test_result_id == result_id).first()
+    first.rejected = True
+    db_session.commit()
+
+    repo = RunRepository(db_session)
+    assert repo.count_mismatches(result_id=result_id, rejected=True) == 1
+    assert repo.count_mismatches(result_id=result_id, status="rejected") == 1
+    assert repo.count_mismatches(result_id=result_id, status="pending") == 4
+
+
 def test_stored_complete_flag_via_endpoint(monkeypatch):
     """stored_complete should be false when total_issues exceeds stored detail rows."""
     import uuid as _uuid

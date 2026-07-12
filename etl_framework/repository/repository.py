@@ -381,13 +381,24 @@ class RunRepository:
         column: str | None = None,
         mismatch_type: str | None = None,
         accepted: bool | None = None,
+        rejected: bool | None = None,
+        status: str | None = None,
     ):
+        if status is not None:
+            if status == "pending":
+                accepted, rejected = False, False
+            elif status == "accepted":
+                accepted, rejected = True, None
+            elif status == "rejected":
+                accepted, rejected = None, True
         if column:
             query = query.filter(MismatchDetail.column_name == column)
         if mismatch_type:
             query = query.filter(MismatchDetail.mismatch_type == mismatch_type)
         if accepted is not None:
             query = query.filter(MismatchDetail.accepted == accepted)
+        if rejected is not None:
+            query = query.filter(MismatchDetail.rejected == rejected)
         if search:
             like = f"%{search.lower()}%"
             query = query.filter(or_(
@@ -407,11 +418,14 @@ class RunRepository:
         column: str | None = None,
         mismatch_type: str | None = None,
         accepted: bool | None = None,
+        rejected: bool | None = None,
+        status: str | None = None,
         sort: str = "id",
     ) -> list[MismatchDetail]:
         query = self._apply_mismatch_filters(
             self._mismatch_base_query(result_id),
-            search=search, column=column, mismatch_type=mismatch_type, accepted=accepted,
+            search=search, column=column, mismatch_type=mismatch_type,
+            accepted=accepted, rejected=rejected, status=status,
         )
         if sort == "column":
             order = (MismatchDetail.column_name, MismatchDetail.id)
@@ -433,10 +447,13 @@ class RunRepository:
         column: str | None = None,
         mismatch_type: str | None = None,
         accepted: bool | None = None,
+        rejected: bool | None = None,
+        status: str | None = None,
     ) -> int:
         query = self._apply_mismatch_filters(
             self._db.query(func.count(MismatchDetail.id)).filter(MismatchDetail.test_result_id == result_id),
-            search=search, column=column, mismatch_type=mismatch_type, accepted=accepted,
+            search=search, column=column, mismatch_type=mismatch_type,
+            accepted=accepted, rejected=rejected, status=status,
         )
         return int(query.scalar() or 0)
 
@@ -453,6 +470,10 @@ class RunRepository:
         md.accepted_note = note
         md.accepted_at = datetime.now(timezone.utc)
         md.accepted_by = accepted_by
+        md.rejected = False
+        md.rejected_note = None
+        md.rejected_at = None
+        md.rejected_by = None
         self._db.commit()
         self._db.refresh(md)
 
@@ -476,6 +497,153 @@ class RunRepository:
                 self._db.commit()
                 status_changed = True
         return md, status_changed
+
+    def reject_mismatch(
+        self,
+        mismatch_id: int,
+        note: str,
+        rejected_by: str | None,
+    ) -> tuple[MismatchDetail, bool]:
+        md = self._db.get(MismatchDetail, mismatch_id)
+        if md is None:
+            raise ValueError(f"MismatchDetail {mismatch_id} not found")
+        md.rejected = True
+        md.rejected_note = note
+        md.rejected_at = datetime.now(timezone.utc)
+        md.rejected_by = rejected_by
+        md.accepted = False
+        md.accepted_note = None
+        md.accepted_at = None
+        md.accepted_by = None
+        self._db.commit()
+        self._db.refresh(md)
+        return md, False
+
+    def bulk_accept_mismatches(
+        self,
+        result_ids: list[int],
+        note: str,
+        accepted_by: str | None,
+    ) -> dict:
+        unaccepted = (
+            self._db.query(MismatchDetail)
+            .filter(
+                MismatchDetail.test_result_id.in_(result_ids),
+                MismatchDetail.accepted == False,  # noqa: E712
+            )
+            .all()
+        )
+        accepted_ids = []
+        for md in unaccepted:
+            md.accepted = True
+            md.accepted_note = note
+            md.accepted_at = datetime.now(timezone.utc)
+            md.accepted_by = accepted_by
+            accepted_ids.append(md.id)
+
+        self._db.commit()
+
+        status_updated = 0
+        for result_id in {md.test_result_id for md in unaccepted}:
+            remaining = (
+                self._db.query(MismatchDetail)
+                .filter(
+                    MismatchDetail.test_result_id == result_id,
+                    MismatchDetail.accepted == False,  # noqa: E712
+                )
+                .count()
+            )
+            if remaining == 0:
+                tr = self._db.get(TestResult, result_id)
+                if tr and tr.status != "PASSED":
+                    tr.status = "PASSED"
+                    run = self.get_run(tr.run_id)
+                    if run:
+                        run.passed = max(0, (run.passed or 0) + 1)
+                        run.failed = max(0, (run.failed or 0) - 1)
+                    status_updated += 1
+        if status_updated > 0:
+            self._db.commit()
+
+        return {
+            "accepted_mismatch_count": len(accepted_ids),
+            "result_status_updated": status_updated,
+            "result_ids": list({md.test_result_id for md in unaccepted}),
+            "accepted_ids": accepted_ids,
+        }
+
+    def bulk_decide_mismatches(
+        self,
+        result_id: int,
+        decision: str,
+        note: str,
+        decided_by: str | None,
+        *,
+        search: str | None = None,
+        column: str | None = None,
+        mismatch_type: str | None = None,
+        status: str | None = None,
+    ) -> dict:
+        matched = self._apply_mismatch_filters(
+            self._mismatch_base_query(result_id),
+            search=search, column=column, mismatch_type=mismatch_type, status=status,
+        ).all()
+        matched_count = len(matched)
+
+        if decision == "accept":
+            targets = [md for md in matched if not md.accepted]
+        else:
+            targets = [md for md in matched if not md.rejected]
+
+        now = datetime.now(timezone.utc)
+        for md in targets:
+            if decision == "accept":
+                md.accepted = True
+                md.accepted_note = note
+                md.accepted_at = now
+                md.accepted_by = decided_by
+                md.rejected = False
+                md.rejected_note = None
+                md.rejected_at = None
+                md.rejected_by = None
+            else:
+                md.rejected = True
+                md.rejected_note = note
+                md.rejected_at = now
+                md.rejected_by = decided_by
+                md.accepted = False
+                md.accepted_note = None
+                md.accepted_at = None
+                md.accepted_by = None
+        self._db.commit()
+
+        result_status_updated = False
+        if decision == "accept" and targets:
+            remaining = (
+                self._db.query(MismatchDetail)
+                .filter(
+                    MismatchDetail.test_result_id == result_id,
+                    MismatchDetail.accepted == False,  # noqa: E712
+                )
+                .count()
+            )
+            if remaining == 0:
+                tr = self._db.get(TestResult, result_id)
+                if tr and tr.status != "PASSED":
+                    tr.status = "PASSED"
+                    run = self.get_run(tr.run_id)
+                    if run:
+                        run.passed = max(0, (run.passed or 0) + 1)
+                        run.failed = max(0, (run.failed or 0) - 1)
+                    self._db.commit()
+                    result_status_updated = True
+
+        return {
+            "decision": decision,
+            "matched_count": matched_count,
+            "decided_count": len(targets),
+            "result_status_updated": result_status_updated,
+        }
 
     def count_unaccepted_mismatches(self, result_id: int) -> int:
         return (
