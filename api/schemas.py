@@ -300,6 +300,10 @@ class MismatchOut(BaseModel):
     accepted_note: str | None = None
     accepted_at: datetime | None = None
     accepted_by: str | None = None
+    rejected: bool = False
+    rejected_note: str | None = None
+    rejected_at: datetime | None = None
+    rejected_by: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -308,6 +312,12 @@ class MismatchTypeFilter(str, Enum):
     value_diff = "value_diff"
     missing_in_target = "missing_in_target"
     missing_in_source = "missing_in_source"
+
+
+class MismatchStatusFilter(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
 
 
 class MismatchSortField(str, Enum):
@@ -764,13 +774,25 @@ class MismatchAcceptRequest(BaseModel):
     accepted_by: str | None = None
 
 
-class MismatchAcceptOut(BaseModel):
+class MismatchRejectRequest(BaseModel):
+    note: str = Field(min_length=1)
+    rejected_by: str | None = None
+
+
+class MismatchDecisionOut(BaseModel):
     id: int
     accepted: bool
     accepted_note: str | None = None
     accepted_at: datetime | None = None
     accepted_by: str | None = None
+    rejected: bool = False
+    rejected_note: str | None = None
+    rejected_at: datetime | None = None
+    rejected_by: str | None = None
     result_status_updated: bool = False
+
+
+MismatchAcceptOut = MismatchDecisionOut
 
 
 class DifferenceExportRequest(BaseModel):
@@ -859,3 +881,37 @@ class MismatchDiffOut(BaseModel):
     persistent: list[MismatchRecordOut]
     summary: dict[str, int]
     has_regressions: bool
+
+
+class BulkMismatchAcceptRequest(BaseModel):
+    result_ids: list[int] = Field(min_length=1)
+    note: str = Field(min_length=1, max_length=1000)
+    accepted_by: str | None = None
+
+
+class BulkOverrideRequest(BaseModel):
+    result_ids: list[int] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class BulkDecisionOut(BaseModel):
+    accepted_mismatch_count: int = 0
+    result_status_updated: int = 0
+    result_ids: list[int] = Field(default_factory=list)
+
+
+class BulkMismatchDecisionRequest(BaseModel):
+    decision: Literal["accept", "reject"]
+    note: str = Field(min_length=1, max_length=1000)
+    decided_by: str | None = None
+    search: str | None = None
+    column: str | None = None
+    mismatch_type: MismatchTypeFilter | None = None
+    status: MismatchStatusFilter | None = None
+
+
+class BulkMismatchDecisionOut(BaseModel):
+    decision: str
+    matched_count: int = 0
+    decided_count: int = 0
+    result_status_updated: bool = False
