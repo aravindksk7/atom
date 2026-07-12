@@ -196,6 +196,10 @@ class MismatchDetail(Base):
     accepted_note = Column(Text, nullable=True)
     accepted_at   = Column(DateTime(timezone=True), nullable=True)
     accepted_by   = Column(String(255), nullable=True)
+    rejected      = Column(Boolean, nullable=False, default=False)
+    rejected_note = Column(Text, nullable=True)
+    rejected_at   = Column(DateTime(timezone=True), nullable=True)
+    rejected_by   = Column(String(255), nullable=True)
 
     test_result = relationship("TestResult", back_populates="mismatches")
 

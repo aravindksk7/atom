@@ -1,9 +1,14 @@
 from __future__ import annotations
 import os
+from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = os.environ.get("ETL_DATABASE_URL", "sqlite:///./etl_framework.db")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_SQLITE_PATH = _REPO_ROOT / "etl_framework.db"
+DATABASE_URL = os.environ.get(
+    "ETL_DATABASE_URL", f"sqlite:///{_DEFAULT_SQLITE_PATH.as_posix()}"
+)
 
 engine = create_engine(
     DATABASE_URL,
@@ -67,6 +72,19 @@ def _ensure_compare_columns(bind) -> None:
         if "accepted_by" not in mismatch_cols:
             conn.execute(text(
                 "ALTER TABLE mismatch_details ADD COLUMN accepted_by VARCHAR(255)"
+            ))
+        if "rejected" not in mismatch_cols:
+            conn.execute(text(
+                "ALTER TABLE mismatch_details "
+                "ADD COLUMN rejected BOOLEAN NOT NULL DEFAULT 0"
+            ))
+        if "rejected_note" not in mismatch_cols:
+            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN rejected_note TEXT"))
+        if "rejected_at" not in mismatch_cols:
+            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN rejected_at DATETIME"))
+        if "rejected_by" not in mismatch_cols:
+            conn.execute(text(
+                "ALTER TABLE mismatch_details ADD COLUMN rejected_by VARCHAR(255)"
             ))
 
         # --- pass-with-agreed-actions columns ---
