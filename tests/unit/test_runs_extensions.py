@@ -116,6 +116,10 @@ def _make_mismatch(id_: int):
     m.accepted_note = None
     m.accepted_at = None
     m.accepted_by = None
+    m.rejected = False
+    m.rejected_note = None
+    m.rejected_at = None
+    m.rejected_by = None
     return m
 
 
@@ -149,7 +153,8 @@ def test_mismatches_respects_pagination_params(client, mock_run_repo):
     client.get("/api/runs/r1/results/42/mismatches?limit=25&offset=50")
     mock_run_repo.list_mismatches.assert_called_once_with(
         result_id=42, limit=25, offset=50,
-        search=None, column=None, mismatch_type=None, accepted=None, sort="id",
+        search=None, column=None, mismatch_type=None, accepted=None,
+        rejected=None, status=None, sort="id",
     )
 
 
@@ -162,7 +167,8 @@ def test_mismatches_default_pagination_is_100_0(client, mock_run_repo):
     client.get("/api/runs/r1/results/7/mismatches")
     mock_run_repo.list_mismatches.assert_called_once_with(
         result_id=7, limit=100, offset=0,
-        search=None, column=None, mismatch_type=None, accepted=None, sort="id",
+        search=None, column=None, mismatch_type=None, accepted=None,
+        rejected=None, status=None, sort="id",
     )
 
 
@@ -178,7 +184,22 @@ def test_mismatches_forwards_filters(client, mock_run_repo):
     )
     mock_run_repo.list_mismatches.assert_called_once_with(
         result_id=42, limit=100, offset=0,
-        search="foo", column="amount", mismatch_type="value_diff", accepted=True, sort="column",
+        search="foo", column="amount", mismatch_type="value_diff", accepted=True,
+        rejected=None, status=None, sort="column",
+    )
+
+
+def test_mismatches_forwards_rejected_and_status_filters(client, mock_run_repo):
+    run = MagicMock()
+    mock_run_repo.get_run.return_value = run
+    mock_run_repo.list_mismatches.return_value = []
+    mock_run_repo.count_mismatches.return_value = 0
+
+    client.get("/api/runs/r1/results/42/mismatches?rejected=true&status=rejected")
+    mock_run_repo.list_mismatches.assert_called_once_with(
+        result_id=42, limit=100, offset=0,
+        search=None, column=None, mismatch_type=None, accepted=None,
+        rejected=True, status="rejected", sort="id",
     )
 
 

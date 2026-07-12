@@ -352,3 +352,86 @@ def test_bulk_decide_mismatches_reject_never_flips_result_to_passed(bulk_client)
         assert db.get(TestResult, tr_id).status == "FAILED"
     finally:
         db.close()
+
+
+def test_reject_mismatch_endpoint(bulk_client):
+    engine = _db_module.SessionLocal().bind
+    _make_run(engine)
+    db = Session(engine)
+    try:
+        tr = TestResult(
+            run_id="bulk-run-001", query_name="q1", status="FAILED",
+            duration_seconds=1.0, source_row_count=10, target_row_count=10,
+            value_mismatch_count=1, missing_in_target_count=0, missing_in_source_count=0,
+        )
+        db.add(tr); db.commit(); db.refresh(tr)
+        md = MismatchDetail(test_result_id=tr.id, column_name="c1",
+                            source_value="a", target_value="b", mismatch_type="value_diff")
+        db.add(md); db.commit(); db.refresh(md)
+        tr_id, md_id = tr.id, md.id
+    finally:
+        db.close()
+
+    resp = bulk_client.patch(
+        f"/api/runs/bulk-run-001/results/{tr_id}/mismatches/{md_id}/reject",
+        json={"note": "confirmed real diff"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["rejected"] is True
+    assert data["rejected_note"] == "confirmed real diff"
+    assert data["accepted"] is False
+
+
+def test_reject_mismatch_endpoint_requires_note(bulk_client):
+    resp = bulk_client.patch(
+        "/api/runs/bulk-run-001/results/1/mismatches/1/reject",
+        json={"note": ""},
+    )
+    assert resp.status_code == 422
+
+
+def test_bulk_decide_endpoint_filtered_and_all_rows(bulk_client):
+    engine = _db_module.SessionLocal().bind
+    _make_run(engine)
+    db = Session(engine)
+    try:
+        tr = TestResult(
+            run_id="bulk-run-001", query_name="q1", status="FAILED",
+            duration_seconds=1.0, source_row_count=10, target_row_count=10,
+            value_mismatch_count=3, missing_in_target_count=0, missing_in_source_count=0,
+        )
+        db.add(tr); db.commit(); db.refresh(tr)
+        db.add_all([
+            MismatchDetail(test_result_id=tr.id, column_name="amount", source_value="1", target_value="2", mismatch_type="value_diff"),
+            MismatchDetail(test_result_id=tr.id, column_name="amount", source_value="3", target_value="4", mismatch_type="value_diff"),
+            MismatchDetail(test_result_id=tr.id, column_name="status", source_value="A", target_value="B", mismatch_type="value_diff"),
+        ])
+        db.commit()
+        tr_id = tr.id
+    finally:
+        db.close()
+
+    filtered = bulk_client.post(
+        f"/api/runs/bulk-run-001/results/{tr_id}/mismatches/bulk-decide",
+        json={"decision": "accept", "note": "rounding", "column": "amount"},
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["decided_count"] == 2
+    assert filtered.json()["result_status_updated"] is False
+
+    all_rows = bulk_client.post(
+        f"/api/runs/bulk-run-001/results/{tr_id}/mismatches/bulk-decide",
+        json={"decision": "accept", "note": "the rest"},
+    )
+    assert all_rows.status_code == 200
+    assert all_rows.json()["decided_count"] == 1
+    assert all_rows.json()["result_status_updated"] is True
+
+
+def test_bulk_decide_endpoint_404_for_missing_run(bulk_client):
+    resp = bulk_client.post(
+        "/api/runs/no-such-run/results/1/mismatches/bulk-decide",
+        json={"decision": "accept", "note": "x"},
+    )
+    assert resp.status_code == 404

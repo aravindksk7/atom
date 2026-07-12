@@ -18,6 +18,11 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_session
 from api.routes.configs import _preserve_masked_secrets
 from api.schemas import (
+    BulkDecisionOut,
+    BulkMismatchAcceptRequest,
+    BulkMismatchDecisionOut,
+    BulkMismatchDecisionRequest,
+    BulkOverrideRequest,
     ColumnMismatchStatOut,
     DifferenceExportRequest,
     DifferenceExportStatusOut,
@@ -28,8 +33,11 @@ from api.schemas import (
     MismatchAcceptOut,
     MismatchAcceptRequest,
     MismatchColumnInsight,
+    MismatchDecisionOut,
     MismatchOut,
+    MismatchRejectRequest,
     MismatchSortField,
+    MismatchStatusFilter,
     MismatchTestInsight,
     MismatchTypeFilter,
     RunCompareOut,
@@ -566,6 +574,8 @@ def list_result_mismatches(
     column: str | None = None,
     mismatch_type: MismatchTypeFilter | None = None,
     accepted: bool | None = None,
+    rejected: bool | None = None,
+    status: MismatchStatusFilter | None = None,
     sort: MismatchSortField = MismatchSortField.id,
     db: Session = Depends(get_session),
 ):
@@ -576,6 +586,7 @@ def list_result_mismatches(
         raise HTTPException(status_code=404, detail="Run not found")
 
     mismatch_type_value = mismatch_type.value if mismatch_type else None
+    status_value = status.value if status else None
     rows = repo.list_mismatches(
         result_id=result_id,
         limit=limit,
@@ -584,6 +595,8 @@ def list_result_mismatches(
         column=column,
         mismatch_type=mismatch_type_value,
         accepted=accepted,
+        rejected=rejected,
+        status=status_value,
         sort=sort.value,
     )
     total = repo.count_mismatches(
@@ -592,6 +605,8 @@ def list_result_mismatches(
         column=column,
         mismatch_type=mismatch_type_value,
         accepted=accepted,
+        rejected=rejected,
+        status=status_value,
     )
     response.headers["X-Total-Count"] = str(total)
 
@@ -615,6 +630,10 @@ def list_result_mismatches(
             accepted_note=m.accepted_note,
             accepted_at=m.accepted_at,
             accepted_by=m.accepted_by,
+            rejected=m.rejected,
+            rejected_note=m.rejected_note,
+            rejected_at=m.rejected_at,
+            rejected_by=m.rejected_by,
         )
         for m in rows
     ]
@@ -831,6 +850,197 @@ def accept_mismatch(
         accepted_by=updated.accepted_by,
         result_status_updated=status_changed,
     )
+
+
+@router.patch(
+    "/{run_id}/results/{result_id}/mismatches/{mismatch_id}/reject",
+    response_model=MismatchDecisionOut,
+)
+def reject_mismatch(
+    run_id: str,
+    result_id: int,
+    mismatch_id: int,
+    body: MismatchRejectRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import MismatchDetail, TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    tr = db.get(TestResult, result_id)
+    if tr is None or tr.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Result not found")
+    md = db.get(MismatchDetail, mismatch_id)
+    if md is None or md.test_result_id != result_id:
+        raise HTTPException(status_code=404, detail="Mismatch not found")
+    updated, status_changed = repo.reject_mismatch(mismatch_id, body.note, body.rejected_by)
+    AuditService(db).log(
+        request,
+        "mismatch.rejected",
+        "mismatch",
+        mismatch_id,
+        {
+            "run_id": run_id,
+            "result_id": result_id,
+            "note": body.note,
+            "rejected_by": body.rejected_by,
+        },
+        actor=body.rejected_by,
+    )
+    return MismatchDecisionOut(
+        id=updated.id,
+        accepted=updated.accepted,
+        accepted_note=updated.accepted_note,
+        accepted_at=updated.accepted_at,
+        accepted_by=updated.accepted_by,
+        rejected=updated.rejected,
+        rejected_note=updated.rejected_note,
+        rejected_at=updated.rejected_at,
+        rejected_by=updated.rejected_by,
+        result_status_updated=status_changed,
+    )
+
+
+@router.post(
+    "/{run_id}/results/{result_id}/mismatches/bulk-decide",
+    response_model=BulkMismatchDecisionOut,
+)
+def bulk_decide_mismatches(
+    run_id: str,
+    result_id: int,
+    body: BulkMismatchDecisionRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    tr = db.get(TestResult, result_id)
+    if tr is None or tr.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Result not found")
+
+    summary = repo.bulk_decide_mismatches(
+        result_id,
+        decision=body.decision,
+        note=body.note,
+        decided_by=body.decided_by,
+        search=body.search,
+        column=body.column,
+        mismatch_type=body.mismatch_type.value if body.mismatch_type else None,
+        status=body.status.value if body.status else None,
+    )
+    AuditService(db).log(
+        request,
+        "mismatch.bulk_decided",
+        "test_result",
+        result_id,
+        {
+            "run_id": run_id,
+            "decision": body.decision,
+            "note": body.note,
+            "decided_by": body.decided_by,
+            "filters": {
+                "search": body.search,
+                "column": body.column,
+                "mismatch_type": body.mismatch_type.value if body.mismatch_type else None,
+                "status": body.status.value if body.status else None,
+            },
+            "matched_count": summary["matched_count"],
+            "decided_count": summary["decided_count"],
+        },
+        actor=body.decided_by,
+    )
+    return BulkMismatchDecisionOut(**summary)
+
+
+@router.post("/{run_id}/results/bulk-accept", response_model=BulkDecisionOut)
+def bulk_accept_mismatches(
+    run_id: str,
+    body: BulkMismatchAcceptRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    for result_id in body.result_ids:
+        tr = db.get(TestResult, result_id)
+        if tr is None or tr.run_id != run_id:
+            raise HTTPException(status_code=404, detail=f"Result {result_id} not found")
+
+    summary = repo.bulk_accept_mismatches(body.result_ids, body.note, body.accepted_by)
+    AuditService(db).log(
+        request,
+        "mismatch.bulk_accepted",
+        "run",
+        run_id,
+        {
+            "result_ids": body.result_ids,
+            "note": body.note,
+            "accepted_by": body.accepted_by,
+            "accepted_mismatch_count": summary["accepted_mismatch_count"],
+            "result_status_updated": summary["result_status_updated"],
+        },
+        actor=body.accepted_by,
+    )
+    return BulkDecisionOut(**summary)
+
+
+@router.post("/{run_id}/results/bulk-override", response_model=list[TestResultOut])
+def bulk_set_test_result_override(
+    run_id: str,
+    body: BulkOverrideRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    from etl_framework.repository.models import TestResult
+
+    repo = RunRepository(db)
+    if repo.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    updated_results = []
+    actor = AuditService.actor_from_request(request) or "unknown"
+    for result_id in body.result_ids:
+        tr = db.get(TestResult, result_id)
+        if tr is None or tr.run_id != run_id:
+            raise HTTPException(status_code=404, detail=f"Result {result_id} not found")
+        if tr.status != "FAILED":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Test result {result_id} is not FAILED (status: {tr.status})",
+            )
+        tr.override_status = "PASSED"
+        tr.override_reason = body.reason
+        tr.override_by = actor
+        tr.override_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(tr)
+        AuditService(db).log(
+            request,
+            "test_result.override_set",
+            "test_result",
+            result_id,
+            {
+                "run_id": run_id,
+                "query_name": tr.query_name,
+                "original_status": tr.status,
+                "override_status": "PASSED",
+                "reason": body.reason,
+                "overridden_by": actor,
+            },
+            actor=actor,
+        )
+        updated_results.append(_test_result_out(tr))
+
+    return updated_results
 
 
 @router.post("/{run_id}/results/{result_id}/drilldown", response_model=DrilldownOut)
