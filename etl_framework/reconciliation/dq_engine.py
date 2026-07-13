@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
+
+try:
+    from scipy import stats as scipy_stats
+except ImportError:  # pragma: no cover - optional dependency
+    scipy_stats = None
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -429,8 +439,7 @@ class DQEngine:
             elif rtype == "custom_sql_assert":
                 if rule.sql and rule.operator:
                     if engine is None:
-                        import logging as _logging
-                        _logging.getLogger("etl_framework.dq_engine").warning(
+                        logger.warning(
                             "custom_sql_assert rule skipped — no DB engine available"
                         )
                     else:
@@ -466,5 +475,196 @@ class DQEngine:
                                 message=f"custom_sql_assert error: {exc}",
                                 actual_value=None,
                             ))
+
+            elif rtype == "outlier_zscore":
+                if col and col in df.columns:
+                    try:
+                        numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                        if len(numeric) > 1:
+                            std = float(numeric.std())
+                            if std > 0:
+                                threshold = rule.threshold if rule.threshold is not None else 3.0
+                                zscores = ((numeric - float(numeric.mean())) / std).abs()
+                                bad = int((zscores > threshold).sum())
+                                if bad:
+                                    violations.append(DQViolation(
+                                        rule_type=rtype, column=col, severity=sev,
+                                        message=f"{bad} value(s) in '{col}' exceed z-score threshold {threshold}",
+                                        actual_value=bad,
+                                    ))
+                    except Exception:
+                        pass
+
+            elif rtype == "outlier_iqr":
+                if col and col in df.columns:
+                    try:
+                        numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                        if len(numeric) > 0:
+                            q1 = float(numeric.quantile(0.25))
+                            q3 = float(numeric.quantile(0.75))
+                            iqr = q3 - q1
+                            multiplier = rule.iqr_multiplier if rule.iqr_multiplier is not None else 1.5
+                            if rule.fence_type == "outer":
+                                multiplier = max(multiplier, 3.0)
+                            lo = q1 - multiplier * iqr
+                            hi = q3 + multiplier * iqr
+                            bad = int(((numeric < lo) | (numeric > hi)).sum())
+                            if bad:
+                                violations.append(DQViolation(
+                                    rule_type=rtype, column=col, severity=sev,
+                                    message=f"{bad} value(s) in '{col}' fall outside IQR fence [{lo:.4g}, {hi:.4g}]",
+                                    actual_value=bad,
+                                ))
+                    except Exception:
+                        pass
+
+            elif rtype == "outlier_grubbs":
+                if col and col in df.columns:
+                    if scipy_stats is None:
+                        logger.warning("outlier_grubbs skipped — scipy not installed")
+                    else:
+                        try:
+                            numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                            n = len(numeric)
+                            if n > 2:
+                                std = float(numeric.std())
+                                if std > 0:
+                                    alpha = rule.alpha if rule.alpha is not None else 0.05
+                                    mean = float(numeric.mean())
+                                    g_stat = float((numeric - mean).abs().max() / std)
+                                    t_crit = float(scipy_stats.t.ppf(1 - alpha / (2 * n), n - 2))
+                                    g_crit = ((n - 1) / (n ** 0.5)) * (((t_crit ** 2) / (n - 2 + t_crit ** 2)) ** 0.5)
+                                    if g_stat > g_crit:
+                                        violations.append(DQViolation(
+                                            rule_type=rtype, column=col, severity=sev,
+                                            message=f"Grubbs test detected an outlier in '{col}' (G={g_stat:.4g} > critical {g_crit:.4g})",
+                                            actual_value=g_stat,
+                                        ))
+                        except Exception:
+                            pass
+
+            elif rtype == "distribution_ks_test":
+                if col and col in df.columns:
+                    if scipy_stats is None:
+                        logger.warning("distribution_ks_test skipped — scipy not installed")
+                    else:
+                        try:
+                            numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                            if len(numeric) > 1:
+                                alpha = rule.alpha if rule.alpha is not None else 0.05
+                                dist = rule.distribution or "normal"
+                                params = rule.distribution_params or {}
+                                if dist == "normal":
+                                    loc = params.get("mean", float(numeric.mean()))
+                                    scale = params.get("std", float(numeric.std()) or 1.0)
+                                    statistic, p_value = scipy_stats.kstest(numeric, "norm", args=(loc, scale))
+                                elif dist == "uniform":
+                                    lo = params.get("min", float(numeric.min()))
+                                    hi = params.get("max", float(numeric.max()))
+                                    span = hi - lo if hi > lo else 1.0
+                                    statistic, p_value = scipy_stats.kstest(numeric, "uniform", args=(lo, span))
+                                else:
+                                    scale = 1.0 / params.get("lam", 1.0)
+                                    statistic, p_value = scipy_stats.kstest(numeric, "expon", args=(0.0, scale))
+                                if p_value < alpha:
+                                    violations.append(DQViolation(
+                                        rule_type=rtype, column=col, severity=sev,
+                                        message=f"KS test rejected {dist} distribution for '{col}' (p={p_value:.4g} < {alpha})",
+                                        actual_value=float(p_value),
+                                    ))
+                        except Exception:
+                            pass
+
+            elif rtype == "distribution_chi_square":
+                if col and col in df.columns:
+                    if scipy_stats is None:
+                        logger.warning("distribution_chi_square skipped — scipy not installed")
+                    else:
+                        try:
+                            numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                            expected = rule.expected_frequencies or []
+                            bins = rule.bins if rule.bins is not None else len(expected)
+                            if len(numeric) > 0 and expected and bins > 0:
+                                observed, _ = np.histogram(numeric, bins=bins)
+                                scale = len(numeric) / sum(expected)
+                                expected_scaled = [v * scale for v in expected]
+                                statistic, p_value = scipy_stats.chisquare(observed, expected_scaled)
+                                alpha = rule.alpha if rule.alpha is not None else 0.05
+                                if p_value < alpha:
+                                    violations.append(DQViolation(
+                                        rule_type=rtype, column=col, severity=sev,
+                                        message=f"Chi-square test rejected expected distribution for '{col}' (p={p_value:.4g} < {alpha})",
+                                        actual_value=float(p_value),
+                                    ))
+                        except Exception:
+                            pass
+
+            elif rtype == "distribution_anderson_darling":
+                if col and col in df.columns:
+                    if scipy_stats is None:
+                        logger.warning("distribution_anderson_darling skipped — scipy not installed")
+                    else:
+                        try:
+                            numeric = pd.to_numeric(df[col], errors="coerce").dropna()
+                            if len(numeric) > 1:
+                                result = scipy_stats.anderson(numeric, dist="norm")
+                                alpha = rule.alpha if rule.alpha is not None else 0.05
+                                significance_map = {0.15: 0, 0.10: 1, 0.05: 2, 0.025: 3, 0.01: 4}
+                                index = significance_map.get(alpha, 2)
+                                critical = float(result.critical_values[index])
+                                if float(result.statistic) > critical:
+                                    violations.append(DQViolation(
+                                        rule_type=rtype, column=col, severity=sev,
+                                        message=f"Anderson-Darling test rejected normality for '{col}' ({result.statistic:.4g} > {critical:.4g})",
+                                        actual_value=float(result.statistic),
+                                    ))
+                        except Exception:
+                            pass
+
+            elif rtype == "hypothesis_test_proportion":
+                if col and col in df.columns and rule.expected_proportion is not None and rule.condition is not None:
+                    if scipy_stats is None:
+                        logger.warning("hypothesis_test_proportion skipped — scipy not installed")
+                    else:
+                        try:
+                            series = df[col].dropna().astype(str)
+                            if len(series) > 0:
+                                observed = int((series == str(rule.condition)).sum())
+                                total = len(series)
+                                p0 = float(rule.expected_proportion)
+                                se = ((p0 * (1 - p0)) / total) ** 0.5
+                                if se > 0:
+                                    z_stat = ((observed / total) - p0) / se
+                                    p_value = float(2 * (1 - scipy_stats.norm.cdf(abs(z_stat))))
+                                    alpha = rule.alpha if rule.alpha is not None else 0.05
+                                    if p_value < alpha:
+                                        violations.append(DQViolation(
+                                            rule_type=rtype, column=col, severity=sev,
+                                            message=f"Proportion test rejected expected ratio for '{col}' (p={p_value:.4g} < {alpha})",
+                                            actual_value=p_value,
+                                        ))
+                        except Exception:
+                            pass
+
+            elif rtype == "anomaly_detection_sigma":
+                if col and col in df.columns:
+                    try:
+                        numeric = pd.to_numeric(df[col], errors="coerce")
+                        threshold = rule.threshold if rule.threshold is not None else 3.0
+                        window = rule.window if rule.window is not None else 10
+                        if len(numeric.dropna()) > 1 and window > 1:
+                            baseline = numeric.shift(1)
+                            rolling_mean = baseline.rolling(window=window, min_periods=2).mean()
+                            rolling_std = baseline.rolling(window=window, min_periods=2).std()
+                            zscores = ((numeric - rolling_mean) / rolling_std).abs()
+                            bad = int((zscores > threshold).fillna(False).sum())
+                            if bad:
+                                violations.append(DQViolation(
+                                    rule_type=rtype, column=col, severity=sev,
+                                    message=f"{bad} value(s) in '{col}' exceed rolling sigma threshold {threshold}",
+                                    actual_value=bad,
+                                ))
+                    except Exception:
+                        pass
 
         return violations

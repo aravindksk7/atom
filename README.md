@@ -2315,6 +2315,14 @@ The following DQ rule types are supported in job definitions:
 | `no_whitespace` | `column` | Fails if any value has leading or trailing whitespace |
 | `referential_check` | `column`, `lookup_query` | Fails if any value is not in the lookup query result set (DB engine required) |
 | `custom_sql_assert` | `column`, `operator`, `min_value` | Runs a custom SQL query; fails if result is not a single `(1, 1)` true assertion |
+| `outlier_zscore` | `column`, `threshold` | Fails if any value exceeds the absolute z-score threshold |
+| `outlier_iqr` | `column`, `iqr_multiplier`, `fence_type` | Fails if any value falls outside the computed IQR fence |
+| `outlier_grubbs` | `column`, `alpha` | Runs a single-outlier Grubbs test and fails when an outlier is detected |
+| `distribution_ks_test` | `column`, `distribution`, `alpha` | Uses a Kolmogorov-Smirnov test to reject a configured reference distribution |
+| `distribution_chi_square` | `column`, `bins`, `expected_frequencies`, `alpha` | Uses chi-square goodness-of-fit against expected bin frequencies |
+| `distribution_anderson_darling` | `column`, `alpha` | Uses Anderson-Darling to reject normality |
+| `hypothesis_test_proportion` | `column`, `condition`, `expected_proportion`, `alpha` | Fails if observed ratio of a target value differs significantly from the expected proportion |
+| `anomaly_detection_sigma` | `column`, `threshold`, `window` | Fails if rolling sigma analysis detects anomalous spikes against prior observations |
 
 The following special job types are supported in addition to the standard `reconciliation` type:
 

@@ -1062,6 +1062,75 @@ function _appRaw() {
       this.showJobModal = true;
     },
 
+    newDQRule(type = 'not_null') {
+      return {
+        type,
+        column: '',
+        severity: 'error',
+        min_value: null,
+        max_value: null,
+        pattern: null,
+        percentile: null,
+        operator: null,
+        column_b: null,
+        lookup_query: null,
+        expected_type: null,
+        threshold: null,
+        iqr_multiplier: null,
+        fence_type: 'inner',
+        distribution: 'normal',
+        distribution_params: null,
+        alpha: null,
+        bins: null,
+        expected_frequencies: [],
+        expected_frequencies_raw: '',
+        expected_proportion: null,
+        condition: null,
+        window: null,
+      };
+    },
+
+    _hydrateDQRule(rule) {
+      const next = { ...this.newDQRule(rule?.type || 'not_null'), ...(rule || {}) };
+      next.expected_frequencies_raw = Array.isArray(next.expected_frequencies)
+        ? next.expected_frequencies.join(', ')
+        : '';
+      return next;
+    },
+
+    _numberOrNull(value) {
+      if (value === '' || value === null || value === undefined) return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    },
+
+    _serializeDQRule(rule) {
+      const out = {
+        ...rule,
+        min_value: this._numberOrNull(rule.min_value),
+        max_value: this._numberOrNull(rule.max_value),
+        percentile: this._numberOrNull(rule.percentile),
+        threshold: this._numberOrNull(rule.threshold),
+        iqr_multiplier: this._numberOrNull(rule.iqr_multiplier),
+        alpha: this._numberOrNull(rule.alpha),
+        bins: this._numberOrNull(rule.bins),
+        expected_proportion: this._numberOrNull(rule.expected_proportion),
+        window: this._numberOrNull(rule.window),
+      };
+      if (typeof rule.expected_frequencies_raw === 'string') {
+        out.expected_frequencies = rule.expected_frequencies_raw
+          .split(',')
+          .map(s => Number(s.trim()))
+          .filter(n => Number.isFinite(n));
+      }
+      delete out.expected_frequencies_raw;
+      Object.keys(out).forEach(key => {
+        if (out[key] === '' || out[key] === undefined) out[key] = null;
+      });
+      if (!Array.isArray(out.expected_frequencies)) out.expected_frequencies = [];
+      return out;
+    },
+
     openEditJobModal(job) {
       this.jobModal = {
         name: job.name, description: job.description || '',
@@ -1074,7 +1143,7 @@ function _appRaw() {
         target_file_label: job.params?.target_file_label || job.params?.label_b || '',
         tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
         depends_on_raw: (job.depends_on || []).join(', '),
-        rules: (job.rules || []).map(r => ({ ...r })),
+        rules: (job.rules || []).map(r => this._hydrateDQRule(r)),
         bo_report_id: job.params?.report_id || '',
         bo_page_id: job.params?.bo_report_id || '',
         bo_format: job.params?.format || 'xlsx',
@@ -1147,7 +1216,7 @@ function _appRaw() {
     },
 
     addDQRule() {
-      this.jobModal.rules.push({ type: 'not_null', column: '', severity: 'error', min_value: null, max_value: null, pattern: null, percentile: null, operator: null, column_b: null, lookup_query: null, expected_type: null });
+      this.jobModal.rules.push(this.newDQRule());
     },
 
     removeDQRule(idx) {
@@ -1245,7 +1314,7 @@ function _appRaw() {
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
         depends_on: m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean),
-        rules: (m.rules || []).filter(r => r.type),
+        rules: (m.rules || []).filter(r => r.type).map(r => this._serializeDQRule(r)),
         params,
         pass_condition: Object.keys(pc).length ? pc : null,
       };

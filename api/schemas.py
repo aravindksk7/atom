@@ -111,6 +111,10 @@ class DQRule(BaseModel):
         "column_std_dev_between", "column_percentile", "column_type_check",
         "column_value_between", "cross_column_consistency", "pii_mask_check",
         "no_whitespace", "referential_check", "custom_sql_assert",
+        # Statistical validation rule types
+        "outlier_zscore", "outlier_iqr", "outlier_grubbs",
+        "distribution_ks_test", "distribution_chi_square", "distribution_anderson_darling",
+        "hypothesis_test_proportion", "anomaly_detection_sigma",
     ]
     column: str | None = None
     min_value: float | None = None
@@ -127,6 +131,17 @@ class DQRule(BaseModel):
     lookup_query: str | None = None
     column_b: str | None = None
     expected_type: str | None = None
+    threshold: float | None = None
+    iqr_multiplier: float | None = None
+    fence_type: Literal["inner", "outer"] = "inner"
+    distribution: Literal["normal", "uniform", "exp"] | None = None
+    distribution_params: dict[str, float] | None = None
+    alpha: float | None = None
+    bins: int | None = None
+    expected_frequencies: list[float] = Field(default_factory=list)
+    expected_proportion: float | None = None
+    condition: str | None = None
+    window: int | None = None
 
 
 class PassCondition(BaseModel):

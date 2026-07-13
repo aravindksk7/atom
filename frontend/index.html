@@ -1308,6 +1308,14 @@
                     <option value="no_whitespace">no_whitespace</option>
                     <option value="referential_check">referential_check</option>
                     <option value="custom_sql_assert">custom_sql_assert</option>
+                    <option value="outlier_zscore">outlier_zscore</option>
+                    <option value="outlier_iqr">outlier_iqr</option>
+                    <option value="outlier_grubbs">outlier_grubbs</option>
+                    <option value="distribution_ks_test">distribution_ks_test</option>
+                    <option value="distribution_chi_square">distribution_chi_square</option>
+                    <option value="distribution_anderson_darling">distribution_anderson_darling</option>
+                    <option value="hypothesis_test_proportion">hypothesis_test_proportion</option>
+                    <option value="anomaly_detection_sigma">anomaly_detection_sigma</option>
                   </select>
                   <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" />
                   <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between','completeness_ratio','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between','custom_sql_assert'].includes(rule.type)">
@@ -1344,6 +1352,43 @@
                   </template>
                   <template x-if="rule.type === 'referential_check'">
                     <input x-model="rule.lookup_query" class="field-input text-xs py-1 flex-1" placeholder="SELECT id FROM ref_table" />
+                  </template>
+                  <template x-if="['outlier_zscore','outlier_grubbs','anomaly_detection_sigma'].includes(rule.type)">
+                    <input x-model="rule.threshold" type="number" step="any" class="field-input text-xs py-1 w-20" :placeholder="rule.type === 'outlier_grubbs' ? 'alpha' : 'threshold'" />
+                  </template>
+                  <template x-if="rule.type === 'outlier_iqr'">
+                    <input x-model="rule.iqr_multiplier" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="IQR x" />
+                  </template>
+                  <template x-if="rule.type === 'outlier_iqr'">
+                    <select x-model="rule.fence_type" class="field-input field-select text-xs py-1 w-20">
+                      <option value="inner">inner</option>
+                      <option value="outer">outer</option>
+                    </select>
+                  </template>
+                  <template x-if="['distribution_ks_test','distribution_chi_square','distribution_anderson_darling','hypothesis_test_proportion'].includes(rule.type)">
+                    <input x-model="rule.alpha" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="alpha" />
+                  </template>
+                  <template x-if="rule.type === 'distribution_ks_test'">
+                    <select x-model="rule.distribution" class="field-input field-select text-xs py-1 w-24">
+                      <option value="normal">normal</option>
+                      <option value="uniform">uniform</option>
+                      <option value="exp">exp</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'distribution_chi_square'">
+                    <input x-model="rule.bins" type="number" min="1" class="field-input text-xs py-1 w-16" placeholder="bins" />
+                  </template>
+                  <template x-if="rule.type === 'distribution_chi_square'">
+                    <input x-model="rule.expected_frequencies_raw" class="field-input text-xs py-1 flex-1" placeholder="expected frequencies: 10,20,30" />
+                  </template>
+                  <template x-if="rule.type === 'hypothesis_test_proportion'">
+                    <input x-model="rule.condition" class="field-input text-xs py-1 w-24" placeholder="value" />
+                  </template>
+                  <template x-if="rule.type === 'hypothesis_test_proportion'">
+                    <input x-model="rule.expected_proportion" type="number" step="any" min="0" max="1" class="field-input text-xs py-1 w-20" placeholder="ratio" />
+                  </template>
+                  <template x-if="rule.type === 'anomaly_detection_sigma'">
+                    <input x-model="rule.window" type="number" min="2" class="field-input text-xs py-1 w-16" placeholder="window" />
                   </template>
                   <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20">
                     <option value="error">error</option>
