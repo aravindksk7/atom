@@ -126,6 +126,12 @@
       font-size: 0.85em;
       padding: 4px 10px;
     }
+    .rejected-note {
+      background: rgba(251,113,133,0.16);
+      color: #fb7185;
+      font-size: 0.85em;
+      padding: 4px 10px;
+    }
     @media (max-width: 760px) {
       body { padding: 16px; }
       .container { padding: 18px; }
@@ -221,8 +227,8 @@
           <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Total Duration</div>
         </div>
         <div style="flex:1;min-width:120px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:8px;padding:12px 16px">
-          <div id="stat-accepted" style="font-size:1.8em;font-weight:700;color:#86efac">0 / 0</div>
-          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Accepted / Open (shown)</div>
+          <div id="stat-accepted" style="font-size:1.8em;font-weight:700;color:#86efac">0 / 0 / 0</div>
+          <div style="font-size:0.8em;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Accepted / Rejected / Open (shown)</div>
         </div>
       </div>
       {% if suite.test_cases | length > 0 %}
@@ -407,7 +413,8 @@
                     data-key="{{ mm.key_values | tojson }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
                     data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}"
-                    data-accepted="{{ 'true' if mm.accepted else 'false' }}">
+                    data-accepted="{{ 'true' if mm.accepted else 'false' }}"
+                    data-rejected="{{ 'true' if mm.rejected else 'false' }}">
                   <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
                   <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values | tojson }}</td>
@@ -432,6 +439,13 @@
                 <tr style="background: rgba(52,211,153,0.12);">
                   <td colspan="5" class="accepted-note">
                     ✓ Accepted{% if mm.accepted_by %} by {{ mm.accepted_by }}{% endif %}{% if mm.accepted_at %} on {{ mm.accepted_at | to_local }}{% endif %}{% if mm.accepted_note %} — {{ mm.accepted_note }}{% endif %}
+                  </td>
+                </tr>
+                {% endif %}
+                {% if mm.rejected %}
+                <tr style="background: rgba(251,113,133,0.12);">
+                  <td colspan="5" class="rejected-note">
+                    ✗ Rejected{% if mm.rejected_by %} by {{ mm.rejected_by }}{% endif %}{% if mm.rejected_at %} on {{ mm.rejected_at | to_local }}{% endif %}{% if mm.rejected_note %} — {{ mm.rejected_note }}{% endif %}
                   </td>
                 </tr>
                 {% endif %}
@@ -731,12 +745,14 @@
   }
 
   function computeAcceptedStats(){
-    var accepted=0, open=0;
+    var accepted=0, rejected=0, open=0;
     document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
-      if(tr.dataset.accepted==='true') accepted++; else open++;
+      if(tr.dataset.accepted==='true') accepted++;
+      else if(tr.dataset.rejected==='true') rejected++;
+      else open++;
     });
     var el=document.getElementById('stat-accepted');
-    if(el) el.textContent = accepted + ' / ' + open;
+    if(el) el.textContent = accepted + ' / ' + rejected + ' / ' + open;
   }
 
   function wireDifferencesLinks(){
@@ -768,7 +784,7 @@
     return (columnName || '') + '||' + (mismatchType || '') + '||' + (keyValuesText || '');
   }
 
-  function buildMismatchRow(row, sourceEnv, targetEnv, acceptedKeys){
+  function buildMismatchRow(row, sourceEnv, targetEnv, acceptedKeys, rejectedKeys){
     var tr = document.createElement('tr');
     tr.setAttribute('data-mismatch', '');
     tr.dataset.test = row.test_name || '';
@@ -777,10 +793,11 @@
     tr.dataset.key = typeof row.key_values === 'string' ? row.key_values : JSON.stringify(row.key_values || {});
     tr.dataset.src = row.source_value || '';
     tr.dataset.tgt = row.target_value || '';
-    // The recompute export has no accepted field (DIFFERENCE_FIELDS doesn't carry it) — carry
-    // forward acceptance state from the rows this injection is about to replace, matched by
-    // column+type+key, so re-loading a test doesn't silently un-accept its already-accepted rows.
+    // The recompute export has no accepted/rejected field (DIFFERENCE_FIELDS doesn't carry it) —
+    // carry forward decision state from the rows this injection is about to replace, matched by
+    // column+type+key, so re-loading a test doesn't silently undo already-decided rows.
     tr.dataset.accepted = (acceptedKeys && acceptedKeys.has(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key))) ? 'true' : 'false';
+    tr.dataset.rejected = (rejectedKeys && rejectedKeys.has(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key))) ? 'true' : 'false';
     tr.innerHTML =
       '<td><span class="badge ' + mismatchTypeBadgeClass(row.mismatch_type) + '">' + escHtml(row.mismatch_type) + '</span></td>' +
       '<td>' + escHtml(row.column_name) + '</td>' +
@@ -808,12 +825,16 @@
     var table = tbody.closest('table');
     if(table && table.style.display === 'none') table.style.display = '';
     var acceptedKeys = new Set();
+    var rejectedKeys = new Set();
     tbody.querySelectorAll('tr[data-mismatch][data-accepted="true"]').forEach(function(tr){
       acceptedKeys.add(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key));
     });
+    tbody.querySelectorAll('tr[data-mismatch][data-rejected="true"]').forEach(function(tr){
+      rejectedKeys.add(mismatchRowKey(tr.dataset.column, tr.dataset.type, tr.dataset.key));
+    });
     var frag = document.createDocumentFragment();
     rows.forEach(function(row){
-      frag.appendChild(buildMismatchRow(row, section.dataset.sourceEnv, section.dataset.targetEnv, acceptedKeys));
+      frag.appendChild(buildMismatchRow(row, section.dataset.sourceEnv, section.dataset.targetEnv, acceptedKeys, rejectedKeys));
     });
     tbody.innerHTML = '';
     tbody.appendChild(frag);
