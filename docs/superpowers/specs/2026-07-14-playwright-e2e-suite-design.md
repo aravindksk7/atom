@@ -35,11 +35,58 @@ One file per tab/concern; each is an independently completable, parallelizable u
 | `05-adapters.spec.ts` | Adapter CRUD, connectivity test | Bad credentials, unreachable host |
 | `06-reports.spec.ts` | View/download report, rejected-mismatches HTML report | Report request for a nonexistent run |
 | `07-differences.spec.ts` | Differences Explorer search/pagination/insights, bulk-decide bar + modal, mismatch drawer accept/reject | Bulk-decide with zero rows selected, missing decision reason |
-| `08-compare.spec.ts` | `compareSubTab` mmdiff comparison flow | Mismatched/invalid file inputs |
+| `08a-compare-bo-report.spec.ts` | Compare → BO Report sub-tab (see breakdown below) | Missing source, upload wrong file type, bad path, tolerance/range validation |
+| `08b-compare-reconciliation.spec.ts` | Compare → Reconciliation sub-tab: Quick Compare Mode, Dual Environment, Run/File vs Report | Launch with no jobs selected, no source selected, empty past-pairs state, zero-match diff filter |
+| `08c-compare-sql.spec.ts` | Compare → SQL sub-tab | Empty query, malformed SQL, missing config |
+| `08d-compare-colstats.spec.ts` | Compare → Column Stats sub-tab | Missing required source fields, invalid/non-numeric doc or report ID, negative row-count tolerance |
+| `08e-compare-mismatch-diff.spec.ts` | Compare → Mismatch Diff sub-tab | Invalid/nonexistent run UUID, Run A == Run B, query filter matching nothing |
+| `08f-compare-templates.spec.ts` | Compare templates bar (Load/Save, shared across all 5 sub-tabs) | Save with empty name, load dropdown with no custom templates |
 | `09-contracts.spec.ts` | Contract CRUD | Validation errors on save |
 | `10-logs.spec.ts` | Global Logs tab auto-refresh, search/level filter | — |
 | `11-help.spec.ts` | Help tab renders | — |
 | `12-cross-cutting.spec.ts` | Offline indicator (`apiOk`), unknown route/deep-link, XSS-safe rendering of user-entered text (job names, mismatch reasons), session expiry mid-action | — |
+
+## Compare tab — detailed breakdown
+
+The Compare tab (`currentView === 'compare'`) has 5 sub-tabs (`compareSubTab`) plus a shared template bar above them. This is the most complex tab in the app, so it gets one spec file per sub-tab instead of being folded into a single file.
+
+**Shared template bar** (`08f`) — sits above all 5 sub-tabs:
+- Load template `<select>` with "Built-in" (`predefinedCompareTemplates`) and "My Templates" (`compareTemplates`) optgroups; selecting one calls `loadCompareTemplate()` and populates the active sub-tab's fields
+- "Save Template" toggles a panel with a name input + Save/Cancel
+- Negative: Save with empty name; My Templates optgroup absent when `compareTemplates` is empty
+
+**08a — BO Report** (`compareSubTab === 'bo'`):
+- Source A/B, each independently switchable between 4 modes: Live (cascading Config → Document → Report selects, via `loadCompareBODocuments`/`loadCompareBOReports`), Path (raw file path input), Upload (multi-format file input: csv/xlsx/xls/json/xml/tsv/txt), API (Config → Endpoint select via `configApiEndpointNames`)
+- Key columns / Exclude columns text inputs
+- Advanced Options accordion: Backend (pandas/polars/duckdb), Float Tolerance, Datetime Tolerance, Mismatch Row Limit, Sample Fraction (0.01–1), Per-column tolerances, Case-insensitive columns, Whitespace-normalize columns, Parallel column comparison checkbox
+- "Save as Baseline when complete" checkbox; "⇄ Swap Sides" button (verify A/B contents actually swap)
+- Run BO Compare → loading state → result card: status badge, test-count chips, results table with per-row checkbox selection and "View" → opens mismatch drawer
+- Result actions: 📊 Chart toggle (chart-by column/sourceValue/targetValue select, canvas render), Export Settings, Download All Differences (CSV/Parquet, each shows busy/disabled state mid-export), "Open in Reports →" (navigates to Reports tab with matching `reportRunId`)
+- Negative: Run with no source selected on either side; Live mode with doc/report left unselected; Upload wrong extension (rejected by `accept` filter — verify via `browser_file_upload` with a disallowed type is not offered/handled); Path pointing at a nonexistent file (compare fails, error surfaced); tolerance/limit fields at their boundaries (sample fraction 0 or >1, mismatch row limit <1)
+
+**08b — Reconciliation** (`compareSubTab === 'recon'`):
+- Quick Compare Mode checkbox (auto-selects last successful run as Source A when enabled)
+- Mode switch: **Dual Environment** vs **Run/File vs Report**
+- *Dual Environment*: Config A/B selects, source/target env label inputs, multi-select job list, "Launch Dual-Env Run" → pair result (improved/regressed/unchanged chips + per-test delta table); "Past Dual-Env Pairs" list with Refresh and per-row "Load"
+- *Run/File vs Report*: Source A/B each switchable between Stored Run (select from `sortRunsForDisplay(runs)`), Server Path, Upload; key/exclude columns + same Advanced Options set as BO; "Compare Files" → result card with CSV/XLSX/HTML download buttons, download-all-differences, "Open in Reports"; per-result row expands into: column statistics table (sortable by column/mismatches/compared/match%, with a filter input), diff filter bar (type/column/search), diff table (source/target values with "…more" expand for long cells, delta, mismatch type), "Load next 100 rows" pagination
+- Negative: Launch dual-env with zero jobs selected; Compare Files with no source chosen on either side; Upload wrong file type; Refresh past pairs with none existing (empty-state message, not an error); clicking a row to expand when its status is PASSED (must not expand — only non-PASSED rows are clickable); diff filter search with no matches (table renders empty, count reflects 0); "Load more" hidden when `hasMore` is false
+
+**08c — SQL** (`compareSubTab === 'sql'`):
+- Config A/B selects; Connection select only rendered when `sqlConfigAConnections()`/`B()` returns entries (verify it's absent for single-connection configs and defaults correctly)
+- SQL Query textarea A/B, key/exclude columns, same Advanced Options set
+- Run SQL Compare → result card mirrors the Reconciliation file-diff result: status/pass/fail chips, per-row expandable diff with column stats + filter bar + diff table + pagination, download-all-differences, Open in Reports
+- Negative: Run with an empty query on either side; malformed SQL (backend error surfaced, not a silent failure); no config selected; query returning identical result sets both sides (PASSED, row not expandable)
+
+**08d — Column Stats** (`compareSubTab === 'colstats'`):
+- Source A/B independently switchable between Upload / Live BO (Config select + free-text Document ID + Report ID — note these are raw inputs here, not cascading selects like the BO tab) / File path / API endpoint
+- Query/Report name, Float Tolerance, Row Count Tolerance
+- "Compute Column Stats" → result: "No drift" message when `has_diffs` is false, else a drift table (column, metric, source value, target value, delta)
+- Negative: Compute with required source fields empty; non-numeric Document/Report ID in Live mode; Upload wrong extension; negative Row Count Tolerance
+
+**08e — Mismatch Diff** (`compareSubTab === 'mmdiff'`):
+- Run A (baseline) / Run B (current) UUID inputs with optional labels; optional query-name filter
+- "Run Mismatch Diff" → summary chips (new/resolved/persistent counts) + regressions badge; three independently-paginated tables (New Regressions, Resolved, Persistent) each with a "Load more" button driven by `mismatchDiffVisible`
+- Negative: invalid/nonexistent run UUID on either side (error surfaced, not a blank success state); Run A identical to Run B (expect 0 new/0 resolved, everything persistent — or whatever the backend's actual documented behavior is, confirmed during implementation); query-name filter matching nothing (all three lists empty, no regressions badge, no crash)
 
 ## Shared fixtures
 
