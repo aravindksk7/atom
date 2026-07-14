@@ -44,6 +44,10 @@ export async function createFileJob(ctx: APIRequestContext, name: string) {
   return resp.json();
 }
 
+// Intentionally fire-and-forget (unlike the create* helpers above): this runs from
+// afterAll/afterEach cleanup blocks, where throwing on a failed delete would mask
+// the actual test failure that's already being reported. A failed cleanup here
+// leaves an orphaned e2e-prefixed job, which is harmless noise, not silent data loss.
 export async function deleteJob(ctx: APIRequestContext, name: string) {
   await ctx.delete(`/api/jobs/${encodeURIComponent(name)}`);
 }
@@ -83,6 +87,7 @@ export async function createConfig(ctx: APIRequestContext, name: string, envName
   return resp.json(); // includes .id
 }
 
+// Fire-and-forget cleanup — see deleteJob's comment above for the rationale.
 export async function deleteConfig(ctx: APIRequestContext, id: number) {
   await ctx.delete(`/api/configs/${id}`);
 }
