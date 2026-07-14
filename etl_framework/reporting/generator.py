@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -61,12 +63,17 @@ class ReportGenerator:
         
         run_id = getattr(suite_result, "run_id", "unknown_run")
         report_path = self._output_dir / f"report_{run_id}.html"
-        
+        tmp_path = None
         try:
-            report_path.write_text(html_content, encoding="utf-8")
+            fd, tmp_path = tempfile.mkstemp(dir=self._output_dir, suffix=".html.tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            os.replace(tmp_path, str(report_path))
             logger.info(f"Generated HTML report at {report_path}")
             return str(report_path)
         except OSError as e:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
             try:
                 from etl_framework.exceptions import ReportOutputError
                 raise ReportOutputError(str(report_path), e) from e

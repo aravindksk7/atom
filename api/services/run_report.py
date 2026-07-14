@@ -172,7 +172,7 @@ class RunReportSnapshot:
 
     @property
     def total_skipped(self) -> int:
-        return 0
+        return sum(1 for result in self.results if result.effective_status == "SKIPPED")
 
     @property
     def total_issues(self) -> int:
@@ -225,10 +225,10 @@ def _snapshot_status(raw_status: str, results: list[ReportResult]) -> str:
     if raw_status not in TERMINAL_STATUSES or not results:
         return raw_status
     statuses = [result.effective_status for result in results]
-    if "ERROR" in statuses:
-        return "ERROR"
     if "FAILED" in statuses:
         return "FAILED"
+    if "ERROR" in statuses:
+        return "ERROR"
     if "SLOW" in statuses:
         return "SLOW"
     if statuses and all(status in {"PASSED", "SKIPPED"} for status in statuses):

@@ -21,7 +21,9 @@ class MetricsWriter:
 
         passed = sum(1 for r in results if r.status == TestStatus.PASSED)
         failed = sum(1 for r in results if r.status == TestStatus.FAILED)
+        error = sum(1 for r in results if r.status == TestStatus.ERROR)
         slow = sum(1 for r in results if r.status == TestStatus.SLOW)
+        skipped = sum(1 for r in results if r.status == TestStatus.SKIPPED)
         total_duration = sum(r.duration_seconds for r in results)
 
         payload = {
@@ -30,12 +32,14 @@ class MetricsWriter:
             "total_tests": len(results),
             "passed": passed,
             "failed": failed,
+            "error": error,
             "slow": slow,
+            "skipped": skipped,
             "total_duration_seconds": round(total_duration, 6),
             "tests": [
                 {
                     "name": r.query_name,
-                    "status": r.status if isinstance(r.status, str) else r.status.value,
+                    "status": r.status if isinstance(r.status, str) else (r.status.value if r.status is not None else "UNKNOWN"),
                     "duration_seconds": r.duration_seconds,
                     "source_row_count": r.source_row_count,
                     "target_row_count": r.target_row_count,

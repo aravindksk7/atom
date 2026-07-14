@@ -208,6 +208,7 @@ function _appRaw() {
     activeRuns: [],
     pollTimer: null,
     runStreams: {},
+    cancellingRuns: {},
     runStepsCache: {},   // { run_id: RunStep[] }
     stepReleaseModal: { show: false, runId: '', stepIndex: 0, releasedBy: '', note: '', action: 'approve' },
 
@@ -1562,6 +1563,24 @@ function _appRaw() {
         this.runStepsCache[runId] = await api('GET', `/api/runs/${runId}/steps`);
       } catch {
         this.runStepsCache[runId] = [];
+      }
+    },
+
+    async cancelRun(runId) {
+      if (!runId || this.cancellingRuns[runId]) return;
+      this.cancellingRuns = { ...this.cancellingRuns, [runId]: true };
+      try {
+        await api('POST', `/api/runs/${runId}/cancel`);
+        const idx = this.activeRuns.findIndex(r => r.run_id === runId);
+        if (idx >= 0) this.activeRuns[idx].cancel_requested = true;
+        this.toast('success', 'Cancel requested', `Run ${runId.substring(0,8)} will stop after current step`);
+        await this.pollActiveRuns();
+      } catch(e) {
+        this.toast('error', 'Cancel failed', e.message);
+      } finally {
+        const next = { ...this.cancellingRuns };
+        delete next[runId];
+        this.cancellingRuns = next;
       }
     },
 
