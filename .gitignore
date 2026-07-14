@@ -29,6 +29,8 @@ __pycache__/
 node_modules/
 .hypothesis/
 *.egg-info/
+test-results/
+playwright-report/
 
 # Local-only validation and planning material
 tests/
