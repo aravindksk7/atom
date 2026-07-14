@@ -92,11 +92,21 @@ Expected: downloads the Chromium browser binary (Chromium-only per design's non-
 
 - [ ] **Step 3: Create `playwright.config.ts`**
 
+**Important ordering note:** Playwright evaluates `webServer.env` when this config module loads — synchronously, before `globalSetup` runs. So the throwaway-DB temp path must be computed here at module scope, not inside `global-setup.ts` (Task 2) — otherwise the server would boot with `ETL_DATABASE_URL=''` and fall back to the real on-disk `etl_framework.db`. `globalSetup`/`globalTeardown` run in the same Node process as config loading, so they can still read `process.env.E2E_DATABASE_URL` / `E2E_DB_DIR` set here.
+
 ```typescript
 import { defineConfig, devices } from '@playwright/test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const PORT = 8055;
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
+
+const dbDir = mkdtempSync(path.join(tmpdir(), 'atom-e2e-'));
+const dbPath = path.join(dbDir, 'e2e.db');
+process.env.E2E_DATABASE_URL = `sqlite:///${dbPath.replace(/\\/g, '/')}`;
+process.env.E2E_DB_DIR = dbDir; // read by global-teardown.ts for cleanup
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -120,11 +130,13 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 60_000,
     env: {
-      ETL_DATABASE_URL: process.env.E2E_DATABASE_URL || '',
+      ETL_DATABASE_URL: process.env.E2E_DATABASE_URL,
     },
   },
 });
 ```
+
+`package.json` also needs an explicit `"name": "atom"` (and `"private": true`) — without it, `npm install`'s lockfile `name` field is derived from the current working directory's basename, which silently drifts if `npm install` is ever run from a differently-named git worktree.
 
 - [ ] **Step 4: Create `tests/e2e/tsconfig.json`**
 
@@ -176,7 +188,7 @@ git commit -m "test: scaffold Playwright E2E project"
 - Create: `tests/e2e/global-teardown.ts`
 - Create: `tests/e2e/api-helpers.ts` (bootstrap function only in this task; more helpers added in Task 3)
 
-**Context:** `frontend/app.js` bootstrap flow: `POST /api/tokens` with no `Authorization` header, when zero tokens exist, is force-admin (`api/routes/tokens.py:81-99`) and is exempt from the auth middleware. `ETL_DATABASE_URL` env var (`etl_framework/repository/database.py:10-11`) picks the sqlite file; defaults to a real on-disk file otherwise — **must** be set before `webServer` starts uvicorn, so we set it via `process.env` in `globalSetup`, which runs *before* Playwright starts `webServer`.
+**Context:** `frontend/app.js` bootstrap flow: `POST /api/tokens` with no `Authorization` header, when zero tokens exist, is force-admin (`api/routes/tokens.py:81-99`) and is exempt from the auth middleware. `ETL_DATABASE_URL` env var (`etl_framework/repository/database.py:10-11`) picks the sqlite file; defaults to a real on-disk file otherwise. **The throwaway-DB temp path is already created in `playwright.config.ts` (Task 1), not here** — `webServer.env` is evaluated at config-load time, before `globalSetup` would run, so that logic had to move up a level. This task's `global-setup.ts` only needs to handle the docker-compose live-backend startup + SQL Server seeding; `global-teardown.ts` cleans up both the docker services and the temp DB dir (via `process.env.E2E_DB_DIR`, already set by config load, visible here since globalSetup/globalTeardown run in the same Node process).
 
 Live-backend seed values (verified via `tests/integration/test_sqlserver_live_reconciliation.py` and `tests/integration/test_sapbo_mock_container.py`, which already run against these exact containers):
 - SQL Server: `127.0.0.1:14333`, user `sa`, password `Atom_Test_12345!`, ODBC driver `ODBC Driver 17 for SQL Server` (matches what the Config modal always sends, `frontend/app.js:_configDataFromModal`).
@@ -216,22 +228,16 @@ export function authedContext(token: string): Promise<APIRequestContext> {
 
 ```typescript
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FullConfig } from '@playwright/test';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
 export default async function globalSetup(_config: FullConfig) {
-  // 1. Throwaway sqlite DB — must be set before Playwright's webServer starts uvicorn.
-  const dbDir = mkdtempSync(path.join(tmpdir(), 'atom-e2e-'));
-  const dbPath = path.join(dbDir, 'e2e.db');
-  process.env.E2E_DATABASE_URL = `sqlite:///${dbPath.replace(/\\/g, '/')}`;
-  process.env.E2E_DB_DIR = dbDir; // read by global-teardown
-
-  // 2. Live backends (SQL Server + SAP BO mock), gated — mirrors the existing
-  //    RUN_LIVE_SQLSERVER_TESTS / RUN_LIVE_SAPBO_TESTS pytest convention.
+  // Live backends (SQL Server + SAP BO mock), gated — mirrors the existing
+  // RUN_LIVE_SQLSERVER_TESTS / RUN_LIVE_SAPBO_TESTS pytest convention.
+  // (The throwaway sqlite DB path itself is created in playwright.config.ts,
+  // not here — see that file's comment on webServer.env evaluation timing.)
   if (process.env.E2E_LIVE_BACKENDS === '1') {
     console.log('[global-setup] starting docker-compose.integration.yml services...');
     execSync('docker compose -f docker-compose.integration.yml up -d --wait', {
