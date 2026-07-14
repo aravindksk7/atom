@@ -85,21 +85,17 @@ async function apiPaged(path) {
 }
 
 function app() {
-  const instance = _appRaw();
-  // Object.assign() above flattens `get storedToken()` into a one-time snapshot
-  // value at merge time, breaking live reactivity. Re-attach it as a real
-  // accessor so it always reflects the current storedTokenValue.
-  Object.defineProperty(instance, 'storedToken', {
-    get() { return this.storedTokenValue; },
-    enumerable: true,
-    configurable: true,
-  });
-  return instance;
+  return _appRaw();
 }
 
 function _appRaw() {
   // Compare feature slice is merged in from features/compare.js (window.ETL_FEATURE_COMPARE).
-  return Object.assign(ETL_FEATURE_COMPARE(), {
+  // Merged with Object.defineProperties (not Object.assign) because Object.assign
+  // reads each `get x()` accessor below immediately and copies the *value* it
+  // returned at that instant, freezing computed properties (filteredJobList,
+  // jobCatalogCountLabel, etc.) as one-time snapshots that never update again.
+  // defineProperties copies the accessor itself, so it keeps recomputing on access.
+  const core = {
     // -----------------------------------------------------------
     // Navigation
     // -----------------------------------------------------------
@@ -1021,7 +1017,22 @@ function _appRaw() {
     // JOBS / LAUNCH
     // ===========================================================
     async loadJobs() {
-      try { this.jobs = await api('GET', '/api/jobs'); } catch {}
+      try {
+        const jobs = await api('GET', '/api/jobs');
+        this.jobs = Array.isArray(jobs) ? jobs : [];
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
+    _upsertJobInList(job) {
+      if (!job?.name) return;
+      if (!Array.isArray(this.jobs)) this.jobs = [];
+      const idx = this.jobs.findIndex(j => j.name === job.name);
+      if (idx >= 0) this.jobs.splice(idx, 1, job);
+      else this.jobs.push(job);
+      this.jobs.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     },
 
     async loadDiagnostics() {
@@ -1372,12 +1383,16 @@ function _appRaw() {
       if (!validation?.ok) return;
       const body = this._buildJobRequestBody(m);
       try {
+        let savedJob;
         if (this.jobModalEditing) {
-          await api('PUT', `/api/jobs/${encodeURIComponent(m.name)}`, body);
+          savedJob = await api('PUT', `/api/jobs/${encodeURIComponent(m.name)}`, body);
         } else {
-          await api('POST', '/api/jobs', body);
+          savedJob = await api('POST', '/api/jobs', body);
+          this.jobSearchQuery = '';
         }
-        await this.loadJobs();
+        this._upsertJobInList(savedJob);
+        const refreshed = await this.loadJobs();
+        if (!refreshed) this._upsertJobInList(savedJob);
         this.showJobModal = false;
         this.toast('success', this.jobModalEditing ? 'Job updated' : 'Job created', m.name);
       } catch (e) {
@@ -3537,6 +3552,13 @@ function _appRaw() {
       });
     },
 
+    get jobCatalogCountLabel() {
+      const total = (this.jobs || []).length;
+      const shown = this.filteredJobList.length;
+      if (shown === total) return total + ' jobs';
+      return shown + ' of ' + total + ' jobs';
+    },
+
     // ===========================================================
     // ===========================================================
     getJobLastStatus(job) {
@@ -4219,6 +4241,7 @@ function _appRaw() {
       return 'badge-unknown';
     },
 
-  });
+  };
+  return Object.defineProperties(ETL_FEATURE_COMPARE(), Object.getOwnPropertyDescriptors(core));
 
 }

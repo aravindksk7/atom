@@ -913,7 +913,7 @@
     <div class="flex items-center justify-between mb-3">
       <div class="font-semibold text-slate-700">Job Catalog</div>
       <div class="flex items-center gap-3">
-        <span class="text-muted" x-text="jobs.length + ' jobs'"></span>
+        <span class="text-muted" x-text="jobCatalogCountLabel"></span>
         <button @click="openNewJobModal()" class="btn-primary btn-sm">+ New Job</button>
       </div>
     </div>
@@ -939,6 +939,9 @@
 
     <template x-if="jobs.length === 0">
       <div class="empty-state"><div class="empty-state-title">No jobs yet. Create one or add from the Adapters tab.</div></div>
+    </template>
+    <template x-if="jobs.length > 0 && filteredJobList.length === 0">
+      <div class="empty-state"><div class="empty-state-title">No jobs match your search.</div></div>
     </template>
     <div class="space-y-1">
       <template x-for="(job, $index) in filteredJobList" :key="job.name">
