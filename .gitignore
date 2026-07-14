@@ -39,6 +39,7 @@ tests/*
 !tests/integration/
 tests/integration/*
 !tests/unit/
+!tests/e2e/
 docs/*
 !docs/superpowers
 test_*.py
