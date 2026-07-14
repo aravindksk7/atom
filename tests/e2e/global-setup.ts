@@ -22,11 +22,17 @@ export default async function globalSetup(_config: FullConfig) {
 
 function seedSqlServer() {
   // Reuses the exact seed pattern from tests/integration/test_sqlserver_live_reconciliation.py
-  // so the databases/table shape match what that suite already validates.
+  // so the databases/table shape match what that suite already validates. The ODBC driver
+  // name is overridable via LIVE_SQLSERVER_ODBC_DRIVER (same env var that pytest suite uses),
+  // defaulting to "ODBC Driver 17 for SQL Server" to match what the app itself always sends
+  // for configs created through the UI (frontend/app.js:_configDataFromModal) — but installed
+  // driver versions vary by machine, so this must not be hardcoded.
+  const driver = process.env.LIVE_SQLSERVER_ODBC_DRIVER || 'ODBC Driver 17 for SQL Server';
   const script = `
 import pyodbc
+DRIVER = ${JSON.stringify(driver)}
 conn = pyodbc.connect(
-    "DRIVER={ODBC Driver 17 for SQL Server};SERVER=127.0.0.1,14333;DATABASE=master;"
+    f"DRIVER={{{DRIVER}}};SERVER=127.0.0.1,14333;DATABASE=master;"
     "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;",
     autocommit=True,
 )
@@ -37,7 +43,7 @@ conn.close()
 
 def seed(db, rows):
     c = pyodbc.connect(
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER=127.0.0.1,14333;DATABASE={db};"
+        f"DRIVER={{{DRIVER}}};SERVER=127.0.0.1,14333;DATABASE={db};"
         "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;",
         autocommit=True,
     )
