@@ -201,6 +201,17 @@ function _appRaw() {
     isLaunching: false,
     validateJobLoading: false,
     validateJobResult: null,
+    validateDefinitionLoading: false,
+    validateDefinitionResult: null,
+
+    // -----------------------------------------------------------
+    // Diagnostics
+    // -----------------------------------------------------------
+    diagnosticsOpen: false,
+    diagnosticsLoading: false,
+    diagnosticsData: null,
+    diagnosticsError: '',
+    diagnosticsIncludeLogs: false,
 
     // -----------------------------------------------------------
     // Monitor
@@ -1013,6 +1024,19 @@ function _appRaw() {
       try { this.jobs = await api('GET', '/api/jobs'); } catch {}
     },
 
+    async loadDiagnostics() {
+      this.diagnosticsLoading = true;
+      this.diagnosticsError = '';
+      try {
+        const qs = new URLSearchParams({ include_logs: String(Boolean(this.diagnosticsIncludeLogs)) });
+        this.diagnosticsData = await api('GET', `/api/health/diagnostics?${qs}`);
+      } catch (e) {
+        this.diagnosticsError = e.message || 'Diagnostics failed';
+      } finally {
+        this.diagnosticsLoading = false;
+      }
+    },
+
     isJobSelected(name) {
       return this.selectedJobs.includes(name);
     },
@@ -1243,8 +1267,7 @@ function _appRaw() {
       }
     },
 
-    async saveJob() {
-      const m = this.jobModal;
+    _buildJobRequestBody(m) {
       const params = {};
       const fileCapableJob = ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type);
       const usesFileSource = fileCapableJob && m.source_mode === 'files';
@@ -1307,7 +1330,7 @@ function _appRaw() {
       if (m.pass_max_missing_in_source !== '') pc.max_missing_in_source = Number(m.pass_max_missing_in_source);
       if (m.pass_require_status) pc.require_status = m.pass_require_status.split(',').map(s => s.trim()).filter(Boolean);
       if (m.pass_sql?.trim()) { pc.pass_sql = m.pass_sql.trim(); pc.pass_sql_mode = m.pass_sql_mode; }
-      const body = {
+      return {
         name: m.name, description: m.description,
         job_type: m.job_type,
         query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource ? m.query : '',
@@ -1319,6 +1342,35 @@ function _appRaw() {
         params,
         pass_condition: Object.keys(pc).length ? pc : null,
       };
+    },
+
+    async validateJobDefinition() {
+      this.validateDefinitionLoading = true;
+      this.validateDefinitionResult = null;
+      try {
+        const body = this._buildJobRequestBody(this.jobModal);
+        this.validateDefinitionResult = await api('POST', '/api/jobs/validate', body);
+        if (this.validateDefinitionResult.ok) {
+          this.toast('success', 'Job definition valid', this.jobModal.name || 'Untitled job');
+        } else {
+          const first = this.validateDefinitionResult.issues?.[0];
+          this.toast('error', 'Job validation failed', first ? `${first.field}: ${first.message}` : 'Fix validation issues');
+        }
+        return this.validateDefinitionResult;
+      } catch (e) {
+        this.validateDefinitionResult = { ok: false, issues: [{ field: 'request', message: e.message, severity: 'error' }] };
+        this.toast('error', 'Validation failed', e.message);
+        return this.validateDefinitionResult;
+      } finally {
+        this.validateDefinitionLoading = false;
+      }
+    },
+
+    async saveJob() {
+      const m = this.jobModal;
+      const validation = await this.validateJobDefinition();
+      if (!validation?.ok) return;
+      const body = this._buildJobRequestBody(m);
       try {
         if (this.jobModalEditing) {
           await api('PUT', `/api/jobs/${encodeURIComponent(m.name)}`, body);

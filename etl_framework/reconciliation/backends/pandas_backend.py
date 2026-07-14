@@ -1,10 +1,13 @@
 from __future__ import annotations
-import math
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 from etl_framework.reconciliation.backends.base import BackendCompareResult
+from etl_framework.reconciliation.compare_utils import (
+    build_mismatch_summary,
+    normalize_string_columns,
+    value_mismatch_mask,
+)
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -30,18 +33,11 @@ class PandasBackend:
         self._whitespace_normalize_columns: frozenset[str] = frozenset(whitespace_normalize_columns or [])
 
     def _normalize_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        if not self._case_insensitive_columns and not self._whitespace_normalize_columns:
-            return df
-        df = df.copy()
-        for col in self._case_insensitive_columns | self._whitespace_normalize_columns:
-            if col not in df.columns:
-                continue
-            if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-                if col in self._whitespace_normalize_columns:
-                    df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
-                if col in self._case_insensitive_columns:
-                    df[col] = df[col].str.lower()
-        return df
+        return normalize_string_columns(
+            df,
+            self._case_insensitive_columns,
+            self._whitespace_normalize_columns,
+        )
 
     def compare(self, df_source: pd.DataFrame, df_target: pd.DataFrame) -> list[MismatchRecord]:
         return self.compare_with_counts(df_source, df_target).mismatches
@@ -90,7 +86,7 @@ class PandasBackend:
                 missing_in_source_count=missing_in_source_count,
                 value_mismatch_count=0,
                 mismatches=mismatches,
-                mismatch_summary=self._build_mismatch_summary(
+                mismatch_summary=build_mismatch_summary(
                     missing_in_target_count,
                     missing_in_source_count,
                     0,
@@ -108,33 +104,17 @@ class PandasBackend:
             if src_col not in both.columns or tgt_col not in both.columns:
                 continue
 
-            s = both[src_col]
-            t = both[tgt_col]
-            src_na = s.isna()
-            tgt_na = t.isna()
-            both_na = src_na & tgt_na
-            neither_na = ~src_na & ~tgt_na
             tol = self._column_tolerances.get(col, self._float_tolerance)
-
-            if pd.api.types.is_datetime64_any_dtype(s) and self._datetime_tolerance.total_seconds() > 0:
-                val_eq = pd.Series(False, index=both.index, dtype=bool)
-                if neither_na.any():
-                    delta_ns = (s[neither_na] - t[neither_na]).abs()
-                    tol_td = pd.Timedelta(seconds=self._datetime_tolerance.total_seconds())
-                    val_eq[neither_na] = delta_ns <= tol_td
-            elif pd.api.types.is_float_dtype(s):
-                val_eq = pd.Series(False, index=both.index, dtype=bool)
-                if neither_na.any():
-                    val_eq[neither_na] = np.isclose(
-                        s[neither_na].to_numpy(dtype=float),
-                        t[neither_na].to_numpy(dtype=float),
-                        rtol=0, atol=tol,
-                    )
-            else:
-                val_eq = s.eq(t).fillna(False)
-
-            match_mask = (both_na & self._null_equals_null) | (neither_na & val_eq)
-            mismatch_mask = ~match_mask
+            mismatch_mask = value_mismatch_mask(
+                both,
+                src_col,
+                tgt_col,
+                both[src_col],
+                null_equals_null=self._null_equals_null,
+                float_tolerance=self._float_tolerance,
+                column_tolerance=tol,
+                datetime_tolerance_seconds=self._datetime_tolerance.total_seconds(),
+            )
             col_count = int(mismatch_mask.sum())
             value_mismatch_count += col_count
             if col_count:
@@ -160,7 +140,7 @@ class PandasBackend:
             missing_in_source_count=missing_in_source_count,
             value_mismatch_count=value_mismatch_count,
             mismatches=mismatches,
-            mismatch_summary=self._build_mismatch_summary(
+            mismatch_summary=build_mismatch_summary(
                 missing_in_target_count,
                 missing_in_source_count,
                 value_mismatch_count,
@@ -169,34 +149,3 @@ class PandasBackend:
             ),
         )
 
-    @staticmethod
-    def _build_mismatch_summary(
-        missing_in_target_count: int,
-        missing_in_source_count: int,
-        value_mismatch_count: int,
-        value_counts_by_column: dict[str, int],
-        compared_rows_by_column: dict[str, int] | None = None,
-    ) -> dict[str, dict[str, int]]:
-        by_column = {
-            str(column): int(count)
-            for column, count in value_counts_by_column.items()
-            if int(count) > 0
-        }
-        compared = {
-            str(column): int(count)
-            for column, count in (compared_rows_by_column or {}).items()
-            if int(count) >= 0
-        }
-        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
-        if missing_rows > 0:
-            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
-            compared["<row>"] = compared.get("<row>", 0) + missing_rows
-        return {
-            "by_column": by_column,
-            "compared_rows_by_column": compared,
-            "by_type": {
-                "value_diff": int(value_mismatch_count or 0),
-                "missing_in_target": int(missing_in_target_count or 0),
-                "missing_in_source": int(missing_in_source_count or 0),
-            },
-        }

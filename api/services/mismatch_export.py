@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 from typing import Any
 
 from fastapi.responses import StreamingResponse
 
 from api.services.run_report import RunReportSnapshot
+from etl_framework.utils.serialization import csv_safe
 
 MISMATCH_FIELDS = [
     "test_name",
@@ -27,7 +27,7 @@ def collect_mismatch_rows(repo: Any, snapshot: RunReportSnapshot) -> list[dict[s
         for mismatch in repo.list_mismatches(result_id=result.id, limit=100_000):
             rows.append({
                 "test_name": result.query_name,
-                "key_values": _key_values(mismatch.key_values),
+                "key_values": csv_safe(mismatch.key_values),
                 "column_name": mismatch.column_name or "",
                 "source_value": mismatch.source_value or "",
                 "target_value": mismatch.target_value or "",
@@ -138,7 +138,3 @@ def _append_summary_sheet(wb: Any, run_id: str, snapshot: RunReportSnapshot, hea
     ws.column_dimensions["B"].width = 16
 
 
-def _key_values(value: Any) -> str:
-    if isinstance(value, dict):
-        return json.dumps(value)
-    return str(value or "")

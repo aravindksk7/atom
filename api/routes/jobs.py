@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -8,6 +7,7 @@ from api.schemas import JobDefinition
 from etl_framework.repository.models import SavedJob
 from etl_framework.repository.repository import JobRepository
 from api.services.audit_service import AuditService
+from etl_framework.runner.job_validation import validate_job_definition
 
 router = APIRouter(tags=["jobs"])
 
@@ -119,6 +119,7 @@ def list_jobs(db: Session = Depends(get_session)):
 @router.post("", response_model=JobDefinition, status_code=201)
 def create_job(body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
+    _raise_validation_errors(body)
     if repo.get(body.name) is not None:
         raise HTTPException(status_code=409, detail="Job already exists")
     job = repo.create(_job_to_data(body))
@@ -129,11 +130,30 @@ def create_job(body: JobDefinition, request: Request, db: Session = Depends(get_
     return _job_to_schema(job)
 
 
+@router.post("/validate")
+def validate_job_definition_body(body: dict):
+    issues = [
+        {"field": issue.field, "message": issue.message, "severity": issue.severity.value}
+        for issue in validate_job_definition(body)
+    ]
+    try:
+        JobDefinition.model_validate(body)
+    except ValidationError as exc:
+        for err in exc.errors():
+            issues.append({
+                "field": ".".join(str(part) for part in err.get("loc", [])) or None,
+                "message": err.get("msg", "validation error"),
+                "severity": "error",
+            })
+    return {"ok": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
+
+
 @router.post("/import", response_model=list[JobDefinition], status_code=201)
 def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
     imported = []
     for job_def in body:
+        _raise_validation_errors(job_def)
         existed = repo.get(job_def.name) is not None
         job = repo.upsert(_job_to_data(job_def))
         AuditService(db).log(
@@ -151,6 +171,7 @@ def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depen
 def update_job(name: str, body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
     before = repo.get(name)
+    _raise_validation_errors(body)
     data = _job_to_data(body)
     data["name"] = name
     job = repo.update(name, data)
@@ -167,6 +188,19 @@ def update_job(name: str, body: JobDefinition, request: Request, db: Session = D
         },
     )
     return _job_to_schema(job)
+
+
+def _raise_validation_errors(job: JobDefinition) -> None:
+    issues = validate_job_definition(job)
+    errors = [issue for issue in issues if issue.severity.value == "error"]
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {"field": issue.field, "message": issue.message, "severity": issue.severity.value}
+                for issue in errors
+            ],
+        )
 
 
 @router.delete("/{name}", status_code=204)

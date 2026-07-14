@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -26,6 +25,11 @@ from api.services.frame_engine import FrameEngine
 from api.services.run_executor import RunExecutor
 from etl_framework.config.models import resolve_connection
 from etl_framework.db.engine import DBEngine
+from etl_framework.reconciliation.compare_utils import (
+    normalize_string_columns,
+    numeric_delta,
+    value_mismatch_mask,
+)
 from etl_framework.reconciliation.normalizer import TypeNormalizer
 from etl_framework.repository.database import SessionLocal
 from etl_framework.repository.models import (
@@ -36,6 +40,7 @@ from etl_framework.repository.models import (
     TestRun,
 )
 from etl_framework.repository.repository import ConfigRepository
+from etl_framework.utils.serialization import csv_safe, json_safe
 
 
 DIFFERENCE_FIELDS = [
@@ -58,21 +63,11 @@ def _utcnow() -> datetime:
 def _json_text(value: Any) -> str:
     if isinstance(value, str):
         return value
-    try:
-        return json.dumps(value, default=str, ensure_ascii=False)
-    except TypeError:
-        return str(value)
+    return json.dumps(json_safe(value), ensure_ascii=False)
 
 
 def _cell_text(value: Any) -> str:
-    if value is None:
-        return ""
-    try:
-        if bool(pd.isna(value)):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    return str(value)
+    return csv_safe(value)
 
 
 def _column_key(column: object) -> str:
@@ -121,7 +116,7 @@ class DifferenceWriter:
             self._csv_writer.writerow(normalized)
         elif self.format == "json":
             assert self._file is not None
-            self._file.write(json.dumps(normalized, ensure_ascii=False) + "\n")
+            self._file.write(json.dumps(json_safe(normalized), ensure_ascii=False) + "\n")
         else:
             self._batch.append(normalized)
             if len(self._batch) >= self._batch_size:
@@ -583,7 +578,7 @@ def _write_tabular_differences(
         for _, row in both.loc[mismatch_mask].iterrows():
             sv = row[src_col]
             tv = row[tgt_col]
-            delta, relative_delta = _numeric_delta(sv, tv)
+            delta, relative_delta = numeric_delta(sv, tv)
             writer.write({
                 "test_name": test_name,
                 "key_values": {key: row.get(key) for key in key_columns},
@@ -601,22 +596,18 @@ def _preprocess(
     df_target: pd.DataFrame,
     options: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    case_cols = set(getattr(options, "case_insensitive_columns", []) or [])
-    whitespace_cols = set(getattr(options, "whitespace_normalize_columns", []) or [])
-    if not case_cols and not whitespace_cols:
-        return df_source, df_target
-    df_source = df_source.copy()
-    df_target = df_target.copy()
-    for df in (df_source, df_target):
-        for col in case_cols | whitespace_cols:
-            if col not in df.columns:
-                continue
-            if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-                if col in whitespace_cols:
-                    df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
-                if col in case_cols:
-                    df[col] = df[col].str.lower()
-    return df_source, df_target
+    return (
+        normalize_string_columns(
+            df_source,
+            getattr(options, "case_insensitive_columns", []) or [],
+            getattr(options, "whitespace_normalize_columns", []) or [],
+        ),
+        normalize_string_columns(
+            df_target,
+            getattr(options, "case_insensitive_columns", []) or [],
+            getattr(options, "whitespace_normalize_columns", []) or [],
+        ),
+    )
 
 
 def _value_mismatch_mask(
@@ -627,42 +618,20 @@ def _value_mismatch_mask(
     options: Any,
     column_name: str,
 ) -> pd.Series:
-    s = both[src_col]
-    t = both[tgt_col]
-    src_na = s.isna()
-    tgt_na = t.isna()
-    both_na = src_na & tgt_na
-    neither_na = ~src_na & ~tgt_na
     null_equals_null = bool(getattr(options, "null_equals_null", True))
     float_tol = float(getattr(options, "float_tolerance", 1e-9) or 1e-9)
     column_tolerances = getattr(options, "column_tolerances", None) or {}
     tol = float(column_tolerances.get(column_name, float_tol))
     datetime_tolerance_seconds = float(getattr(options, "datetime_tolerance_seconds", 0.0) or 0.0)
-
-    if pd.api.types.is_datetime64_any_dtype(source_series) and datetime_tolerance_seconds > 0:
-        val_eq = pd.Series(False, index=both.index, dtype=bool)
-        if neither_na.any():
-            delta_ns = (s[neither_na] - t[neither_na]).abs()
-            val_eq[neither_na] = delta_ns <= pd.Timedelta(seconds=datetime_tolerance_seconds)
-    elif pd.api.types.is_float_dtype(source_series):
-        val_eq = pd.Series(False, index=both.index, dtype=bool)
-        if neither_na.any():
-            val_eq[neither_na] = np.isclose(
-                s[neither_na].to_numpy(dtype=float),
-                t[neither_na].to_numpy(dtype=float),
-                rtol=0,
-                atol=tol,
-            )
-    else:
-        val_eq = s.eq(t).fillna(False)
-    return ~((both_na & null_equals_null) | (neither_na & val_eq))
+    return value_mismatch_mask(
+        both,
+        src_col,
+        tgt_col,
+        source_series,
+        null_equals_null=null_equals_null,
+        float_tolerance=float_tol,
+        column_tolerance=tol,
+        datetime_tolerance_seconds=datetime_tolerance_seconds,
+    )
 
 
-def _numeric_delta(source_value: Any, target_value: Any) -> tuple[float | None, float | None]:
-    try:
-        sv = float(source_value)
-        tv = float(target_value)
-    except (TypeError, ValueError):
-        return None, None
-    delta = tv - sv
-    return delta, (delta / sv if sv != 0 else None)

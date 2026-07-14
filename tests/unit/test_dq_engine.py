@@ -19,6 +19,15 @@ def _df(**cols) -> pd.DataFrame:
 engine = DQEngine()
 
 
+class _FakeQueryEngine:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def execute_query(self, query: str) -> pd.DataFrame:
+        self.queries.append(query)
+        return pd.DataFrame({"value": [1]})
+
+
 # ---------------------------------------------------------------------------
 # not_null
 # ---------------------------------------------------------------------------
@@ -179,3 +188,22 @@ def test_length_and_contains_rules_ignore_nulls():
         _rule(type="column_contains", column="v", pattern="a"),
     ]
     assert engine.evaluate(df, rules) == []
+
+
+def test_referential_check_rejects_mutating_lookup_query():
+    violations = engine.evaluate(
+        _df(id=[1]),
+        [_rule(type="referential_check", column="id", lookup_query="DELETE FROM ids")],
+        engine=_FakeQueryEngine(),
+    )
+    assert violations == []
+
+
+def test_custom_sql_assert_rejects_mutating_sql():
+    violations = engine.evaluate(
+        _df(id=[1]),
+        [_rule(type="custom_sql_assert", sql="DROP TABLE ids", operator=">=", min_value=1)],
+        engine=_FakeQueryEngine(),
+    )
+    assert len(violations) == 1
+    assert "read-only" in violations[0].message

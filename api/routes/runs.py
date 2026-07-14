@@ -55,7 +55,7 @@ from api.schemas import (
 )
 from api.services.run_executor import RunExecutor
 from api.services.pytest_runner import PytestRunExecutor
-from etl_framework.repository.repository import ConfigRepository, RunRepository, RunStepRepository
+from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository
 from api.services.artifact_service import ArtifactService
 from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
@@ -81,6 +81,7 @@ from api.services.difference_export import (
 from api.services.run_report import build_run_report_snapshot
 from etl_framework.config.models import resolve_connection as _resolve_connection
 from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
+from etl_framework.runner.job_validation import validate_job_definition
 
 router = APIRouter(tags=["runs"])
 
@@ -271,6 +272,45 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
     return snapshot
 
 
+def _job_name_from_sequence_item(item) -> str:
+    return item.job_name if hasattr(item, "job_name") else str(item)
+
+
+def _saved_job_to_validation_dict(job) -> dict:
+    return {
+        "name": job.name,
+        "description": job.description,
+        "job_type": job.job_type,
+        "query": job.query,
+        "key_columns": job.key_columns or [],
+        "exclude_columns": job.exclude_columns or [],
+        "source_env": job.source_env,
+        "target_env": job.target_env,
+        "params": job.params or {},
+        "enabled": job.enabled,
+    }
+
+
+def _validate_saved_jobs_for_launch(db: Session, ordered_jobs: list) -> None:
+    job_repo = JobRepository(db)
+    errors: list[dict] = []
+    for item in ordered_jobs:
+        name = _job_name_from_sequence_item(item)
+        saved = job_repo.get(name)
+        if saved is None:
+            continue
+        for issue in validate_job_definition(_saved_job_to_validation_dict(saved)):
+            if issue.severity.value == "error":
+                errors.append({
+                    "job_name": name,
+                    "field": issue.field,
+                    "message": issue.message,
+                    "severity": issue.severity.value,
+                })
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+
 def _execute_run(
     run_id: str,
     job_sequence: list[str],
@@ -356,6 +396,7 @@ def trigger_run(
     run_id = str(uuid.uuid4())
     repo = RunRepository(db)
     ordered_jobs = body.job_sequence or body.job_names
+    _validate_saved_jobs_for_launch(db, ordered_jobs)
     run_settings = body.run_settings.model_dump()
     config_snapshot = _snapshot_from_trigger(body, db)
     if ordered_jobs:

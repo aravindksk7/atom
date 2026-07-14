@@ -11,6 +11,7 @@ except (ImportError, TypeError):
     _DUCKDB_AVAILABLE = False
 
 from etl_framework.reconciliation.backends.base import BackendCompareResult
+from etl_framework.reconciliation.compare_utils import build_mismatch_summary
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -93,7 +94,7 @@ class DuckDBBackend:
             missing_in_source_count=mis_count,
             value_mismatch_count=value_count,
             mismatches=mismatches,
-            mismatch_summary=self._build_mismatch_summary(
+            mismatch_summary=build_mismatch_summary(
                 mit_count,
                 mis_count,
                 value_count,
@@ -276,38 +277,6 @@ class DuckDBBackend:
             "COALESCE(SUM(CASE WHEN __in_src__ AND __in_tgt__ "
             f"AND {condition} THEN 1 ELSE 0 END), 0)"
         )
-
-    @staticmethod
-    def _build_mismatch_summary(
-        missing_in_target_count: int,
-        missing_in_source_count: int,
-        value_mismatch_count: int,
-        value_counts_by_column: dict[str, int],
-        compared_rows_by_column: dict[str, int] | None = None,
-    ) -> dict[str, dict[str, int]]:
-        by_column = {
-            str(column): int(count)
-            for column, count in value_counts_by_column.items()
-            if int(count) > 0
-        }
-        compared = {
-            str(column): int(count)
-            for column, count in (compared_rows_by_column or {}).items()
-            if int(count) >= 0
-        }
-        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
-        if missing_rows > 0:
-            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
-            compared["<row>"] = compared.get("<row>", 0) + missing_rows
-        return {
-            "by_column": by_column,
-            "compared_rows_by_column": compared,
-            "by_type": {
-                "value_diff": int(value_mismatch_count or 0),
-                "missing_in_target": int(missing_in_target_count or 0),
-                "missing_in_source": int(missing_in_source_count or 0),
-            },
-        }
 
     def _mismatch_condition(self, src_alias: str, tgt_alias: str, source_series: pd.Series) -> str:
         src = self._q(src_alias)

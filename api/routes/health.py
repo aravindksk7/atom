@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from pydantic import ValidationError
 
 from api.schemas import HealthCheckOut, HealthCheckRequest
+from api.services.diagnostics_service import DiagnosticsService
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.runner.health import HealthChecker
 
@@ -45,3 +46,8 @@ def run_health_checks(body: HealthCheckRequest):
             )
         )
     return results
+
+
+@router.get("/diagnostics")
+def diagnostics(include_logs: bool = True):
+    return DiagnosticsService().build_bundle(include_logs=include_logs)

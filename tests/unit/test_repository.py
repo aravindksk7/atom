@@ -109,6 +109,15 @@ def test_run_list(db):
     assert len(runs) == 2
 
 
+def test_run_list_clamps_pagination(db):
+    repo = RunRepository(db)
+    for idx in range(3):
+        repo.create_run(run_id=f"run-page-{idx}", source_env="dev", target_env="prod")
+    runs = repo.list_runs(limit=0, offset=-10)
+    assert len(runs) == 1
+    assert runs[0].run_id == "run-page-2"
+
+
 def test_run_update_status(db):
     repo = RunRepository(db)
     repo.create_run(run_id="run-003", source_env="dev", target_env="prod")

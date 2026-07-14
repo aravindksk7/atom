@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from etl_framework.db.sql_utils import reject_mutating_sql
+
 try:
     from scipy import stats as scipy_stats
 except ImportError:  # pragma: no cover - optional dependency
@@ -420,7 +422,7 @@ class DQEngine:
                         )
                     else:
                         try:
-                            lookup_df = engine.execute_query(rule.lookup_query)
+                            lookup_df = engine.execute_query(reject_mutating_sql(rule.lookup_query))
                             valid_values: set = set(lookup_df.iloc[:, 0].astype(str)) if not lookup_df.empty else set()
                             col_vals = df[col].dropna().astype(str)
                             bad = int((~col_vals.isin(valid_values)).sum())
@@ -444,7 +446,7 @@ class DQEngine:
                         )
                     else:
                         try:
-                            result_df = engine.execute_query(rule.sql)
+                            result_df = engine.execute_query(reject_mutating_sql(rule.sql))
                             if result_df.empty or result_df.shape != (1, 1):
                                 violations.append(DQViolation(
                                     rule_type=rtype, column=None, severity="error",

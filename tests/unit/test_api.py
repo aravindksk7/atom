@@ -10,7 +10,7 @@ from api.routes import runs as runs_module
 from etl_framework.repository.database import Base, get_db
 from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401 — registers ORM models with Base
-from etl_framework.repository.repository import TokenRepository
+from etl_framework.repository.repository import JobRepository, TokenRepository
 from api.main import app
 
 
@@ -164,6 +164,16 @@ def test_list_runs_empty(client):
     assert resp.json() == []
 
 
+def test_health_diagnostics_endpoint(client):
+    resp = client.get("/api/health/diagnostics?include_logs=false")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "environment" in data
+    assert "packages" in data
+    assert "database" in data
+    assert data["recent_logs"] == []
+
+
 def test_trigger_run(client):
     payload = {"source_env": "dev", "target_env": "prod", "job_names": ["orders_query"]}
     resp = client.post("/api/runs", json=payload)
@@ -171,6 +181,27 @@ def test_trigger_run(client):
     data = resp.json()
     assert "run_id" in data
     assert data["status"] == "PENDING"
+
+
+def test_trigger_run_validates_saved_job_before_launch(client):
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "bad_saved_job",
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": [],
+            "exclude_columns": [],
+            "params": {},
+            "enabled": True,
+        })
+
+    resp = client.post(
+        "/api/runs",
+        json={"source_env": "dev", "target_env": "prod", "job_sequence": ["bad_saved_job"]},
+    )
+    assert resp.status_code == 422
+    fields = {item["field"] for item in resp.json()["detail"]}
+    assert fields == {"query", "key_columns"}
 
 
 def test_trigger_run_stores_sequence_and_settings(client, monkeypatch):
@@ -593,6 +624,26 @@ def test_create_update_delete_job(client):
 
     delete = client.delete("/api/jobs/custom_orders")
     assert delete.status_code == 204
+
+
+def test_validate_job_definition_endpoint(client):
+    resp = client.post(
+        "/api/jobs/validate",
+        json={"name": "bad", "job_type": "reconciliation", "query": "", "key_columns": []},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert {issue["field"] for issue in data["issues"]} >= {"query", "key_columns"}
+
+
+def test_validate_job_definition_endpoint_accepts_valid_job(client):
+    resp = client.post(
+        "/api/jobs/validate",
+        json={"name": "valid", "job_type": "reconciliation", "query": "SELECT 1", "key_columns": ["id"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "issues": []}
 
 
 def test_import_jobs_upserts_definitions(client):

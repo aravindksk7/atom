@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import case, insert, or_, cast, String, func
 from sqlalchemy.orm import Session
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.repository.query_utils import apply_pagination
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
@@ -276,7 +277,7 @@ class RunRepository:
             q = q.filter(TestRun.status == status)
         if run_type:
             q = q.filter(TestRun.run_type == run_type)
-        return q.order_by(TestRun.id.desc()).offset(offset).limit(limit).all()
+        return apply_pagination(q.order_by(TestRun.id.desc()), limit, offset).all()
 
     def update_run_status(self, run_id: str, status: str, **kwargs) -> TestRun | None:
         run = self.get_run(run_id)
@@ -438,7 +439,7 @@ class RunRepository:
                 else_=2,
             )
             order = (mismatch_order, MismatchDetail.id)
-        return query.order_by(*order).offset(offset).limit(limit).all()
+        return apply_pagination(query.order_by(*order), limit, offset, maximum=100_000).all()
 
     def count_mismatches(
         self,
@@ -1094,7 +1095,7 @@ class AuditRepository:
         if resource_id:
             q = q.filter(AuditEvent.resource_id == resource_id)
         q = q.order_by(AuditEvent.created_at.desc())
-        return q.offset(offset).limit(limit).all()
+        return apply_pagination(q, limit, offset).all()
 
 
 class RunStepRepository:

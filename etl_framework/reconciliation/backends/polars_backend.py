@@ -1,5 +1,4 @@
 from __future__ import annotations
-import math
 from datetime import timedelta
 
 import pandas as pd
@@ -11,6 +10,7 @@ except (ImportError, TypeError):
     _POLARS_AVAILABLE = False
 
 from etl_framework.reconciliation.backends.base import BackendCompareResult
+from etl_framework.reconciliation.compare_utils import build_mismatch_summary, values_match
 from etl_framework.reconciliation.models import MismatchRecord
 
 
@@ -115,7 +115,7 @@ class PolarsBackend:
             missing_in_source_count=int(missing_in_source_count),
             value_mismatch_count=value_mismatch_count,
             mismatches=mismatches,
-            mismatch_summary=self._build_mismatch_summary(
+            mismatch_summary=build_mismatch_summary(
                 int(missing_in_target_count),
                 int(missing_in_source_count),
                 value_mismatch_count,
@@ -123,38 +123,6 @@ class PolarsBackend:
                 {str(col): int(matched_count) for col in value_cols},
             ),
         )
-
-    @staticmethod
-    def _build_mismatch_summary(
-        missing_in_target_count: int,
-        missing_in_source_count: int,
-        value_mismatch_count: int,
-        value_counts_by_column: dict[str, int],
-        compared_rows_by_column: dict[str, int] | None = None,
-    ) -> dict[str, dict[str, int]]:
-        by_column = {
-            str(column): int(count)
-            for column, count in value_counts_by_column.items()
-            if int(count) > 0
-        }
-        compared = {
-            str(column): int(count)
-            for column, count in (compared_rows_by_column or {}).items()
-            if int(count) >= 0
-        }
-        missing_rows = int(missing_in_target_count or 0) + int(missing_in_source_count or 0)
-        if missing_rows > 0:
-            by_column["<row>"] = by_column.get("<row>", 0) + missing_rows
-            compared["<row>"] = compared.get("<row>", 0) + missing_rows
-        return {
-            "by_column": by_column,
-            "compared_rows_by_column": compared,
-            "by_type": {
-                "value_diff": int(value_mismatch_count or 0),
-                "missing_in_target": int(missing_in_target_count or 0),
-                "missing_in_source": int(missing_in_source_count or 0),
-            },
-        }
 
     def _append_missing_records(
         self,
@@ -232,19 +200,12 @@ class PolarsBackend:
         return pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)
 
     def _values_match(self, a, b, is_float: bool, is_dt: bool = False, tolerance: float | None = None) -> bool:
-        a_na = a is None or (isinstance(a, float) and math.isnan(a))
-        b_na = b is None or (isinstance(b, float) and math.isnan(b))
-        if a_na and b_na:
-            return self._null_equals_null
-        if a_na or b_na:
-            return False
-        if is_dt and self._datetime_tolerance.total_seconds() > 0:
-            try:
-                import pandas as _pd
-                return abs((_pd.Timestamp(a) - _pd.Timestamp(b)).total_seconds()) <= self._datetime_tolerance.total_seconds()
-            except Exception:
-                return a == b
-        if is_float:
-            atol = tolerance if tolerance is not None else self._float_tolerance
-            return abs(float(a) - float(b)) <= atol
-        return a == b
+        return values_match(
+            a,
+            b,
+            is_float=is_float,
+            is_datetime=is_dt,
+            null_equals_null=self._null_equals_null,
+            float_tolerance=tolerance if tolerance is not None else self._float_tolerance,
+            datetime_tolerance=self._datetime_tolerance,
+        )

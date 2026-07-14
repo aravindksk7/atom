@@ -1,28 +1,23 @@
-import re
-
 import pandas as pd
 
-# Column identifiers must consist of word characters and spaces only.
-# Anything else (semicolons, dashes, quotes, etc.) is rejected to prevent
-# SQL injection through user-supplied key_columns values.
-_SAFE_COLUMN = re.compile(r"^[\w ]+$")
+from etl_framework.db.sql_utils import quote_identifier, reject_mutating_sql
 
 
 def _validate_columns(columns: list[str]) -> None:
     for col in columns:
-        if not _SAFE_COLUMN.match(col):
-            raise ValueError(f"Unsafe column name rejected: {col!r}")
+        quote_identifier(col, "sqlserver")
 
 
 def _quote_col(col: str) -> str:
     """Wrap a column name in MSSQL square-bracket quoting."""
-    return f"[{col.strip()}]"
+    return quote_identifier(col.strip(), "sqlserver")
 
 
 def build_hash_query(base_query: str, key_columns: list[str]) -> str:
     if not key_columns:
         raise ValueError("key_columns must not be empty")
     _validate_columns(key_columns)
+    base_query = reject_mutating_sql(base_query)
     key_list = ", ".join(_quote_col(c) for c in key_columns)
     return (
         f"SELECT {key_list}, "
@@ -40,6 +35,7 @@ def build_chunk_query(
     if not key_columns:
         raise ValueError("key_columns must not be empty")
     _validate_columns(key_columns)
+    base_query = reject_mutating_sql(base_query)
     order_cols = ", ".join(_quote_col(c) for c in key_columns)
     return (
         f"SELECT * FROM ({base_query}) AS _base "

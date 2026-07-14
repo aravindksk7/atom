@@ -50,6 +50,16 @@ def test_build_hash_query_raises_on_empty_key_columns():
         build_hash_query("SELECT id FROM t", key_columns=[])
 
 
+def test_build_hash_query_rejects_mutating_base_query():
+    with pytest.raises(ValueError, match="read-only"):
+        build_hash_query("DELETE FROM orders", key_columns=["id"])
+
+
+def test_build_chunk_query_rejects_unsafe_key_column():
+    with pytest.raises(ValueError, match="Invalid SQL identifier"):
+        build_chunk_query("SELECT id FROM t", key_columns=["id;drop"], offset=0, chunk_size=10)
+
+
 def test_build_chunk_query_raises_on_empty_key_columns():
     with pytest.raises(ValueError, match="key_columns"):
         build_chunk_query("SELECT id FROM t", key_columns=[], offset=0, chunk_size=10)

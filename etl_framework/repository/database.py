@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os
 from pathlib import Path
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_SQLITE_PATH = _REPO_ROOT / "etl_framework.db"
@@ -39,9 +40,6 @@ def _ensure_compare_columns(bind) -> None:
     if not {"test_runs", "test_results", "mismatch_details"}.issubset(tables):
         return
 
-    test_run_cols = {col["name"] for col in inspector.get_columns("test_runs")}
-    test_result_cols = {col["name"] for col in inspector.get_columns("test_results")}
-    mismatch_cols = {col["name"] for col in inspector.get_columns("mismatch_details")}
     scheduled_run_cols = (
         {col["name"] for col in inspector.get_columns("scheduled_runs")}
         if "scheduled_runs" in tables else set()
@@ -49,65 +47,31 @@ def _ensure_compare_columns(bind) -> None:
 
     with bind.begin() as conn:
         # --- original compare-tab columns ---
-        if "run_type" not in test_run_cols:
-            conn.execute(text(
-                "ALTER TABLE test_runs "
-                "ADD COLUMN run_type VARCHAR(50) NOT NULL DEFAULT 'reconciliation'"
-            ))
-        if "pair_id" not in test_run_cols:
-            conn.execute(text("ALTER TABLE test_runs ADD COLUMN pair_id VARCHAR(36)"))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_test_runs_pair_id ON test_runs (pair_id)"
-        ))
+        ensure_column(conn, "test_runs", "run_type", "ALTER TABLE test_runs ADD COLUMN run_type VARCHAR(50) NOT NULL DEFAULT 'reconciliation'")
+        ensure_column(conn, "test_runs", "pair_id", "ALTER TABLE test_runs ADD COLUMN pair_id VARCHAR(36)")
+        ensure_index(conn, "ix_test_runs_pair_id", "CREATE INDEX IF NOT EXISTS ix_test_runs_pair_id ON test_runs (pair_id)")
 
-        if "accepted" not in mismatch_cols:
-            conn.execute(text(
-                "ALTER TABLE mismatch_details "
-                "ADD COLUMN accepted BOOLEAN NOT NULL DEFAULT 0"
-            ))
-        if "accepted_note" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN accepted_note TEXT"))
-        if "accepted_at" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN accepted_at DATETIME"))
-        if "accepted_by" not in mismatch_cols:
-            conn.execute(text(
-                "ALTER TABLE mismatch_details ADD COLUMN accepted_by VARCHAR(255)"
-            ))
-        if "rejected" not in mismatch_cols:
-            conn.execute(text(
-                "ALTER TABLE mismatch_details "
-                "ADD COLUMN rejected BOOLEAN NOT NULL DEFAULT 0"
-            ))
-        if "rejected_note" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN rejected_note TEXT"))
-        if "rejected_at" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN rejected_at DATETIME"))
-        if "rejected_by" not in mismatch_cols:
-            conn.execute(text(
-                "ALTER TABLE mismatch_details ADD COLUMN rejected_by VARCHAR(255)"
-            ))
+        ensure_column(conn, "mismatch_details", "accepted", "ALTER TABLE mismatch_details ADD COLUMN accepted BOOLEAN NOT NULL DEFAULT 0")
+        ensure_column(conn, "mismatch_details", "accepted_note", "ALTER TABLE mismatch_details ADD COLUMN accepted_note TEXT")
+        ensure_column(conn, "mismatch_details", "accepted_at", "ALTER TABLE mismatch_details ADD COLUMN accepted_at DATETIME")
+        ensure_column(conn, "mismatch_details", "accepted_by", "ALTER TABLE mismatch_details ADD COLUMN accepted_by VARCHAR(255)")
+        ensure_column(conn, "mismatch_details", "rejected", "ALTER TABLE mismatch_details ADD COLUMN rejected BOOLEAN NOT NULL DEFAULT 0")
+        ensure_column(conn, "mismatch_details", "rejected_note", "ALTER TABLE mismatch_details ADD COLUMN rejected_note TEXT")
+        ensure_column(conn, "mismatch_details", "rejected_at", "ALTER TABLE mismatch_details ADD COLUMN rejected_at DATETIME")
+        ensure_column(conn, "mismatch_details", "rejected_by", "ALTER TABLE mismatch_details ADD COLUMN rejected_by VARCHAR(255)")
 
         # --- pass-with-agreed-actions columns ---
-        if "override_status" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_status VARCHAR(20)"))
-        if "override_reason" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_reason TEXT"))
-        if "override_by" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_by VARCHAR(255)"))
-        if "override_at" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN override_at DATETIME"))
-        if "sample_rows" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN sample_rows JSON"))
-        if "segment_summary" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN segment_summary JSON"))
-        if "mismatch_summary" not in test_result_cols:
-            conn.execute(text("ALTER TABLE test_results ADD COLUMN mismatch_summary JSON"))
-        if "delta" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN delta FLOAT"))
-        if "relative_delta" not in mismatch_cols:
-            conn.execute(text("ALTER TABLE mismatch_details ADD COLUMN relative_delta FLOAT"))
+        ensure_column(conn, "test_results", "override_status", "ALTER TABLE test_results ADD COLUMN override_status VARCHAR(20)")
+        ensure_column(conn, "test_results", "override_reason", "ALTER TABLE test_results ADD COLUMN override_reason TEXT")
+        ensure_column(conn, "test_results", "override_by", "ALTER TABLE test_results ADD COLUMN override_by VARCHAR(255)")
+        ensure_column(conn, "test_results", "override_at", "ALTER TABLE test_results ADD COLUMN override_at DATETIME")
+        ensure_column(conn, "test_results", "sample_rows", "ALTER TABLE test_results ADD COLUMN sample_rows JSON")
+        ensure_column(conn, "test_results", "segment_summary", "ALTER TABLE test_results ADD COLUMN segment_summary JSON")
+        ensure_column(conn, "test_results", "mismatch_summary", "ALTER TABLE test_results ADD COLUMN mismatch_summary JSON")
+        ensure_column(conn, "mismatch_details", "delta", "ALTER TABLE mismatch_details ADD COLUMN delta FLOAT")
+        ensure_column(conn, "mismatch_details", "relative_delta", "ALTER TABLE mismatch_details ADD COLUMN relative_delta FLOAT")
 
-        conn.execute(text(
+        ensure_table(conn, "difference_export_jobs",
             "CREATE TABLE IF NOT EXISTS difference_export_jobs ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "export_id VARCHAR(36) NOT NULL UNIQUE, "
@@ -122,18 +86,12 @@ def _ensure_compare_columns(bind) -> None:
             "started_at DATETIME, "
             "completed_at DATETIME, "
             "recomputed_at DATETIME)"
-        ))
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_difference_export_jobs_export_id "
-            "ON difference_export_jobs (export_id)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_difference_export_jobs_run_id "
-            "ON difference_export_jobs (run_id)"
-        ))
+        )
+        ensure_index(conn, "ix_difference_export_jobs_export_id", "CREATE UNIQUE INDEX IF NOT EXISTS ix_difference_export_jobs_export_id ON difference_export_jobs (export_id)")
+        ensure_index(conn, "ix_difference_export_jobs_run_id", "CREATE INDEX IF NOT EXISTS ix_difference_export_jobs_run_id ON difference_export_jobs (run_id)")
 
         # --- P0: new tables (created by create_all; ensure idempotent) ---
-        conn.execute(text(
+        ensure_table(conn, "api_tokens",
             "CREATE TABLE IF NOT EXISTS api_tokens ("
             "id INTEGER PRIMARY KEY, "
             "token_hash VARCHAR(64) NOT NULL UNIQUE, "
@@ -144,20 +102,12 @@ def _ensure_compare_columns(bind) -> None:
             "enabled BOOLEAN NOT NULL DEFAULT 1, "
             "is_admin BOOLEAN NOT NULL DEFAULT 0, "
             "token_hint VARCHAR(8) NOT NULL DEFAULT '')"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_api_tokens_token_hash ON api_tokens (token_hash)"
-        ))
+        )
+        ensure_index(conn, "ix_api_tokens_token_hash", "CREATE INDEX IF NOT EXISTS ix_api_tokens_token_hash ON api_tokens (token_hash)")
         # --- Token auth hardening: is_admin + token_hint ---
-        for _ddl in [
-            "ALTER TABLE api_tokens ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0",
-            "ALTER TABLE api_tokens ADD COLUMN token_hint VARCHAR(8) NOT NULL DEFAULT ''",
-        ]:
-            try:
-                conn.execute(text(_ddl))
-            except Exception:
-                pass  # column already exists (fresh install or repeated startup)
-        conn.execute(text(
+        ensure_column(conn, "api_tokens", "is_admin", "ALTER TABLE api_tokens ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+        ensure_column(conn, "api_tokens", "token_hint", "ALTER TABLE api_tokens ADD COLUMN token_hint VARCHAR(8) NOT NULL DEFAULT ''")
+        ensure_table(conn, "notification_hooks",
             "CREATE TABLE IF NOT EXISTS notification_hooks ("
             "id INTEGER PRIMARY KEY, "
             "name VARCHAR(255) NOT NULL, "
@@ -166,8 +116,8 @@ def _ensure_compare_columns(bind) -> None:
             "enabled BOOLEAN NOT NULL DEFAULT 1, "
             "secret TEXT, "
             "created_at DATETIME)"
-        ))
-        conn.execute(text(
+        )
+        ensure_table(conn, "scheduled_runs",
             "CREATE TABLE IF NOT EXISTS scheduled_runs ("
             "id INTEGER PRIMARY KEY, "
             "name VARCHAR(255) NOT NULL UNIQUE, "
@@ -180,29 +130,23 @@ def _ensure_compare_columns(bind) -> None:
             "last_run_at DATETIME, "
             "next_run_at DATETIME, "
             "created_at DATETIME)"
-        ))
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_scheduled_runs_name ON scheduled_runs (name)"
-        ))
+        )
+        ensure_index(conn, "ix_scheduled_runs_name", "CREATE UNIQUE INDEX IF NOT EXISTS ix_scheduled_runs_name ON scheduled_runs (name)")
 
         # --- P3: job lineage table ---
-        conn.execute(text(
+        ensure_table(conn, "job_lineage_edges",
             "CREATE TABLE IF NOT EXISTS job_lineage_edges ("
             "id INTEGER PRIMARY KEY, "
             "upstream_job VARCHAR(255) NOT NULL, "
             "downstream_job VARCHAR(255) NOT NULL, "
             "edge_type VARCHAR(50) NOT NULL DEFAULT 'depends_on', "
             "created_at DATETIME)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_job_lineage_upstream ON job_lineage_edges (upstream_job)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_job_lineage_downstream ON job_lineage_edges (downstream_job)"
-        ))
+        )
+        ensure_index(conn, "ix_job_lineage_upstream", "CREATE INDEX IF NOT EXISTS ix_job_lineage_upstream ON job_lineage_edges (upstream_job)")
+        ensure_index(conn, "ix_job_lineage_downstream", "CREATE INDEX IF NOT EXISTS ix_job_lineage_downstream ON job_lineage_edges (downstream_job)")
 
         # --- Execution Sequence Scheduler: run_steps table ---
-        conn.execute(text(
+        ensure_table(conn, "run_steps",
             "CREATE TABLE IF NOT EXISTS run_steps ("
             "id INTEGER PRIMARY KEY, "
             "run_id VARCHAR(36) REFERENCES test_runs(run_id) ON DELETE CASCADE, "
@@ -217,28 +161,18 @@ def _ensure_compare_columns(bind) -> None:
             "released_by VARCHAR(255), "
             "release_note TEXT, "
             "release_action VARCHAR(20))"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_run_steps_run_id ON run_steps (run_id)"
-        ))
+        )
+        ensure_index(conn, "ix_run_steps_run_id", "CREATE INDEX IF NOT EXISTS ix_run_steps_run_id ON run_steps (run_id)")
 
         # --- P2: is_baseline column on test_runs ---
-        if "is_baseline" not in test_run_cols:
-            conn.execute(text(
-                "ALTER TABLE test_runs ADD COLUMN is_baseline BOOLEAN NOT NULL DEFAULT 0"
-            ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_test_runs_is_baseline ON test_runs (is_baseline)"
-        ))
+        ensure_column(conn, "test_runs", "is_baseline", "ALTER TABLE test_runs ADD COLUMN is_baseline BOOLEAN NOT NULL DEFAULT 0")
+        ensure_index(conn, "ix_test_runs_is_baseline", "CREATE INDEX IF NOT EXISTS ix_test_runs_is_baseline ON test_runs (is_baseline)")
 
         # --- Run cancellation: cancel_requested column on test_runs ---
-        if "cancel_requested" not in test_run_cols:
-            conn.execute(text(
-                "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0"
-            ))
+        ensure_column(conn, "test_runs", "cancel_requested", "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0")
 
         # --- ETL Capabilities: column_profiles + schema_snapshots tables ---
-        conn.execute(text(
+        ensure_table(conn, "column_profiles",
             "CREATE TABLE IF NOT EXISTS column_profiles ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "job_name TEXT NOT NULL, "
@@ -255,11 +189,9 @@ def _ensure_compare_columns(bind) -> None:
             "p75 REAL, "
             "p95 REAL, "
             "captured_at DATETIME NOT NULL)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_column_profiles_job_name ON column_profiles (job_name)"
-        ))
-        conn.execute(text(
+        )
+        ensure_index(conn, "ix_column_profiles_job_name", "CREATE INDEX IF NOT EXISTS ix_column_profiles_job_name ON column_profiles (job_name)")
+        ensure_table(conn, "schema_snapshots",
             "CREATE TABLE IF NOT EXISTS schema_snapshots ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "job_name TEXT NOT NULL, "
@@ -267,13 +199,11 @@ def _ensure_compare_columns(bind) -> None:
             "run_id TEXT, "
             "captured_at DATETIME NOT NULL, "
             "columns TEXT NOT NULL DEFAULT '[]')"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_schema_snapshots_job_name ON schema_snapshots (job_name)"
-        ))
+        )
+        ensure_index(conn, "ix_schema_snapshots_job_name", "CREATE INDEX IF NOT EXISTS ix_schema_snapshots_job_name ON schema_snapshots (job_name)")
 
         # --- Data Contracts tables ---
-        conn.execute(text(
+        ensure_table(conn, "contracts",
             "CREATE TABLE IF NOT EXISTS contracts ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "name VARCHAR(255) NOT NULL UNIQUE, "
@@ -286,11 +216,11 @@ def _ensure_compare_columns(bind) -> None:
             "active BOOLEAN NOT NULL DEFAULT 1, "
             "created_at DATETIME, "
             "updated_at DATETIME)"
-        ))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_contracts_name ON contracts (name)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_contracts_source_job ON contracts (source_job)"))
+        )
+        ensure_index(conn, "ix_contracts_name", "CREATE INDEX IF NOT EXISTS ix_contracts_name ON contracts (name)")
+        ensure_index(conn, "ix_contracts_source_job", "CREATE INDEX IF NOT EXISTS ix_contracts_source_job ON contracts (source_job)")
 
-        conn.execute(text(
+        ensure_table(conn, "contract_versions",
             "CREATE TABLE IF NOT EXISTS contract_versions ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "contract_id INTEGER NOT NULL REFERENCES contracts(id), "
@@ -298,13 +228,10 @@ def _ensure_compare_columns(bind) -> None:
             "bump_type VARCHAR(10) NOT NULL, "
             "note TEXT, "
             "bumped_at DATETIME NOT NULL)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_contract_versions_contract_id "
-            "ON contract_versions (contract_id)"
-        ))
+        )
+        ensure_index(conn, "ix_contract_versions_contract_id", "CREATE INDEX IF NOT EXISTS ix_contract_versions_contract_id ON contract_versions (contract_id)")
 
-        conn.execute(text(
+        ensure_table(conn, "contract_breaches",
             "CREATE TABLE IF NOT EXISTS contract_breaches ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "contract_id INTEGER NOT NULL REFERENCES contracts(id), "
@@ -316,18 +243,12 @@ def _ensure_compare_columns(bind) -> None:
             "escalated BOOLEAN NOT NULL DEFAULT 0, "
             "escalated_at DATETIME, "
             "duration_hours REAL)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_contract_breaches_contract_id "
-            "ON contract_breaches (contract_id)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_contract_breaches_run_id "
-            "ON contract_breaches (run_id)"
-        ))
+        )
+        ensure_index(conn, "ix_contract_breaches_contract_id", "CREATE INDEX IF NOT EXISTS ix_contract_breaches_contract_id ON contract_breaches (contract_id)")
+        ensure_index(conn, "ix_contract_breaches_run_id", "CREATE INDEX IF NOT EXISTS ix_contract_breaches_run_id ON contract_breaches (run_id)")
 
         # --- Job Selections ---
-        conn.execute(text(
+        ensure_table(conn, "job_selections",
             "CREATE TABLE IF NOT EXISTS job_selections ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "name VARCHAR(255) NOT NULL UNIQUE, "
@@ -336,11 +257,9 @@ def _ensure_compare_columns(bind) -> None:
             "archived BOOLEAN NOT NULL DEFAULT 0, "
             "created_at DATETIME, "
             "updated_at DATETIME)"
-        ))
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_job_selections_name ON job_selections (name)"
-        ))
-        conn.execute(text(
+        )
+        ensure_index(conn, "ix_job_selections_name", "CREATE UNIQUE INDEX IF NOT EXISTS ix_job_selections_name ON job_selections (name)")
+        ensure_table(conn, "job_selection_versions",
             "CREATE TABLE IF NOT EXISTS job_selection_versions ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "selection_id INTEGER NOT NULL REFERENCES job_selections(id) ON DELETE CASCADE, "
@@ -348,48 +267,28 @@ def _ensure_compare_columns(bind) -> None:
             "job_sequence JSON, "
             "run_settings_json JSON, "
             "created_at DATETIME)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_job_selection_versions_selection_id "
-            "ON job_selection_versions (selection_id)"
-        ))
+        )
+        ensure_index(conn, "ix_job_selection_versions_selection_id", "CREATE INDEX IF NOT EXISTS ix_job_selection_versions_selection_id ON job_selection_versions (selection_id)")
 
-        if "selection_id" not in test_run_cols:
-            conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_id INTEGER"))
-        if "selection_version" not in test_run_cols:
-            conn.execute(text("ALTER TABLE test_runs ADD COLUMN selection_version INTEGER"))
-        if "ci_context" not in test_run_cols:
-            conn.execute(text("ALTER TABLE test_runs ADD COLUMN ci_context JSON"))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_test_runs_selection_id ON test_runs (selection_id)"
-        ))
+        ensure_column(conn, "test_runs", "selection_id", "ALTER TABLE test_runs ADD COLUMN selection_id INTEGER")
+        ensure_column(conn, "test_runs", "selection_version", "ALTER TABLE test_runs ADD COLUMN selection_version INTEGER")
+        ensure_column(conn, "test_runs", "ci_context", "ALTER TABLE test_runs ADD COLUMN ci_context JSON")
+        ensure_index(conn, "ix_test_runs_selection_id", "CREATE INDEX IF NOT EXISTS ix_test_runs_selection_id ON test_runs (selection_id)")
 
         if scheduled_run_cols:
-            if "selection_id" not in scheduled_run_cols:
-                conn.execute(text("ALTER TABLE scheduled_runs ADD COLUMN selection_id INTEGER"))
-            if "selection_version" not in scheduled_run_cols:
-                conn.execute(text("ALTER TABLE scheduled_runs ADD COLUMN selection_version INTEGER"))
+            ensure_column(conn, "scheduled_runs", "selection_id", "ALTER TABLE scheduled_runs ADD COLUMN selection_id INTEGER")
+            ensure_column(conn, "scheduled_runs", "selection_version", "ALTER TABLE scheduled_runs ADD COLUMN selection_version INTEGER")
 
         # --- App-wide settings (single row) ---
-        conn.execute(text(
+        ensure_table(conn, "app_settings",
             "CREATE TABLE IF NOT EXISTS app_settings ("
             "id INTEGER PRIMARY KEY, "
             "timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', "
             "upload_retention_days INTEGER NOT NULL DEFAULT 30, "
             "updated_at DATETIME)"
-        ))
-        conn.execute(text(
-            "INSERT OR IGNORE INTO app_settings (id, timezone) VALUES (1, 'UTC')"
-        ))
-        app_settings_cols = (
-            {col["name"] for col in inspector.get_columns("app_settings")}
-            if "app_settings" in tables else set()
         )
-        if app_settings_cols and "upload_retention_days" not in app_settings_cols:
-            conn.execute(text(
-                "ALTER TABLE app_settings "
-                "ADD COLUMN upload_retention_days INTEGER NOT NULL DEFAULT 30"
-            ))
+        execute_once(conn, "INSERT OR IGNORE INTO app_settings (id, timezone) VALUES (1, 'UTC')")
+        ensure_column(conn, "app_settings", "upload_retention_days", "ALTER TABLE app_settings ADD COLUMN upload_retention_days INTEGER NOT NULL DEFAULT 30")
 
 
 def _backfill_schedule_selections(bind) -> None:
