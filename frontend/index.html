@@ -48,7 +48,7 @@
       <div class="auth-status-content">
         <span class="auth-status-dot">🔑</span>
         <span>No API token set</span>
-        <button class="auth-status-action" @click="openAuthModal()">Set up access →</button>
+        <button class="auth-status-action" data-testid="auth-status-open-btn" @click="openAuthModal()">Set up access →</button>
       </div>
     </template>
     <template x-if="storedToken">
@@ -227,7 +227,7 @@
 
   <!-- Security – API Tokens -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
+    <div class="flex items-center justify-between cursor-pointer" data-testid="security-card-header" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
       <div class="font-semibold text-slate-700">🔑 Security — Users &amp; API Access</div>
       <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
     </div>
@@ -235,22 +235,22 @@
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Each user receives a personal bearer token. Administrators can create and revoke standard-user or administrator access.</p>
         <div class="flex items-center gap-2">
-          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" placeholder="Paste token here to authenticate…" />
+          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" data-testid="security-token-input" placeholder="Paste token here to authenticate…" />
           <span class="badge text-xs" :class="activeTokenIsAdmin ? 'badge-blue' : 'badge-gray'" x-text="activeTokenIsAdmin ? 'Administrator' : 'Standard user'"></span>
         </div>
         <div class="flex justify-between items-center">
           <span class="text-muted text-xs" x-text="activeTokenIsAdmin ? tokens.length + ' user credential(s)' : 'Administrator access is required to manage users'"></span>
-          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm">+ Add User Access</button>
+          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm" data-testid="security-add-user-btn">+ Add User Access</button>
         </div>
         <template x-if="showCreateToken && activeTokenIsAdmin">
           <div class="grid gap-2 md:grid-cols-4 items-end">
             <div class="md:col-span-2">
               <label class="field-label">User / service name</label>
-              <input x-model="newTokenName" class="field-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
+              <input x-model="newTokenName" class="field-input" data-testid="security-new-token-name-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
             </div>
             <div>
               <label class="field-label">Role</label>
-              <select x-model="newTokenRole" class="field-input field-select">
+              <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select">
                 <option value="user">Standard user</option>
                 <option value="admin">Administrator</option>
               </select>
@@ -259,14 +259,14 @@
               <label class="field-label">Expires (optional)</label>
               <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" />
             </div>
-            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4">Create Access</button>
+            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4" data-testid="security-create-access-btn">Create Access</button>
           </div>
         </template>
         <template x-if="createdToken">
           <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
             <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : 'a standard user'"></span> — copy this token now:</div>
             <div class="text-xs text-amber-700">Give it to the intended user securely. Your current administrator session has not changed.</div>
-            <div class="font-mono text-xs break-all text-amber-900 select-all" x-text="createdToken"></div>
+            <div class="font-mono text-xs break-all text-amber-900 select-all" data-testid="security-created-token-value" x-text="createdToken"></div>
             <template x-if="createdTokenHint">
               <div class="text-xs text-amber-700">Hint (last 8 chars): <span class="font-mono" x-text="'…' + createdTokenHint"></span></div>
             </template>
@@ -275,7 +275,7 @@
         </template>
         <div class="space-y-1">
           <template x-for="tok in tokens" :key="tok.id">
-            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm" :data-testid="'security-token-row-' + tok.id">
               <div class="flex-1 min-w-0">
                 <span class="font-medium text-slate-700" x-text="tok.name"></span>
                 <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : 'text-slate-500'" x-text="tok.is_admin ? '(administrator)' : '(standard user)'"></span>
@@ -285,7 +285,7 @@
                 <span x-show="tok.expires_at" class="text-muted ml-2 text-xs" x-text="'expires ' + fmtDate(tok.expires_at)"></span>
               </div>
               <span :class="tok.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="tok.enabled ? 'Active' : 'Revoked'"></span>
-              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs">Revoke</button>
+              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs" :data-testid="'security-revoke-btn-' + tok.id">Revoke</button>
             </div>
           </template>
         </div>
@@ -4819,7 +4819,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      AUTH SETUP MODAL
      ==================================================================== -->
-<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
   <div class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <div class="auth-modal-header">
       <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
@@ -4830,8 +4830,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="auth-path-label">Create Initial Administrator</div>
       <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
       <div class="auth-row">
-        <input x-model="authTokenName" class="field-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
-        <button @click="createToken('auth')" class="btn-primary auth-row-button">Create Admin →</button>
+        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
       </div>
     </div>
 
@@ -4839,13 +4839,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
         <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
         <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
-        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" x-text="authCreatedToken"></div>
+        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" data-testid="auth-created-token-value" x-text="authCreatedToken"></div>
         <button
           @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
           class="btn-primary btn-sm text-xs">
           Copy to Clipboard
         </button>
-        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2">Done — I've saved my token</button>
+        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2" data-testid="auth-done-btn">Done — I've saved my token</button>
       </div>
     </template>
 
@@ -4859,13 +4859,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
       <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
       <div class="auth-row">
-        <input x-model="authPasteValue" type="password" class="field-input" placeholder="Token" @keydown.enter="activateToken()" />
-        <button @click="activateToken()" class="btn-secondary auth-row-button">Activate</button>
+        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" />
+        <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
       </div>
     </div>
 
     <template x-if="authError">
-      <div class="auth-error" x-text="authError"></div>
+      <div class="auth-error" data-testid="auth-error-text" x-text="authError"></div>
     </template>
   </div>
 </div>
