@@ -52,7 +52,7 @@
       </div>
     </template>
     <template x-if="storedToken">
-      <div class="auth-status-content">
+      <div class="auth-status-content" data-testid="auth-status-connected">
         <span class="auth-status-dot">●</span>
         <span x-text="activeTokenName ? 'Connected as ' + activeTokenName + (activeTokenIsAdmin ? ' (Administrator)' : ' (Standard user)') : 'Connected'"></span>
         <button class="auth-status-action" @click="goToTokenManagement()">Manage →</button>

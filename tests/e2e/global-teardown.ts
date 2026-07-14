@@ -19,7 +19,15 @@ export default async function globalTeardown() {
   } finally {
     const dbDir = process.env.E2E_DB_DIR;
     if (dbDir) {
-      rmSync(dbDir, { recursive: true, force: true });
+      try {
+        rmSync(dbDir, { recursive: true, force: true });
+      } catch (err) {
+        // Windows sometimes still holds a lock on the sqlite file for a moment
+        // after the webServer process is killed (EBUSY). It's a temp dir either
+        // way (OS temp cleanup reclaims it eventually) — don't fail the whole
+        // test run over a leftover file we can't delete right now.
+        console.warn(`[global-teardown] could not remove ${dbDir}: ${(err as Error).message}`);
+      }
     }
   }
 }
