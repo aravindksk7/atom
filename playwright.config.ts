@@ -54,6 +54,14 @@ export default defineConfig({
     timeout: 60_000,
     env: {
       ETL_DATABASE_URL: process.env.E2E_DATABASE_URL,
+      // File-mode reconciliation jobs (tests/e2e/api-helpers.ts's createFileJob())
+      // point at CSV fixtures under tests/e2e/fixtures/data — the backend's
+      // server-side file-path feature only reads from an explicit allowlist
+      // (api/services/file_source.py's SERVER_FILE_ALLOWED_DIRS), which otherwise
+      // defaults to C:\temp / reports/uploads only. Without this, every file-mode
+      // job errors with "Invalid file path" instead of producing the deterministic
+      // diff the fixtures were designed to produce.
+      SERVER_FILE_ALLOWED_DIRS: path.join(__dirname, 'tests', 'e2e', 'fixtures', 'data'),
     },
   },
 });
