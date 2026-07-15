@@ -1878,19 +1878,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="empty-state-icon">📡</div>
       <div class="empty-state-title">No active runs</div>
       <div class="empty-state-sub">
-        <button @click="currentView='jobs'" class="text-indigo-500 hover:underline">Launch a test →</button>
+        <button @click="currentView='jobs'" data-testid="monitor-launch-link" class="text-indigo-500 hover:underline">Launch a test →</button>
       </div>
     </div>
   </template>
 
   <div class="space-y-4">
     <template x-for="run in activeRuns" :key="run.run_id">
-      <div class="card">
+      <div class="card" :data-testid="'monitor-run-' + run.run_id">
         <div class="flex items-start justify-between mb-4">
           <div>
             <div class="flex items-center gap-2">
               <span class="font-mono text-sm text-slate-400" x-text="run.run_id.substring(0,8)+'…'"></span>
-              <span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span>
+              <span class="badge" :class="statusBadgeClass(run.status)" :data-testid="'monitor-run-status-' + run.run_id" x-text="run.status"></span>
             </div>
             <div class="text-muted mt-1">
               <span x-text="run.source_env||'?'"></span> → <span x-text="run.target_env||'?'"></span>
@@ -1908,6 +1908,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <button @click="cancelRun(run.run_id)"
                     x-show="!isTerminalStatus(run.status)"
                     :disabled="cancellingRuns[run.run_id] || run.cancel_requested"
+                    :data-testid="'monitor-cancel-btn-' + run.run_id"
                     class="btn-danger btn-sm text-xs disabled:opacity-50"
                     x-text="run.cancel_requested ? 'Cancel requested' : (cancellingRuns[run.run_id] ? 'Cancelling...' : 'Cancel')"></button>
           </div>
