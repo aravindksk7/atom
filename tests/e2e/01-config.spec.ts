@@ -7,15 +7,19 @@ test.describe('01 config', () => {
     // than reaching around it through the API. deleteConfig() in app.js gates the
     // delete on a native confirm() dialog, so we register an auto-accept handler
     // before each click.
-    const deleteButtons = authedPage.locator('[data-testid^="config-row-"][data-testid$="-delete-btn"]');
-    let count = await deleteButtons.count();
+    // The row container itself carries data-testid="config-row-{id}" (no suffix);
+    // its Edit/Delete buttons carry "-edit-btn"/"-delete-btn" on top of that same
+    // prefix. Tag-qualifying with `div` (the row) vs `button` (its children)
+    // disambiguates the two without an XPath ancestor walk.
+    const rows = authedPage.locator('div[data-testid^="config-row-"]');
+    let count = await rows.count();
     for (let i = count - 1; i >= 0; i--) {
-      const btn = deleteButtons.nth(i);
-      const rowText = await btn.locator('xpath=ancestor::*[@data-testid][1]').textContent().catch(() => '');
+      const row = rows.nth(i);
+      const rowText = await row.textContent().catch(() => '');
       if (rowText && rowText.includes('e2e-')) {
         authedPage.once('dialog', (d) => d.accept());
-        await btn.click();
-        await authedPage.waitForTimeout(200);
+        await row.locator('button:has-text("Delete")').click();
+        await expect(row).toBeHidden();
       }
     }
   });
