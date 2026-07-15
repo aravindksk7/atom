@@ -70,11 +70,16 @@ test.describe('01 config', () => {
 
   test('negative: import-yaml with invalid YAML surfaces an error toast, does not create a config', async ({ authedPage }) => {
     await authedPage.goto('/');
+    const countBefore = await authedPage.locator('[data-testid^="config-row-"][data-testid$="-edit-btn"]').count();
+
     // The Import YAML card is collapsed by default (yamlImportOpen starts false in
     // app.js) — the textarea only renders once the card header is clicked to expand it.
     await authedPage.getByText('Import YAML', { exact: true }).click();
     await authedPage.locator('[data-testid="config-yaml-textarea"]').fill('not: [valid: yaml: at: all');
     await authedPage.locator('[data-testid="config-yaml-import-btn"]').click();
     await expect(authedPage.locator('.toast-title')).toContainText('Import failed');
+
+    // Confirm the test's own name: a failed import must not silently persist a config.
+    await expect(authedPage.locator('[data-testid^="config-row-"][data-testid$="-edit-btn"]')).toHaveCount(countBefore);
   });
 });
