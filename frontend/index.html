@@ -3174,28 +3174,28 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run</div>
     <div class="flex gap-3">
-      <select x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
+      <select data-testid="reports-run-select" x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
         </template>
       </select>
-      <button @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
+      <button data-testid="reports-load-btn" @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
     </div>
   </div>
 
   <template x-if="reportRunId">
     <div class="compare-subtabs mb-4">
-      <button @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
-      <button @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
-      <button @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
+      <button data-testid="reports-subtab-report" @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
+      <button data-testid="reports-subtab-metrics" @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
+      <button data-testid="reports-subtab-logs" @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
     </div>
   </template>
 
   <template x-if="reportRunId && reportLoaded && reportView === 'report'">
     <div>
       <div class="card p-0 overflow-hidden report-frame-card">
-      <iframe :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
+      <iframe data-testid="reports-iframe" :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
       </div>
     </div>
   </template>
@@ -3203,7 +3203,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <template x-if="reportRunId && reportLoaded && reportView === 'metrics'">
     <div class="space-y-4">
       <div class="flex gap-2 mb-3 flex-wrap">
-        <button @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
+        <button data-testid="reports-metrics-refresh-btn" @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
           <span x-text="reportMetricsLoading ? 'Refreshing…' : 'Refresh Metrics'"></span>
         </button>
       </div>
