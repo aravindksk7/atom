@@ -2886,7 +2886,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="grid-2 mb-3">
           <div>
             <label class="field-label">Config</label>
-            <select x-model="boConfigId" class="field-input field-select">
+            <select x-model="boConfigId" class="field-input field-select" data-testid="bo-config-select">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -2894,7 +2894,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
           </div>
           <div class="flex items-end">
-            <button @click="testBOConnection()" :disabled="!boConfigId || boTesting" class="btn-primary w-full">
+            <button @click="testBOConnection()" :disabled="!boConfigId || boTesting" class="btn-primary w-full" data-testid="bo-test-connection-btn">
               <span x-show="!boTesting">Test Connection</span>
               <span x-show="boTesting">Testing…</span>
             </button>
@@ -2902,7 +2902,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <template x-if="boTestResult">
           <div :class="boTestResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
-               class="border rounded-lg p-2 text-sm mb-3">
+               class="border rounded-lg p-2 text-sm mb-3" data-testid="bo-test-result">
             <span x-text="boTestResult.ok ? '✓ ' + boTestResult.message : '✗ ' + boTestResult.message"></span>
             <span x-show="boTestResult.latency_ms" class="text-muted ml-2" x-text="boTestResult.latency_ms + 'ms'"></span>
           </div>
@@ -2963,7 +2963,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="grid-2 mb-3">
           <div>
             <label class="field-label">Config</label>
-            <select x-model="automicConfigId" class="field-input field-select">
+            <select x-model="automicConfigId" class="field-input field-select" data-testid="automic-config-select">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -2972,21 +2972,21 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <div>
             <label class="field-label">Lookup Type</label>
-            <select x-model="automicIdType" class="field-input field-select">
+            <select x-model="automicIdType" class="field-input field-select" data-testid="automic-lookup-type-select">
               <option value="job_name">Job Name</option>
               <option value="run_id">Run ID</option>
             </select>
           </div>
         </div>
         <div class="flex gap-2">
-          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" />
-          <button @click="lookupAutomic()" :disabled="!automicConfigId || !automicIdentifier || automicLoading" class="btn-primary flex-shrink-0">
+          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" data-testid="automic-identifier-input" />
+          <button @click="lookupAutomic()" :disabled="!automicConfigId || !automicIdentifier || automicLoading" class="btn-primary flex-shrink-0" data-testid="automic-lookup-btn">
             <span x-show="!automicLoading">Lookup</span>
             <span x-show="automicLoading">…</span>
           </button>
         </div>
         <template x-if="automicResult">
-          <div class="mt-3 border rounded-lg p-3 text-sm" :class="automicResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'">
+          <div class="mt-3 border rounded-lg p-3 text-sm" :class="automicResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'" data-testid="automic-result">
             <div class="flex items-center justify-between">
               <span class="font-medium" x-text="automicResult.identifier"></span>
               <span class="badge" :class="statusBadgeClass(automicResult.status)" x-text="automicResult.status"></span>
