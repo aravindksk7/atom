@@ -52,6 +52,14 @@ export function authedContext(token: string): Promise<APIRequestContext> {
 
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
 
+/**
+ * Creates a file-mode reconciliation job comparing fixtures/data/source.csv vs
+ * target.csv on key column `id`. Running this job is deterministic: it always
+ * reaches status FAILED with exactly 1 value_diff (id=2, amount 50.00->55.00),
+ * 1 missing_in_target (id=3), 1 missing_in_source (id=4) — see those two CSVs.
+ * Requires playwright.config.ts's SERVER_FILE_ALLOWED_DIRS to include
+ * fixtures/data, or the run errors with "Invalid file path" instead.
+ */
 export async function createFileJob(ctx: APIRequestContext, name: string) {
   const resp = await ctx.post('/api/jobs', {
     data: {
