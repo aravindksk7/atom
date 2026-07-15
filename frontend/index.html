@@ -27,7 +27,8 @@
         <button
           @click="onTabEnter(tab.id)"
           :class="currentView === tab.id ? 'active' : ''"
-          class="tab-btn">
+          class="tab-btn"
+          :data-testid="'nav-tab-' + tab.id">
           <span class="tab-icon" x-html="tab.icon"></span>
           <span x-text="tab.label"></span>
         </button>
@@ -914,7 +915,7 @@
       <div class="font-semibold text-slate-700">Job Catalog</div>
       <div class="flex items-center gap-3">
         <span class="text-muted" x-text="jobCatalogCountLabel"></span>
-        <button @click="openNewJobModal()" class="btn-primary btn-sm">+ New Job</button>
+        <button @click="openNewJobModal()" class="btn-primary btn-sm" data-testid="job-new-btn">+ New Job</button>
       </div>
     </div>
 
@@ -924,7 +925,8 @@
                x-model="jobSearchQuery"
                @input="shiftLastIndex = -1"
                placeholder="Search jobs by name, tags, or description..."
-               class="field-input pl-8 w-full text-sm">
+               class="field-input pl-8 w-full text-sm"
+               data-testid="job-search-input">
         <svg class="absolute left-2 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
@@ -945,8 +947,9 @@
     </template>
     <div class="space-y-1">
       <template x-for="(job, $index) in filteredJobList" :key="job.name">
-        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors">
-          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" />
+        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors"
+             :data-testid="'job-row-' + job.name">
+          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" :data-testid="'job-row-' + job.name + '-checkbox'" />
           <label class="flex-1 min-w-0 cursor-pointer" @click.prevent="toggleJobWithShift($index, $event)">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full flex-shrink-0 inline-block"
@@ -970,8 +973,8 @@
             </template>
           </label>
           <div class="flex gap-1 flex-shrink-0">
-            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs">Edit</button>
-            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs">Del</button>
+            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
+            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
         </div>
       </template>
@@ -979,7 +982,7 @@
   </div>
 
   <!-- Job Modal -->
-  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false">
+  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false" data-testid="job-modal">
     <div class="modal-box w-full max-w-2xl">
       <div class="flex items-center mb-4">
         <h2 class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
@@ -1014,7 +1017,8 @@
         <template x-for="tab in jobModalTabs" :key="tab.id">
           <button @click="jobModalTab = tab.id"
                   class="px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors"
-                  :class="jobModalTab === tab.id ? 'border-indigo-500 text-indigo-600 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'">
+                  :class="jobModalTab === tab.id ? 'border-indigo-500 text-indigo-600 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                  :data-testid="'job-modal-tab-' + tab.id">
             <span x-text="tab.label"></span>
           </button>
         </template>
@@ -1023,7 +1027,7 @@
       <div x-show="jobModalTab === 'basic'" class="space-y-3">
         <div>
           <label class="field-label">Job Name *</label>
-          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" />
+          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" data-testid="job-modal-name-input" />
         </div>
         <div>
           <label class="field-label">Description</label>
@@ -1031,7 +1035,7 @@
         </div>
         <div>
           <label class="field-label">Job Type</label>
-          <select x-model="jobModal.job_type" class="field-input field-select">
+          <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select">
             <option value="reconciliation">reconciliation</option>
             <option value="bo_report">bo_report</option>
             <option value="automic_job">automic_job</option>
@@ -1060,7 +1064,8 @@
           <label class="field-label">SQL Query</label>
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
-                    @input="validateJobModal()"></textarea>
+                    @input="validateJobModal()"
+                    data-testid="job-modal-query-textarea"></textarea>
           <p x-show="jobModalValidation && jobModalValidation.sql"
              class="text-xs mt-1"
              :class="jobModalValidation && jobModalValidation.sql && jobModalValidation.sql.startsWith('✓') ? 'text-emerald-600' : 'text-amber-600'"
@@ -1133,7 +1138,12 @@
         </div>
         <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
           <label class="field-label">Key Columns (comma-separated)</label>
-          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" />
+          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
+          <p x-show="jobModalValidation && jobModalValidation.keyColumns"
+             class="text-xs mt-1 text-amber-600"
+             data-testid="job-modal-key-columns-validation"
+             x-text="jobModalValidation && jobModalValidation.keyColumns ? jobModalValidation.keyColumns : ''">
+          </p>
         </div>
         <div x-show="jobModal.job_type === 'bo_report'" class="grid-2">
           <div>
@@ -1305,7 +1315,7 @@
       <div x-show="jobModalTab === 'deps'" class="space-y-3">
         <div>
           <label class="field-label">Depends On (comma-separated job names)</label>
-          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" />
+          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" data-testid="job-modal-depends-on-input" />
           <p x-show="jobModalValidation && jobModalValidation.dependencies"
              class="text-xs mt-1 text-amber-600"
              x-text="jobModalValidation && jobModalValidation.dependencies ? jobModalValidation.dependencies : ''">
@@ -1504,15 +1514,16 @@
       </div>
 
       <div class="flex justify-end gap-3 mt-6">
-        <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name">
+        <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
           <span x-show="!validateDefinitionLoading">Validate Definition</span>
           <span x-show="validateDefinitionLoading">Validating...</span>
         </button>
-        <button @click="showJobModal = false" class="btn-secondary">Cancel</button>
-        <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()">Save</button>
+        <button @click="showJobModal = false" class="btn-secondary" data-testid="job-modal-cancel-btn">Cancel</button>
+        <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()" data-testid="job-modal-save-btn">Save</button>
       </div>
       <template x-if="validateDefinitionResult">
         <div class="mt-3 rounded-lg border p-3 text-sm"
+             data-testid="job-modal-validation-result"
              :class="validateDefinitionResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'">
           <div class="font-semibold" x-text="validateDefinitionResult.ok ? 'Definition valid' : 'Definition has issues'"></div>
           <template x-if="validateDefinitionResult.issues && validateDefinitionResult.issues.length">
@@ -1617,7 +1628,7 @@
 
   <div class="flex justify-end">
     <button @click="runTests()" :disabled="selectedJobs.length === 0 || isLaunching"
-            class="btn-primary px-8 py-3 text-base">
+            class="btn-primary px-8 py-3 text-base" data-testid="run-tests-btn">
       <span x-show="!isLaunching">▶ Run Tests</span>
       <span x-show="isLaunching">Launching…</span>
     </button>
