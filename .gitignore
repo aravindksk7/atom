@@ -31,16 +31,6 @@ node_modules/
 *.egg-info/
 
 # Local-only validation and planning material
-tests/
-!tests/
-tests/*
-!tests/integration/
-tests/integration/*
-!tests/unit/
 docs/*
 !docs/superpowers
-test_*.py
-!tests/unit/test_file_backed_jobs.py
-!tests/integration/test_sqlserver_live_reconciliation.py
-!tests/integration/test_sapbo_mock_container.py
 upgrade.md
