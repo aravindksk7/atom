@@ -48,7 +48,7 @@ test.describe('03 monitor', () => {
     // missing_in_target, 1 missing_in_source -- see api-helpers.ts's createFileJob
     // doc). The UI picks this up either via the SSE 'done' event (startRunStream) or
     // the 5s poll fallback (pollActiveRuns), so 30s is a generous timeout.
-    await expect(runCard).toContainText(/PASSED|FAILED|COMPLETED|ERROR/, { timeout: 30_000 });
+    await expect(runCard).toContainText('FAILED', { timeout: 30_000 });
   });
 
   test('negative: Run Tests stays disabled with zero jobs selected', async ({ authedPage }) => {
