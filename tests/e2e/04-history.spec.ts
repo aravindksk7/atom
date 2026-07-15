@@ -20,6 +20,7 @@ test.describe('04 history', () => {
   });
 
   test.afterAll(async ({ adminToken }) => {
+    if (!jobName) return; // beforeAll never got past seedBaselineRun() — nothing to clean up
     const ctx = await authedContext(adminToken);
     try {
       await deleteJob(ctx, jobName);
