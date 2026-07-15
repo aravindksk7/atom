@@ -544,7 +544,9 @@ git commit -m "test: add shared Playwright fixtures, API seed helpers, and CSV t
 
 **Context (from research):** Bootstrap path shows when `!authInitialized && !authCreatedToken` (`index.html:4829`, label "Create Initial Administrator", input `authTokenName`, button "Create Admin →" → `createToken('auth')`). Sign-in/paste path (`index.html:4858`) shows whenever `!authCreatedToken`; label switches "Paste Existing Token" → "Sign in with Your Access Token" once `authInitialized`. `POST /api/tokens` unauthenticated + zero existing tokens is force-admin. 401 body: `{"detail":"Missing or invalid Authorization header"}` (no header) or `{"detail":"Invalid or expired token"}` (bad token). 403 body: `{"detail":"Admin token required"}`. `revokeToken()` uses native `confirm()`.
 
-This spec runs against the **fresh, empty DB** (it's `00-`, runs first) so `authInitialized` is false and the bootstrap UI is live.
+This spec runs against the **fresh, empty DB** so `authInitialized` is false and the bootstrap UI is live.
+
+**Post-implementation correction (superseding the "it's `00-`, runs first" assumption above):** filename prefixes do NOT reliably control Playwright's spec-file execution order — confirmed empirically that file-discovery order isn't guaranteed alphabetical even with `fullyParallel:false`/`workers:1`. `playwright.config.ts` was restructured into a `setup` project (`testMatch` matching only this file) and a `chromium` project (`dependencies: ['setup']`, `testIgnore` on this file) — Playwright's actual supported ordering mechanism. Every task from here on: your spec file automatically lands in the `chromium` project (no config changes needed on your end) and Playwright guarantees it runs after this file completes. The admin-token handoff between the two projects (separate worker processes) goes through a small gitignored file, `tests/e2e/.admin-token.json`, written by `primeAdminToken()` and read by `bootstrapAdminToken()` (both in `api-helpers.ts`) — use `fixtures.ts`'s `authedPage`/`adminToken` fixtures as normal, this is transparent to you.
 
 - [ ] **Step 1: Add testids to the auth modal**
 
