@@ -27,13 +27,25 @@ function seedSqlServer() {
   // defaulting to "ODBC Driver 17 for SQL Server" to match what the app itself always sends
   // for configs created through the UI (frontend/app.js:_configDataFromModal) — but installed
   // driver versions vary by machine, so this must not be hardcoded.
+  //
+  // TrustServerCertificate=yes below is required for this seed connection specifically:
+  // ODBC Driver 18 defaults to Encrypt=yes + strict certificate validation (a behavior
+  // change from Driver 17), which rejects the mssql container's self-signed cert without
+  // it. Safe here because this only ever talks to an ephemeral, local Docker container
+  // for tests. NOTE: etl_framework/db/engine.py (the app's own SQL Server connection
+  // builder, used by real Compare/SQL runs) does NOT set this — a real app-level gap for
+  // any on-prem SQL Server + Driver 18 combination, not just this test seed script. Task
+  // 14 (SQL Compare live tests) may hit the exact same TLS rejection when it runs real
+  // comparisons against this same container; if so, that's a product fix (likely a new
+  // EnvironmentConfig field, not something to silently bolt on here) — investigate then,
+  // don't speculatively fix etl_framework/db/engine.py from this test-infra task.
   const driver = process.env.LIVE_SQLSERVER_ODBC_DRIVER || 'ODBC Driver 17 for SQL Server';
   const script = `
 import pyodbc
 DRIVER = ${JSON.stringify(driver)}
 conn = pyodbc.connect(
     f"DRIVER={{{DRIVER}}};SERVER=127.0.0.1,14333;DATABASE=master;"
-    "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;",
+    "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;TrustServerCertificate=yes;",
     autocommit=True,
 )
 cur = conn.cursor()
@@ -44,7 +56,7 @@ conn.close()
 def seed(db, rows):
     c = pyodbc.connect(
         f"DRIVER={{{DRIVER}}};SERVER=127.0.0.1,14333;DATABASE={db};"
-        "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;",
+        "UID=sa;PWD=Atom_Test_12345!;Connect Timeout=5;TrustServerCertificate=yes;",
         autocommit=True,
     )
     cur = c.cursor()
