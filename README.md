@@ -2374,6 +2374,14 @@ docker compose -f docker-compose.integration.yml down -v
 
 The `sapbo` service is a local HTTPS mock of the SAP BO RESTful Web Services endpoints used by this project. It is not a SAP BusinessObjects distribution. Use `https://127.0.0.1:18443` with username `administrator`, password `Password1`, and SSL verification disabled for the mock's self-signed certificate.
 
+### End-to-end (Playwright) tests
+
+```powershell
+npx playwright test                      # full UI suite against a throwaway DB, file/upload-mode compare coverage only
+$env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server paths (requires Docker + ODBC Driver 17 for SQL Server)
+npx playwright show-report               # view the last HTML report
+```
+
 Run property-based tests (requires `hypothesis`):
 
 ```powershell

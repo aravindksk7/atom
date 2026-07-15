@@ -29,6 +29,9 @@ __pycache__/
 node_modules/
 .hypothesis/
 *.egg-info/
+test-results/
+playwright-report/
+tests/e2e/.admin-token.json
 
 # Local-only validation and planning material
 docs/*

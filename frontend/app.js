@@ -3479,8 +3479,9 @@ function _appRaw() {
       });
       nodes.forEach(n => {
         const { x, y } = pos[n.name];
+        const safeName = (n.name || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         svg += `<rect x="${x}" y="${y}" width="${W}" height="${H}" rx="4" fill="#1e2533" stroke="#334155" stroke-width="1"/>`;
-        svg += `<text x="${x + W/2}" y="${y + H/2 + 4}" text-anchor="middle" fill="#c7d0dc">${n.name}</text>`;
+        svg += `<text x="${x + W/2}" y="${y + H/2 + 4}" text-anchor="middle" fill="#c7d0dc">${safeName}</text>`;
       });
       svg += '</svg>';
       return svg;

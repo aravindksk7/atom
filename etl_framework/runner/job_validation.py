@@ -80,13 +80,17 @@ def _get(job: Any, name: str, default: Any = None) -> Any:
 
 
 def _file_value(params: dict[str, Any], prefix: str, field: str) -> Any:
+    # Canonical key convention, matching api/schemas.py's _job_file_value() and
+    # api/services/run_executor.py's _job_file_value() -- e.g. "source_file_path",
+    # with a "file_a_path"/"file_b_path" fallback. This function previously looked
+    # up "source_path" (no "_file_" infix), which no producer of file-mode job
+    # params (the frontend job modal, run_executor.py, or schemas.py's own pydantic
+    # validator) ever writes -- so a well-formed file-backed job created through the
+    # real UI was rejected here with a 422 despite passing every other check.
+    side = "a" if prefix == "source" else "b"
     nested = params.get(prefix)
     if isinstance(nested, dict) and nested.get(field):
         return nested.get(field)
-    value = params.get(f"{prefix}_{field}")
-    if value:
-        return value
-    side = "a" if prefix == "source" else "b"
     return params.get(f"{prefix}_file_{field}") or params.get(f"file_{side}_{field}")
 
 

@@ -10,7 +10,7 @@ import zipfile
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 HOST = os.getenv("SAPBO_MOCK_HOST", "0.0.0.0")
@@ -170,13 +170,23 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True})
             return
 
         if not self._require_token():
             return
+
+        # The real biprws API paginates these collections (client.py's
+        # _paginate_biprws_collection keeps requesting `page` until a page
+        # comes back shorter than the previous one or empty). This mock's
+        # datasets fit in a single page, so page 1 returns everything and any
+        # later page returns empty — without this, a client that always
+        # requests the same `pagesize` would see an identically-sized batch
+        # forever and never stop paging.
+        page = int(parse_qs(parsed.query).get("page", ["1"])[0] or "1")
 
         if path == "/biprws/raylight/v1/documents":
             # Real on-premises biprws wraps the collection under a "document"
@@ -185,7 +195,7 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             # below which does collapse a single element to a bare object).
             self._send_json(
                 HTTPStatus.OK,
-                {"documents": {"document": DOCUMENTS}},
+                {"documents": {"document": DOCUMENTS if page == 1 else []}},
             )
             return
 
@@ -195,10 +205,11 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if doc_id not in REPORTS:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"document {doc_id} not found"})
                 return
+            reports = REPORTS[doc_id] if page == 1 else []
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "reports": _collapse_single(REPORTS[doc_id]),
+                    "reports": _collapse_single(reports),
                     "dataset": _rows_for_doc(doc_id),
                 },
             )

@@ -27,7 +27,8 @@
         <button
           @click="onTabEnter(tab.id)"
           :class="currentView === tab.id ? 'active' : ''"
-          class="tab-btn">
+          class="tab-btn"
+          :data-testid="'nav-tab-' + tab.id">
           <span class="tab-icon" x-html="tab.icon"></span>
           <span x-text="tab.label"></span>
         </button>
@@ -48,11 +49,11 @@
       <div class="auth-status-content">
         <span class="auth-status-dot">🔑</span>
         <span>No API token set</span>
-        <button class="auth-status-action" @click="openAuthModal()">Set up access →</button>
+        <button class="auth-status-action" data-testid="auth-status-open-btn" @click="openAuthModal()">Set up access →</button>
       </div>
     </template>
     <template x-if="storedToken">
-      <div class="auth-status-content">
+      <div class="auth-status-content" data-testid="auth-status-connected">
         <span class="auth-status-dot">●</span>
         <span x-text="activeTokenName ? 'Connected as ' + activeTokenName + (activeTokenIsAdmin ? ' (Administrator)' : ' (Standard user)') : 'Connected'"></span>
         <button class="auth-status-action" @click="goToTokenManagement()">Manage →</button>
@@ -75,7 +76,7 @@
       <div class="section-title">Configuration Editor</div>
       <div class="section-sub">Manage environment credentials and settings</div>
     </div>
-    <button @click="openNewConfigModal()" class="btn-primary">+ New Config</button>
+    <button @click="openNewConfigModal()" class="btn-primary" data-testid="config-new-btn">+ New Config</button>
   </div>
 
   <template x-if="configs.length === 0">
@@ -88,7 +89,7 @@
 
   <div class="grid gap-3">
     <template x-for="cfg in configs" :key="cfg.id">
-      <div class="card flex items-center justify-between gap-4">
+      <div class="card flex items-center justify-between gap-4" :data-testid="'config-row-' + cfg.id">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0"
                style="background:#ede9fe">🗃️</div>
@@ -101,8 +102,8 @@
           </div>
         </div>
         <div class="flex gap-2 flex-shrink-0">
-          <button @click="editConfig(cfg)" class="btn-secondary btn-sm">Edit</button>
-          <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm">Delete</button>
+          <button @click="editConfig(cfg)" class="btn-secondary btn-sm" :data-testid="'config-row-' + cfg.id + '-edit-btn'">Edit</button>
+          <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm" :data-testid="'config-row-' + cfg.id + '-delete-btn'">Delete</button>
           <button @click="openSchemaExplorer(cfg)" class="btn-secondary btn-sm"
                   :class="schemaExplorerId === cfg.id ? 'ring-2 ring-indigo-400' : ''">
             Browse Schema <span x-text="schemaExplorerId === cfg.id ? '▲' : '▼'"></span>
@@ -214,9 +215,9 @@
     <template x-if="yamlImportOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Paste a YAML block defining one or more named environments. Each top-level key becomes a saved config.</p>
-        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405"></textarea>
+        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405" data-testid="config-yaml-textarea"></textarea>
         <div class="flex justify-end">
-          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()">
+          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()" data-testid="config-yaml-import-btn">
             <span x-show="!yamlImporting">Import</span>
             <span x-show="yamlImporting">Importing…</span>
           </button>
@@ -227,7 +228,7 @@
 
   <!-- Security – API Tokens -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
+    <div class="flex items-center justify-between cursor-pointer" data-testid="security-card-header" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
       <div class="font-semibold text-slate-700">🔑 Security — Users &amp; API Access</div>
       <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
     </div>
@@ -235,22 +236,22 @@
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Each user receives a personal bearer token. Administrators can create and revoke standard-user or administrator access.</p>
         <div class="flex items-center gap-2">
-          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" placeholder="Paste token here to authenticate…" />
+          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" data-testid="security-token-input" placeholder="Paste token here to authenticate…" />
           <span class="badge text-xs" :class="activeTokenIsAdmin ? 'badge-blue' : 'badge-gray'" x-text="activeTokenIsAdmin ? 'Administrator' : 'Standard user'"></span>
         </div>
         <div class="flex justify-between items-center">
           <span class="text-muted text-xs" x-text="activeTokenIsAdmin ? tokens.length + ' user credential(s)' : 'Administrator access is required to manage users'"></span>
-          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm">+ Add User Access</button>
+          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm" data-testid="security-add-user-btn">+ Add User Access</button>
         </div>
         <template x-if="showCreateToken && activeTokenIsAdmin">
           <div class="grid gap-2 md:grid-cols-4 items-end">
             <div class="md:col-span-2">
               <label class="field-label">User / service name</label>
-              <input x-model="newTokenName" class="field-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
+              <input x-model="newTokenName" class="field-input" data-testid="security-new-token-name-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
             </div>
             <div>
               <label class="field-label">Role</label>
-              <select x-model="newTokenRole" class="field-input field-select">
+              <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select">
                 <option value="user">Standard user</option>
                 <option value="admin">Administrator</option>
               </select>
@@ -259,14 +260,14 @@
               <label class="field-label">Expires (optional)</label>
               <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" />
             </div>
-            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4">Create Access</button>
+            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4" data-testid="security-create-access-btn">Create Access</button>
           </div>
         </template>
         <template x-if="createdToken">
           <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
             <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : 'a standard user'"></span> — copy this token now:</div>
             <div class="text-xs text-amber-700">Give it to the intended user securely. Your current administrator session has not changed.</div>
-            <div class="font-mono text-xs break-all text-amber-900 select-all" x-text="createdToken"></div>
+            <div class="font-mono text-xs break-all text-amber-900 select-all" data-testid="security-created-token-value" x-text="createdToken"></div>
             <template x-if="createdTokenHint">
               <div class="text-xs text-amber-700">Hint (last 8 chars): <span class="font-mono" x-text="'…' + createdTokenHint"></span></div>
             </template>
@@ -275,7 +276,7 @@
         </template>
         <div class="space-y-1">
           <template x-for="tok in tokens" :key="tok.id">
-            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm" :data-testid="'security-token-row-' + tok.id">
               <div class="flex-1 min-w-0">
                 <span class="font-medium text-slate-700" x-text="tok.name"></span>
                 <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : 'text-slate-500'" x-text="tok.is_admin ? '(administrator)' : '(standard user)'"></span>
@@ -285,7 +286,7 @@
                 <span x-show="tok.expires_at" class="text-muted ml-2 text-xs" x-text="'expires ' + fmtDate(tok.expires_at)"></span>
               </div>
               <span :class="tok.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="tok.enabled ? 'Active' : 'Revoked'"></span>
-              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs">Revoke</button>
+              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs" :data-testid="'security-revoke-btn-' + tok.id">Revoke</button>
             </div>
           </template>
         </div>
@@ -461,18 +462,18 @@
   </div>
 
   <!-- Config Modal -->
-  <div x-show="showConfigModal" x-cloak class="modal-backdrop" @click.self="showConfigModal = false">
+  <div x-show="showConfigModal" x-cloak class="modal-backdrop" data-testid="config-modal" @click.self="showConfigModal = false">
     <div class="modal-box w-full max-w-2xl">
       <h2 class="text-lg font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
       <div class="space-y-4">
         <div class="grid-2">
           <div>
             <label class="field-label">Config Name *</label>
-            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" />
+            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" data-testid="config-modal-name-input" />
           </div>
           <div>
             <label class="field-label">Environment</label>
-            <select x-model="configModal.env_name" class="field-input field-select">
+            <select x-model="configModal.env_name" class="field-input field-select" data-testid="config-modal-env-select">
               <option value="dev">Dev</option>
               <option value="qa">QA</option>
               <option value="staging">Staging</option>
@@ -482,11 +483,11 @@
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" /></div>
-          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" /></div>
-          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" /></div>
-          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" /></div>
-          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" /></div>
+          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" /></div>
+          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" /></div>
+          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" /></div>
+          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" /></div>
+          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" /></div>
           <div><label class="field-label">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" /></div>
         </div>
         <div class="divider"></div>
@@ -698,13 +699,13 @@
         </div>
         <template x-if="configValidation">
           <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
-               class="border rounded-lg p-3 text-sm">
+               class="border rounded-lg p-3 text-sm" data-testid="config-validation-result">
             <template x-if="configValidation.ok"><div>✓ Configuration is valid.</div></template>
             <template x-if="!configValidation.ok">
               <div>
                 <div class="font-semibold mb-1">Validation errors</div>
                 <template x-for="err in configValidation.errors" :key="err.field_name + err.message">
-                  <div><span class="font-mono" x-text="err.field_name"></span>: <span x-text="err.message"></span></div>
+                  <div data-testid="config-validation-error-row"><span class="font-mono" x-text="err.field_name"></span>: <span x-text="err.message"></span></div>
                 </template>
               </div>
             </template>
@@ -712,9 +713,9 @@
         </template>
       </div>
       <div class="flex justify-end gap-3 mt-6">
-        <button @click="showConfigModal = false" class="btn-secondary">Cancel</button>
-        <button @click="validateConfig()" class="btn-secondary">Validate</button>
-        <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name">Save</button>
+        <button @click="showConfigModal = false" class="btn-secondary" data-testid="config-modal-cancel-btn">Cancel</button>
+        <button @click="validateConfig()" class="btn-secondary" data-testid="config-modal-validate-btn">Validate</button>
+        <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name" data-testid="config-modal-save-btn">Save</button>
       </div>
     </div>
   </div>
@@ -914,7 +915,7 @@
       <div class="font-semibold text-slate-700">Job Catalog</div>
       <div class="flex items-center gap-3">
         <span class="text-muted" x-text="jobCatalogCountLabel"></span>
-        <button @click="openNewJobModal()" class="btn-primary btn-sm">+ New Job</button>
+        <button @click="openNewJobModal()" class="btn-primary btn-sm" data-testid="job-new-btn">+ New Job</button>
       </div>
     </div>
 
@@ -924,7 +925,8 @@
                x-model="jobSearchQuery"
                @input="shiftLastIndex = -1"
                placeholder="Search jobs by name, tags, or description..."
-               class="field-input pl-8 w-full text-sm">
+               class="field-input pl-8 w-full text-sm"
+               data-testid="job-search-input">
         <svg class="absolute left-2 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
@@ -945,8 +947,9 @@
     </template>
     <div class="space-y-1">
       <template x-for="(job, $index) in filteredJobList" :key="job.name">
-        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors">
-          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" />
+        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors"
+             :data-testid="'job-row-' + job.name">
+          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" :data-testid="'job-row-' + job.name + '-checkbox'" />
           <label class="flex-1 min-w-0 cursor-pointer" @click.prevent="toggleJobWithShift($index, $event)">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full flex-shrink-0 inline-block"
@@ -970,8 +973,8 @@
             </template>
           </label>
           <div class="flex gap-1 flex-shrink-0">
-            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs">Edit</button>
-            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs">Del</button>
+            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
+            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
         </div>
       </template>
@@ -979,7 +982,7 @@
   </div>
 
   <!-- Job Modal -->
-  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false">
+  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false" data-testid="job-modal">
     <div class="modal-box w-full max-w-2xl">
       <div class="flex items-center mb-4">
         <h2 class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
@@ -1014,7 +1017,8 @@
         <template x-for="tab in jobModalTabs" :key="tab.id">
           <button @click="jobModalTab = tab.id"
                   class="px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors"
-                  :class="jobModalTab === tab.id ? 'border-indigo-500 text-indigo-600 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'">
+                  :class="jobModalTab === tab.id ? 'border-indigo-500 text-indigo-600 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                  :data-testid="'job-modal-tab-' + tab.id">
             <span x-text="tab.label"></span>
           </button>
         </template>
@@ -1023,7 +1027,7 @@
       <div x-show="jobModalTab === 'basic'" class="space-y-3">
         <div>
           <label class="field-label">Job Name *</label>
-          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" />
+          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" data-testid="job-modal-name-input" />
         </div>
         <div>
           <label class="field-label">Description</label>
@@ -1031,7 +1035,7 @@
         </div>
         <div>
           <label class="field-label">Job Type</label>
-          <select x-model="jobModal.job_type" class="field-input field-select">
+          <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select">
             <option value="reconciliation">reconciliation</option>
             <option value="bo_report">bo_report</option>
             <option value="automic_job">automic_job</option>
@@ -1060,7 +1064,8 @@
           <label class="field-label">SQL Query</label>
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
-                    @input="validateJobModal()"></textarea>
+                    @input="validateJobModal()"
+                    data-testid="job-modal-query-textarea"></textarea>
           <p x-show="jobModalValidation && jobModalValidation.sql"
              class="text-xs mt-1"
              :class="jobModalValidation && jobModalValidation.sql && jobModalValidation.sql.startsWith('✓') ? 'text-emerald-600' : 'text-amber-600'"
@@ -1133,7 +1138,7 @@
         </div>
         <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
           <label class="field-label">Key Columns (comma-separated)</label>
-          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" />
+          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
         </div>
         <div x-show="jobModal.job_type === 'bo_report'" class="grid-2">
           <div>
@@ -1305,7 +1310,7 @@
       <div x-show="jobModalTab === 'deps'" class="space-y-3">
         <div>
           <label class="field-label">Depends On (comma-separated job names)</label>
-          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" />
+          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" data-testid="job-modal-depends-on-input" />
           <p x-show="jobModalValidation && jobModalValidation.dependencies"
              class="text-xs mt-1 text-amber-600"
              x-text="jobModalValidation && jobModalValidation.dependencies ? jobModalValidation.dependencies : ''">
@@ -1504,15 +1509,16 @@
       </div>
 
       <div class="flex justify-end gap-3 mt-6">
-        <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name">
+        <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
           <span x-show="!validateDefinitionLoading">Validate Definition</span>
           <span x-show="validateDefinitionLoading">Validating...</span>
         </button>
-        <button @click="showJobModal = false" class="btn-secondary">Cancel</button>
-        <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()">Save</button>
+        <button @click="showJobModal = false" class="btn-secondary" data-testid="job-modal-cancel-btn">Cancel</button>
+        <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()" data-testid="job-modal-save-btn">Save</button>
       </div>
       <template x-if="validateDefinitionResult">
         <div class="mt-3 rounded-lg border p-3 text-sm"
+             data-testid="job-modal-validation-result"
              :class="validateDefinitionResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'">
           <div class="font-semibold" x-text="validateDefinitionResult.ok ? 'Definition valid' : 'Definition has issues'"></div>
           <template x-if="validateDefinitionResult.issues && validateDefinitionResult.issues.length">
@@ -1617,7 +1623,7 @@
 
   <div class="flex justify-end">
     <button @click="runTests()" :disabled="selectedJobs.length === 0 || isLaunching"
-            class="btn-primary px-8 py-3 text-base">
+            class="btn-primary px-8 py-3 text-base" data-testid="run-tests-btn">
       <span x-show="!isLaunching">▶ Run Tests</span>
       <span x-show="isLaunching">Launching…</span>
     </button>
@@ -1872,19 +1878,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="empty-state-icon">📡</div>
       <div class="empty-state-title">No active runs</div>
       <div class="empty-state-sub">
-        <button @click="currentView='jobs'" class="text-indigo-500 hover:underline">Launch a test →</button>
+        <button @click="currentView='jobs'" data-testid="monitor-launch-link" class="text-indigo-500 hover:underline">Launch a test →</button>
       </div>
     </div>
   </template>
 
   <div class="space-y-4">
     <template x-for="run in activeRuns" :key="run.run_id">
-      <div class="card">
+      <div class="card" :data-testid="'monitor-run-' + run.run_id">
         <div class="flex items-start justify-between mb-4">
           <div>
             <div class="flex items-center gap-2">
               <span class="font-mono text-sm text-slate-400" x-text="run.run_id.substring(0,8)+'…'"></span>
-              <span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span>
+              <span class="badge" :class="statusBadgeClass(run.status)" :data-testid="'monitor-run-status-' + run.run_id" x-text="run.status"></span>
             </div>
             <div class="text-muted mt-1">
               <span x-text="run.source_env||'?'"></span> → <span x-text="run.target_env||'?'"></span>
@@ -1902,6 +1908,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <button @click="cancelRun(run.run_id)"
                     x-show="!isTerminalStatus(run.status)"
                     :disabled="cancellingRuns[run.run_id] || run.cancel_requested"
+                    :data-testid="'monitor-cancel-btn-' + run.run_id"
                     class="btn-danger btn-sm text-xs disabled:opacity-50"
                     x-text="run.cancel_requested ? 'Cancel requested' : (cancellingRuns[run.run_id] ? 'Cancelling...' : 'Cancel')"></button>
           </div>
@@ -1973,7 +1980,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <template x-if="selectedRun">
     <div>
       <div class="flex items-center gap-3 mb-4">
-        <button @click="selectedRun = null" class="btn-secondary btn-sm">← Back</button>
+        <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
         <div class="section-title">Run Detail</div>
         <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="selectedRun.status"></span>
       </div>
@@ -2329,13 +2336,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <div>
       <!-- Sub-tab switcher -->
       <div class="flex gap-1 mb-4 border-b border-slate-200 pb-2">
-        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Runs</button>
-        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Trends</button>
-        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Lineage</button>
-        <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Audit</button>
-        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Profile</button>
-        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Schema</button>
-        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Coverage</button>
+        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-runs">Runs</button>
+        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-trends">Trends</button>
+        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-lineage">Lineage</button>
+        <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-audit">Audit</button>
+        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-profile">Profile</button>
+        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-schema">Schema</button>
+        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-coverage">Coverage</button>
       </div>
 
       <!-- Trends panel -->
@@ -2666,7 +2673,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
         <div class="flex flex-wrap gap-2 items-center">
-          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter">
             <option value="">All statuses</option>
             <option value="PENDING">PENDING</option>
             <option value="RUNNING">RUNNING</option>
@@ -2674,13 +2681,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <option value="FAILED">FAILED</option>
             <option value="ERROR">ERROR</option>
           </select>
-          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter">
             <option value="">All types</option>
             <option value="reconciliation">reconciliation</option>
             <option value="bo_comparison">bo_comparison</option>
           </select>
-          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm">Clear</button>
-          <button @click="loadRuns()" class="btn-secondary btn-sm">↻ Refresh</button>
+          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm" data-testid="history-clear-btn">Clear</button>
+          <button @click="loadRuns()" class="btn-secondary btn-sm" data-testid="history-refresh-btn">↻ Refresh</button>
           <button @click="compareMode = !compareMode; compareResult = null"
                   :class="compareMode ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
             ⇄ Compare Runs
@@ -2828,7 +2835,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </thead>
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
-              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)">
+              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
                 <td class="font-mono text-xs text-slate-500">
                   <span x-text="run.run_id.substring(0,8)+'…'"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
@@ -2879,7 +2886,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="grid-2 mb-3">
           <div>
             <label class="field-label">Config</label>
-            <select x-model="boConfigId" class="field-input field-select">
+            <select x-model="boConfigId" class="field-input field-select" data-testid="bo-config-select">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -2887,7 +2894,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
           </div>
           <div class="flex items-end">
-            <button @click="testBOConnection()" :disabled="!boConfigId || boTesting" class="btn-primary w-full">
+            <button @click="testBOConnection()" :disabled="!boConfigId || boTesting" class="btn-primary w-full" data-testid="bo-test-connection-btn">
               <span x-show="!boTesting">Test Connection</span>
               <span x-show="boTesting">Testing…</span>
             </button>
@@ -2895,7 +2902,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <template x-if="boTestResult">
           <div :class="boTestResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
-               class="border rounded-lg p-2 text-sm mb-3">
+               class="border rounded-lg p-2 text-sm mb-3" data-testid="bo-test-result">
             <span x-text="boTestResult.ok ? '✓ ' + boTestResult.message : '✗ ' + boTestResult.message"></span>
             <span x-show="boTestResult.latency_ms" class="text-muted ml-2" x-text="boTestResult.latency_ms + 'ms'"></span>
           </div>
@@ -2956,7 +2963,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="grid-2 mb-3">
           <div>
             <label class="field-label">Config</label>
-            <select x-model="automicConfigId" class="field-input field-select">
+            <select x-model="automicConfigId" class="field-input field-select" data-testid="automic-config-select">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -2965,21 +2972,21 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <div>
             <label class="field-label">Lookup Type</label>
-            <select x-model="automicIdType" class="field-input field-select">
+            <select x-model="automicIdType" class="field-input field-select" data-testid="automic-lookup-type-select">
               <option value="job_name">Job Name</option>
               <option value="run_id">Run ID</option>
             </select>
           </div>
         </div>
         <div class="flex gap-2">
-          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" />
-          <button @click="lookupAutomic()" :disabled="!automicConfigId || !automicIdentifier || automicLoading" class="btn-primary flex-shrink-0">
+          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" data-testid="automic-identifier-input" />
+          <button @click="lookupAutomic()" :disabled="!automicConfigId || !automicIdentifier || automicLoading" class="btn-primary flex-shrink-0" data-testid="automic-lookup-btn">
             <span x-show="!automicLoading">Lookup</span>
             <span x-show="automicLoading">…</span>
           </button>
         </div>
         <template x-if="automicResult">
-          <div class="mt-3 border rounded-lg p-3 text-sm" :class="automicResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'">
+          <div class="mt-3 border rounded-lg p-3 text-sm" :class="automicResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'" data-testid="automic-result">
             <div class="flex items-center justify-between">
               <span class="font-medium" x-text="automicResult.identifier"></span>
               <span class="badge" :class="statusBadgeClass(automicResult.status)" x-text="automicResult.status"></span>
@@ -3167,28 +3174,28 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run</div>
     <div class="flex gap-3">
-      <select x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
+      <select data-testid="reports-run-select" x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
         </template>
       </select>
-      <button @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
+      <button data-testid="reports-load-btn" @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
     </div>
   </div>
 
   <template x-if="reportRunId">
     <div class="compare-subtabs mb-4">
-      <button @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
-      <button @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
-      <button @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
+      <button data-testid="reports-subtab-report" @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
+      <button data-testid="reports-subtab-metrics" @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
+      <button data-testid="reports-subtab-logs" @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
     </div>
   </template>
 
   <template x-if="reportRunId && reportLoaded && reportView === 'report'">
     <div>
       <div class="card p-0 overflow-hidden report-frame-card">
-      <iframe :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
+      <iframe data-testid="reports-iframe" :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
       </div>
     </div>
   </template>
@@ -3196,7 +3203,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <template x-if="reportRunId && reportLoaded && reportView === 'metrics'">
     <div class="space-y-4">
       <div class="flex gap-2 mb-3 flex-wrap">
-        <button @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
+        <button data-testid="reports-metrics-refresh-btn" @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
           <span x-text="reportMetricsLoading ? 'Refreshing…' : 'Refresh Metrics'"></span>
         </button>
       </div>
@@ -3257,14 +3264,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input
             x-model.debounce.300ms="logFilterQuery"
             class="field-input"
+            data-testid="reports-logs-search-input"
             placeholder="Search logs… (live)"
           />
           <div class="flex gap-2 flex-wrap items-center">
-            <button class="level-chip" :class="logFilterLevel === '' ? 'chip-active-ALL' : ''" @click="logFilterLevel = ''">ALL</button>
-            <button class="level-chip" :class="logFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="logFilterLevel = logFilterLevel === 'ERROR' ? '' : 'ERROR'">ERROR</button>
-            <button class="level-chip" :class="logFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="logFilterLevel = logFilterLevel === 'WARNING' ? '' : 'WARNING'">WARN</button>
-            <button class="level-chip" :class="logFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="logFilterLevel = logFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
-            <button class="level-chip" :class="logFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="logFilterLevel = logFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
+            <button class="level-chip" :class="logFilterLevel === '' ? 'chip-active-ALL' : ''" @click="logFilterLevel = ''" data-testid="reports-logs-level-ALL">ALL</button>
+            <button class="level-chip" :class="logFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="logFilterLevel = logFilterLevel === 'ERROR' ? '' : 'ERROR'" data-testid="reports-logs-level-ERROR">ERROR</button>
+            <button class="level-chip" :class="logFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="logFilterLevel = logFilterLevel === 'WARNING' ? '' : 'WARNING'" data-testid="reports-logs-level-WARNING">WARN</button>
+            <button class="level-chip" :class="logFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="logFilterLevel = logFilterLevel === 'INFO' ? '' : 'INFO'" data-testid="reports-logs-level-INFO">INFO</button>
+            <button class="level-chip" :class="logFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="logFilterLevel = logFilterLevel === 'DEBUG' ? '' : 'DEBUG'" data-testid="reports-logs-level-DEBUG">DEBUG</button>
             <span class="text-muted text-xs ml-2" x-text="filteredLogEvents().length + ' / ' + allLogEvents.length + ' events'"></span>
             <template x-if="allLogEventsTruncated">
               <span class="text-xs text-amber ml-2" x-text="'Showing first 5,000 of ' + allLogEventsTotalLines.toLocaleString() + ' events'"></span>
@@ -3332,13 +3340,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run &amp; Test</div>
     <div class="flex gap-3 flex-wrap">
-      <select x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1">
+      <select data-testid="diff-run-select" x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
         </template>
       </select>
-      <select x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1">
+      <select data-testid="diff-test-select" x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1">
         <option value="">— Choose test —</option>
         <template x-for="t in diffTestOptions" :key="t.id">
           <option :value="t.id" x-text="t.query_name + ' (' + t.total_issues + ' issues)'"></option>
@@ -3383,11 +3391,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="flex items-center gap-3 flex-wrap">
           <span class="text-xs font-semibold text-slate-600" x-text="diffTotal + ' matching rows'"></span>
           <div class="flex gap-2 ml-auto">
-            <button @click="openMismatchDecisionForm('diff', 'accept')"
+            <button data-testid="diff-accept-all-btn" @click="openMismatchDecisionForm('diff', 'accept')"
                     class="btn-accept-confirm text-xs px-3 py-1.5" :disabled="diffTotal === 0">
               Accept all <span x-text="diffTotal"></span> filtered
             </button>
-            <button @click="openMismatchDecisionForm('diff', 'reject')"
+            <button data-testid="diff-reject-all-btn" @click="openMismatchDecisionForm('diff', 'reject')"
                     class="btn-outline btn-sm text-xs" :disabled="diffTotal === 0">
               Reject all <span x-text="diffTotal"></span> filtered
             </button>
@@ -3397,35 +3405,35 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
       <div class="card mb-4">
         <div class="flex gap-2 flex-wrap items-center">
-          <input x-model="diffSearch" @input.debounce.300ms="applyDifferenceFilters()" class="field-input flex-1" placeholder="Search key values, column, source/target…" style="min-width:220px">
-          <select x-model="diffColumn" @change="applyDifferenceFilters()" class="field-input field-select">
+          <input data-testid="diff-search-input" x-model="diffSearch" @input.debounce.300ms="applyDifferenceFilters()" class="field-input flex-1" placeholder="Search key values, column, source/target…" style="min-width:220px">
+          <select data-testid="diff-column-select" x-model="diffColumn" @change="applyDifferenceFilters()" class="field-input field-select">
             <option value="">All columns</option>
             <template x-for="c in diffColumnOptions" :key="c"><option :value="c" x-text="c"></option></template>
           </select>
-          <select x-model="diffType" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-type-select" x-model="diffType" @change="applyDifferenceFilters()" class="field-input field-select">
             <option value="">All types</option>
             <option value="value_diff">Value diff</option>
             <option value="missing_in_target">Missing →</option>
             <option value="missing_in_source">Missing ←</option>
           </select>
-          <select x-model="diffStatus" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-status-select" x-model="diffStatus" @change="applyDifferenceFilters()" class="field-input field-select">
             <option value="">All statuses</option>
             <option value="pending">Pending only</option>
             <option value="accepted">Accepted only</option>
             <option value="rejected">Rejected only</option>
           </select>
-          <select x-model="diffSort" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-sort-select" x-model="diffSort" @change="applyDifferenceFilters()" class="field-input field-select">
             <option value="id">Default order</option>
             <option value="column">Sort by column</option>
             <option value="mismatch_type">Sort by type</option>
           </select>
-          <button class="btn-secondary btn-sm" @click="clearDifferenceFilters()">✕ Clear</button>
+          <button data-testid="diff-clear-filters-btn" class="btn-secondary btn-sm" @click="clearDifferenceFilters()">✕ Clear</button>
           <span class="text-xs text-muted ml-auto" x-text="diffTotal + ' matching rows'"></span>
         </div>
       </div>
 
       <div class="card overflow-hidden p-0">
-        <table class="data-table">
+        <table data-testid="diff-results-table" class="data-table">
           <thead><tr><th>Type</th><th>Column</th><th>Key Values</th><th>Source</th><th>Target</th><th>Status</th></tr></thead>
           <tbody>
             <template x-if="diffLoading">
@@ -3449,9 +3457,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
 
       <div class="flex items-center justify-between gap-3 mt-3">
-        <button class="btn-secondary btn-sm" @click="prevDifferencePage()" :disabled="diffPage === 0">← Prev</button>
-        <span class="text-xs text-muted" x-text="'Page ' + (diffPage + 1) + ' of ' + differenceTotalPages()"></span>
-        <button class="btn-secondary btn-sm" @click="nextDifferencePage()" :disabled="(diffPage + 1) * diffPageSize >= diffTotal">Next →</button>
+        <button data-testid="diff-prev-btn" class="btn-secondary btn-sm" @click="prevDifferencePage()" :disabled="diffPage === 0">← Prev</button>
+        <span data-testid="diff-page-label" class="text-xs text-muted" x-text="'Page ' + (diffPage + 1) + ' of ' + differenceTotalPages()"></span>
+        <button data-testid="diff-next-btn" class="btn-secondary btn-sm" @click="nextDifferencePage()" :disabled="(diffPage + 1) * diffPageSize >= diffTotal">Next →</button>
       </div>
     </div>
   </template>
@@ -3481,15 +3489,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 
   <div class="compare-subtabs mb-4">
-    <button @click="compareSubTab = 'bo'" :class="compareSubTab === 'bo' ? 'sub-tab active' : 'sub-tab'">BO Report</button>
-    <button @click="compareSubTab = 'recon'" :class="compareSubTab === 'recon' ? 'sub-tab active' : 'sub-tab'">Reconciliation</button>
-    <button @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
-    <button @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
-    <button @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
+    <button data-testid="compare-subtab-bo" @click="compareSubTab = 'bo'" :class="compareSubTab === 'bo' ? 'sub-tab active' : 'sub-tab'">BO Report</button>
+    <button data-testid="compare-subtab-recon" @click="compareSubTab = 'recon'" :class="compareSubTab === 'recon' ? 'sub-tab active' : 'sub-tab'">Reconciliation</button>
+    <button data-testid="compare-subtab-sql" @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
+    <button data-testid="compare-subtab-colstats" @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
+    <button data-testid="compare-subtab-mmdiff" @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
   </div>
 
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
-    <select @change="loadCompareTemplate($event.target.value)"
+    <select data-testid="compare-template-load-select" @change="loadCompareTemplate($event.target.value)"
             class="field-input text-sm flex-1"
             x-model="activeCompareTemplate">
       <option value="">-- Load template --</option>
@@ -3504,15 +3512,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </template>
       </optgroup>
     </select>
-    <button @click="showCompareTemplatePanel = !showCompareTemplatePanel"
+    <button data-testid="compare-template-save-toggle-btn" @click="showCompareTemplatePanel = !showCompareTemplatePanel"
             class="btn-outline btn-sm text-xs">
       Save Template
     </button>
   </div>
   <div x-show="showCompareTemplatePanel" class="p-3 border-b flex gap-2 mb-4">
-    <input type="text" x-model="newCompareTemplateName" placeholder="Template name..." class="field-input text-sm flex-1">
-    <button @click="saveCompareTemplate()" class="btn-primary btn-sm text-sm">Save</button>
-    <button @click="showCompareTemplatePanel = false" class="btn-outline btn-sm text-sm">Cancel</button>
+    <input data-testid="compare-template-name-input" type="text" x-model="newCompareTemplateName" placeholder="Template name..." class="field-input text-sm flex-1">
+    <button data-testid="compare-template-save-btn" @click="saveCompareTemplate()" class="btn-primary btn-sm text-sm">Save</button>
+    <button data-testid="compare-template-cancel-btn" @click="showCompareTemplatePanel = false" class="btn-outline btn-sm text-sm">Cancel</button>
   </div>
 
   <div x-show="compareSubTab === 'bo'" class="space-y-4">
@@ -3520,23 +3528,23 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="card compare-source-card">
         <div class="compare-card-title">Source A</div>
         <div class="mode-row mb-3">
-          <button @click="boSourceAType = 'live'" :class="boSourceAType === 'live' ? 'pill active' : 'pill'">Live</button>
-          <button @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
-          <button @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
-          <button @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-a-mode-live" @click="boSourceAType = 'live'" :class="boSourceAType === 'live' ? 'pill active' : 'pill'">Live</button>
+          <button data-testid="compare-bo-source-a-mode-path" @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
+          <button data-testid="compare-bo-source-a-mode-upload" @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+          <button data-testid="compare-bo-source-a-mode-api" @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
-        <input x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" />
+        <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" />
         <template x-if="boSourceAType === 'live'">
           <div class="space-y-2">
-            <select x-model="boSourceA.configId" @change="loadCompareBODocuments('a')" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-config-select" x-model="boSourceA.configId" @change="loadCompareBODocuments('a')" class="field-input field-select">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select x-model="boSourceA.docId" @change="loadCompareBOReports('a')" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-doc-select" x-model="boSourceA.docId" @change="loadCompareBOReports('a')" class="field-input field-select">
               <option value="">Select document</option>
               <template x-for="d in boDocsA" :key="d.id"><option :value="d.id" x-text="d.name"></option></template>
             </select>
-            <select x-model="boSourceA.reportId" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-report-select" x-model="boSourceA.reportId" class="field-input field-select">
               <option value="">Select report</option>
               <template x-for="r in boReportsA" :key="r.id"><option :value="r.id" x-text="r.name"></option></template>
             </select>
@@ -3546,7 +3554,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
-          <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" />
+          <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" />
         </template>
         <template x-if="boSourceAType === 'api'">
           <div class="space-y-2">
@@ -3567,23 +3575,23 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="card compare-source-card">
         <div class="compare-card-title">Source B</div>
         <div class="mode-row mb-3">
-          <button @click="boSourceBType = 'live'" :class="boSourceBType === 'live' ? 'pill active' : 'pill'">Live</button>
-          <button @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
-          <button @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
-          <button @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-b-mode-live" @click="boSourceBType = 'live'" :class="boSourceBType === 'live' ? 'pill active' : 'pill'">Live</button>
+          <button data-testid="compare-bo-source-b-mode-path" @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
+          <button data-testid="compare-bo-source-b-mode-upload" @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+          <button data-testid="compare-bo-source-b-mode-api" @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
-        <input x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" />
+        <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" />
         <template x-if="boSourceBType === 'live'">
           <div class="space-y-2">
-            <select x-model="boSourceB.configId" @change="loadCompareBODocuments('b')" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-config-select" x-model="boSourceB.configId" @change="loadCompareBODocuments('b')" class="field-input field-select">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select x-model="boSourceB.docId" @change="loadCompareBOReports('b')" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-doc-select" x-model="boSourceB.docId" @change="loadCompareBOReports('b')" class="field-input field-select">
               <option value="">Select document</option>
               <template x-for="d in boDocsB" :key="d.id"><option :value="d.id" x-text="d.name"></option></template>
             </select>
-            <select x-model="boSourceB.reportId" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-report-select" x-model="boSourceB.reportId" class="field-input field-select">
               <option value="">Select report</option>
               <template x-for="r in boReportsB" :key="r.id"><option :value="r.id" x-text="r.name"></option></template>
             </select>
@@ -3593,7 +3601,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
-          <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" />
+          <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" />
         </template>
         <template x-if="boSourceBType === 'api'">
           <div class="space-y-2">
@@ -3614,24 +3622,24 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="grid-2 mb-3">
         <div>
           <label class="field-label">Key columns</label>
-          <input x-model="boKeyColumns" class="field-input" placeholder="id, account_id" />
+          <input data-testid="compare-bo-key-columns-input" x-model="boKeyColumns" class="field-input" placeholder="id, account_id" />
         </div>
         <div>
           <label class="field-label">Exclude columns</label>
-          <input x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" />
+          <input data-testid="compare-bo-exclude-columns-input" x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" />
         </div>
       </div>
       <!-- Advanced Options accordion -->
       <div class="mb-3 border rounded">
-        <button @click="boAdvancedOpen = !boAdvancedOpen"
+        <button data-testid="compare-bo-advanced-toggle" @click="boAdvancedOpen = !boAdvancedOpen"
                 class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
           <span>Advanced Options</span>
           <span x-text="boAdvancedOpen ? '▲' : '▼'"></span>
         </button>
-        <div x-show="boAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+        <div data-testid="compare-bo-advanced-panel" x-show="boAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
           <div>
             <label class="field-label">Backend</label>
-            <select x-model="boBackend" class="field-input">
+            <select data-testid="compare-bo-backend-select" x-model="boBackend" class="field-input">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
               <option value="duckdb">duckdb</option>
@@ -3639,34 +3647,34 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <div>
             <label class="field-label">Float Tolerance</label>
-            <input x-model="boFloatTolerance" class="field-input" placeholder="1e-9" />
+            <input data-testid="compare-bo-float-tolerance-input" x-model="boFloatTolerance" class="field-input" placeholder="1e-9" />
           </div>
           <div>
             <label class="field-label">Datetime Tolerance (s)</label>
-            <input x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+            <input data-testid="compare-bo-datetime-tolerance-input" x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
           </div>
           <div>
             <label class="field-label">Mismatch Row Limit</label>
-            <input x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+            <input data-testid="compare-bo-mismatch-row-limit-input" x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
           </div>
           <div>
             <label class="field-label">Sample Fraction (0–1)</label>
-            <input x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
+            <input data-testid="compare-bo-sample-frac-input" x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
           </div>
           <div class="col-span-2">
             <label class="field-label">Per-column tolerances (col:val, …)</label>
-            <input x-model="boColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+            <input data-testid="compare-bo-column-tolerances-input" x-model="boColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
           </div>
           <div>
             <label class="field-label">Case-insensitive columns</label>
-            <input x-model="boCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+            <input data-testid="compare-bo-case-insensitive-input" x-model="boCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
           </div>
           <div>
             <label class="field-label">Whitespace-normalize columns</label>
-            <input x-model="boWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+            <input data-testid="compare-bo-whitespace-normalize-input" x-model="boWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
           </div>
           <div class="col-span-2 flex items-center gap-2 mt-1">
-            <input type="checkbox" x-model="boParallelColumns" id="boParallelCols" class="rounded" />
+            <input data-testid="compare-bo-parallel-columns-checkbox" type="checkbox" x-model="boParallelColumns" id="boParallelCols" class="rounded" />
             <label for="boParallelCols">Parallel column comparison</label>
           </div>
         </div>
@@ -3676,11 +3684,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input type="checkbox" x-model="boSaveAsBaseline" class="rounded">
           <span>Save as Baseline when complete</span>
         </label>
-        <button @click="swapCompareSides()" class="btn-outline btn-sm ml-auto" title="Swap Source A and Source B">
+        <button data-testid="compare-bo-swap-btn" @click="swapCompareSides()" class="btn-outline btn-sm ml-auto" title="Swap Source A and Source B">
           ⇄ Swap Sides
         </button>
       </div>
-      <button @click="runBOComparison()" :disabled="boCompareLoading" class="btn-primary">
+      <button data-testid="compare-bo-run-btn" @click="runBOComparison()" :disabled="boCompareLoading" class="btn-primary">
         <span x-show="!boCompareLoading">Run BO Compare</span>
         <span x-show="boCompareLoading">Comparing...</span>
       </button>
@@ -3725,12 +3733,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <p x-show="!mismatchChartData" class="text-xs text-slate-400 text-center py-4">Loading chart data...</p>
         </div>
         <div class="flex gap-2 flex-wrap mb-3">
-          <span class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boCompareResult.status"></span>
+          <span data-testid="compare-bo-result-status" class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boCompareResult.status"></span>
           <span class="compare-chip chip-unchanged" x-text="(boCompareResult.total_tests || 0) + ' test stored'"></span>
           <span class="compare-chip chip-regressed" x-show="(boCompareResult.failed || 0) > 0" x-text="boCompareResult.failed + ' failed'"></span>
         </div>
         <template x-if="boCompareResult.results && boCompareResult.results.length">
-          <table class="data-table">
+          <table data-testid="compare-bo-results-table" class="data-table">
             <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
             <tbody>
               <template x-for="r in boCompareResult.results" :key="r.id">
@@ -3749,7 +3757,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </td>
                   <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '-'"></td>
                   <td>
-                    <button x-show="totalMismatches(r) > 0" @click="openMismatchDrawer(boCompareResult.run_id, r)" class="btn-secondary btn-sm">View</button>
+                    <button :data-testid="'compare-bo-view-btn-' + r.id" x-show="totalMismatches(r) > 0" @click="openMismatchDrawer(boCompareResult.run_id, r)" class="btn-secondary btn-sm">View</button>
                   </td>
                 </tr>
               </template>
@@ -3763,7 +3771,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div x-show="compareSubTab === 'recon'" class="space-y-4">
     <div class="flex items-center gap-3 mb-3 p-2 bg-slate-50 rounded border">
       <label class="flex items-center gap-2 text-sm cursor-pointer">
-        <input type="checkbox"
+        <input data-testid="compare-recon-quick-checkbox" type="checkbox"
                :checked="quickCompareMode"
                @change="quickCompareMode ? disableQuickCompare() : enableQuickCompare()"
                class="rounded">
@@ -3773,11 +3781,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
 
     <div class="mode-grid">
-      <button @click="reconMode = 'stored'" :class="reconMode === 'stored' ? 'mode-card active' : 'mode-card'">
+      <button data-testid="compare-recon-mode-stored" @click="reconMode = 'stored'" :class="reconMode === 'stored' ? 'mode-card active' : 'mode-card'">
         <h4>Dual Environment</h4>
         <p>Launch and compare two reconciliation runs.</p>
       </button>
-      <button @click="reconMode = 'file'" :class="reconMode === 'file' ? 'mode-card active' : 'mode-card'">
+      <button data-testid="compare-recon-mode-file" @click="reconMode = 'file'" :class="reconMode === 'file' ? 'mode-card active' : 'mode-card'">
         <h4>Run/File vs Report</h4>
         <p>Compare stored results or HTML against production HTML.</p>
       </button>
@@ -3787,7 +3795,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="compare-source-grid">
         <div class="card compare-source-card">
           <div class="compare-card-title">Environment A</div>
-          <select x-model="dualEnvConfigA" class="field-input field-select mb-2">
+          <select data-testid="compare-recon-dualenv-config-a-select" x-model="dualEnvConfigA" class="field-input field-select mb-2">
             <option value="">Select config</option>
             <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
           </select>
@@ -3797,7 +3805,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
           <div class="compare-card-title">Environment B</div>
-          <select x-model="dualEnvConfigB" class="field-input field-select mb-2">
+          <select data-testid="compare-recon-dualenv-config-b-select" x-model="dualEnvConfigB" class="field-input field-select mb-2">
             <option value="">Select config</option>
             <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
           </select>
@@ -3807,10 +3815,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
       <div class="card">
         <label class="field-label">Jobs to run</label>
-        <select x-model="dualEnvJobs" multiple class="field-input field-select compare-multi-select mb-3">
+        <select data-testid="compare-recon-dualenv-jobs-select" x-model="dualEnvJobs" multiple class="field-input field-select compare-multi-select mb-3">
           <template x-for="j in jobs" :key="j.name"><option :value="j.name" x-text="j.name"></option></template>
         </select>
-        <button @click="launchDualEnv()" :disabled="dualEnvLoading" class="btn-primary">
+        <button data-testid="compare-recon-dualenv-launch-btn" @click="launchDualEnv()" :disabled="dualEnvLoading" class="btn-primary">
           <span x-show="!dualEnvLoading">Launch Dual-Env Run</span>
           <span x-show="dualEnvLoading">Launching...</span>
         </button>
@@ -3846,13 +3854,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="card">
         <div class="flex items-center justify-between mb-3">
           <div class="font-semibold text-slate-700">Past Dual-Env Pairs</div>
-          <button @click="loadPastPairs()" :disabled="pastPairsLoading" class="btn-secondary btn-sm">
+          <button data-testid="compare-recon-dualenv-refresh-pairs-btn" @click="loadPastPairs()" :disabled="pastPairsLoading" class="btn-secondary btn-sm">
             <span x-show="!pastPairsLoading">Refresh</span>
             <span x-show="pastPairsLoading">Loading…</span>
           </button>
         </div>
         <template x-if="pastPairs.length === 0 && !pastPairsLoading">
-          <div class="text-muted text-sm">No past pairs found. Click Refresh to load.</div>
+          <div data-testid="compare-recon-dualenv-pairs-empty" class="text-muted text-sm">No past pairs found. Click Refresh to load.</div>
         </template>
         <template x-if="pastPairs.length > 0">
           <table class="data-table">
@@ -3895,14 +3903,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="compare-card-title">Source A</div>
           <input x-model="fileLabelA" class="field-input mb-2" placeholder="Source A label" />
           <div class="mode-row mb-3">
-            <button @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
-            <button @click="fileSourceAType = 'path'" :class="fileSourceAType === 'path' ? 'pill active' : 'pill'">Server Path</button>
-            <button @click="fileSourceAType = 'upload'" :class="fileSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+            <button data-testid="compare-file-source-a-mode-run" @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
+            <button data-testid="compare-file-source-a-mode-path" @click="fileSourceAType = 'path'" :class="fileSourceAType === 'path' ? 'pill active' : 'pill'">Server Path</button>
+            <button data-testid="compare-file-source-a-mode-upload" @click="fileSourceAType = 'upload'" :class="fileSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           </div>
           <template x-if="fileSourceAType === 'run'">
             <div>
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
-              <select x-model="fileRunIdA" class="field-input field-select mt-1">
+              <select data-testid="compare-file-source-a-run-select" x-model="fileRunIdA" class="field-input field-select mt-1">
                 <option value="">Select run</option>
                 <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
                   <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
@@ -3915,7 +3923,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
           <template x-if="fileSourceAType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+              <input data-testid="compare-file-source-a-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
               <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1" x-text="fileNameA ? fileNameA + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -3925,14 +3933,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="compare-card-title">Source B</div>
           <input x-model="fileLabelB" class="field-input mb-2" placeholder="Source B label" />
           <div class="mode-row mb-3">
-            <button @click="fileSourceBType = 'run'" :class="fileSourceBType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
-            <button @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Server Path</button>
-            <button @click="fileSourceBType = 'upload'" :class="fileSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
+            <button data-testid="compare-file-source-b-mode-run" @click="fileSourceBType = 'run'" :class="fileSourceBType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
+            <button data-testid="compare-file-source-b-mode-path" @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Server Path</button>
+            <button data-testid="compare-file-source-b-mode-upload" @click="fileSourceBType = 'upload'" :class="fileSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           </div>
           <template x-if="fileSourceBType === 'run'">
             <div>
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
-              <select x-model="fileRunIdB" class="field-input field-select mt-1">
+              <select data-testid="compare-file-source-b-run-select" x-model="fileRunIdB" class="field-input field-select mt-1">
                 <option value="">Select run</option>
                 <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
                   <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
@@ -3945,7 +3953,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
           <template x-if="fileSourceBType === 'upload'">
             <div>
-              <input type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+              <input data-testid="compare-file-source-b-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
               <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1" x-text="fileNameB ? fileNameB + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -3964,12 +3972,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <!-- Advanced Options accordion -->
         <div class="border rounded">
-          <button @click="fileAdvancedOpen = !fileAdvancedOpen"
+          <button data-testid="compare-file-advanced-toggle" @click="fileAdvancedOpen = !fileAdvancedOpen"
                   class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
             <span>Advanced Options</span>
             <span x-text="fileAdvancedOpen ? '▲' : '▼'"></span>
           </button>
-          <div x-show="fileAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+          <div data-testid="compare-file-advanced-panel" x-show="fileAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
             <div>
               <label class="field-label">Backend</label>
               <select x-model="fileBackend" class="field-input">
@@ -4012,7 +4020,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </div>
           </div>
         </div>
-        <button @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
+        <button data-testid="compare-file-run-btn" @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
           <span x-show="!fileCompareLoading">Compare Files</span>
           <span x-show="fileCompareLoading">Comparing...</span>
         </button>
@@ -4020,7 +4028,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <template x-if="fileCompareResult">
         <div class="card">
           <div class="flex items-center justify-between mb-3">
-            <div class="font-semibold text-slate-700">File Comparison Results</div>
+            <div data-testid="compare-file-results" class="font-semibold text-slate-700">File Comparison Results</div>
             <div class="flex gap-2 items-center">
               <button @click="downloadCompareResults('csv')" class="btn-secondary btn-sm text-xs">⬇ CSV</button>
               <button @click="downloadCompareResults('xlsx')" class="btn-secondary btn-sm text-xs">⬇ Excel</button>
@@ -4046,6 +4054,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <template x-for="r in fileCompareResult.results" :key="r.id">
                 <div class="border border-slate-200 rounded-lg overflow-hidden">
                   <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
+                       :data-testid="'compare-file-row-' + r.query_name"
                        @click="r.status !== 'PASSED' && toggleFileDiff(r)">
                     <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
                     <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
@@ -4200,14 +4209,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="compare-card-title">Source A</div>
         <input x-model="sqlLabelA" class="field-input mb-2" placeholder="Source A label" />
         <label class="field-label">Config</label>
-        <select x-model="sqlConfigA" class="field-input field-select mb-3">
+        <select data-testid="compare-sql-config-a-select" x-model="sqlConfigA" class="field-input field-select mb-3">
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
         <template x-if="sqlConfigAConnections().length > 0">
           <div class="mb-3">
             <label class="field-label">Connection</label>
-            <select x-model="sqlConnectionA" class="field-input field-select">
+            <select data-testid="compare-sql-connection-a-select" x-model="sqlConnectionA" class="field-input field-select">
               <option :value="null">— default —</option>
               <template x-for="name in sqlConfigAConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -4216,7 +4225,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </template>
         <label class="field-label">SQL Query</label>
-        <textarea x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+        <textarea data-testid="compare-sql-query-a-textarea" x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
       </div>
 
       <div class="vs-divider">VS</div>
@@ -4225,14 +4234,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="compare-card-title">Source B</div>
         <input x-model="sqlLabelB" class="field-input mb-2" placeholder="Source B label" />
         <label class="field-label">Config</label>
-        <select x-model="sqlConfigB" class="field-input field-select mb-3">
+        <select data-testid="compare-sql-config-b-select" x-model="sqlConfigB" class="field-input field-select mb-3">
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
         <template x-if="sqlConfigBConnections().length > 0">
           <div class="mb-3">
             <label class="field-label">Connection</label>
-            <select x-model="sqlConnectionB" class="field-input field-select">
+            <select data-testid="compare-sql-connection-b-select" x-model="sqlConnectionB" class="field-input field-select">
               <option :value="null">— default —</option>
               <template x-for="name in sqlConfigBConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -4241,7 +4250,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </template>
         <label class="field-label">SQL Query</label>
-        <textarea x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+        <textarea data-testid="compare-sql-query-b-textarea" x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
       </div>
     </div>
 
@@ -4258,12 +4267,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
       <!-- Advanced Options accordion -->
       <div class="border rounded">
-        <button @click="sqlAdvancedOpen = !sqlAdvancedOpen"
+        <button data-testid="compare-sql-advanced-toggle" @click="sqlAdvancedOpen = !sqlAdvancedOpen"
                 class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
           <span>Advanced Options</span>
           <span x-text="sqlAdvancedOpen ? '▲' : '▼'"></span>
         </button>
-        <div x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+        <div data-testid="compare-sql-advanced-panel" x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
           <div>
             <label class="field-label">Backend</label>
             <select x-model="sqlBackend" class="field-input">
@@ -4306,7 +4315,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
       </div>
-      <button @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
+      <button data-testid="compare-sql-run-btn" @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
         <span x-show="!sqlCompareLoading">Run SQL Compare</span>
         <span x-show="sqlCompareLoading">Comparing...</span>
       </button>
@@ -4315,7 +4324,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <template x-if="sqlCompareResult">
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <div class="font-semibold text-slate-700">SQL Comparison Results</div>
+          <div data-testid="compare-sql-results" class="font-semibold text-slate-700">SQL Comparison Results</div>
           <div class="flex gap-2 items-center">
             <button @click="downloadAllDifferences(sqlCompareResult.run_id, 'csv')"
                     :disabled="isDifferenceExportBusy(sqlCompareResult.run_id, 'csv')"
@@ -4338,6 +4347,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <template x-for="r in sqlCompareResult.results" :key="r.id">
               <div class="border border-slate-200 rounded-lg overflow-hidden">
                 <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
+                     :data-testid="'compare-sql-row-' + r.query_name"
                      @click="r.status !== 'PASSED' && toggleSQLDiff(r)">
                   <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
                   <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
@@ -4493,7 +4503,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="compare-card-title">Source A</div>
           <input x-model="colStatsSourceA.label" class="field-input mb-2" placeholder="Source A label" />
           <label class="field-label">Source type</label>
-          <select x-model="colStatsSourceAType" class="field-input field-select mb-2">
+          <select data-testid="compare-colstats-source-a-type-select" x-model="colStatsSourceAType" class="field-input field-select mb-2">
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
@@ -4501,7 +4511,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </select>
           <template x-if="colStatsSourceAType === 'upload'">
             <div>
-              <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
+              <input data-testid="compare-colstats-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
               <div x-show="colStatsSourceA.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceA.fileName ? colStatsSourceA.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -4514,8 +4524,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <input x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
-              <input x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
+              <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
+              <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
             </div>
           </template>
           <template x-if="colStatsSourceAType === 'api'">
@@ -4536,7 +4546,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="compare-card-title">Source B</div>
           <input x-model="colStatsSourceB.label" class="field-input mb-2" placeholder="Source B label" />
           <label class="field-label">Source type</label>
-          <select x-model="colStatsSourceBType" class="field-input field-select mb-2">
+          <select data-testid="compare-colstats-source-b-type-select" x-model="colStatsSourceBType" class="field-input field-select mb-2">
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
@@ -4544,7 +4554,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </select>
           <template x-if="colStatsSourceBType === 'upload'">
             <div>
-              <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
+              <input data-testid="compare-colstats-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
               <div x-show="colStatsSourceB.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceB.fileName ? colStatsSourceB.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -4557,8 +4567,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <input x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
-              <input x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+              <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
+              <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
             </div>
           </template>
           <template x-if="colStatsSourceBType === 'api'">
@@ -4578,25 +4588,25 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="grid-2 mt-3">
         <div>
           <label class="field-label">Query/Report name</label>
-          <input x-model="colStatsQueryName" class="field-input" placeholder="stats_compare" />
+          <input data-testid="compare-colstats-query-name-input" x-model="colStatsQueryName" class="field-input" placeholder="stats_compare" />
         </div>
         <div>
           <label class="field-label">Float Tolerance</label>
-          <input x-model="colStatsFloatTol" class="field-input" placeholder="1e-9" />
+          <input data-testid="compare-colstats-float-tol-input" x-model="colStatsFloatTol" class="field-input" placeholder="1e-9" />
         </div>
         <div>
           <label class="field-label">Row Count Tolerance</label>
-          <input x-model="colStatsRowCountTol" type="number" min="0" class="field-input" placeholder="0" />
+          <input data-testid="compare-colstats-row-count-tol-input" x-model="colStatsRowCountTol" type="number" min="0" class="field-input" placeholder="0" />
         </div>
       </div>
-      <button @click="runColumnStats()" :disabled="colStatsLoading" class="btn-primary mt-3">
+      <button data-testid="compare-colstats-run-btn" @click="runColumnStats()" :disabled="colStatsLoading" class="btn-primary mt-3">
         <span x-show="!colStatsLoading">Compute Column Stats</span>
         <span x-show="colStatsLoading">Computing...</span>
       </button>
     </div>
 
     <template x-if="colStatsResult">
-      <div class="card">
+      <div data-testid="compare-colstats-result" class="card">
         <div class="flex items-center gap-2 mb-3">
           <h3 class="text-sm font-semibold text-slate-700">Column Stats Result</h3>
           <span class="ml-2 badge" :class="colStatsResult.has_diffs ? 'badge-failed' : 'badge-passed'"
@@ -4633,20 +4643,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="grid-2">
         <div>
           <label class="field-label">Run A (baseline)</label>
-          <input x-model="mismatchDiffRunIdA" class="field-input font-mono text-xs" placeholder="run UUID" />
+          <input data-testid="compare-mmdiff-run-a-input" x-model="mismatchDiffRunIdA" class="field-input font-mono text-xs" placeholder="run UUID" />
           <input x-model="mismatchDiffRunLabelA" class="field-input mt-1 text-xs" placeholder="Label (e.g. Yesterday)" />
         </div>
         <div>
           <label class="field-label">Run B (current)</label>
-          <input x-model="mismatchDiffRunIdB" class="field-input font-mono text-xs" placeholder="run UUID" />
+          <input data-testid="compare-mmdiff-run-b-input" x-model="mismatchDiffRunIdB" class="field-input font-mono text-xs" placeholder="run UUID" />
           <input x-model="mismatchDiffRunLabelB" class="field-input mt-1 text-xs" placeholder="Label (e.g. Today)" />
         </div>
         <div class="col-span-2 mt-2">
           <label class="field-label">Filter by query name <span class="text-slate-400 font-normal">(optional)</span></label>
-          <input x-model="mismatchDiffQueryName" class="field-input" placeholder="Leave blank to diff all queries" />
+          <input data-testid="compare-mmdiff-query-filter-input" x-model="mismatchDiffQueryName" class="field-input" placeholder="Leave blank to diff all queries" />
         </div>
       </div>
-      <button @click="runMismatchDiff()" :disabled="mismatchDiffLoading" class="btn-primary mt-3">
+      <button data-testid="compare-mmdiff-run-btn" @click="runMismatchDiff()" :disabled="mismatchDiffLoading" class="btn-primary mt-3">
         <span x-show="!mismatchDiffLoading">Run Mismatch Diff</span>
         <span x-show="mismatchDiffLoading">Diffing...</span>
       </button>
@@ -4661,15 +4671,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <div class="flex gap-3 text-xs">
           <div class="px-3 py-2 bg-red-50 border border-red-200 rounded text-center">
-            <div class="font-semibold text-red-700 text-lg" x-text="mismatchDiffResult.summary.new"></div>
+            <div data-testid="compare-mmdiff-new-count" class="font-semibold text-red-700 text-lg" x-text="mismatchDiffResult.summary.new"></div>
             <div class="text-red-500">New (regressions)</div>
           </div>
           <div class="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-center">
-            <div class="font-semibold text-emerald-700 text-lg" x-text="mismatchDiffResult.summary.resolved"></div>
+            <div data-testid="compare-mmdiff-resolved-count" class="font-semibold text-emerald-700 text-lg" x-text="mismatchDiffResult.summary.resolved"></div>
             <div class="text-emerald-500">Resolved (fixes)</div>
           </div>
           <div class="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-center">
-            <div class="font-semibold text-amber-700 text-lg" x-text="mismatchDiffResult.summary.persistent"></div>
+            <div data-testid="compare-mmdiff-persistent-count" class="font-semibold text-amber-700 text-lg" x-text="mismatchDiffResult.summary.persistent"></div>
             <div class="text-amber-500">Persistent</div>
           </div>
         </div>
@@ -4691,7 +4701,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </tbody>
             </table>
             <div x-show="mismatchDiffResult.new.length > mismatchDiffVisible.new" class="mt-2">
-              <button @click="showMoreMismatchDiff('new')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <button data-testid="compare-mmdiff-loadmore-new-btn" @click="showMoreMismatchDiff('new')" class="btn-secondary btn-sm text-xs">Load more</button>
               <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.new + ' of ' + mismatchDiffResult.new.length"></span>
             </div>
           </div>
@@ -4713,7 +4723,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </tbody>
             </table>
             <div x-show="mismatchDiffResult.resolved.length > mismatchDiffVisible.resolved" class="mt-2">
-              <button @click="showMoreMismatchDiff('resolved')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <button data-testid="compare-mmdiff-loadmore-resolved-btn" @click="showMoreMismatchDiff('resolved')" class="btn-secondary btn-sm text-xs">Load more</button>
               <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.resolved + ' of ' + mismatchDiffResult.resolved.length"></span>
             </div>
           </div>
@@ -4736,7 +4746,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </tbody>
             </table>
             <div x-show="mismatchDiffResult.persistent.length > mismatchDiffVisible.persistent" class="mt-2">
-              <button @click="showMoreMismatchDiff('persistent')" class="btn-secondary btn-sm text-xs">Load more</button>
+              <button data-testid="compare-mmdiff-loadmore-persistent-btn" @click="showMoreMismatchDiff('persistent')" class="btn-secondary btn-sm text-xs">Load more</button>
               <span class="text-xs text-slate-400 ml-2" x-text="'Showing ' + mismatchDiffVisible.persistent + ' of ' + mismatchDiffResult.persistent.length"></span>
             </div>
           </div>
@@ -4765,20 +4775,22 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           x-model="globalLogRunId"
           @change="loadGlobalLogs()"
           class="field-input"
+          data-testid="logs-run-id-input"
           placeholder="Filter to a run ID… (optional)"
         />
         <input
           x-model="globalLogFilterQuery"
           class="field-input"
+          data-testid="logs-search-input"
           placeholder="Search logs… (live)"
         />
         <div class="flex gap-2 flex-wrap items-center">
-          <button class="level-chip" :class="globalLogFilterLevel === '' ? 'chip-active-ALL' : ''" @click="globalLogFilterLevel = ''">ALL</button>
-          <button class="level-chip" :class="globalLogFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'ERROR' ? '' : 'ERROR'">ERROR</button>
-          <button class="level-chip" :class="globalLogFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'WARNING' ? '' : 'WARNING'">WARN</button>
-          <button class="level-chip" :class="globalLogFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
-          <button class="level-chip" :class="globalLogFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
-          <span class="text-muted text-xs ml-2" x-text="filteredGlobalLogEvents().length + ' / ' + globalLogEvents.length + ' events'"></span>
+          <button data-testid="logs-level-chip-ALL" class="level-chip" :class="globalLogFilterLevel === '' ? 'chip-active-ALL' : ''" @click="globalLogFilterLevel = ''">ALL</button>
+          <button data-testid="logs-level-chip-ERROR" class="level-chip" :class="globalLogFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'ERROR' ? '' : 'ERROR'">ERROR</button>
+          <button data-testid="logs-level-chip-WARN" class="level-chip" :class="globalLogFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'WARNING' ? '' : 'WARNING'">WARN</button>
+          <button data-testid="logs-level-chip-INFO" class="level-chip" :class="globalLogFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'INFO' ? '' : 'INFO'">INFO</button>
+          <button data-testid="logs-level-chip-DEBUG" class="level-chip" :class="globalLogFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="globalLogFilterLevel = globalLogFilterLevel === 'DEBUG' ? '' : 'DEBUG'">DEBUG</button>
+          <span data-testid="logs-counter" class="text-muted text-xs ml-2" x-text="filteredGlobalLogEvents().length + ' / ' + globalLogEvents.length + ' events'"></span>
         </div>
       </div>
     </div>
@@ -4819,7 +4831,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      AUTH SETUP MODAL
      ==================================================================== -->
-<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
   <div class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <div class="auth-modal-header">
       <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
@@ -4830,8 +4842,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="auth-path-label">Create Initial Administrator</div>
       <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
       <div class="auth-row">
-        <input x-model="authTokenName" class="field-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
-        <button @click="createToken('auth')" class="btn-primary auth-row-button">Create Admin →</button>
+        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
       </div>
     </div>
 
@@ -4839,13 +4851,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
         <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
         <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
-        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" x-text="authCreatedToken"></div>
+        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" data-testid="auth-created-token-value" x-text="authCreatedToken"></div>
         <button
           @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
           class="btn-primary btn-sm text-xs">
           Copy to Clipboard
         </button>
-        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2">Done — I've saved my token</button>
+        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2" data-testid="auth-done-btn">Done — I've saved my token</button>
       </div>
     </template>
 
@@ -4859,13 +4871,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
       <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
       <div class="auth-row">
-        <input x-model="authPasteValue" type="password" class="field-input" placeholder="Token" @keydown.enter="activateToken()" />
-        <button @click="activateToken()" class="btn-secondary auth-row-button">Activate</button>
+        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" />
+        <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
       </div>
     </div>
 
     <template x-if="authError">
-      <div class="auth-error" x-text="authError"></div>
+      <div class="auth-error" data-testid="auth-error-text" x-text="authError"></div>
     </template>
   </div>
 </div>
@@ -5036,7 +5048,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
     <div class="flex gap-2">
       <button @click="showContractExamples = !showContractExamples" class="btn-outline btn-sm" :class="showContractExamples ? 'bg-indigo-50 border-indigo-300' : ''">Examples</button>
-      <button @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
+      <button data-testid="contracts-new-btn" @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
     </div>
   </div>
 
@@ -5108,7 +5120,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Contracts (<span x-text="contracts.length"></span>)</div>
       <div x-show="contracts.length === 0" class="text-slate-400 text-sm py-2">No contracts yet.</div>
       <template x-for="c in contracts" :key="c.name">
-        <div @click="selectContract(c)"
+        <div :data-testid="'contract-row-' + c.name" @click="selectContract(c)"
              :class="selectedContract && selectedContract.name === c.name ? 'bg-indigo-50 border-indigo-300' : 'hover:bg-slate-50 border-transparent'"
              class="flex items-center justify-between p-2 rounded border cursor-pointer mb-1 transition-colors">
           <div>
@@ -5146,7 +5158,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </div>
               <div class="flex gap-2">
                 <button @click="openEditContractModal(selectedContract)" class="btn-outline btn-sm text-xs">Edit</button>
-                <button @click="deleteContract(selectedContract.name)" class="btn-danger btn-sm text-xs">Delete</button>
+                <button data-testid="contract-delete-btn" @click="deleteContract(selectedContract.name)" class="btn-danger btn-sm text-xs">Delete</button>
               </div>
             </div>
           </div>
@@ -5171,12 +5183,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="card">
             <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Bump Version</div>
             <div class="flex gap-2 items-center">
-              <select x-model="contractBumpType" class="field-input field-select text-sm" style="width:120px">
+              <select data-testid="contract-bump-type-select" x-model="contractBumpType" class="field-input field-select text-sm" style="width:120px">
                 <option value="minor">Minor</option>
                 <option value="major">Major</option>
               </select>
-              <input x-model="contractBumpNote" type="text" placeholder="Note (optional)" class="field-input text-sm flex-1" />
-              <button @click="bumpContractVersion(selectedContract.name)" :disabled="contractBumpLoading" class="btn-primary btn-sm text-xs">Bump</button>
+              <input data-testid="contract-bump-note-input" x-model="contractBumpNote" type="text" placeholder="Note (optional)" class="field-input text-sm flex-1" />
+              <button data-testid="contract-bump-btn" @click="bumpContractVersion(selectedContract.name)" :disabled="contractBumpLoading" class="btn-primary btn-sm text-xs">Bump</button>
             </div>
             <div x-show="contractVersionHistory.length > 0" class="mt-3">
               <div class="text-xs text-slate-500 mb-1">Version history</div>
@@ -5202,41 +5214,41 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
 <!-- Contract create/edit modal -->
 <template x-if="showContractModal">
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
+  <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
     <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
       <div class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></div>
       <div class="space-y-3">
         <div>
           <label class="field-label">Name</label>
-          <input x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" />
+          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" />
         </div>
         <div>
           <label class="field-label">Source Job</label>
-          <input x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" />
+          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" />
         </div>
         <div>
           <label class="field-label">Owner (email)</label>
-          <input x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" />
+          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" />
         </div>
         <div>
           <label class="field-label">SLA Hours</label>
-          <input x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" />
+          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" />
         </div>
         <div>
           <label class="field-label">Consumers (comma-separated)</label>
-          <input x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" />
+          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" />
         </div>
         <div>
           <label class="field-label">Breach Severity</label>
-          <select x-model="contractModal.breach_severity" class="field-input field-select">
+          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select">
             <option value="error">Error</option>
             <option value="warn">Warn</option>
           </select>
         </div>
       </div>
       <div class="flex justify-end gap-2 mt-5">
-        <button @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
-        <button @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
+        <button data-testid="contract-modal-cancel-btn" @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
+        <button data-testid="contract-modal-save-btn" @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
       </div>
     </div>
   </div>
@@ -5275,7 +5287,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <aside class="help-sidebar">
       <div class="help-search-wrap">
         <svg class="help-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input class="help-search" type="text" placeholder="Search help…" x-model="helpSearch" aria-label="Search help" />
+        <input data-testid="help-search-input" class="help-search" type="text" placeholder="Search help…" x-model="helpSearch" aria-label="Search help" />
       </div>
       <nav class="help-nav">
         <template x-for="s in helpFilteredSections()" :key="s.id">
@@ -5371,7 +5383,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </template>
 
     <template x-if="mismatchDecisionForm.open">
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeMismatchDecisionForm()">
+      <div data-testid="decision-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeMismatchDecisionForm()">
         <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
           <div class="flex items-center justify-between mb-4">
             <div class="text-base font-semibold text-slate-900"
@@ -5381,12 +5393,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="space-y-3">
             <div>
               <label class="field-label" x-text="'Reason (applied to every matching mismatch)'"></label>
-              <textarea x-model="mismatchDecisionForm.note" maxlength="1000" rows="3"
+              <textarea data-testid="decision-modal-note-textarea" x-model="mismatchDecisionForm.note" maxlength="1000" rows="3"
                         class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
             </div>
             <div class="flex gap-2 justify-end pt-2">
-              <button @click="closeMismatchDecisionForm()" class="btn-secondary">Cancel</button>
-              <button @click="submitMismatchDecision()" :disabled="mismatchDecisionForm.saving"
+              <button data-testid="decision-modal-cancel-btn" @click="closeMismatchDecisionForm()" class="btn-secondary">Cancel</button>
+              <button data-testid="decision-modal-confirm-btn" @click="submitMismatchDecision()" :disabled="mismatchDecisionForm.saving"
                       class="btn-primary">
                 <span x-show="!mismatchDecisionForm.saving">Confirm</span>
                 <span x-show="mismatchDecisionForm.saving">Saving...</span>
