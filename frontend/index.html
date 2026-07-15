@@ -1980,7 +1980,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <template x-if="selectedRun">
     <div>
       <div class="flex items-center gap-3 mb-4">
-        <button @click="selectedRun = null" class="btn-secondary btn-sm">← Back</button>
+        <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
         <div class="section-title">Run Detail</div>
         <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="selectedRun.status"></span>
       </div>
@@ -2336,13 +2336,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <div>
       <!-- Sub-tab switcher -->
       <div class="flex gap-1 mb-4 border-b border-slate-200 pb-2">
-        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Runs</button>
-        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Trends</button>
-        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Lineage</button>
-        <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Audit</button>
-        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Profile</button>
-        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Schema</button>
-        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium">Coverage</button>
+        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-runs">Runs</button>
+        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-trends">Trends</button>
+        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-lineage">Lineage</button>
+        <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-audit">Audit</button>
+        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-profile">Profile</button>
+        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-schema">Schema</button>
+        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-coverage">Coverage</button>
       </div>
 
       <!-- Trends panel -->
@@ -2673,7 +2673,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
         <div class="flex flex-wrap gap-2 items-center">
-          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter">
             <option value="">All statuses</option>
             <option value="PENDING">PENDING</option>
             <option value="RUNNING">RUNNING</option>
@@ -2681,13 +2681,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <option value="FAILED">FAILED</option>
             <option value="ERROR">ERROR</option>
           </select>
-          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto">
+          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter">
             <option value="">All types</option>
             <option value="reconciliation">reconciliation</option>
             <option value="bo_comparison">bo_comparison</option>
           </select>
-          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm">Clear</button>
-          <button @click="loadRuns()" class="btn-secondary btn-sm">↻ Refresh</button>
+          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm" data-testid="history-clear-btn">Clear</button>
+          <button @click="loadRuns()" class="btn-secondary btn-sm" data-testid="history-refresh-btn">↻ Refresh</button>
           <button @click="compareMode = !compareMode; compareResult = null"
                   :class="compareMode ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
             ⇄ Compare Runs
@@ -2835,7 +2835,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </thead>
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
-              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)">
+              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
                 <td class="font-mono text-xs text-slate-500">
                   <span x-text="run.run_id.substring(0,8)+'…'"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
