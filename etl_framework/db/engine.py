@@ -17,6 +17,11 @@ class DBEngine:
         if _engine is not None:
             self._engine = _engine
         else:
+            # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
+            # (a behavior change from Driver 17, which defaulted to no encryption), so
+            # it rejects self-signed/internal CA certs unless TrustServerCertificate is
+            # set. Driver 17 doesn't need this — leave its connection string unchanged.
+            trust_cert = "TrustServerCertificate=yes;" if "18" in env_config.db_driver else ""
             params = urllib.parse.quote_plus(
                 f"DRIVER={{{env_config.db_driver}}};"
                 f"SERVER={env_config.db_host},{env_config.db_port};"
@@ -24,6 +29,7 @@ class DBEngine:
                 f"UID={env_config.db_user};"
                 f"PWD={env_config.db_password};"
                 f"Connect Timeout={env_config.db_connect_timeout};"
+                f"{trust_cert}"
             )
             self._engine = create_engine(
                 f"mssql+pyodbc:///?odbc_connect={params}",
