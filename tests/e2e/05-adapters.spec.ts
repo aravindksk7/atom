@@ -95,7 +95,9 @@ test.describe('05 adapters - no live backend required', () => {
       await authedPage.locator('[data-testid="nav-tab-adapters"]').click();
       await authedPage.locator('[data-testid="bo-config-select"]').selectOption(String(unreachable.id));
       await authedPage.locator('[data-testid="bo-test-connection-btn"]').click();
-      await expect(authedPage.locator('[data-testid="bo-test-result"]')).toContainText('Cannot resolve');
+      // DNS resolution for a nonexistent host takes ~12s on this platform's resolver
+      // before it gives up and returns NXDOMAIN, well past the default 5s assertion timeout.
+      await expect(authedPage.locator('[data-testid="bo-test-result"]')).toContainText('Cannot resolve', { timeout: 20_000 });
     } finally {
       await deleteConfig(ctx, unreachable.id);
       await ctx.dispose();
@@ -129,7 +131,9 @@ test.describe('05 adapters - no live backend required', () => {
       // AutomicClient wraps the underlying connection failure in AutomicTimeoutError,
       // whose type name ("...TimeoutError") matches _friendly_error()'s "Timeout" check,
       // producing "Connection timed out from the application server - ...".
-      await expect(authedPage.locator('.toast-title')).toContainText('Lookup failed');
+      // Same platform DNS-resolution latency (~12s for a nonexistent host) as the BO
+      // unreachable-host test above, past the default 5s assertion timeout.
+      await expect(authedPage.locator('.toast-title')).toContainText('Lookup failed', { timeout: 20_000 });
       await expect(authedPage.locator('.toast-msg')).toContainText('Connection timed out');
     } finally {
       await deleteConfig(ctx, cfg.id);
