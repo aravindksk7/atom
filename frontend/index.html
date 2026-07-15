@@ -75,7 +75,7 @@
       <div class="section-title">Configuration Editor</div>
       <div class="section-sub">Manage environment credentials and settings</div>
     </div>
-    <button @click="openNewConfigModal()" class="btn-primary">+ New Config</button>
+    <button @click="openNewConfigModal()" class="btn-primary" data-testid="config-new-btn">+ New Config</button>
   </div>
 
   <template x-if="configs.length === 0">
@@ -88,7 +88,7 @@
 
   <div class="grid gap-3">
     <template x-for="cfg in configs" :key="cfg.id">
-      <div class="card flex items-center justify-between gap-4">
+      <div class="card flex items-center justify-between gap-4" :data-testid="'config-row-' + cfg.id">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0"
                style="background:#ede9fe">🗃️</div>
@@ -101,8 +101,8 @@
           </div>
         </div>
         <div class="flex gap-2 flex-shrink-0">
-          <button @click="editConfig(cfg)" class="btn-secondary btn-sm">Edit</button>
-          <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm">Delete</button>
+          <button @click="editConfig(cfg)" class="btn-secondary btn-sm" :data-testid="'config-row-' + cfg.id + '-edit-btn'">Edit</button>
+          <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm" :data-testid="'config-row-' + cfg.id + '-delete-btn'">Delete</button>
           <button @click="openSchemaExplorer(cfg)" class="btn-secondary btn-sm"
                   :class="schemaExplorerId === cfg.id ? 'ring-2 ring-indigo-400' : ''">
             Browse Schema <span x-text="schemaExplorerId === cfg.id ? '▲' : '▼'"></span>
@@ -214,9 +214,9 @@
     <template x-if="yamlImportOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Paste a YAML block defining one or more named environments. Each top-level key becomes a saved config.</p>
-        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405"></textarea>
+        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405" data-testid="config-yaml-textarea"></textarea>
         <div class="flex justify-end">
-          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()">
+          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()" data-testid="config-yaml-import-btn">
             <span x-show="!yamlImporting">Import</span>
             <span x-show="yamlImporting">Importing…</span>
           </button>
@@ -461,18 +461,18 @@
   </div>
 
   <!-- Config Modal -->
-  <div x-show="showConfigModal" x-cloak class="modal-backdrop" @click.self="showConfigModal = false">
+  <div x-show="showConfigModal" x-cloak class="modal-backdrop" data-testid="config-modal" @click.self="showConfigModal = false">
     <div class="modal-box w-full max-w-2xl">
       <h2 class="text-lg font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
       <div class="space-y-4">
         <div class="grid-2">
           <div>
             <label class="field-label">Config Name *</label>
-            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" />
+            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" data-testid="config-modal-name-input" />
           </div>
           <div>
             <label class="field-label">Environment</label>
-            <select x-model="configModal.env_name" class="field-input field-select">
+            <select x-model="configModal.env_name" class="field-input field-select" data-testid="config-modal-env-select">
               <option value="dev">Dev</option>
               <option value="qa">QA</option>
               <option value="staging">Staging</option>
@@ -482,11 +482,11 @@
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" /></div>
-          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" /></div>
-          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" /></div>
-          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" /></div>
-          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" /></div>
+          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" /></div>
+          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" /></div>
+          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" /></div>
+          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" /></div>
+          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" /></div>
           <div><label class="field-label">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" /></div>
         </div>
         <div class="divider"></div>
@@ -698,13 +698,13 @@
         </div>
         <template x-if="configValidation">
           <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
-               class="border rounded-lg p-3 text-sm">
+               class="border rounded-lg p-3 text-sm" data-testid="config-validation-result">
             <template x-if="configValidation.ok"><div>✓ Configuration is valid.</div></template>
             <template x-if="!configValidation.ok">
               <div>
                 <div class="font-semibold mb-1">Validation errors</div>
                 <template x-for="err in configValidation.errors" :key="err.field_name + err.message">
-                  <div><span class="font-mono" x-text="err.field_name"></span>: <span x-text="err.message"></span></div>
+                  <div data-testid="config-validation-error-row"><span class="font-mono" x-text="err.field_name"></span>: <span x-text="err.message"></span></div>
                 </template>
               </div>
             </template>
@@ -712,9 +712,9 @@
         </template>
       </div>
       <div class="flex justify-end gap-3 mt-6">
-        <button @click="showConfigModal = false" class="btn-secondary">Cancel</button>
-        <button @click="validateConfig()" class="btn-secondary">Validate</button>
-        <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name">Save</button>
+        <button @click="showConfigModal = false" class="btn-secondary" data-testid="config-modal-cancel-btn">Cancel</button>
+        <button @click="validateConfig()" class="btn-secondary" data-testid="config-modal-validate-btn">Validate</button>
+        <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name" data-testid="config-modal-save-btn">Save</button>
       </div>
     </div>
   </div>
