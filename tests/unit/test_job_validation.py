@@ -28,6 +28,21 @@ def test_file_backed_reconciliation_requires_both_files():
     assert any(issue.field == "params" for issue in issues)
 
 
+def test_file_backed_reconciliation_accepts_job_file_paths():
+    issues = validate_job_definition({
+        "name": "files",
+        "job_type": "reconciliation",
+        "params": {
+            "source_mode": "files",
+            "source_file_path": r"c:\temp\RMS_FUT_20260601_qa.xml",
+            "target_file_path": r"c:\temp\RMS_FUT_20260601_prod.xml",
+        },
+        "key_columns": ["id"],
+    })
+
+    assert issues == []
+
+
 def test_api_reconciliation_requires_endpoint_and_keys():
     issues = validate_job_definition({"name": "api", "job_type": "api_reconciliation", "params": {}, "key_columns": []})
     assert {issue.field for issue in issues} == {"params.source_api_endpoint", "key_columns"}

@@ -83,7 +83,11 @@ def _file_value(params: dict[str, Any], prefix: str, field: str) -> Any:
     nested = params.get(prefix)
     if isinstance(nested, dict) and nested.get(field):
         return nested.get(field)
-    return params.get(f"{prefix}_{field}")
+    value = params.get(f"{prefix}_{field}")
+    if value:
+        return value
+    side = "a" if prefix == "source" else "b"
+    return params.get(f"{prefix}_file_{field}") or params.get(f"file_{side}_{field}")
 
 
 def _has_file_source(params: dict[str, Any], prefix: str) -> bool:
