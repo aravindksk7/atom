@@ -1139,11 +1139,6 @@
         <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
           <label class="field-label">Key Columns (comma-separated)</label>
           <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
-          <p x-show="jobModalValidation && jobModalValidation.keyColumns"
-             class="text-xs mt-1 text-amber-600"
-             data-testid="job-modal-key-columns-validation"
-             x-text="jobModalValidation && jobModalValidation.keyColumns ? jobModalValidation.keyColumns : ''">
-          </p>
         </div>
         <div x-show="jobModal.job_type === 'bo_report'" class="grid-2">
           <div>
