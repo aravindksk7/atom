@@ -1,8 +1,31 @@
 import { APIRequestContext, request as pwRequest } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 import { BASE_URL } from '../../playwright.config';
 
+// File-based (not in-memory) cache: the `setup` Playwright project (00-auth-setup.spec.ts)
+// and the `chromium` project (everything else, via `dependencies: ['setup']` in
+// playwright.config.ts) run in SEPARATE worker processes even though each project itself
+// uses workers:1 — an in-memory module-level variable would not survive that process
+// boundary. The backend also only allows ONE unauthenticated bootstrap POST /api/tokens per
+// DB (api/routes/tokens.py, `count() == 0` check); 00-auth-setup.spec.ts's first test
+// deliberately consumes that one-time bootstrap through the real UI (that's the behavior
+// under test) and calls primeAdminToken() with the token it captured from the page, writing
+// it to this file so bootstrapAdminToken() — called from every other spec file via
+// fixtures.ts's `adminToken` fixture — returns the already-known token instead of attempting
+// a second, doomed bootstrap request.
+const TOKEN_CACHE_FILE = path.join(__dirname, '.admin-token.json');
+
+/** See the cache comment above bootstrapAdminToken(). Call this after obtaining an admin
+ * token through a path other than bootstrapAdminToken() itself (e.g. the UI bootstrap flow). */
+export function primeAdminToken(token: string): void {
+  fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify({ token }));
+}
+
 export async function bootstrapAdminToken(): Promise<string> {
+  if (fs.existsSync(TOKEN_CACHE_FILE)) {
+    return (JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf-8')).token) as string;
+  }
   const ctx = await pwRequest.newContext({ baseURL: BASE_URL });
   try {
     const resp = await ctx.post('/api/tokens', {
@@ -12,7 +35,9 @@ export async function bootstrapAdminToken(): Promise<string> {
       throw new Error(`bootstrap token creation failed: ${resp.status()} ${await resp.text()}`);
     }
     const body = await resp.json();
-    return body.raw_token as string;
+    const token = body.raw_token as string;
+    primeAdminToken(token);
+    return token;
   } finally {
     await ctx.dispose();
   }

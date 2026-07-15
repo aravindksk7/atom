@@ -1,15 +1,32 @@
 import { test, expect } from '@playwright/test';
+import { primeAdminToken } from './api-helpers';
 
-// NOTE on ordering: this is 00-*, and the suite runs with workers: 1 /
-// fullyParallel: false, so specs (and the tests within this file) run in
-// declaration order against a single fresh DB. The backend only allows the
-// *very first* POST /api/tokens ever made against an empty DB to bootstrap
-// an admin token unauthenticated (see api/routes/tokens.py: is_bootstrap =
-// repo.count() == 0). The first test below consumes that one-time bootstrap
-// via the UI and captures the resulting admin token in this module-scoped
-// variable; every later test that needs an admin token reuses it instead of
-// trying to bootstrap again (a second bootstrap attempt would 401, since the
-// DB is no longer empty once the first test creates a token).
+// NOTE on ordering: this file runs in Playwright's `setup` project
+// (playwright.config.ts), which the `chromium` project (every other spec file)
+// declares as a `dependencies: ['setup']` — Playwright guarantees `setup` runs
+// to completion before `chromium` starts. That guarantee is *required* here:
+// plain filename prefixes (00-, 01-, ...) do NOT reliably control execution
+// order on their own (confirmed empirically — Playwright's file-discovery order
+// is not guaranteed alphabetical), so don't rely on renumbering files to fix
+// ordering bugs; use `dependencies` instead. Within this file, tests still run
+// in declaration order (see `mode: 'serial'` below).
+//
+// The backend only allows the *very first* POST /api/tokens ever made against
+// an empty DB to bootstrap an admin token unauthenticated (see
+// api/routes/tokens.py: is_bootstrap = repo.count() == 0). The first test below
+// consumes that one-time bootstrap via the UI and captures the resulting admin
+// token in this module-scoped variable; every later test in this file that
+// needs an admin token reuses it instead of trying to bootstrap again (a second
+// bootstrap attempt would 401, since the DB is no longer empty once the first
+// test creates a token).
+//
+// It also calls api-helpers.ts's primeAdminToken() with that same token, which
+// writes it to tests/e2e/.admin-token.json — otherwise every test in the
+// `chromium` project using fixtures.ts's `adminToken` fixture (which calls
+// bootstrapAdminToken()) would attempt its own bootstrap POST against a DB
+// that's no longer empty, and 401. (A plain in-memory cache wouldn't survive
+// the process boundary between the `setup` and `chromium` projects, which is
+// why this goes through a file, not a shared module variable.)
 let adminToken: string;
 
 test.describe('00 auth setup', () => {
@@ -31,6 +48,7 @@ test.describe('00 auth setup', () => {
     const rawToken = (await created.textContent())!.trim();
     expect(rawToken.length).toBeGreaterThan(10);
     adminToken = rawToken;
+    primeAdminToken(rawToken);
 
     await page.locator('[data-testid="auth-done-btn"]').click();
     await expect(page.locator('[data-testid="auth-modal"]')).toBeHidden();

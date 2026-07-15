@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
+const TOKEN_CACHE_FILE = path.join(__dirname, '.admin-token.json');
 
 export default async function globalTeardown() {
   // Docker teardown and temp-dir cleanup are independent concerns — a failure in one
@@ -29,5 +30,6 @@ export default async function globalTeardown() {
         console.warn(`[global-teardown] could not remove ${dbDir}: ${(err as Error).message}`);
       }
     }
+    rmSync(TOKEN_CACHE_FILE, { force: true });
   }
 }
