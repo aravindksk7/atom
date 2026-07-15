@@ -144,39 +144,61 @@ class BORestClient:
         data = response.json()
         return pd.DataFrame(_as_list(data.get("dataset", data.get("reports", data))))
 
-    def list_documents(self) -> list[dict]:
-        """GET /biprws/raylight/v1/documents — list all WebI documents.
+    _PAGE_REQUEST_SIZE = 200
+    _MAX_PAGES = 500
 
-        biprws paginates this collection (page size is admin-configured in
-        CMC; observed defaulting to as few as 10 for the sibling reports
-        endpoint), so page through with an explicit pagesize until a short
-        page comes back rather than silently truncating the results.
+    def _paginate_biprws_collection(
+        self,
+        url: str,
+        plural_key: str,
+        singular_key: str,
+        *fallback_keys: str,
+        error_report_id: str | None = None,
+        not_found_report_id: str | None = None,
+    ) -> list[dict]:
+        """Page through a biprws collection endpoint.
+
+        biprws paginates these collections and the page size is
+        admin-configured in CMC (observed defaulting to as few as 10). Some
+        on-prem deployments silently clamp the response to that cap
+        regardless of the `pagesize` we request, so a page shorter than
+        what we *asked for* is not proof there's no more data — only an
+        empty page, or a page shorter than the *previous* page, means the
+        collection is exhausted.
         """
-        if not self._token:
-            self.authenticate()
-        url = f"{self._base_url}/biprws/raylight/v1/documents"
-        page_size = 200
         raw: list[dict] = []
         page = 1
-        while True:
+        previous_batch_size: int | None = None
+        while page <= self._MAX_PAGES:
             response = self._session.get(
                 url,
                 headers={"Accept": "application/json"},
-                params={"page": page, "pagesize": page_size},
+                params={"page": page, "pagesize": self._PAGE_REQUEST_SIZE},
                 timeout=self._timeout,
                 verify=self._verify_ssl,
             )
+            if not_found_report_id is not None and response.status_code == 404:
+                raise ReportNotFoundError(report_id=not_found_report_id, env_name=self._base_url)
             if response.status_code >= 400:
                 raise BOAPIError(
-                    report_id=None,
+                    report_id=error_report_id,
                     http_status=response.status_code,
                     response_body=response.text,
                 )
-            batch = _unwrap_collection(response.json(), "documents", "document", "entries")
+            batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
             raw.extend(batch)
-            if len(batch) < page_size:
+            if not batch or (previous_batch_size is not None and len(batch) < previous_batch_size):
                 break
+            previous_batch_size = len(batch)
             page += 1
+        return raw
+
+    def list_documents(self) -> list[dict]:
+        """GET /biprws/raylight/v1/documents — list all WebI documents."""
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}/biprws/raylight/v1/documents"
+        raw = self._paginate_biprws_collection(url, "documents", "document", "entries")
         results = []
         for d in raw:
             doc_id = str(d.get("id", ""))
@@ -190,40 +212,14 @@ class BORestClient:
         return results
 
     def list_reports(self, doc_id: str) -> list[dict]:
-        """GET /biprws/raylight/v1/documents/{doc_id}/reports — list report tabs.
-
-        biprws paginates this collection (page size is admin-configured in
-        CMC; observed defaulting to as few as 10), so page through with an
-        explicit pagesize until a short page comes back rather than silently
-        truncating documents with more tabs than one page holds.
-        """
+        """GET /biprws/raylight/v1/documents/{doc_id}/reports — list report tabs."""
         if not self._token:
             self.authenticate()
         url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports"
-        page_size = 200
-        raw: list[dict] = []
-        page = 1
-        while True:
-            response = self._session.get(
-                url,
-                headers={"Accept": "application/json"},
-                params={"page": page, "pagesize": page_size},
-                timeout=self._timeout,
-                verify=self._verify_ssl,
-            )
-            if response.status_code == 404:
-                raise ReportNotFoundError(report_id=doc_id, env_name=self._base_url)
-            if response.status_code >= 400:
-                raise BOAPIError(
-                    report_id=doc_id,
-                    http_status=response.status_code,
-                    response_body=response.text,
-                )
-            batch = _unwrap_collection(response.json(), "reports", "report")
-            raw.extend(batch)
-            if len(batch) < page_size:
-                break
-            page += 1
+        raw = self._paginate_biprws_collection(
+            url, "reports", "report",
+            error_report_id=doc_id, not_found_report_id=doc_id,
+        )
         results = []
         for r in raw:
             report_id = str(r.get("id", ""))

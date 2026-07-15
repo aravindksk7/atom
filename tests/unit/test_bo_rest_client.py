@@ -161,7 +161,10 @@ def test_list_documents_returns_list_of_dicts(authenticated_client):
             {"id": "102", "name": "Inventory Daily", "folder": "/Operations"},
         ]
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"documents": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         docs = authenticated_client.list_documents()
     assert len(docs) == 2
     assert docs[0]["id"] == "101"
@@ -212,7 +215,10 @@ def test_list_documents_unwraps_plural_container_nested_singular_child(authentic
             ]
         }
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"documents": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         docs = authenticated_client.list_documents()
     assert docs == [
         {"id": "123456", "name": "01.aCIS_Sum_Mon_Bran_Reg", "folder": ""}
@@ -227,7 +233,10 @@ def test_list_documents_handles_single_document_not_wrapped_in_list(authenticate
     mock_response.json.return_value = {
         "documents": {"id": "101", "name": "Sales Report", "folder": "/Finance"}
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"documents": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         docs = authenticated_client.list_documents()
     assert docs == [{"id": "101", "name": "Sales Report", "folder": "/Finance"}]
 
@@ -254,6 +263,31 @@ def test_list_documents_pages_through_results_beyond_default_page_size(authentic
     assert mock_get.call_args_list[1][1]["params"] == {"page": 2, "pagesize": page_size}
 
 
+def test_list_documents_pages_past_server_enforced_page_cap(authenticated_client):
+    """Some on-prem biprws deployments admin-cap the page size (CMC setting)
+    and silently clamp it below whatever `pagesize` the client requests —
+    e.g. requesting pagesize=200 but the server always returns 10 per page.
+    A page shorter than the *requested* size is then NOT proof there's no
+    more data; only a page shorter than the *previous* (server's actual)
+    page size, or an empty page, means the collection is exhausted."""
+    server_cap = 10
+    pages = [
+        [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(server_cap)],
+        [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(server_cap, 2 * server_cap)],
+        [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(2 * server_cap, 2 * server_cap + 5)],
+    ]
+    responses = []
+    for page_docs in pages:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": page_docs}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses):
+        docs = authenticated_client.list_documents()
+    assert len(docs) == 25
+    assert docs[-1]["id"] == "24"
+
+
 # ---------------------------------------------------------------------------
 # list_reports
 # ---------------------------------------------------------------------------
@@ -267,7 +301,10 @@ def test_list_reports_returns_reports_for_document(authenticated_client):
             {"id": "2", "name": "Summary", "reportIndex": 1},
         ]
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"reports": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         reports = authenticated_client.list_reports("101")
     assert len(reports) == 2
     assert reports[0]["id"] == "1"
@@ -283,7 +320,10 @@ def test_list_reports_unwraps_plural_container_nested_singular_child(authenticat
     mock_response.json.return_value = {
         "reports": {"report": [{"id": "1", "name": "Page 1", "reportIndex": 0}]}
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"reports": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         reports = authenticated_client.list_reports("101")
     assert reports == [{"id": "1", "name": "Page 1", "reportIndex": 0}]
 
@@ -311,6 +351,28 @@ def test_list_reports_pages_through_results_beyond_default_page_size(authenticat
     assert mock_get.call_count == 2
     assert mock_get.call_args_list[0][1]["params"] == {"page": 1, "pagesize": page_size}
     assert mock_get.call_args_list[1][1]["params"] == {"page": 2, "pagesize": page_size}
+
+
+def test_list_reports_pages_past_server_enforced_page_cap(authenticated_client):
+    """Same server-clamped-page-size scenario as list_documents: the server
+    ignores the requested pagesize=200 and always returns its own smaller
+    admin-configured cap per page."""
+    server_cap = 10
+    pages = [
+        [{"id": str(i), "name": f"Tab {i}", "reportIndex": i} for i in range(server_cap)],
+        [{"id": str(i), "name": f"Tab {i}", "reportIndex": i} for i in range(server_cap, 2 * server_cap)],
+        [{"id": str(i), "name": f"Tab {i}", "reportIndex": i} for i in range(2 * server_cap, 2 * server_cap + 5)],
+    ]
+    responses = []
+    for page_reports in pages:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"reports": page_reports}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses):
+        reports = authenticated_client.list_reports("101")
+    assert len(reports) == 25
+    assert reports[-1]["id"] == "24"
 
 
 def test_list_reports_calls_correct_endpoint(authenticated_client):
@@ -343,7 +405,10 @@ def test_list_reports_handles_single_report_not_wrapped_in_list(authenticated_cl
     mock_response.json.return_value = {
         "reports": {"id": "1", "name": "Page 1", "reportIndex": 0}
     }
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    empty_response = MagicMock()
+    empty_response.status_code = 200
+    empty_response.json.return_value = {"reports": []}
+    with patch.object(authenticated_client._session, "get", side_effect=[mock_response, empty_response]):
         reports = authenticated_client.list_reports("101")
     assert reports == [{"id": "1", "name": "Page 1", "reportIndex": 0}]
 
