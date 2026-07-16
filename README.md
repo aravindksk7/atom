@@ -47,9 +47,12 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
   - [Recon File Compare](#recon-file-compare)
 - [Data Contracts](#data-contracts)
+- [Write-Audit-Publish Gate](#write-audit-publish-gate)
+- [Rules-As-Code & Schema Compatibility](#rules-as-code--schema-compatibility)
 - [API Usage](#api-usage)
 - [ETL Test Capabilities](#etl-test-capabilities)
 - [Testing](#testing)
+  - [Isolated Transform Testing (TransformCase)](#isolated-transform-testing-transformcase)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
@@ -354,7 +357,47 @@ Environment configs can be created in the Config tab or through `/api/configs`. 
 - `automic_user`
 - `automic_password`
 
-Environment config supports a `base` overlay (shared settings merged under every environment; per-env keys win) and `secret://<provider>/<name>` values (built-in `env` provider reads environment variables; register custom providers via `etl_framework.config.secrets.register_provider`).
+### Config Overlays & Secret Providers (standalone CLI)
+
+The **standalone CLI runner** (`python -m etl_framework.runner.cli --config <file.yml> --source-env dev --target-env prod`) reads its own YAML file — separate from the web app's DB-backed configs above — via `etl_framework.config.loader.ConfigLoader`. That file supports two things worth knowing about:
+
+**1. A `base` overlay** — shared settings merged under every named environment (per-environment keys win on conflict). Keeps multi-environment files from repeating themselves:
+
+```yaml
+environments:
+  base:                     # not itself an environment — merged into every one below
+    db_port: 1433
+    db_driver: "ODBC Driver 17 for SQL Server"
+    db_password: secret://env/DB_PASSWORD
+
+  dev:
+    db_host: dev-sql.internal
+    db_name: dev_db
+
+  qa:
+    db_host: qa-sql.internal
+    db_name: qa_db
+
+  prod:
+    db_host: prod-sql.internal
+    db_name: prod_db
+    db_password: secret://env/PROD_DB_PASSWORD   # overrides base for this env only
+```
+
+**2. `secret://<provider>/<name>` values** — resolved at load time instead of being read as a literal string. The built-in `env` provider reads an environment variable (`secret://env/DB_PASSWORD` → `os.environ["DB_PASSWORD"]`); a missing variable raises a clear `ValueError` rather than silently passing through an empty password. Register a custom provider (Vault, Azure Key Vault, ...) once at process startup:
+
+```python
+from etl_framework.config.secrets import register_provider
+
+class VaultSecretProvider:
+    def get(self, name: str) -> str:
+        ...  # fetch `name` from your secret store
+
+register_provider("vault", VaultSecretProvider())
+# now usable in YAML as: db_password: secret://vault/prod-db-password
+```
+
+`${ENV_VAR}` substitution (the older mechanism) still works unchanged for values that aren't `secret://` URIs.
 
 Example API request:
 
@@ -859,7 +902,11 @@ The **Job Catalog** card lists all saved jobs (or seed jobs if the database is e
 - Only `enabled` jobs appear in the catalog by default.
 - Use the tag filter to narrow the list by tag (e.g. `daily`, `payments`).
 
-**5. Start the run**
+**5. (Optional) Check a job's promotion gate**
+
+Click the **Gate** button on any job row to call `POST /api/gates/{job}/evaluate` and see whether that job is currently safe to promote. A `PROMOTE`/`HOLD` badge appears next to the button (also shown as a toast). See [Write-Audit-Publish Gate](#write-audit-publish-gate) for what drives the verdict and how to call it from an orchestrator.
+
+**6. Start the run**
 
 Click **Run Tests**. The page switches to the **Monitor** tab automatically and streams live progress via Server-Sent Events. When complete, results appear in **History**.
 
@@ -1285,6 +1332,8 @@ Run settings are configured in the **Run Settings** panel in the Launch tab or p
 | `chunk_size` | `0` | Chunk large tables by fetching `chunk_size` rows at a time. `0` fetches the entire result set in one query. Useful for very large tables to reduce peak memory. |
 | `use_hash_precheck` | `true` | Before comparing values column-by-column, hash the entire source and target rows. If the hashes match, the row is immediately marked clean. Speeds up runs with many passing rows. |
 | `comparison_backend` | `pandas` | Data comparison engine: `pandas` (default, broad compatibility) or `polars` (faster for large result sets). Both are included in the base install. |
+| `run_profile` | `full` | `full` compares every row. `shadow` wraps the backend in `SamplingBackend`, comparing only a `shadow_sample_frac` sample — rows missing on either side are always kept regardless of sampling. Set in the Launch tab's **Run Profile** dropdown or via the API; use `shadow` for cheap, fast per-PR checks and `full` for the nightly/authoritative run. |
+| `shadow_sample_frac` | `0.02` | Fraction of rows (0-1) sampled per key when `run_profile` is `shadow`. Ignored when `run_profile` is `full`. |
 | `mismatch_row_limit` | `1000` | Maximum number of mismatch rows stored per job result. Rows beyond this limit are still counted but not stored in detail. |
 | `exclude_columns` | `[]` | Global list of column names to skip during comparison. Applies to all jobs in the run. Job-level `exclude_columns` are merged with this list. |
 | `key_columns` | `[]` | Global key columns used as a fallback when a job does not specify its own `key_columns`. Job-level `key_columns` take precedence. |
@@ -1954,6 +2003,110 @@ Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/contracts/orders_v1/sch
 Invoke-RestMethod -Method Delete -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1
 ```
 
+## Write-Audit-Publish Gate
+
+The gate answers one question for one job: **is it safe to promote?** It never publishes or moves data itself — it only returns a verdict for your orchestrator (Automic, Airflow, a CI job, a deploy script) to act on.
+
+**Typical Write-Audit-Publish flow:**
+
+```text
+1. WRITE  — load new/changed data into a staging table or schema
+2. AUDIT  — run the job's reconciliation/DQ checks against staging
+3. GATE   — call POST /api/gates/{job}/evaluate
+4. PUBLISH — only if the verdict is PROMOTE: swap staging into production
+             (e.g. SQL Server schema swap, table rename, or synonym repoint)
+```
+
+**Verdict logic** (`api/services/gate_service.py`): `PROMOTE` requires **both** of:
+
+- The job's most recent `TestResult` has status `PASSED`.
+- No unresolved `ContractBreach` exists on an active [Data Contract](#data-contracts) whose `source_job` is this job.
+
+Anything else returns `HOLD` with a `reasons` list explaining exactly why (e.g. `"Latest result for 'orders_reconciliation' is FAILED"` or `"1 open contract breach(es) on 'orders_reconciliation'"`).
+
+**From the UI:** Launch tab → click **Gate** on any job row. A `PROMOTE`/`HOLD` badge appears next to the button and as a toast.
+
+**From the API / an orchestrator:**
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+$verdict = Invoke-RestMethod -Method Post -Headers $h `
+  "http://127.0.0.1:8000/api/gates/orders_reconciliation/evaluate"
+$verdict.verdict   # "PROMOTE" or "HOLD"
+$verdict.reasons   # [] when PROMOTE, else a list of strings
+```
+
+```bash
+curl -s -X POST -H "Authorization: Bearer etl_<token>" \
+  http://127.0.0.1:8000/api/gates/orders_reconciliation/evaluate | jq
+```
+
+**From the CLI (no server round trip needed once you have a `run_id`):**
+
+```powershell
+python -m etl_framework.runner.cli --gate-run "$RUN_ID" --output json
+# exit codes: 0 passed, 1 failed, 2 cancelled, 3 error, 4 not found
+```
+
+Both paths are audited: every gate evaluation is logged as a `gate.evaluated` audit event, queryable via `GET /api/audit`.
+
+## Rules-As-Code & Schema Compatibility
+
+Job DQ rules normally live in the database, edited through the Jobs UI or API. **Rules-as-code** lets you keep those same rules as versioned YAML files instead — reviewed in pull requests, synced into the database on demand.
+
+### Expectation suites
+
+One YAML file per job under `expectations/` (see [expectations/README.md](expectations/README.md)). The file's `rules` list **replaces** the job's DQ rules on sync:
+
+```yaml
+# expectations/orders_reconciliation.yml
+job: orders_reconciliation
+rules:
+  - type: not_null
+    column: id
+    severity: error
+  - type: row_count_min
+    min_value: 1
+```
+
+**Export** current job rules to YAML (useful the first time you adopt this, or to snapshot rules for review):
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+Invoke-RestMethod -Method Post -Headers $h -ContentType "application/json" `
+  -Body (@{ directory = "expectations" } | ConvertTo-Json) `
+  http://127.0.0.1:8000/api/expectations/export
+```
+
+**Sync** YAML files back into job rules (run this in CI after merging a PR that touched `expectations/`):
+
+```powershell
+$h = @{ Authorization = "Bearer etl_<token>" }
+$report = Invoke-RestMethod -Method Post -Headers $h -ContentType "application/json" `
+  -Body (@{ directory = "expectations" } | ConvertTo-Json) `
+  http://127.0.0.1:8000/api/expectations/sync
+$report.synced        # job names successfully updated
+$report.missing_jobs   # suite files whose `job` doesn't exist yet — create the job first
+$report.errors         # suites with an invalid rule type/field — that job's rules are left untouched
+```
+
+A suite naming a job that doesn't exist yet is reported in `missing_jobs`, not treated as an error — create the job (UI or API), then re-run sync. A suite with an invalid rule is reported in `errors` and skipped; every other suite in the same sync call still applies.
+
+Every sync is audited as an `expectations.synced` event (`GET /api/audit`).
+
+### Schema-drift compatibility
+
+Schema snapshot diffs (`schema_snapshot` job type, and `GET /api/jobs/{job}/schema-history`) now include a `compatibility` verdict alongside `added`/`removed`/`changed`:
+
+| Verdict | Meaning |
+|---|---|
+| `full` | No schema change at all. |
+| `non_breaking` | Only additive/widening changes — a new column, or a numeric type getting wider (e.g. `int32` → `int64`, `int64` → `float64`). Existing consumers keep working. |
+| `risky` | A type change that isn't a clean widening or narrowing (e.g. anything to/from `object`, datetime unit/tz changes) — review before promoting. |
+| `breaking` | A column was removed, or a numeric type narrowed (e.g. `int64` → `int32`, `float64` → `int64`) — likely to break downstream consumers. |
+
+The overall `compatibility` on a diff is always the worst individual change (`breaking` > `risky` > `non_breaking` > `full`). See `etl_framework/expectations/schema_compat.py` for the exact rules.
+
 ## API Usage
 
 All API calls require `Authorization: Bearer <token>` except `/api/health`.
@@ -2350,6 +2503,43 @@ The following special job types are supported in addition to the standard `recon
 For cheap per-PR shadow runs, launch with `run_settings: {"run_profile": "shadow", "shadow_sample_frac": 0.02}` — every reconciliation samples ~2% of rows (missing rows always kept). Nightly runs use the default `full` profile.
 
 Run the suite in parallel: `python -m pytest tests/unit -n auto`. Most of the suite is parallel-safe and the pass count matches the serial run. A small number of route tests (`test_mismatch_search.py`, `test_selections_routes.py`) occasionally fail only under `-n auto` and only when run alongside the full suite (they pass standalone) — this is shared module-level/singleton state (e.g. `SessionLocal` monkeypatching, in-memory SQLite) racing across xdist workers, not a bug in the tests themselves. Known follow-up; if you hit it, re-run serially or scope `-n auto` to a subset of files.
+
+### Isolated Transform Testing (TransformCase)
+
+Reconciliation jobs test data *at rest* (source vs. target). `TransformCase` tests business logic *in isolation*: it runs a transform SQL statement against small, in-memory DuckDB fixture tables and reconciles the output against an expected DataFrame — no live database, no network, no fixtures beyond plain `pandas.DataFrame` objects.
+
+```python
+# tests/transforms/test_daily_revenue.py
+import pandas as pd
+from etl_framework.transform_testing.harness import TransformCase
+
+TRANSFORM_SQL = """
+    SELECT order_date, SUM(amount) FILTER (WHERE status <> 'CANCELLED') AS revenue
+    FROM orders
+    GROUP BY order_date
+"""
+
+def test_cancelled_orders_excluded_from_revenue():
+    mismatches = TransformCase(
+        transform_sql=TRANSFORM_SQL,
+        inputs={"orders": pd.DataFrame({
+            "order_date": ["2026-07-01", "2026-07-01"],
+            "amount": [100.0, 50.0],
+            "status": ["COMPLETE", "CANCELLED"],
+        })},
+        expected=pd.DataFrame({"order_date": ["2026-07-01"], "revenue": [100.0]}),
+        key_columns=["order_date"],
+    ).run()
+    assert mismatches == []
+```
+
+`inputs` accepts one or more named tables (each a `DataFrame`) — pass multiple to test transforms that join across tables. `TransformCase` reuses the same `DuckDBBackend` comparison engine production reconciliation runs use, so a passing `TransformCase` test and a passing production job mean the same thing. See `tests/transforms/test_example_daily_revenue.py` for a complete example, and add new transform tests under `tests/transforms/`.
+
+Run just the transform tests:
+
+```powershell
+python -m pytest tests/transforms -v
+```
 
 Run all tests:
 

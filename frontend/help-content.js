@@ -341,6 +341,44 @@
       ],
     },
     {
+      id: 'gates-rules-shadow',
+      title: 'Gates, Rules-As-Code & Shadow Runs',
+      intro: 'A Write-Audit-Publish promotion gate, versioned DQ rules, schema-compatibility grading, isolated transform testing, and cheap sampled "shadow" runs for CI. The first two below live in the UI; the rest are API/CLI/pytest features with no dedicated screen.',
+      steps: [
+        {
+          title: 'Run a job in Shadow profile for a cheap check',
+          text: 'In Run Settings, set Run Profile to Shadow (default is Full) and adjust Shadow Sample Fraction (default 0.02 = 2% of rows). Shadow runs sample rows per key via the same comparison backend; rows missing on either side are always kept, never sampled away. Use Shadow for fast per-PR checks and Full for the nightly authoritative run.',
+          where: 'Launch -> Run Settings -> Run Profile',
+        },
+        {
+          title: 'Check whether a job is safe to promote',
+          text: 'Click Gate on any job row in the Job Catalog. This calls the Write-Audit-Publish gate, which returns PROMOTE only if the job\'s latest run PASSED and no open Data Contract breach exists for it — otherwise HOLD, with the specific reason(s) shown in the toast and badge next to the button.',
+          where: 'Launch -> Job Catalog -> Gate button',
+          tip: 'Wire the same check into an orchestrator with POST /api/gates/{job}/evaluate, or from the CLI with --gate-run <run_id> (exit codes 0=passed 1=failed 2=cancelled 3=error 4=not found) once a run has completed.',
+        },
+        {
+          title: 'Keep DQ rules as versioned YAML (rules-as-code)',
+          text: 'Export a job\'s current DQ rules to a YAML file under expectations/ with POST /api/expectations/export, review/edit them like any other source file, then POST /api/expectations/sync to push the YAML back into the job — the file\'s rules list fully replaces what was there. A suite naming a job that does not exist yet is reported, not treated as an error.',
+          where: 'API -> POST /api/expectations/export and /sync',
+        },
+        {
+          title: 'Read the schema-compatibility verdict',
+          text: 'Schema snapshot diffs (History -> Schema sub-tab, or GET /api/jobs/{job}/schema-history) now include a compatibility grade: full (no change), non_breaking (new column, or a numeric type widening), risky (anything to/from object, datetime unit/tz changes), or breaking (column removed, or a numeric type narrowing). The overall grade on a diff is always its worst individual change.',
+          where: 'History -> Schema sub-tab',
+        },
+        {
+          title: 'Test a transform in isolation with TransformCase',
+          text: 'For business logic that is not a straight source-vs-target reconciliation, write a pytest test using etl_framework.transform_testing.harness.TransformCase: it runs your transform SQL against in-memory DuckDB fixture tables (plain pandas DataFrames, no live DB) and reconciles the output against an expected DataFrame with the same comparison engine production jobs use. See tests/transforms/test_example_daily_revenue.py.',
+          where: 'pytest -> tests/transforms/*.py',
+        },
+        {
+          title: 'Use a base overlay and secret providers in the CLI config file',
+          text: 'The standalone CLI runner (python -m etl_framework.runner.cli --config file.yml ...) supports an environments.base block merged under every named environment (its own keys win), and secret://<provider>/<name> values resolved at load time instead of read literally -- the built-in env provider reads an environment variable, and you can register others (Vault, Azure Key Vault, ...) via etl_framework.config.secrets.register_provider.',
+          where: 'CLI config YAML -> environments.base / secret://',
+        },
+      ],
+    },
+    {
       id: 'adapters',
       title: 'Adapters',
       intro: 'Adapters connect to external systems: SAP BusinessObjects, Automic (UC4), and REST APIs. Browse, test, and import directly from the UI.',
