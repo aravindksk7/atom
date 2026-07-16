@@ -90,7 +90,8 @@ button:focus-visible {
 /* =========================================================
    Layout shell
    ========================================================= */
-.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.app-shell { min-height: 100vh; display: flex; flex-direction: row; }
+.app-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ----- Top nav ----- */
 .top-nav {
