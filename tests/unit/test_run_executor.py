@@ -594,3 +594,39 @@ def test_run_with_segment_columns_persists_summary():
     assert tr.segment_summary is not None
     assert tr.segment_summary["region"][0]["value"] == "APAC"
     assert tr.segment_summary["region"][0]["mismatch_count"] == 1
+
+
+def test_shadow_profile_wraps_backend_in_sampling():
+    from etl_framework.reconciliation.backends.sampling_backend import SamplingBackend
+    from tests.helpers.factories import make_job_definition
+
+    db = _session()
+    RunRepository(db).create_run("run-shadow-001", "dev", "prod", {})
+    executor = RunExecutor(
+        db=db,
+        run_id="run-shadow-001",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=[],
+        run_settings=RunSettings(run_profile="shadow", metrics_enabled=False),
+    )
+    backend = executor._build_backend(make_job_definition())
+    assert isinstance(backend, SamplingBackend)
+
+
+def test_full_profile_backend_unwrapped():
+    from etl_framework.reconciliation.backends.sampling_backend import SamplingBackend
+    from tests.helpers.factories import make_job_definition
+
+    db = _session()
+    RunRepository(db).create_run("run-full-001", "dev", "prod", {})
+    executor = RunExecutor(
+        db=db,
+        run_id="run-full-001",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=[],
+        run_settings=RunSettings(metrics_enabled=False),
+    )
+    backend = executor._build_backend(make_job_definition())
+    assert not isinstance(backend, SamplingBackend)

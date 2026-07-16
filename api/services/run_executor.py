@@ -1101,18 +1101,23 @@ class RunExecutor:
     def _build_backend(self, job: JobDefinition):
         key_columns = job.key_columns or self._settings.key_columns
         if self._settings.comparison_backend == "polars":
-            return PolarsBackend(
+            backend = PolarsBackend(
                 key_columns=key_columns,
                 float_tolerance=self._settings.float_tolerance,
                 null_equals_null=self._settings.null_equals_null,
                 mismatch_row_limit=self._settings.mismatch_row_limit,
             )
-        return PandasBackend(
-            key_columns=key_columns,
-            float_tolerance=self._settings.float_tolerance,
-            null_equals_null=self._settings.null_equals_null,
-            mismatch_row_limit=self._settings.mismatch_row_limit,
-        )
+        else:
+            backend = PandasBackend(
+                key_columns=key_columns,
+                float_tolerance=self._settings.float_tolerance,
+                null_equals_null=self._settings.null_equals_null,
+                mismatch_row_limit=self._settings.mismatch_row_limit,
+            )
+        if self._settings.run_profile == "shadow":
+            from etl_framework.reconciliation.backends.sampling_backend import SamplingBackend
+            backend = SamplingBackend(backend, sample_frac=self._settings.shadow_sample_frac)
+        return backend
 
     def _job_file_value(self, job: JobDefinition, prefix: str, suffix: str) -> Any:
         side = "a" if prefix == "source" else "b"
