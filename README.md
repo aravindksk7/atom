@@ -108,6 +108,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - Contracts carry a semantic **version** (`1.0` by default); bump minor or major with `POST /api/contracts/{name}/bump`.
   - The **Contracts tab** in the UI lists all contracts with live OK / BREACHED / OVERDUE status badges, breach history, and inline version bump.
   - Derived endpoints expose the source job's DQ rules (`/rules`) and latest schema snapshot (`/schema`) without duplicating configuration.
+- **Rules-as-code** — export job DQ rules to versioned YAML suites in `expectations/`, review them in PRs, and sync them back with `POST /api/expectations/sync`. Schema snapshot diffs now include a `compatibility` verdict (`full` / `non_breaking` / `risky` / `breaking`).
 
 ## Architecture
 
