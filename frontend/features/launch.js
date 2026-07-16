@@ -13,6 +13,8 @@
     selectedJobs: [],
     stepSettings: {},      // { jobName: { hold_after, wait_seconds, require_status, max_mismatch_count } }
     stepSettingsOpen: {},  // { jobName: bool } — expanded settings panel
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showJobModal: false,
     jobModal: {},
     jobModalEditing: false,
@@ -53,6 +55,8 @@
     // -----------------------------------------------------------
     schedules: [],
     launchSubTab: 'jobs',
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showScheduleModal: false,
     scheduleModal: {},
     jobSelections: [],

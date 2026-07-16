@@ -10,6 +10,8 @@
     // Config
     // -----------------------------------------------------------
     configs: [],
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showConfigModal: false,
     configModal: {},
     configValidation: null,
@@ -39,6 +41,8 @@
     // -----------------------------------------------------------
     hooks: [],
     notifOpen: false,
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showHookModal: false,
     hookModal: { name: '', url: '', events: [], secret: '' },
     hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed', 'run.held', 'run.cancelled'],

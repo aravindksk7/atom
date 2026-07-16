@@ -16,6 +16,8 @@
     boDocs: [],
     expandedBODocs: [],
     boReports: {},         // doc.id → list of reports
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showBOJobModal: false,
     boJobForm: { name: '', title: '', doc_id: '', report_id: '', key_columns_raw: 'id', format: 'xlsx' },
 

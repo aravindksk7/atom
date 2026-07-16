@@ -16,6 +16,8 @@
     contractBreachHistory: [],
     contractVersionHistory: [],
     contractBreachLoading: false,
+    // NOTE: app-help.js's global Escape-key handler reads this flag directly to
+    // close the modal — don't rename without updating app-help.js too.
     showContractModal: false,
     contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' },
     contractModalEditing: false,
