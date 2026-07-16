@@ -77,6 +77,30 @@ export async function createFileJob(ctx: APIRequestContext, name: string) {
   return resp.json();
 }
 
+/**
+ * Creates a file-mode reconciliation job comparing fixtures/data/gate_ok_source.csv vs
+ * gate_ok_target.csv on key column `id`. The two files are byte-identical, so running
+ * this job always reaches status PASSED with zero mismatches — the counterpart to
+ * createFileJob's deterministic FAILED case, used where a test needs a PROMOTE-eligible
+ * job (e.g. WAP gate evaluation).
+ */
+export async function createPassingFileJob(ctx: APIRequestContext, name: string) {
+  const resp = await ctx.post('/api/jobs', {
+    data: {
+      name,
+      job_type: 'reconciliation',
+      key_columns: ['id'],
+      params: {
+        source_mode: 'files',
+        source_file_path: path.join(FIXTURE_DIR, 'gate_ok_source.csv'),
+        target_file_path: path.join(FIXTURE_DIR, 'gate_ok_target.csv'),
+      },
+    },
+  });
+  if (!resp.ok()) throw new Error(`createPassingFileJob(${name}) failed: ${resp.status()} ${await resp.text()}`);
+  return resp.json();
+}
+
 // Intentionally fire-and-forget (unlike the create* helpers above): this runs from
 // afterAll/afterEach cleanup blocks, where throwing on a failed delete would mask
 // the actual test failure that's already being reported. A failed cleanup here

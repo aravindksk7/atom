@@ -834,10 +834,31 @@
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div>
           <label class="field-label">Comparison Backend</label>
-          <select x-model="launchSettings.comparison_backend" class="field-input field-select">
+          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select">
             <option value="pandas">Pandas</option>
             <option value="polars">Polars</option>
           </select>
+        </div>
+        <div>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="field-label mb-0">Run Profile</label>
+            <button @click="showHelp('runProfile')" class="help-btn" title="Learn more">
+              <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <select x-model="launchSettings.run_profile" class="field-input field-select" data-testid="launch-run-profile-select"
+                  title="Full compares every row. Shadow samples a small fraction — cheap per-PR checks.">
+            <option value="full">Full</option>
+            <option value="shadow">Shadow (sampled)</option>
+          </select>
+        </div>
+        <div x-show="launchSettings.run_profile === 'shadow'">
+          <label class="field-label">Shadow Sample Fraction</label>
+          <input type="number" min="0" max="1" step="0.01" x-model.number="launchSettings.shadow_sample_frac"
+                 class="field-input" data-testid="launch-shadow-sample-frac-input"
+                 title="Fraction of rows to sample when Run Profile is Shadow (0-1)." />
         </div>
         <div>
           <div class="flex items-center gap-1 mb-1">
@@ -972,7 +993,12 @@
               </div>
             </template>
           </label>
-          <div class="flex gap-1 flex-shrink-0">
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <span x-show="jobGateVerdicts[job.name]" class="badge text-xs"
+                  :class="(jobGateVerdicts[job.name] || {}).verdict === 'PROMOTE' ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'"
+                  :data-testid="'job-row-' + job.name + '-gate-verdict'"
+                  x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
+            <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
             <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
             <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>

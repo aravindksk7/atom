@@ -180,6 +180,7 @@ function _appRaw() {
     showJobModal: false,
     jobModal: {},
     jobModalEditing: false,
+    jobGateVerdicts: {},
     launchSettings: {
       source_env: 'dev',
       target_env: 'prod',
@@ -193,6 +194,8 @@ function _appRaw() {
       chunk_size: 0,
       use_hash_precheck: true,
       comparison_backend: 'pandas',
+      run_profile: 'full',
+      shadow_sample_frac: 0.02,
       mismatch_row_limit: 1000,
       health_check: false,
       metrics_enabled: true,
@@ -1449,6 +1452,20 @@ function _appRaw() {
       }
     },
 
+    async checkJobGate(name) {
+      try {
+        const verdict = await api('POST', `/api/gates/${encodeURIComponent(name)}/evaluate`);
+        this.jobGateVerdicts = { ...this.jobGateVerdicts, [name]: verdict };
+        if (verdict.verdict === 'PROMOTE') {
+          this.toast('success', 'PROMOTE', name);
+        } else {
+          this.toast('error', 'HOLD', verdict.reasons.join('; ') || name);
+        }
+      } catch (e) {
+        this.toast('error', 'Gate check failed', e.message);
+      }
+    },
+
     _runSettingsPayload() {
       const s = this.launchSettings;
       return {
@@ -1461,6 +1478,8 @@ function _appRaw() {
         chunk_size: Number(s.chunk_size),
         use_hash_precheck: Boolean(s.use_hash_precheck),
         comparison_backend: s.comparison_backend,
+        run_profile: s.run_profile || 'full',
+        shadow_sample_frac: Number(s.shadow_sample_frac) || 0.02,
         mismatch_row_limit: Number(s.mismatch_row_limit) || 1000,
         health_check: Boolean(s.health_check),
         metrics_enabled: Boolean(s.metrics_enabled),

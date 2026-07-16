@@ -8,6 +8,10 @@
       title: 'Chunk Size',
       content: 'Number of rows to process at once. Set to 0 to disable chunking and process all rows in memory. Larger values use more memory but may be faster for simple comparisons.',
     },
+    runProfile: {
+      title: 'Run Profile',
+      content: 'Full compares every row. Shadow samples a small fraction of rows (Shadow Sample Fraction) via the sampling backend — useful for cheap, fast per-PR checks; rows missing on either side are always kept.',
+    },
     hashPrecheck: {
       title: 'Hash Precheck',
       content: 'When enabled, computes hash values for rows first and only performs full row comparison when hashes differ. Significantly speeds up comparisons for large datasets with few actual differences.',
