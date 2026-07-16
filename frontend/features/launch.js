@@ -2,7 +2,7 @@
   'use strict';
   // Launch feature slice (Launch tab: job catalog/CRUD, run launch,
   // Schedules sub-tab). Merged into the Alpine component via
-  // Object.assign(ETL_FEATURE_LAUNCH(), ...) in app.js.
+  // the FEATURE_SLICES reduce in app.js.
   global.ETL_FEATURE_LAUNCH = function () {
     return {
       // ===== STATE (extracted from app.js) =====

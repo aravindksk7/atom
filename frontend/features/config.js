@@ -2,7 +2,7 @@
   'use strict';
   // Config feature slice (Config tab, incl. Security/API tokens and
   // Notifications/webhooks). Merged into the Alpine component via
-  // Object.assign(ETL_FEATURE_CONFIG(), ...) in app.js.
+  // the FEATURE_SLICES reduce in app.js.
   global.ETL_FEATURE_CONFIG = function () {
     return {
       // ===== STATE (extracted from app.js) =====
