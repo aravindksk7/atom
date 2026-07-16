@@ -808,6 +808,10 @@ function _appRaw() {
       return this.runs.slice(0, 8);
     },
 
+    get currentTabLabel() {
+      return (this.tabs.find(t => t.id === this.currentView) || {}).label || '';
+    },
+
     // ===========================================================
     // REGIONAL – APP-WIDE TIMEZONE
     // ===========================================================
