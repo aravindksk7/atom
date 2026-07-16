@@ -1033,6 +1033,9 @@ button:focus-visible {
   --panel-raised: #1c212c;
   --line: rgba(255,255,255,0.10);
   --line-strong: rgba(255,255,255,0.16);
+  /* --border aliases --line rather than adopting the design spec's #262c38,
+     to keep the existing dark-theme border look unchanged; revisit only if a
+     dedicated border color is needed later. */
   --border: var(--line);
   --text: #f4f7fb;
   --text-soft: #c7d0dc;
