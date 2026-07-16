@@ -108,6 +108,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - Contracts carry a semantic **version** (`1.0` by default); bump minor or major with `POST /api/contracts/{name}/bump`.
   - The **Contracts tab** in the UI lists all contracts with live OK / BREACHED / OVERDUE status badges, breach history, and inline version bump.
   - Derived endpoints expose the source job's DQ rules (`/rules`) and latest schema snapshot (`/schema`) without duplicating configuration.
+- **Write-Audit-Publish gate** — `POST /api/gates/{job}/evaluate` returns a machine-readable `PROMOTE`/`HOLD` verdict (latest result status + open contract breaches) so orchestrators can gate a staging→production swap on data quality.
 
 ## Architecture
 
