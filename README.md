@@ -350,6 +350,8 @@ Environment configs can be created in the Config tab or through `/api/configs`. 
 - `automic_user`
 - `automic_password`
 
+Environment config supports a `base` overlay (shared settings merged under every environment; per-env keys win) and `secret://<provider>/<name>` values (built-in `env` provider reads environment variables; register custom providers via `etl_framework.config.secrets.register_provider`).
+
 Example API request:
 
 ```powershell
