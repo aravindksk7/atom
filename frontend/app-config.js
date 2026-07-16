@@ -5,9 +5,31 @@
     return TERMINAL_STATUSES.includes(String(status || '').toUpperCase());
   }
 
+  // Shared by the Reports tab's logs subtab (features/reports.js) and the
+  // Global Logs tab (features/logs.js) — both render log lines via these
+  // two functions in index.html (e.g. `x-html="highlightMatch(line.text,
+  // logFilterQuery)"`, `:class="logLevelClass(line.level)"`).
+  function highlightMatch(text, query) {
+    const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    if (!query.trim()) return safe;
+    const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
+  }
+
+  function logLevelClass(level) {
+    const value = (level || '').toUpperCase();
+    if (value === 'ERROR') return 'log-level-error';
+    if (value === 'WARNING' || value === 'WARN') return 'log-level-warn';
+    if (value === 'INFO') return 'log-level-info';
+    if (value === 'DEBUG') return 'log-level-debug';
+    return 'log-level-trace';
+  }
+
   global.ETL_APP_CONFIG = {
     terminalStatuses: TERMINAL_STATUSES,
     isTerminalStatusValue,
+    highlightMatch,
+    logLevelClass,
     jobModalTabs: [
       { id: 'basic', label: 'Basic Info' },
       { id: 'settings', label: 'Settings' },

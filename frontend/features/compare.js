@@ -1,7 +1,7 @@
 (function (global) {
   'use strict';
   // Compare feature slice (Compare tab + Schema-Explorer helpers used by it).
-  // Merged into the Alpine component via Object.assign(ETL_FEATURE_COMPARE(), ...) in app().
+  // Merged into the Alpine component via the FEATURE_SLICES reduce in app.js.
   global.ETL_FEATURE_COMPARE = function () {
     return {
       // ===== STATE (extracted from app.js) =====

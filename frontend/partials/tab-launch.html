@@ -1,0 +1,1158 @@
+<!-- Partial name is historical: this tab's currentView identity is 'jobs', not 'launch'. See features/launch.js. -->
+<div x-show="currentView === 'jobs'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Job Launcher</div>
+      <div class="section-sub">Select jobs, configure settings, and trigger a run</div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex rounded-lg border border-slate-200 overflow-hidden">
+        <button @click="launchSubTab='jobs'" :class="launchSubTab==='jobs' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Jobs</button>
+        <button @click="launchSubTab='selections'; loadJobSelections()" :class="launchSubTab==='selections' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Job Selections</button>
+        <button @click="launchSubTab='schedules'; loadSchedules(); loadJobSelections()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
+      </div>
+      <template x-if="launchSubTab==='jobs'">
+        <label class="toggle-wrap">
+          <div class="toggle-track" :class="launchSettings.use_live_connections ? 'on' : ''">
+            <div class="toggle-thumb"></div>
+          </div>
+          <span class="toggle-label" @click="launchSettings.use_live_connections = !launchSettings.use_live_connections">
+            Live Connections
+          </span>
+        </label>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── Jobs sub-tab ── -->
+  <div x-show="launchSubTab === 'jobs'">
+
+  <!-- Launch settings card -->
+  <div class="card mb-4">
+    <div class="font-semibold text-slate-700 mb-3">Settings</div>
+
+    <div class="settings-group">
+      <div class="settings-group-label">Connection</div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="field-label">Source Env</label>
+          <select x-model="launchSettings.source_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Target Env</label>
+          <select x-model="launchSettings.target_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Saved Config</label>
+          <select x-model="launchSettings.config_id" class="field-input field-select">
+            <option value="">— None —</option>
+            <template x-for="cfg in configs" :key="cfg.id">
+              <option :value="cfg.id" x-text="savedConfigDisplay(cfg)"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+      <template x-if="launchConfigConnections().length > 0">
+        <div class="grid grid-cols-2 gap-4 mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <div>
+            <label class="field-label text-emerald-700">Source Connection</label>
+            <select x-model="launchSettings.source_connection" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in launchConfigConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="field-label text-emerald-700">Target Connection</label>
+            <select x-model="launchSettings.target_connection" class="field-input field-select">
+              <option :value="null">— default —</option>
+              <template x-for="name in launchConfigConnections()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-label">Execution</div>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div>
+          <label class="field-label">Execution Mode</label>
+          <select x-model="launchSettings.execution_mode" class="field-input field-select">
+            <option value="parallel">Parallel</option>
+            <option value="sequential">Sequential</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Max Workers</label>
+          <input x-model="launchSettings.max_workers" type="number" min="1" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Max Duration (s)</label>
+          <input x-model="launchSettings.max_duration_seconds" type="number" min="0" class="field-input" />
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-label">Comparison</div>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div>
+          <label class="field-label">Comparison Backend</label>
+          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select">
+            <option value="pandas">Pandas</option>
+            <option value="polars">Polars</option>
+          </select>
+        </div>
+        <div>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="field-label mb-0">Run Profile</label>
+            <button @click="showHelp('runProfile')" class="help-btn" title="Learn more">
+              <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <select x-model="launchSettings.run_profile" class="field-input field-select" data-testid="launch-run-profile-select"
+                  title="Full compares every row. Shadow samples a small fraction — cheap per-PR checks.">
+            <option value="full">Full</option>
+            <option value="shadow">Shadow (sampled)</option>
+          </select>
+        </div>
+        <div x-show="launchSettings.run_profile === 'shadow'">
+          <label class="field-label">Shadow Sample Fraction</label>
+          <input type="number" min="0" max="1" step="0.01" x-model.number="launchSettings.shadow_sample_frac"
+                 class="field-input" data-testid="launch-shadow-sample-frac-input"
+                 title="Fraction of rows to sample when Run Profile is Shadow (0-1)." />
+        </div>
+        <div>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="field-label mb-0">Chunk Size</label>
+            <button @click="showHelp('chunkSize')" class="help-btn" title="Learn more">
+              <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <input type="number" min="0" x-model.number="launchSettings.chunk_size"
+                 class="field-input"
+                 title="Number of rows to process at once. 0 disables chunking.">
+        </div>
+        <div>
+          <label class="field-label">Float Tolerance</label>
+          <input type="text" x-model="launchSettings.float_tolerance"
+                 class="field-input font-mono text-sm"
+                 placeholder="1e-9"
+                 title="Maximum allowed difference between floating-point values before flagging as a mismatch">
+        </div>
+        <div>
+          <label class="field-label">Mismatch Row Limit</label>
+          <input type="number" min="1" x-model.number="launchSettings.mismatch_row_limit"
+                 class="field-input"
+                 title="Maximum number of mismatch detail rows stored per result. Counts still include all mismatches.">
+        </div>
+        <div>
+          <label class="field-label">Schema Mismatch</label>
+          <select x-model="launchSettings.schema_mismatch_policy" class="field-input field-select"
+                  title="How to handle column count or type differences between source and target">
+            <option value="warn">Warn</option>
+            <option value="error">Error</option>
+            <option value="ignore">Ignore</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-label">Advanced</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+          <input type="checkbox" class="rounded" x-model="launchSettings.health_check" /> Health gate
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+          <input type="checkbox" class="rounded" x-model="launchSettings.metrics_enabled" /> Metrics
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
+               title="Treat two NULL values as equal during comparison">
+          <input type="checkbox" class="rounded" x-model="launchSettings.null_equals_null" /> NULL = NULL
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
+               title="Use hash comparison before full value comparison to speed up processing">
+          <input type="checkbox" class="rounded" x-model="launchSettings.use_hash_precheck" /> Hash precheck
+        </label>
+      </div>
+      <!-- Retry policy -->
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div>
+          <label class="field-label">Max Retries (0 = off)</label>
+          <input x-model="launchSettings.max_retries" type="number" min="0" max="10" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Retry Delay (seconds)</label>
+          <input x-model="launchSettings.retry_delay_seconds" type="number" min="0" class="field-input" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Job catalog -->
+  <div class="card mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="font-semibold text-slate-700">Job Catalog</div>
+      <div class="flex items-center gap-3">
+        <span class="text-muted" x-text="jobCatalogCountLabel"></span>
+        <button @click="openNewJobModal()" class="btn-primary btn-sm" data-testid="job-new-btn">+ New Job</button>
+      </div>
+    </div>
+
+    <div class="px-0 py-2 border-b mb-2">
+      <div class="relative">
+        <input type="text"
+               x-model="jobSearchQuery"
+               @input="shiftLastIndex = -1"
+               placeholder="Search jobs by name, tags, or description..."
+               class="field-input pl-8 w-full text-sm"
+               data-testid="job-search-input">
+        <svg class="absolute left-2 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="flex gap-2 py-1.5 border-b bg-slate-50 text-xs mb-2 -mx-0 px-1">
+      <button @click="selectAllJobs()" class="btn-link btn-sm text-slate-600">Select All</button>
+      <span class="text-slate-300">|</span>
+      <button @click="selectNoneJobs()" class="btn-link btn-sm text-slate-600">Select None</button>
+    </div>
+
+    <template x-if="jobs.length === 0">
+      <div class="empty-state"><div class="empty-state-title">No jobs yet. Create one or add from the Adapters tab.</div></div>
+    </template>
+    <template x-if="jobs.length > 0 && filteredJobList.length === 0">
+      <div class="empty-state"><div class="empty-state-title">No jobs match your search.</div></div>
+    </template>
+    <div class="space-y-1">
+      <template x-for="(job, $index) in filteredJobList" :key="job.name">
+        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors"
+             :data-testid="'job-row-' + job.name">
+          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" :data-testid="'job-row-' + job.name + '-checkbox'" />
+          <label class="flex-1 min-w-0 cursor-pointer" @click.prevent="toggleJobWithShift($index, $event)">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full flex-shrink-0 inline-block"
+                    :class="{
+                      'bg-emerald-500': getJobLastStatus(job) === 'passed',
+                      'bg-rose-500': getJobLastStatus(job) === 'failed',
+                      'bg-amber-400 animate-pulse': getJobLastStatus(job) === 'running',
+                      'bg-slate-300': !getJobLastStatus(job)
+                    }">
+              </span>
+              <span class="font-medium text-slate-800 truncate" x-text="job.name"></span>
+              <span class="badge text-xs" :class="'jtype-' + (job.job_type || 'reconciliation')" x-text="job.job_type || 'reconciliation'"></span>
+            </div>
+            <div class="text-muted truncate" x-text="job.description"></div>
+            <template x-if="job.tags && job.tags.length">
+              <div class="flex flex-wrap gap-1 mt-0.5">
+                <template x-for="tag in job.tags" :key="tag">
+                  <span class="px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700" x-text="tag"></span>
+                </template>
+              </div>
+            </template>
+          </label>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <span x-show="jobGateVerdicts[job.name]" class="badge text-xs"
+                  :class="(jobGateVerdicts[job.name] || {}).verdict === 'PROMOTE' ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'"
+                  :data-testid="'job-row-' + job.name + '-gate-verdict'"
+                  x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
+            <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
+            <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
+            <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Job Modal -->
+  <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false" data-testid="job-modal">
+    <div class="modal-box w-full max-w-2xl">
+      <div class="flex items-center mb-4">
+        <h2 class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
+        <button @click="showSaveTemplatePrompt = !showSaveTemplatePrompt"
+                class="btn-outline btn-sm ml-auto text-xs">
+          Save as Template
+        </button>
+      </div>
+
+      <div x-show="showSaveTemplatePrompt" class="mb-3 flex gap-2">
+        <input type="text"
+               x-model="jobTemplateName"
+               placeholder="Template name..."
+               class="field-input text-sm flex-1">
+        <button @click="saveJobAsTemplate()" class="btn-primary btn-sm text-sm">Save</button>
+        <button @click="showSaveTemplatePrompt = false" class="btn-outline btn-sm text-sm">Cancel</button>
+      </div>
+
+      <template x-if="jobTemplates && jobTemplates.length > 0">
+        <div class="mb-3">
+          <select @change="loadJobTemplate($event.target.value); $event.target.value=''"
+                  class="field-input text-sm">
+            <option value="">-- Use template --</option>
+            <template x-for="tmpl in jobTemplates" :key="tmpl.name">
+              <option :value="tmpl.name" x-text="tmpl.name"></option>
+            </template>
+          </select>
+        </div>
+      </template>
+
+      <div class="flex border-b mb-4 overflow-x-auto">
+        <template x-for="tab in jobModalTabs" :key="tab.id">
+          <button @click="jobModalTab = tab.id"
+                  class="px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors"
+                  :class="jobModalTab === tab.id ? 'border-indigo-500 text-indigo-600 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                  :data-testid="'job-modal-tab-' + tab.id">
+            <span x-text="tab.label"></span>
+          </button>
+        </template>
+      </div>
+
+      <div x-show="jobModalTab === 'basic'" class="space-y-3">
+        <div>
+          <label class="field-label">Job Name *</label>
+          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" data-testid="job-modal-name-input" />
+        </div>
+        <div>
+          <label class="field-label">Description</label>
+          <input x-model="jobModal.description" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Job Type</label>
+          <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select">
+            <option value="reconciliation">reconciliation</option>
+            <option value="bo_report">bo_report</option>
+            <option value="automic_job">automic_job</option>
+            <option value="dbt_artifact">dbt_artifact</option>
+            <option value="freshness">freshness</option>
+            <option value="schema_snapshot">schema_snapshot</option>
+            <option value="profile">profile</option>
+            <option value="cross_job_assertion">cross_job_assertion</option>
+            <option value="api_reconciliation">api_reconciliation</option>
+          </select>
+        </div>
+        <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
+          <label class="field-label">Input Source</label>
+          <select x-model="jobModal.source_mode" class="field-input field-select">
+            <option value="sql">SQL Query</option>
+            <option value="files">Files</option>
+          </select>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" class="rounded" x-model="jobModal.enabled" /> Enabled
+        </label>
+      </div>
+
+      <div x-show="jobModalTab === 'settings'" class="space-y-3">
+        <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'files'">
+          <label class="field-label">SQL Query</label>
+          <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
+                    placeholder="SELECT * FROM orders WHERE date = :run_date"
+                    @input="validateJobModal()"
+                    data-testid="job-modal-query-textarea"></textarea>
+          <p x-show="jobModalValidation && jobModalValidation.sql"
+             class="text-xs mt-1"
+             :class="jobModalValidation && jobModalValidation.sql && jobModalValidation.sql.startsWith('✓') ? 'text-emerald-600' : 'text-amber-600'"
+             x-text="jobModalValidation && jobModalValidation.sql ? jobModalValidation.sql : ''">
+          </p>
+          <div class="flex items-center mt-1">
+            <button @click="showHelp('sqlQuery')" class="btn-link btn-sm text-slate-400 ml-1" title="Learn more about SQL queries">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+            <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+              <span class="text-xs font-medium text-slate-600">Preview against config</span>
+              <input type="number" x-model="jobModal.previewConfigId" class="field-input text-xs w-24 py-0.5" placeholder="Config ID" />
+              <button @click="previewJobQuery()"
+                      :disabled="jobModal.previewLoading || !jobModal.query?.trim()"
+                      class="btn-sm btn-secondary text-xs px-3 py-1 disabled:opacity-40">
+                <span x-show="!jobModal.previewLoading">Run Preview</span>
+                <span x-show="jobModal.previewLoading">Loading…</span>
+              </button>
+            </div>
+            <p x-show="jobModal.previewError" x-text="jobModal.previewError" class="text-xs text-red-600 px-3 py-2"></p>
+            <div x-show="jobModal.previewResult" class="overflow-x-auto max-h-48">
+              <table class="text-xs w-full">
+                <thead class="bg-slate-100 sticky top-0">
+                  <tr>
+                    <template x-for="col in (jobModal.previewResult?.columns || [])" :key="col">
+                      <th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap border-r border-slate-200 last:border-r-0"></th>
+                    </template>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(row, ri) in (jobModal.previewResult?.rows || [])" :key="ri">
+                    <tr :class="ri % 2 === 0 ? 'bg-white' : 'bg-slate-50'">
+                      <template x-for="(cell, ci) in row" :key="ci">
+                        <td x-text="cell ?? 'NULL'" class="px-2 py-1 border-r border-slate-100 last:border-r-0 whitespace-nowrap max-w-xs truncate"
+                            :class="cell === null ? 'text-slate-400 italic' : ''"></td>
+                      </template>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <p x-show="jobModal.previewResult && jobModal.previewResult.rows?.length === 0"
+                 class="text-xs text-slate-500 px-3 py-2">No rows returned.</p>
+            </div>
+          </div>
+        </div>
+        <div x-show="jobModal.source_mode === 'files' && ['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)"
+             class="border border-slate-200 rounded-lg p-3">
+          <div class="grid-2">
+            <div>
+              <label class="field-label" x-text="jobModal.job_type === 'reconciliation' ? 'Source File Path' : 'Input File Path'"></label>
+              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" />
+            </div>
+            <div x-show="jobModal.job_type === 'reconciliation'">
+              <label class="field-label">Target File Path</label>
+              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" />
+            </div>
+            <div>
+              <label class="field-label">Source Label</label>
+              <input x-model="jobModal.source_file_label" class="field-input" placeholder="Source file" />
+            </div>
+            <div x-show="jobModal.job_type === 'reconciliation'">
+              <label class="field-label">Target Label</label>
+              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Target file" />
+            </div>
+          </div>
+        </div>
+        <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
+          <label class="field-label">Key Columns (comma-separated)</label>
+          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
+        </div>
+        <div x-show="jobModal.job_type === 'bo_report'" class="grid-2">
+          <div>
+            <label class="field-label">BO Document ID</label>
+            <input x-model="jobModal.bo_report_id" class="field-input" placeholder="101" />
+          </div>
+          <div>
+            <label class="field-label">BO Report/Page ID</label>
+            <input x-model="jobModal.bo_page_id" class="field-input" placeholder="1" />
+          </div>
+          <div>
+            <label class="field-label">Format</label>
+            <select x-model="jobModal.bo_format" class="field-input field-select">
+              <option value="xlsx">xlsx</option>
+              <option value="csv">csv</option>
+              <option value="pdf">pdf</option>
+            </select>
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'automic_job'" class="grid-2">
+          <div>
+            <label class="field-label">Automic Job Name</label>
+            <input x-model="jobModal.automic_job_name" class="field-input" placeholder="ETL_NIGHTLY_LOAD" />
+          </div>
+          <div>
+            <label class="field-label">Automic Run ID</label>
+            <input x-model="jobModal.automic_run_id" class="field-input" placeholder="RUN_42" />
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'api_reconciliation'" class="grid-2">
+          <div>
+            <label class="field-label">Source API Endpoint</label>
+            <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" />
+          </div>
+          <div>
+            <label class="field-label">Target API Endpoint <span class="text-slate-400 font-normal">(optional — leave blank to compare later)</span></label>
+            <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" />
+          </div>
+          <p class="text-xs text-slate-400 col-span-2">
+            Endpoint names must match entries in the api_endpoints section of whichever config is selected when this job runs.
+            Without a target, the job saves and runs as SKIPPED until one is set.
+          </p>
+        </div>
+        <div x-show="jobModal.job_type === 'dbt_artifact'" class="grid-2">
+          <div>
+            <label class="field-label">manifest.json path</label>
+            <input x-model="jobModal.dbt_manifest_path" class="field-input" placeholder="target/manifest.json" />
+          </div>
+          <div>
+            <label class="field-label">run_results.json path</label>
+            <input x-model="jobModal.dbt_run_results_path" class="field-input" placeholder="target/run_results.json" />
+          </div>
+        </div>
+        <!-- Freshness params -->
+        <div x-show="jobModal.job_type === 'freshness'" class="space-y-3">
+          <div x-show="jobModal.source_mode !== 'files'">
+            <label class="field-label">SQL Query (must return a timestamp column)</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT MAX(created_at) as ts FROM orders"></textarea>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Timestamp Column Name</label>
+              <input x-model="jobModal.freshness_ts_col" class="field-input" placeholder="ts" />
+            </div>
+            <div>
+              <label class="field-label">Max Age (hours)</label>
+              <input type="number" x-model="jobModal.freshness_max_hours" class="field-input" placeholder="24" min="0" step="0.5" />
+            </div>
+          </div>
+        </div>
+        <!-- Profile params -->
+        <div x-show="jobModal.job_type === 'profile'" class="space-y-3">
+          <div x-show="jobModal.source_mode !== 'files'">
+            <label class="field-label">SQL Query</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT * FROM orders"></textarea>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Columns (comma-separated, blank = all)</label>
+              <input x-model="jobModal.profile_columns" class="field-input" placeholder="amount, status, created_at" />
+            </div>
+            <div>
+              <label class="field-label">Drift Threshold %</label>
+              <input type="number" x-model="jobModal.profile_drift_pct" class="field-input" placeholder="20" min="0" max="100" />
+            </div>
+          </div>
+        </div>
+        <!-- Schema Snapshot params -->
+        <div x-show="jobModal.job_type === 'schema_snapshot'" class="space-y-3">
+          <div x-show="jobModal.source_mode !== 'files'">
+            <label class="field-label">SQL Query (schema is captured from the result columns)</label>
+            <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
+                      placeholder="SELECT * FROM orders LIMIT 0"></textarea>
+          </div>
+          <div>
+            <label class="field-label">Environment</label>
+            <select x-model="jobModal.snapshot_environment" class="field-input field-select">
+              <option value="source">source</option>
+              <option value="target">target</option>
+              <option value="both">both</option>
+            </select>
+          </div>
+        </div>
+        <!-- Cross-Job Assertion params -->
+        <div x-show="jobModal.job_type === 'cross_job_assertion'" class="space-y-3">
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Source Job Name</label>
+              <input x-model="jobModal.cja_source_job" class="field-input" placeholder="orders_profile" />
+            </div>
+            <div>
+              <label class="field-label">Source Metric</label>
+              <select x-model="jobModal.cja_source_metric" class="field-input field-select">
+                <option value="count">count</option>
+                <option value="distinct_count">distinct_count</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Source Column</label>
+              <input x-model="jobModal.cja_source_col" class="field-input" placeholder="amount" />
+            </div>
+            <div>
+              <label class="field-label">Target Job Name</label>
+              <input x-model="jobModal.cja_target_job" class="field-input" placeholder="payments_profile" />
+            </div>
+            <div>
+              <label class="field-label">Target Metric</label>
+              <select x-model="jobModal.cja_target_metric" class="field-input field-select">
+                <option value="count">count</option>
+                <option value="distinct_count">distinct_count</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Target Column</label>
+              <input x-model="jobModal.cja_target_col" class="field-input" placeholder="total" />
+            </div>
+            <div>
+              <label class="field-label">Tolerance</label>
+              <input type="number" x-model="jobModal.cja_tolerance" class="field-input" placeholder="0" min="0" />
+            </div>
+            <div>
+              <label class="field-label">Tolerance Type</label>
+              <select x-model="jobModal.cja_tolerance_type" class="field-input field-select">
+                <option value="absolute">absolute</option>
+                <option value="percent">percent</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <!-- Validate query button (editing mode only) -->
+        <template x-if="jobModalEditing && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'files'">
+          <div>
+            <div class="flex items-center gap-3">
+              <button @click="validateJob()" class="btn-secondary btn-sm" :disabled="validateJobLoading">
+                <span x-show="!validateJobLoading">🔍 Validate Query</span>
+                <span x-show="validateJobLoading">Validating…</span>
+              </button>
+              <template x-if="validateJobResult">
+                <span class="text-xs" :class="validateJobResult.errors?.length ? 'text-rose-500' : 'text-emerald-600'"
+                      x-text="validateJobResult.errors?.length ? '✗ ' + validateJobResult.errors[0] : '✓ Query validated'"></span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div x-show="jobModalTab === 'deps'" class="space-y-3">
+        <div>
+          <label class="field-label">Depends On (comma-separated job names)</label>
+          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" data-testid="job-modal-depends-on-input" />
+          <p x-show="jobModalValidation && jobModalValidation.dependencies"
+             class="text-xs mt-1 text-amber-600"
+             x-text="jobModalValidation && jobModalValidation.dependencies ? jobModalValidation.dependencies : ''">
+          </p>
+        </div>
+      </div>
+
+      <div x-show="jobModalTab === 'rules'" class="space-y-3">
+        <div x-show="jobModal.job_type === 'reconciliation'">
+          <div class="flex items-center gap-2 mb-3">
+            <label class="text-sm text-slate-500">Template:</label>
+            <select @change="applyDqTemplate($event.target.value); $event.target.value=''"
+                    class="field-input text-sm flex-1">
+              <option value="">-- Apply template --</option>
+              <template x-for="tmpl in dqRuleTemplates" :key="tmpl.name">
+                <option :value="tmpl.name" x-text="tmpl.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="field-label mb-0">Data Quality Rules</label>
+            <button @click="addDQRule()" class="btn-secondary btn-sm text-xs">+ Add Rule</button>
+          </div>
+          <template x-if="jobModal.rules && jobModal.rules.length > 0">
+            <div class="space-y-2 mt-1">
+              <template x-for="(rule, idx) in jobModal.rules" :key="idx">
+                <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
+                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-44">
+                    <option value="not_null">not_null</option>
+                    <option value="unique">unique</option>
+                    <option value="row_count_min">row_count_min</option>
+                    <option value="row_count_max">row_count_max</option>
+                    <option value="row_count_between">row_count_between</option>
+                    <option value="column_mean_between">column_mean_between</option>
+                    <option value="match_regex">match_regex</option>
+                    <option value="custom_sql">custom_sql</option>
+                    <option value="completeness_ratio">completeness_ratio</option>
+                    <option value="distinct_count_between">distinct_count_between</option>
+                    <option value="column_sum_between">column_sum_between</option>
+                    <option value="column_std_dev_between">column_std_dev_between</option>
+                    <option value="column_percentile">column_percentile</option>
+                    <option value="column_type_check">column_type_check</option>
+                    <option value="column_value_between">column_value_between</option>
+                    <option value="cross_column_consistency">cross_column_consistency</option>
+                    <option value="pii_mask_check">pii_mask_check</option>
+                    <option value="no_whitespace">no_whitespace</option>
+                    <option value="referential_check">referential_check</option>
+                    <option value="custom_sql_assert">custom_sql_assert</option>
+                    <option value="outlier_zscore">outlier_zscore</option>
+                    <option value="outlier_iqr">outlier_iqr</option>
+                    <option value="outlier_grubbs">outlier_grubbs</option>
+                    <option value="distribution_ks_test">distribution_ks_test</option>
+                    <option value="distribution_chi_square">distribution_chi_square</option>
+                    <option value="distribution_anderson_darling">distribution_anderson_darling</option>
+                    <option value="hypothesis_test_proportion">hypothesis_test_proportion</option>
+                    <option value="anomaly_detection_sigma">anomaly_detection_sigma</option>
+                  </select>
+                  <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" />
+                  <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between','completeness_ratio','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between','custom_sql_assert'].includes(rule.type)">
+                    <input x-model="rule.min_value" type="number" class="field-input text-xs py-1 w-20" placeholder="min" />
+                  </template>
+                  <template x-if="['row_count_max','row_count_between','column_mean_between','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between'].includes(rule.type)">
+                    <input x-model="rule.max_value" type="number" class="field-input text-xs py-1 w-20" placeholder="max" />
+                  </template>
+                  <template x-if="['match_regex','pii_mask_check'].includes(rule.type)">
+                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="regex pattern" />
+                  </template>
+                  <template x-if="rule.type === 'column_percentile'">
+                    <input x-model="rule.percentile" type="number" class="field-input text-xs py-1 w-16" placeholder="p%" min="1" max="99" />
+                  </template>
+                  <template x-if="rule.type === 'column_type_check'">
+                    <select x-model="rule.expected_type" class="field-input field-select text-xs py-1 w-24">
+                      <option value="int">int</option>
+                      <option value="float">float</option>
+                      <option value="date">date</option>
+                      <option value="uuid">uuid</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'cross_column_consistency'">
+                    <input x-model="rule.column_b" class="field-input text-xs py-1 w-24" placeholder="column B" />
+                  </template>
+                  <template x-if="['cross_column_consistency','custom_sql_assert'].includes(rule.type)">
+                    <select x-model="rule.operator" class="field-input field-select text-xs py-1 w-16">
+                      <option value="&lt;=">&lt;=</option>
+                      <option value="&lt;">&lt;</option>
+                      <option value="&gt;=">&gt;=</option>
+                      <option value="&gt;">&gt;</option>
+                      <option value="==">==</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'referential_check'">
+                    <input x-model="rule.lookup_query" class="field-input text-xs py-1 flex-1" placeholder="SELECT id FROM ref_table" />
+                  </template>
+                  <template x-if="['outlier_zscore','outlier_grubbs','anomaly_detection_sigma'].includes(rule.type)">
+                    <input x-model="rule.threshold" type="number" step="any" class="field-input text-xs py-1 w-20" :placeholder="rule.type === 'outlier_grubbs' ? 'alpha' : 'threshold'" />
+                  </template>
+                  <template x-if="rule.type === 'outlier_iqr'">
+                    <input x-model="rule.iqr_multiplier" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="IQR x" />
+                  </template>
+                  <template x-if="rule.type === 'outlier_iqr'">
+                    <select x-model="rule.fence_type" class="field-input field-select text-xs py-1 w-20">
+                      <option value="inner">inner</option>
+                      <option value="outer">outer</option>
+                    </select>
+                  </template>
+                  <template x-if="['distribution_ks_test','distribution_chi_square','distribution_anderson_darling','hypothesis_test_proportion'].includes(rule.type)">
+                    <input x-model="rule.alpha" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="alpha" />
+                  </template>
+                  <template x-if="rule.type === 'distribution_ks_test'">
+                    <select x-model="rule.distribution" class="field-input field-select text-xs py-1 w-24">
+                      <option value="normal">normal</option>
+                      <option value="uniform">uniform</option>
+                      <option value="exp">exp</option>
+                    </select>
+                  </template>
+                  <template x-if="rule.type === 'distribution_chi_square'">
+                    <input x-model="rule.bins" type="number" min="1" class="field-input text-xs py-1 w-16" placeholder="bins" />
+                  </template>
+                  <template x-if="rule.type === 'distribution_chi_square'">
+                    <input x-model="rule.expected_frequencies_raw" class="field-input text-xs py-1 flex-1" placeholder="expected frequencies: 10,20,30" />
+                  </template>
+                  <template x-if="rule.type === 'hypothesis_test_proportion'">
+                    <input x-model="rule.condition" class="field-input text-xs py-1 w-24" placeholder="value" />
+                  </template>
+                  <template x-if="rule.type === 'hypothesis_test_proportion'">
+                    <input x-model="rule.expected_proportion" type="number" step="any" min="0" max="1" class="field-input text-xs py-1 w-20" placeholder="ratio" />
+                  </template>
+                  <template x-if="rule.type === 'anomaly_detection_sigma'">
+                    <input x-model="rule.window" type="number" min="2" class="field-input text-xs py-1 w-16" placeholder="window" />
+                  </template>
+                  <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20">
+                    <option value="error">error</option>
+                    <option value="warn">warn</option>
+                  </select>
+                  <button @click="removeDQRule(idx)" class="btn-danger btn-sm text-xs py-1 px-2">✕</button>
+                </div>
+              </template>
+            </div>
+          </template>
+          <template x-if="!jobModal.rules || jobModal.rules.length === 0">
+            <div class="text-muted text-xs py-2">No rules — job will skip DQ checks</div>
+          </template>
+        </div>
+        <div x-show="jobModal.job_type !== 'reconciliation'" class="text-muted text-sm">
+          DQ rules only apply to reconciliation jobs.
+        </div>
+      </div>
+
+      <div x-show="jobModalTab === 'tags'" class="space-y-3">
+        <div>
+          <label class="field-label">Tags (comma-separated)</label>
+          <input x-model="jobModal.tags_raw" class="field-input" placeholder="daily, finance" />
+        </div>
+      </div>
+
+      <!-- Conditions tab panel -->
+      <div x-show="jobModalTab === 'conditions'" class="space-y-3">
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Min Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_min_row_count" class="field-input" placeholder="e.g. 1 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_row_count" class="field-input" placeholder="e.g. 1000000 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Value Mismatches</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_value_mismatches" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Missing in Target</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_target" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Max Missing in Source</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_source" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+          </div>
+          <div>
+            <label class="field-label">Required Status (comma-sep)</label>
+            <input type="text" x-model="jobModal.pass_require_status" class="field-input" placeholder="PASSED" />
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'reconciliation'">
+          <label class="field-label">Pass SQL <span class="text-muted text-xs font-normal">(runs against source after reconciliation)</span></label>
+          <textarea x-model="jobModal.pass_sql" rows="3" class="field-input font-mono text-xs"
+                    placeholder="SELECT 1 WHERE EXISTS (SELECT 1 FROM orders WHERE status = 'ok')"></textarea>
+          <div class="mt-2">
+            <label class="field-label text-xs">Pass SQL Mode</label>
+            <select x-model="jobModal.pass_sql_mode" class="field-input field-select text-sm">
+              <option value="rows_mean_pass">Rows returned → PASS (assert good state exists)</option>
+              <option value="rows_mean_fail">Rows returned → FAIL (assert no bad rows exist)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
+          <span x-show="!validateDefinitionLoading">Validate Definition</span>
+          <span x-show="validateDefinitionLoading">Validating...</span>
+        </button>
+        <button @click="showJobModal = false" class="btn-secondary" data-testid="job-modal-cancel-btn">Cancel</button>
+        <button @click="saveJob()" class="btn-primary" :disabled="!canSaveJob()" data-testid="job-modal-save-btn">Save</button>
+      </div>
+      <template x-if="validateDefinitionResult">
+        <div class="mt-3 rounded-lg border p-3 text-sm"
+             data-testid="job-modal-validation-result"
+             :class="validateDefinitionResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'">
+          <div class="font-semibold" x-text="validateDefinitionResult.ok ? 'Definition valid' : 'Definition has issues'"></div>
+          <template x-if="validateDefinitionResult.issues && validateDefinitionResult.issues.length">
+            <ul class="mt-1 list-disc pl-5 space-y-0.5">
+              <template x-for="(issue, idx) in validateDefinitionResult.issues" :key="idx">
+                <li><span class="font-mono" x-text="issue.field || 'job'"></span>: <span x-text="issue.message"></span></li>
+              </template>
+            </ul>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Execution sequence -->
+  <div class="card mb-4">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-sm font-medium text-slate-700">Execution Sequence</span>
+      <span class="text-xs text-slate-400 ml-1" x-show="estimatedSequenceDuration" x-text="estimatedSequenceDuration"></span>
+      <span class="text-muted text-xs ml-1" x-text="selectedJobs.length + ' queued'"></span>
+      <div class="ml-auto flex gap-1">
+        <button @click="invertJobSelection()" class="btn-outline btn-sm text-xs" title="Invert Selection">Invert</button>
+        <button @click="clearExecutionSequence()" class="btn-outline btn-sm text-xs text-rose-500" title="Clear all jobs from sequence">Clear All</button>
+      </div>
+    </div>
+
+    <div x-show="hasCircularDependency()" class="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+      ⚠ Circular dependency detected in selected jobs
+    </div>
+
+    <template x-if="selectedJobs.length === 0">
+      <div class="empty-state py-8"><div class="empty-state-title">Select jobs above to build the sequence</div></div>
+    </template>
+    <div class="space-y-1.5">
+      <template x-for="(name, idx) in selectedJobs" :key="name">
+        <div>
+          <!-- Step row -->
+          <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-100 bg-slate-50 sequence-item"
+               draggable="true"
+               @dragstart="onDragStart(idx)"
+               @dragover.prevent="onDragOver($event, idx)"
+               @drop="onDrop(idx)"
+               @dragend="onDragEnd()"
+               :class="{'drag-over': dragSrcIndex !== null && dragSrcIndex !== idx}">
+            <span class="text-xs font-bold text-slate-400 w-5 text-center cursor-grab" x-text="idx+1"></span>
+            <span class="flex-1 font-medium text-slate-700 text-sm" x-text="name"></span>
+            <span x-show="getStepCfg(name).hold_after" class="badge badge-amber text-xs">HOLD</span>
+            <span x-show="Number(getStepCfg(name).wait_seconds) > 0" class="text-xs text-slate-400" x-text="getStepCfg(name).wait_seconds + 's'"></span>
+            <button @click="stepSettingsOpen[name] = !stepSettingsOpen[name]" class="btn-secondary btn-sm py-1 text-xs" title="Step settings">⚙</button>
+            <button @click="selectedJobs.splice(idx-1,0,selectedJobs.splice(idx,1)[0])" :disabled="idx===0" class="btn-secondary btn-sm py-1">↑</button>
+            <button @click="selectedJobs.splice(idx+1,0,selectedJobs.splice(idx,1)[0])" :disabled="idx===selectedJobs.length-1" class="btn-secondary btn-sm py-1">↓</button>
+            <button @click="selectedJobs.splice(idx,1); delete stepSettings[name]; delete stepSettingsOpen[name]" class="btn-danger btn-sm py-1">✕</button>
+          </div>
+          <!-- Expandable step settings -->
+          <div x-show="stepSettingsOpen[name]" class="ml-6 mt-1 mb-2 p-3 rounded-lg bg-slate-100 border border-slate-200 space-y-2 text-sm">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" class="rounded" x-model="getStepCfg(name).hold_after" />
+              <span class="font-medium">Hold after this step</span>
+              <span class="text-muted text-xs">(pause sequence and wait for approval)</span>
+            </label>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="field-label text-xs">Delay before next step (s)</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).wait_seconds" placeholder="0" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max mismatches (condition)</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_mismatch_count" placeholder="unlimited" />
+              </div>
+            </div>
+            <div>
+              <label class="field-label text-xs">Required prior status (comma-sep, e.g. PASSED)</label>
+              <input type="text" class="field-input text-sm py-1" x-model="getStepCfg(name).require_status" placeholder="PASSED" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="field-label text-xs">Min source row count</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).min_row_count" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max source row count</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_row_count" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max value mismatches</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_value_mismatches" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max missing in target</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_target" placeholder="blank = skip" />
+              </div>
+              <div>
+                <label class="field-label text-xs">Max missing in source</label>
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_source" placeholder="blank = skip" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="flex justify-end">
+    <button @click="runTests()" :disabled="selectedJobs.length === 0 || isLaunching"
+            class="btn-primary px-8 py-3 text-base" data-testid="run-tests-btn">
+      <span x-show="!isLaunching">▶ Run Tests</span>
+      <span x-show="isLaunching">Launching…</span>
+    </button>
+  </div>
+  </div><!-- end jobs sub-tab -->
+
+  <!-- ── Job Selections sub-tab ── -->
+  <div x-show="launchSubTab === 'selections'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">Job Selections</div>
+        <button @click="openNewSelectionModal()" class="btn-primary btn-sm">+ New Selection</button>
+      </div>
+      <template x-if="jobSelections.length === 0">
+        <div class="empty-state"><div class="empty-state-title">No saved job selections yet.</div></div>
+      </template>
+      <div class="space-y-1">
+        <template x-for="sel in jobSelections" :key="sel.id">
+          <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-800" x-text="sel.name"></span>
+                <span class="badge text-xs" x-text="'v' + sel.latest_version"></span>
+                <span class="text-muted text-xs" x-text="sel.job_count + ' jobs'"></span>
+              </div>
+              <div class="text-muted truncate" x-text="sel.description"></div>
+            </div>
+            <div class="flex gap-1 flex-shrink-0">
+              <button @click="openLaunchSelectionModal(sel)" class="btn-primary btn-sm text-xs">Launch</button>
+              <button @click="openSelectionRuns(sel)" class="btn-secondary btn-sm text-xs">History</button>
+              <button @click="openCiIntegrationModal(sel)" class="btn-secondary btn-sm text-xs">CI/CD</button>
+              <button @click="openEditSelectionModal(sel)" class="btn-secondary btn-sm text-xs">Edit</button>
+              <button @click="deleteSelection(sel.id)" class="btn-danger btn-sm text-xs">Archive</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Job Selection Modal -->
+  <div x-show="showSelectionModal" x-cloak class="modal-backdrop" @click.self="showSelectionModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4" x-text="selectionModalEditing ? 'Edit Job Selection' : 'New Job Selection'"></h2>
+      <div class="space-y-3">
+        <div><label class="field-label">Name *</label><input x-model="selectionModal.name" class="field-input" :disabled="selectionModalEditing" placeholder="nightly-set" /></div>
+        <div><label class="field-label">Description</label><input x-model="selectionModal.description" class="field-input" /></div>
+        <div><label class="field-label">Tags (comma-separated)</label><input x-model="selectionModal.tags" class="field-input" placeholder="daily, orders" /></div>
+        <div>
+          <label class="field-label">Jobs</label>
+          <div class="border rounded-lg max-h-64 overflow-y-auto">
+            <template x-for="job in filteredJobList" :key="job.name">
+              <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" class="rounded" :checked="isSelectionJobChecked(job.name)" @change="toggleSelectionJob(job.name)" />
+                <span class="text-sm" x-text="job.name"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showSelectionModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveSelection()" :disabled="!selectionModal.name || !selectedSelectionJobNames.length" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Launch Selection Modal -->
+  <div x-show="showLaunchSelectionModal" x-cloak class="modal-backdrop" @click.self="showLaunchSelectionModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4">Launch Job Selection</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Source Env</label>
+          <select x-model="launchSelectionModal.source_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Target Env (leave blank for single-environment jobs)</label>
+          <select x-model="launchSelectionModal.target_env" class="field-input field-select">
+            <option value="">— None —</option>
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
+        <button @click="launchSelection()" class="btn-primary">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CI/CD Integration Modal -->
+  <div x-show="showCiIntegrationModal" x-cloak class="modal-backdrop" @click.self="showCiIntegrationModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4">CI/CD Integration — <span x-text="ciIntegrationModal.selectionName"></span></h2>
+      <div class="space-y-3 text-sm">
+        <div>
+          <div class="label">STEP 1 — Create an API token</div>
+          <p class="text-muted">Use the Tokens section to create one, then store it as a masked/protected GitLab CI/CD variable.</p>
+        </div>
+        <div>
+          <div class="label">STEP 2 — Add these variables in GitLab (Settings &rarr; CI/CD &rarr; Variables)</div>
+          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono">ATOM_API_URL = &lt;your Atom base URL&gt;
+ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
+        </div>
+        <div>
+          <div class="label">STEP 3 — Copy this into .gitlab-ci.yml</div>
+          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono" x-text="ciIntegrationModal.yamlSnippet"></pre>
+          <button @click="copyCiYamlSnippet()" class="btn-primary btn-sm text-xs mt-2">Copy snippet</button>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showCiIntegrationModal = false" class="btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selection Run History / Compare-Pairing Modal -->
+  <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></h2>
+      <div>
+        <div class="text-muted text-xs mb-2">Pick exactly two runs to compare (any environment, any time).</div>
+        <template x-if="selectionRuns.length === 0">
+          <div class="empty-state"><div class="empty-state-title">No runs yet for this selection.</div></div>
+        </template>
+        <div class="space-y-1 max-h-80 overflow-y-auto">
+          <template x-for="run in selectionRuns" :key="run.run_id">
+            <label class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200">
+              <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" />
+              <span class="font-mono text-xs text-slate-600" x-text="run.run_id"></span>
+              <span class="badge text-xs" x-text="run.status"></span>
+              <span class="text-muted text-xs" x-text="run.started_at || ''"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showSelectionRunsModal = false" class="btn-secondary">Close</button>
+        <button @click="compareSelectedRuns()" :disabled="compareRunIds.length !== 2" class="btn-primary">Compare Selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Schedules sub-tab ── -->
+  <div x-show="launchSubTab === 'schedules'">
+    <div class="flex justify-end mb-3">
+      <button @click="openNewScheduleModal()" class="btn-primary">+ New Schedule</button>
+    </div>
+    <template x-if="schedules.length === 0">
+      <div class="card empty-state">
+        <div class="empty-state-icon">🕒</div>
+        <div class="empty-state-title">No schedules yet</div>
+        <div class="empty-state-sub">Create a schedule to run jobs on a cron expression automatically</div>
+      </div>
+    </template>
+    <div class="space-y-3">
+      <template x-for="sched in schedules" :key="sched.id">
+        <div class="card">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-slate-800" x-text="sched.name"></span>
+                <span :class="sched.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="sched.enabled ? 'Enabled' : 'Disabled'"></span>
+              </div>
+              <div class="text-muted text-sm mt-0.5 font-mono" x-text="sched.cron_expr"></div>
+              <div class="flex gap-3 mt-1 text-xs text-muted">
+                <span x-text="sched.source_env + ' → ' + sched.target_env"></span>
+                <span x-text="(jobSelections.find(s => s.id === sched.selection_id)?.job_count ?? '?') + ' job(s)'"></span>
+              </div>
+              <div class="flex gap-4 mt-1 text-xs text-muted">
+                <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
+                <span x-show="sched.next_run_at" x-text="'Next: ' + fmtDate(sched.next_run_at)"></span>
+              </div>
+            </div>
+            <div class="flex gap-2 flex-shrink-0">
+              <button @click="runScheduleNow(sched.id)" class="btn-secondary btn-sm">▶ Now</button>
+              <button @click="openEditScheduleModal(sched)" class="btn-secondary btn-sm">Edit</button>
+              <button @click="deleteSchedule(sched.id)" class="btn-danger btn-sm">Delete</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div><!-- end schedules sub-tab -->
+
+  <!-- Schedule Modal -->
+  <div x-show="showScheduleModal" x-cloak class="modal-backdrop" @click.self="showScheduleModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
+      <div class="space-y-3">
+        <div><label class="field-label">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" /></div>
+        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily (times in <span x-text="appTimezone"></span>)</div></div>
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Source Env</label>
+            <select x-model="scheduleModal.source_env" class="field-input field-select">
+              <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Target Env</label>
+            <select x-model="scheduleModal.target_env" class="field-input field-select">
+              <option value="">— None —</option>
+              <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="field-label">Job Selection *</label>
+          <select x-model="scheduleModal.selection_id" class="field-input field-select">
+            <option value="">— Select —</option>
+            <template x-for="sel in jobSelections" :key="sel.id">
+              <option :value="sel.id" x-text="sel.name + ' (v' + sel.latest_version + ', ' + sel.job_count + ' jobs)'"></option>
+            </template>
+          </select>
+          <div class="text-xs text-amber-600" x-show="jobSelections.length === 0">You need at least one Job Selection first — create one in the Job Selections tab.</div>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" /> Enabled</label>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showScheduleModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr || !scheduleModal.selection_id" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+</div>
