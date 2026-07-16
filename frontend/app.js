@@ -790,6 +790,19 @@ function _appRaw() {
       return this.storedTokenValue;
     },
 
+    get homeStats() {
+      return {
+        activeRuns: this.runs.filter(r => r.status === 'RUNNING').length,
+        pendingJobs: this.runs.filter(r => r.status === 'PENDING').length,
+        connectedEnvironments: this.configs.length,
+        lastRunStatus: this.runs.length ? this.runs[0].status : null,
+      };
+    },
+
+    get homeRecentRuns() {
+      return this.runs.slice(0, 8);
+    },
+
     // ===========================================================
     // REGIONAL – APP-WIDE TIMEZONE
     // ===========================================================
