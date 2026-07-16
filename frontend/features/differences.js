@@ -32,7 +32,6 @@
     diffStoredComplete: true,
     diffLoading: false,
     diffInsights: null,
-    diffInsightsLoading: false,
 
       // ===== METHODS (extracted from app.js) =====
     _applyDeepLink() {
@@ -76,14 +75,12 @@
 
     async loadDifferenceInsights() {
       if (!this.diffRunId) return;
-      this.diffInsightsLoading = true;
       try {
         this.diffInsights = await api('GET', `/api/runs/${this.diffRunId}/mismatches/insights`);
       } catch (e) {
         this.diffInsights = null;
         this.toast('error', 'Failed to load insights', e.message);
       } finally {
-        this.diffInsightsLoading = false;
         this.$nextTick(() => this._renderDifferenceCharts());
       }
     },

@@ -12,17 +12,10 @@
     contracts: [],
     contractsLoading: false,
     selectedContract: null,
-    // NOTE: dead — set nowhere, read nowhere; moved as-is (pure code motion).
-    contractDetailLoading: false,
     contractStatusMap: {},          // name → { status, open_breach }
     contractBreachHistory: [],
     contractVersionHistory: [],
-    // NOTE: dead — set nowhere, read nowhere; moved as-is (pure code motion).
-    contractStatusLoading: false,
     contractBreachLoading: false,
-    // NOTE: dead — set/cleared in selectContract() but never read in
-    // index.html; moved as-is (pure code motion).
-    contractVersionLoading: false,
     showContractModal: false,
     contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' },
     contractModalEditing: false,
@@ -52,11 +45,9 @@
       this.contractBreachHistory = [];
       this.contractVersionHistory = [];
       this.contractBreachLoading = true;
-      this.contractVersionLoading = true;
       try { this.contractBreachHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/breaches`); } catch {}
       this.contractBreachLoading = false;
       try { this.contractVersionHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/versions`); } catch {}
-      this.contractVersionLoading = false;
     },
 
     openNewContractModal() {

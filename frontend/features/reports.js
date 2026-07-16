@@ -22,11 +22,6 @@
     reportView: 'report',
     reportMetrics: null,
     reportMetricsLoading: false,
-    reportLogs: null,
-    reportLogsLoading: false,
-    reportLogQuery: '',
-    reportLogLevel: '',
-    reportLogLimit: 500,
 
     allLogEvents: [],
     allLogEventsLoading: false,
@@ -39,7 +34,6 @@
     resetReportArtifacts() {
       this.reportLoaded = false;
       this.reportMetrics = null;
-      this.reportLogs = null;
       if (this.reportBlobUrl) { URL.revokeObjectURL(this.reportBlobUrl); this.reportBlobUrl = ''; }
       this.allLogEvents = [];
       this.logFilterQuery = '';
@@ -114,25 +108,6 @@
         this.toast('error', 'Metrics unavailable', e.message);
       } finally {
         this.reportMetricsLoading = false;
-      }
-    },
-
-    async loadRunLogs() {
-      if (!this.reportRunId) return;
-      this.reportLogsLoading = true;
-      const params = new URLSearchParams({
-        format: 'json',
-        limit: String(this.reportLogLimit || 500),
-      });
-      if (this.reportLogQuery) params.set('q', this.reportLogQuery);
-      if (this.reportLogLevel) params.set('level', this.reportLogLevel);
-      try {
-        this.reportLogs = await api('GET', `/api/runs/${this.reportRunId}/logs?${params.toString()}`);
-      } catch (e) {
-        this.reportLogs = null;
-        this.toast('error', 'Logs unavailable', e.message);
-      } finally {
-        this.reportLogsLoading = false;
       }
     },
 
