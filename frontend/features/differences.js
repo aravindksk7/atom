@@ -8,6 +8,13 @@
     // -----------------------------------------------------------
     // Differences Explorer tab
     // -----------------------------------------------------------
+    // The tab's accept/reject-all buttons drive openMismatchDecisionForm /
+    // closeMismatchDecisionForm / submitMismatchDecision, which live in
+    // app.js (core) — shared with the mismatch drawer. Those methods read
+    // this file's diff* state (diffSearch, diffColumn, diffType, diffStatus,
+    // diffRunId, diffResultId, diffPage) and call fetchDifferenceRows() /
+    // loadDifferenceInsights() directly via `this`, relying on the
+    // FEATURE_SLICES merge in app.js to flatten both files onto one object.
     diffRunId: '',
     diffResultId: null,
     diffRunDetail: null,
