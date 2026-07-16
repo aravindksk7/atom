@@ -13,6 +13,44 @@
 <body class="app-shell" x-data="app()" x-init="init()">
 <span class="sr-only">Validate Configuration Run Health Check Add Job Execution Sequence</span>
 
+<aside class="sidebar" :class="sidebarCollapsed ? 'is-collapsed' : ''" data-testid="app-sidebar">
+  <div class="sidebar-brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+    <span class="sidebar-brand-label" x-show="!sidebarCollapsed">ETL Framework</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <template x-for="tab in tabs.filter(t => !t.group)" :key="tab.id">
+      <button @click="onTabEnter(tab.id)" :class="currentView === tab.id ? 'active' : ''"
+              class="sidebar-nav-item" :data-testid="'nav-tab-' + tab.id">
+        <span class="sidebar-nav-icon" x-html="tab.icon"></span>
+        <span class="sidebar-nav-label" x-show="!sidebarCollapsed" x-text="tab.label"></span>
+      </button>
+    </template>
+
+    <template x-for="grp in tabGroups" :key="grp.id">
+      <div class="sidebar-group" :data-group="grp.id">
+        <div class="sidebar-group-header" x-show="!sidebarCollapsed" x-text="grp.label"></div>
+        <template x-for="tab in tabs.filter(t => t.group === grp.id)" :key="tab.id">
+          <button @click="onTabEnter(tab.id)" :class="currentView === tab.id ? 'active' : ''"
+                  class="sidebar-nav-item" :data-group="grp.id" :data-testid="'nav-tab-' + tab.id">
+            <span class="sidebar-nav-icon" x-html="tab.icon"></span>
+            <span class="sidebar-nav-label" x-show="!sidebarCollapsed" x-text="tab.label"></span>
+          </button>
+        </template>
+      </div>
+    </template>
+  </nav>
+
+  <button class="sidebar-collapse-btn" data-testid="sidebar-collapse-btn"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+          :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :style="sidebarCollapsed ? 'transform: rotate(180deg)' : ''"><polyline points="15 18 9 12 15 6"></polyline></svg>
+  </button>
+</aside>
+
+<div class="app-content">
+
 <!-- ============================================================
      TOP NAV
      ============================================================ -->
@@ -478,5 +516,6 @@
         </div>
       </div>
     </template>
+</div><!-- end .app-content -->
   </body>
 </html>
