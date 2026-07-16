@@ -1,0 +1,63 @@
+<div x-show="currentView === 'help'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Help Center</div>
+      <div class="section-sub">End-user guide — detailed steps for every area of the app</div>
+    </div>
+  </div>
+
+  <div class="help-layout">
+    <aside class="help-sidebar">
+      <div class="help-search-wrap">
+        <svg class="help-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input data-testid="help-search-input" class="help-search" type="text" placeholder="Search help…" x-model="helpSearch" aria-label="Search help" />
+      </div>
+      <nav class="help-nav">
+        <template x-for="s in helpFilteredSections()" :key="s.id">
+          <button class="help-nav-item" :class="helpActiveId === s.id ? 'active' : ''" @click="scrollToHelp(s.id)" x-text="s.title"></button>
+        </template>
+        <template x-if="helpFilteredSections().length === 0">
+          <div class="help-nav-empty">No matches</div>
+        </template>
+      </nav>
+    </aside>
+
+    <div class="help-content">
+      <template x-for="(s, i) in helpFilteredSections()" :key="s.id">
+        <section class="help-section" :id="'help-' + s.id">
+          <div class="help-section-head">
+            <span class="help-badge" x-text="String(i + 1).padStart(2, '0')"></span>
+            <div>
+              <h2 class="help-section-title" x-text="s.title"></h2>
+              <p class="help-section-intro" x-text="s.intro"></p>
+            </div>
+          </div>
+          <div class="help-steps">
+            <template x-for="(step, si) in s.steps" :key="step.title">
+              <div class="help-step" x-show="helpStepMatches(step, helpSearch.trim())">
+                <span class="help-step-num" x-text="String(si + 1).padStart(2, '0')"></span>
+                <div class="help-step-body">
+                  <h3 class="help-step-title" x-text="step.title"></h3>
+                  <p class="help-step-text" x-text="step.text"></p>
+                  <template x-if="step.where">
+                    <div class="help-where"><span class="help-where-label">Where</span><span x-text="step.where"></span></div>
+                  </template>
+                  <template x-if="step.tip">
+                    <div class="help-callout tip"><span class="help-callout-label">Tip</span><span x-text="step.tip"></span></div>
+                  </template>
+                  <template x-if="step.warn">
+                    <div class="help-callout warn"><span class="help-callout-label">Caution</span><span x-text="step.warn"></span></div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </section>
+      </template>
+
+      <template x-if="helpFilteredSections().length === 0">
+        <div class="help-empty">No help topics match "<span x-text="helpSearch"></span>".</div>
+      </template>
+    </div>
+  </div>
+</div>

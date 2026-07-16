@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#050505" />
+  <title>ETL Test Framework</title>
+  <link rel="stylesheet" href="vendor/tailwind.css" />
+  <script defer src="vendor/alpine.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app-shell" x-data="app()" x-init="init()">
+<span class="sr-only">Validate Configuration Run Health Check Add Job Execution Sequence</span>
+
+<!-- ============================================================
+     TOP NAV
+     ============================================================ -->
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <span class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+      ETL Framework
+    </span>
+    <div class="flex gap-1 flex-1">
+      <template x-for="tab in tabs" :key="tab.id">
+        <button
+          @click="onTabEnter(tab.id)"
+          :class="currentView === tab.id ? 'active' : ''"
+          class="tab-btn"
+          :data-testid="'nav-tab-' + tab.id">
+          <span class="tab-icon" x-html="tab.icon"></span>
+          <span x-text="tab.label"></span>
+        </button>
+      </template>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-xs" :class="apiOk ? 'text-emerald-500' : 'text-rose-400'" x-text="apiOk ? '● Connected' : '● Offline'"></span>
+    </div>
+  </div>
+</nav>
+
+<!-- ============================================================
+     AUTH STATUS
+     ============================================================ -->
+<section class="auth-status-bar" :class="storedToken ? 'is-connected' : 'is-missing'">
+  <div class="auth-status-inner">
+    <template x-if="!storedToken">
+      <div class="auth-status-content">
+        <span class="auth-status-dot">🔑</span>
+        <span>No API token set</span>
+        <button class="auth-status-action" data-testid="auth-status-open-btn" @click="openAuthModal()">Set up access →</button>
+      </div>
+    </template>
+    <template x-if="storedToken">
+      <div class="auth-status-content" data-testid="auth-status-connected">
+        <span class="auth-status-dot">●</span>
+        <span x-text="activeTokenName ? 'Connected as ' + activeTokenName + (activeTokenIsAdmin ? ' (Administrator)' : ' (Standard user)') : 'Connected'"></span>
+        <button class="auth-status-action" @click="goToTokenManagement()">Manage →</button>
+      </div>
+    </template>
+  </div>
+</section>
+
+<!-- ============================================================
+     MAIN CONTENT
+     ============================================================ -->
+<main class="main-content">
+
+<!-- ====================================================================
+     TAB 1 – CONFIG EDITOR
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-config.html -->
+
+
+<!-- ====================================================================
+     TAB 2 – JOB LAUNCHER
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-launch.html -->
+
+
+<!-- ====================================================================
+     TAB 3 – MONITOR
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-monitor.html -->
+
+
+<!-- ====================================================================
+     TAB 4 – HISTORY
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-history.html -->
+
+
+<!-- ====================================================================
+     TAB 5 – ADAPTERS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-adapters.html -->
+
+
+<!-- ====================================================================
+     TAB 6 – REPORTS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-reports.html -->
+
+<!-- ====================================================================
+     TAB - DIFFERENCES EXPLORER
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-differences.html -->
+
+<!-- ====================================================================
+     TAB 7 - COMPARE
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-compare.html -->
+
+<!-- ====================================================================
+     TAB - GLOBAL LOGS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-logs.html -->
+
+
+</main><!-- end .main-content -->
+
+
+<!-- ====================================================================
+     AUTH SETUP MODAL
+     ==================================================================== -->
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
+  <div class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="auth-modal-header">
+      <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
+      <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
+    </div>
+
+    <div class="auth-path" x-show="!authInitialized && !authCreatedToken">
+      <div class="auth-path-label">Create Initial Administrator</div>
+      <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
+      <div class="auth-row">
+        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
+      </div>
+    </div>
+
+    <template x-if="authCreatedToken">
+      <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
+        <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
+        <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
+        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" data-testid="auth-created-token-value" x-text="authCreatedToken"></div>
+        <button
+          @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
+          class="btn-primary btn-sm text-xs">
+          Copy to Clipboard
+        </button>
+        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2" data-testid="auth-done-btn">Done — I've saved my token</button>
+      </div>
+    </template>
+
+    <div class="auth-or" x-show="!authInitialized && !authCreatedToken">
+      <span></span>
+      <strong>or</strong>
+      <span></span>
+    </div>
+
+    <div class="auth-path" x-show="!authCreatedToken">
+      <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
+      <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
+      <div class="auth-row">
+        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" />
+        <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
+      </div>
+    </div>
+
+    <template x-if="authError">
+      <div class="auth-error" data-testid="auth-error-text" x-text="authError"></div>
+    </template>
+  </div>
+</div>
+
+
+<!-- ====================================================================
+     SLIDE-OVER DRAWER – Mismatch details
+     ==================================================================== -->
+<template x-if="drawer.show">
+  <div>
+    <div class="drawer-backdrop" @click="drawer.show = false"></div>
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <div class="drawer-title" x-text="'Mismatches · ' + (drawer.result ? drawer.result.query_name : '')"></div>
+        <button class="drawer-close" @click="drawer.show = false">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div x-show="drawer.result" class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-3">
+          <span x-text="detailRowsLabel(drawer.rows, drawer.result)"></span>
+          <span x-show="totalMismatches(drawer.result) > 0"
+                class="font-medium text-slate-600"
+                x-text="mismatchBreakdownText(drawer.result)"></span>
+        </div>
+        <template x-if="drawer.loading">
+          <div class="text-muted text-sm py-8 text-center">Loading mismatches…</div>
+        </template>
+        <template x-if="!drawer.loading && drawer.rows.length === 0">
+          <div class="empty-state"><div class="empty-state-title">No mismatch details found</div></div>
+        </template>
+
+        <template x-if="drawer.result && drawer.result.column_stats && drawer.result.column_stats.length">
+          <div class="mb-3 border border-slate-100 rounded overflow-hidden">
+            <div class="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50">
+              <div class="text-xs text-muted font-semibold">All columns</div>
+              <input x-model="columnStatFilters[columnStatKey('drawer', drawer.result)]"
+                     class="field-input text-xs py-1 max-w-48"
+                     placeholder="Filter columns" />
+            </div>
+            <div class="overflow-auto max-h-48">
+              <table class="mismatch-diff-table">
+                <thead>
+                  <tr>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer">Column</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer">Compared</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer">Match %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="stat in columnStatsFor(drawer.result, 'drawer')" :key="stat.column">
+                    <tr>
+                      <td class="font-mono text-xs" x-text="stat.column"></td>
+                      <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                      <td x-text="stat.compared_rows"></td>
+                      <td x-text="matchPctText(stat.match_pct)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!drawer.loading && drawer.rows.length > 0">
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <div class="flex gap-1 text-xs">
+              <template x-for="f in ['ALL','PENDING','ACCEPTED','REJECTED']" :key="f">
+                <button @click="mismatchStatusFilter = f"
+                        class="px-2 py-1 rounded border text-xs transition-colors"
+                        :class="mismatchStatusFilter === f ? 'bg-indigo-500 text-white border-indigo-500' : 'text-slate-600 border-slate-200 hover:bg-slate-50'"
+                        x-text="f">
+                </button>
+              </template>
+            </div>
+            <div class="ml-auto flex gap-2">
+              <button @click="decideAllPendingDrawerMismatches('accept')"
+                      class="btn-accept-confirm text-xs px-3 py-1.5">
+                Accept All Pending
+              </button>
+              <button @click="decideAllPendingDrawerMismatches('reject')"
+                      class="btn-outline btn-sm text-xs">
+                Reject All Pending
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-2">
+          <template x-for="m in filteredMismatches" :key="m.id">
+            <div class="border border-slate-100 rounded-lg p-3 text-sm" :class="m.accepted ? 'diff-accepted' : ''">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-mono font-semibold text-slate-700" x-text="m.column_name || '(row)'"></span>
+                <span class="badge badge-rose" x-text="m.mismatch_type || 'value'"></span>
+              </div>
+              <div class="grid-2 gap-2 text-xs">
+                <div class="bg-rose-50 rounded p-2">
+                  <div class="text-muted mb-0.5">Source</div>
+                  <div class="font-mono" x-text="m.source_value ?? '—'"></div>
+                </div>
+                <div class="bg-sky-50 rounded p-2">
+                  <div class="text-muted mb-0.5">Target</div>
+                  <div class="font-mono" x-text="m.target_value ?? '—'"></div>
+                </div>
+              </div>
+              <template x-if="m.key_values">
+                <div class="mt-1 text-xs text-muted font-mono" x-text="JSON.stringify(m.key_values)"></div>
+              </template>
+              <template x-if="m.delta != null">
+                <div class="mt-1 text-xs font-mono" :class="m.delta > 0 ? 'text-amber-600' : 'text-red-600'"
+                     x-text="'delta: ' + (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) + (m.relative_delta != null ? '  (' + (m.relative_delta * 100).toFixed(2) + '%)' : '')"></div>
+              </template>
+              <div class="mt-2">
+                <template x-if="m.accepted">
+                  <span class="accepted-badge">Accepted</span>
+                </template>
+                <template x-if="!m.accepted">
+                  <div>
+                    <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
+                    <template x-if="acceptForms[m.id]?.open">
+                      <div class="accept-form-inline">
+                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                        <button @click="submitAccept(drawer.runId, drawer.result.id, m.id)" class="btn-accept-confirm">Save</button>
+                        <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+        <template x-if="drawer.rows.length >= 100">
+          <div class="text-center mt-4 space-y-1">
+            <button @click="loadMoreMismatches()" class="btn-secondary btn-sm">Load more</button>
+            <div class="text-xs text-slate-400" x-text="detailRowsLabel(drawer.rows, drawer.result)"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</template>
+
+
+<!-- ====================================================================
+     TOAST STACK
+     ==================================================================== -->
+<div class="toast-stack">
+  <template x-for="(t, i) in toasts" :key="t.id">
+    <div class="toast" :class="['toast-'+t.type, t.fading ? 'fade-out' : '']">
+      <span class="toast-icon" x-text="t.type === 'success' ? '✓' : t.type === 'error' ? '✗' : '⚠'"></span>
+      <div class="toast-body">
+        <div class="toast-title" x-text="t.title"></div>
+        <div class="toast-msg" x-show="t.msg" x-text="t.msg"></div>
+      </div>
+    </div>
+  </template>
+</div>
+
+
+<!-- ====================================================================
+     TAB 8 - CONTRACTS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-contracts.html -->
+
+<!-- Contract create/edit modal -->
+<template x-if="showContractModal">
+  <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+      <div class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></div>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Name</label>
+          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" />
+        </div>
+        <div>
+          <label class="field-label">Source Job</label>
+          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" />
+        </div>
+        <div>
+          <label class="field-label">Owner (email)</label>
+          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" />
+        </div>
+        <div>
+          <label class="field-label">SLA Hours</label>
+          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label">Consumers (comma-separated)</label>
+          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" />
+        </div>
+        <div>
+          <label class="field-label">Breach Severity</label>
+          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select">
+            <option value="error">Error</option>
+            <option value="warn">Warn</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button data-testid="contract-modal-cancel-btn" @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
+        <button data-testid="contract-modal-save-btn" @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
+      </div>
+    </div>
+  </div>
+</template>
+
+
+<template x-if="showingHelp">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+       @click.self="showingHelp = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+      <div class="flex justify-between items-start mb-3">
+        <h3 class="text-base font-semibold text-slate-900" x-text="helpTitle"></h3>
+        <button @click="showingHelp = false" class="text-slate-400 hover:text-slate-600 ml-4">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-sm text-slate-600" x-text="helpContent"></p>
+    </div>
+  </div>
+</template>
+
+<!-- ====================================================================
+     HELP CENTER
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-help.html -->
+
+    <script src="app-config.js"></script>
+    <script src="help-content.js"></script>
+    <script src="app-help.js"></script>
+    <script src="contract-examples.js"></script>
+    <script src="features/compare.js"></script>
+    <script src="features/config.js"></script>
+    <script src="features/launch.js"></script>
+    <script src="features/monitor.js"></script>
+    <script src="features/history.js"></script>
+    <script src="features/adapters.js"></script>
+    <script src="features/reports.js"></script>
+    <script src="features/differences.js"></script>
+    <script src="features/contracts.js"></script>
+    <script src="features/logs.js"></script>
+    <script src="app.js"></script>
+
+    <template x-if="bulkDecisionForm.open">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeBulkDecisionForm()">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-base font-semibold text-slate-900"
+                 x-text="bulkDecisionForm.mode === 'bulk-accept' ? 'Accept all mismatches' : 'Bulk pass with actions'"></div>
+            <button @click="closeBulkDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="space-y-3">
+            <template x-if="bulkDecisionForm.mode === 'bulk-accept'">
+              <div>
+                <label class="field-label">Accept reason (applied to all selected mismatches)</label>
+                <textarea x-model="bulkDecisionForm.note" maxlength="1000" rows="3"
+                          class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+              </div>
+            </template>
+            <template x-if="bulkDecisionForm.mode === 'bulk-override'">
+              <div>
+                <label class="field-label">Agreed actions (applied to all selected tests)</label>
+                <textarea x-model="bulkDecisionForm.note" maxlength="4000" rows="4"
+                          class="field-input" placeholder="Describe the agreed actions required to accept these failed outcomes"></textarea>
+              </div>
+            </template>
+            <div class="flex gap-2 justify-end pt-2">
+              <button @click="closeBulkDecisionForm()" class="btn-secondary">Cancel</button>
+              <button @click="submitBulkDecision(selectedRun.run_id)" :disabled="bulkDecisionForm.saving"
+                      class="btn-primary">
+                <span x-show="!bulkDecisionForm.saving">Confirm</span>
+                <span x-show="bulkDecisionForm.saving">Saving...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="mismatchDecisionForm.open">
+      <div data-testid="decision-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeMismatchDecisionForm()">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-base font-semibold text-slate-900"
+                 x-text="(mismatchDecisionForm.decision === 'accept' ? 'Accept' : 'Reject') + ' matching mismatches'"></div>
+            <button @click="closeMismatchDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="field-label" x-text="'Reason (applied to every matching mismatch)'"></label>
+              <textarea data-testid="decision-modal-note-textarea" x-model="mismatchDecisionForm.note" maxlength="1000" rows="3"
+                        class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+            </div>
+            <div class="flex gap-2 justify-end pt-2">
+              <button data-testid="decision-modal-cancel-btn" @click="closeMismatchDecisionForm()" class="btn-secondary">Cancel</button>
+              <button data-testid="decision-modal-confirm-btn" @click="submitMismatchDecision()" :disabled="mismatchDecisionForm.saving"
+                      class="btn-primary">
+                <span x-show="!mismatchDecisionForm.saving">Confirm</span>
+                <span x-show="mismatchDecisionForm.saving">Saving...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </body>
+</html>

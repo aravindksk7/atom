@@ -5,6 +5,7 @@
     "build:css": "tailwindcss -i tailwind.input.css -o frontend/vendor/tailwind.css --minify",
     "build:vendor": "npm run build:css && node scripts/copy-vendor.js",
     "watch:css": "tailwindcss -i tailwind.input.css -o frontend/vendor/tailwind.css --watch",
+    "build:html": "node scripts/build-html.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

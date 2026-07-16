@@ -1,0 +1,650 @@
+<div x-show="currentView === 'config'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Configuration Editor</div>
+      <div class="section-sub">Manage environment credentials and settings</div>
+    </div>
+    <button @click="openNewConfigModal()" class="btn-primary" data-testid="config-new-btn">+ New Config</button>
+  </div>
+
+  <template x-if="configs.length === 0">
+    <div class="card empty-state">
+      <div class="empty-state-icon">🔧</div>
+      <div class="empty-state-title">No configurations yet</div>
+      <div class="empty-state-sub">Click "New Config" to define an environment</div>
+    </div>
+  </template>
+
+  <div class="grid gap-3">
+    <template x-for="cfg in configs" :key="cfg.id">
+      <div class="card flex items-center justify-between gap-4" :data-testid="'config-row-' + cfg.id">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0"
+               style="background:#ede9fe">🗃️</div>
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-800 truncate" x-text="cfg.name"></div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span class="badge badge-blue" x-text="cfg.env_name"></span>
+              <span class="text-muted" x-text="'Updated ' + fmtDate(cfg.updated_at)"></span>
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 flex-shrink-0">
+          <button @click="editConfig(cfg)" class="btn-secondary btn-sm" :data-testid="'config-row-' + cfg.id + '-edit-btn'">Edit</button>
+          <button @click="deleteConfig(cfg.id)" class="btn-danger btn-sm" :data-testid="'config-row-' + cfg.id + '-delete-btn'">Delete</button>
+          <button @click="openSchemaExplorer(cfg)" class="btn-secondary btn-sm"
+                  :class="schemaExplorerId === cfg.id ? 'ring-2 ring-indigo-400' : ''">
+            Browse Schema <span x-text="schemaExplorerId === cfg.id ? '▲' : '▼'"></span>
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Schema Explorer Panel -->
+  <template x-if="schemaExplorerId !== null">
+    <div class="card mt-3">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">
+          Schema Explorer —
+          <span x-text="configs.find(c => c.id === schemaExplorerId)?.name ?? ''"></span>
+        </div>
+        <button @click="closeSchemaExplorer()" class="text-muted hover:text-slate-700 text-sm">✕ Close</button>
+      </div>
+
+      <div x-show="schemaExplorerLoading" class="text-muted text-sm">Loading schema…</div>
+
+      <template x-if="!schemaExplorerLoading && schemaExplorerData.length === 0">
+        <div class="text-muted text-sm">No tables found or connection failed.</div>
+      </template>
+
+      <template x-if="!schemaExplorerLoading && schemaExplorerData.length > 0">
+        <div>
+          <template x-for="schemaGroup in [...new Set(schemaExplorerData.map(t => t.schema))]" :key="schemaGroup">
+            <div class="mb-2">
+              <button @click="toggleSchemaGroup(schemaGroup)"
+                      class="flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-indigo-600 w-full text-left">
+                <span x-text="schemaExpandedSchemas[schemaGroup] ? '▼' : '▶'"></span>
+                <span x-text="schemaGroup"></span>
+                <span class="text-muted font-normal ml-1"
+                      x-text="'(' + schemaExplorerData.filter(t => t.schema === schemaGroup).length + ' tables)'"></span>
+              </button>
+              <template x-if="schemaExpandedSchemas[schemaGroup]">
+                <div class="ml-4 mt-1 space-y-1">
+                  <template x-for="tbl in schemaExplorerData.filter(t => t.schema === schemaGroup)" :key="tbl.schema + '.' + tbl.table">
+                    <div>
+                      <div class="flex items-center gap-2 py-0.5">
+                        <button @click="toggleSchemaTable(tbl.schema + '.' + tbl.table)"
+                                class="text-xs text-slate-600 hover:text-indigo-600 font-mono">
+                          <span x-text="schemaExpandedTables[tbl.schema + '.' + tbl.table] ? '▼' : '▶'"></span>
+                          <span x-text="tbl.table"></span>
+                        </button>
+                        <button @click="previewSchemaTable(schemaExplorerId, tbl.schema, tbl.table)"
+                                class="btn-secondary btn-sm text-xs">▶ Preview</button>
+                        <button @click="useTableInJob(tbl.schema, tbl.table)"
+                                class="btn-secondary btn-sm text-xs">Use in Job</button>
+                      </div>
+                      <template x-if="schemaExpandedTables[tbl.schema + '.' + tbl.table]">
+                        <div class="ml-6 text-xs text-muted font-mono flex flex-wrap gap-x-3 mt-0.5">
+                          <template x-for="col in tbl.columns" :key="col.name">
+                            <span><span x-text="col.name"></span> <span class="text-slate-400" x-text="'(' + col.type + ')'"></span></span>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table]">
+                        <div class="mt-1 ml-4">
+                          <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'loading'">
+                            <div class="text-xs text-muted">Loading preview…</div>
+                          </template>
+                          <template x-if="typeof schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'string' && schemaTablePreviews[tbl.schema + '.' + tbl.table].startsWith('error:')">
+                            <div class="text-xs text-red-500" x-text="schemaTablePreviews[tbl.schema + '.' + tbl.table].replace('error:', '')"></div>
+                          </template>
+                          <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table] && typeof schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'object'">
+                            <div class="overflow-x-auto border rounded" style="max-height:200px;overflow-y:auto">
+                              <table class="data-table text-xs">
+                                <thead>
+                                  <tr>
+                                    <template x-for="col in schemaTablePreviews[tbl.schema + '.' + tbl.table].columns" :key="col">
+                                      <th x-text="col"></th>
+                                    </template>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <template x-for="(row, ri) in schemaTablePreviews[tbl.schema + '.' + tbl.table].rows" :key="ri">
+                                    <tr>
+                                      <template x-for="(cell, ci) in row" :key="ci">
+                                        <td x-text="cell ?? '—'"></td>
+                                      </template>
+                                    </tr>
+                                  </template>
+                                </tbody>
+                              </table>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- YAML Import card -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="yamlImportOpen = !yamlImportOpen">
+      <div class="font-semibold text-slate-700">Import YAML</div>
+      <span class="text-muted text-sm" x-text="yamlImportOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="yamlImportOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Paste a YAML block defining one or more named environments. Each top-level key becomes a saved config.</p>
+        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405" data-testid="config-yaml-textarea"></textarea>
+        <div class="flex justify-end">
+          <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()" data-testid="config-yaml-import-btn">
+            <span x-show="!yamlImporting">Import</span>
+            <span x-show="yamlImporting">Importing…</span>
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Security – API Tokens -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" data-testid="security-card-header" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
+      <div class="font-semibold text-slate-700">🔑 Security — Users &amp; API Access</div>
+      <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="securityOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Each user receives a personal bearer token. Administrators can create and revoke standard-user or administrator access.</p>
+        <div class="flex items-center gap-2">
+          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" data-testid="security-token-input" placeholder="Paste token here to authenticate…" />
+          <span class="badge text-xs" :class="activeTokenIsAdmin ? 'badge-blue' : 'badge-gray'" x-text="activeTokenIsAdmin ? 'Administrator' : 'Standard user'"></span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-muted text-xs" x-text="activeTokenIsAdmin ? tokens.length + ' user credential(s)' : 'Administrator access is required to manage users'"></span>
+          <button x-show="activeTokenIsAdmin" @click="showCreateToken = !showCreateToken" class="btn-primary btn-sm" data-testid="security-add-user-btn">+ Add User Access</button>
+        </div>
+        <template x-if="showCreateToken && activeTokenIsAdmin">
+          <div class="grid gap-2 md:grid-cols-4 items-end">
+            <div class="md:col-span-2">
+              <label class="field-label">User / service name</label>
+              <input x-model="newTokenName" class="field-input" data-testid="security-new-token-name-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
+            </div>
+            <div>
+              <label class="field-label">Role</label>
+              <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select">
+                <option value="user">Standard user</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Expires (optional)</label>
+              <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" />
+            </div>
+            <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4" data-testid="security-create-access-btn">Create Access</button>
+          </div>
+        </template>
+        <template x-if="createdToken">
+          <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
+            <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : 'a standard user'"></span> — copy this token now:</div>
+            <div class="text-xs text-amber-700">Give it to the intended user securely. Your current administrator session has not changed.</div>
+            <div class="font-mono text-xs break-all text-amber-900 select-all" data-testid="security-created-token-value" x-text="createdToken"></div>
+            <template x-if="createdTokenHint">
+              <div class="text-xs text-amber-700">Hint (last 8 chars): <span class="font-mono" x-text="'…' + createdTokenHint"></span></div>
+            </template>
+            <button @click="createdToken = null; createdTokenHint = null" class="text-xs text-amber-700 underline">Dismiss</button>
+          </div>
+        </template>
+        <div class="space-y-1">
+          <template x-for="tok in tokens" :key="tok.id">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm" :data-testid="'security-token-row-' + tok.id">
+              <div class="flex-1 min-w-0">
+                <span class="font-medium text-slate-700" x-text="tok.name"></span>
+                <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : 'text-slate-500'" x-text="tok.is_admin ? '(administrator)' : '(standard user)'"></span>
+                <span class="text-muted ml-2 text-xs" x-text="'created ' + fmtDate(tok.created_at)"></span>
+                <span x-show="tok.last_used_at" class="text-muted ml-2 text-xs" x-text="'last used ' + fmtDate(tok.last_used_at)"></span>
+                <span x-show="tok.token_hint" class="text-muted ml-2 text-xs font-mono" x-text="'…' + tok.token_hint"></span>
+                <span x-show="tok.expires_at" class="text-muted ml-2 text-xs" x-text="'expires ' + fmtDate(tok.expires_at)"></span>
+              </div>
+              <span :class="tok.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="tok.enabled ? 'Active' : 'Revoked'"></span>
+              <button @click="revokeToken(tok.id)" :disabled="!tok.enabled" class="btn-danger btn-sm text-xs" :data-testid="'security-revoke-btn-' + tok.id">Revoke</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Diagnostics – Support Bundle -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="diagnosticsOpen = !diagnosticsOpen; if(diagnosticsOpen && !diagnosticsData) loadDiagnostics()">
+      <div class="font-semibold text-slate-700">Diagnostics — Support Bundle</div>
+      <span class="text-muted text-sm" x-text="diagnosticsOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="diagnosticsOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Collect runtime, package, database, and optional recent log details for troubleshooting.</p>
+        <div class="flex items-center justify-between gap-3">
+          <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" class="rounded" x-model="diagnosticsIncludeLogs" /> Include recent logs
+          </label>
+          <button @click="loadDiagnostics()" class="btn-secondary btn-sm" :disabled="diagnosticsLoading">
+            <span x-show="!diagnosticsLoading">Refresh Diagnostics</span>
+            <span x-show="diagnosticsLoading">Loading...</span>
+          </button>
+        </div>
+        <template x-if="diagnosticsError">
+          <div class="text-sm text-rose-600" x-text="diagnosticsError"></div>
+        </template>
+        <template x-if="diagnosticsData">
+          <div class="grid gap-3 md:grid-cols-3 text-sm">
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 mb-1">Environment</div>
+              <div class="text-muted">Python <span x-text="diagnosticsData.environment?.python || 'unknown'"></span></div>
+              <div class="text-muted truncate" x-text="diagnosticsData.environment?.platform || ''"></div>
+            </div>
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 mb-1">Database</div>
+              <div class="text-muted">Dialect <span x-text="diagnosticsData.database?.dialect || 'unknown'"></span></div>
+              <div class="text-muted">Driver <span x-text="diagnosticsData.database?.driver || 'unknown'"></span></div>
+            </div>
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 mb-1">Packages</div>
+              <div class="text-muted" x-text="Object.entries(diagnosticsData.packages || {}).map(([k,v]) => k + ' ' + v).join(', ')"></div>
+            </div>
+          </div>
+        </template>
+        <template x-if="diagnosticsData && diagnosticsData.recent_logs && diagnosticsData.recent_logs.length">
+          <pre class="text-xs bg-slate-950 text-slate-100 rounded p-3 overflow-auto max-h-64" x-text="diagnosticsData.recent_logs.join('\n')"></pre>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- Regional – App-wide Timezone -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="timezoneOpen = !timezoneOpen">
+      <div class="font-semibold text-slate-700">🌐 Regional — Timezone</div>
+      <span class="text-muted text-sm" x-text="timezoneOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="timezoneOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">All timestamps across the dashboard, run history, and generated reports are shown in this timezone. Scheduled runs also fire according to it — a cron expression of <code>0 9 * * *</code> means 9am in this zone.</p>
+        <template x-if="!activeTokenIsAdmin">
+          <div class="text-sm">Current: <span class="font-medium" x-text="appTimezone"></span> <span class="text-muted text-xs">(administrator access required to change)</span></div>
+        </template>
+        <template x-if="activeTokenIsAdmin">
+          <div class="flex items-center gap-2">
+            <select x-model="timezoneDraft" class="field-input field-select flex-1">
+              <template x-for="tz in timezoneOptions" :key="tz">
+                <option :value="tz" x-text="tz"></option>
+              </template>
+            </select>
+            <button @click="saveTimezoneSetting()" :disabled="timezoneSaving || timezoneDraft === appTimezone" class="btn-primary btn-sm">
+              <span x-show="!timezoneSaving">Save</span>
+              <span x-show="timezoneSaving">Saving…</span>
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- Notifications – Webhook Hooks -->
+  <div class="card mt-4">
+    <div class="flex items-center justify-between cursor-pointer" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()">
+      <div class="font-semibold text-slate-700">🔔 Notifications — Webhooks</div>
+      <span class="text-muted text-sm" x-text="notifOpen ? '▲ collapse' : '▼ expand'"></span>
+    </div>
+    <template x-if="notifOpen">
+      <div class="mt-3 space-y-3">
+        <div class="flex justify-end">
+          <button @click="openNewHookModal()" class="btn-primary btn-sm">+ New Webhook</button>
+        </div>
+        <template x-if="hooks.length === 0">
+          <div class="empty-state py-4"><div class="empty-state-title">No webhooks configured</div></div>
+        </template>
+        <div class="space-y-1">
+          <template x-for="hook in hooks" :key="hook.id">
+            <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+              <div class="flex-1 min-w-0">
+                <span class="font-medium text-slate-700" x-text="hook.name"></span>
+                <span class="text-muted ml-2 text-xs font-mono truncate" x-text="hook.url"></span>
+                <div class="flex flex-wrap gap-1 mt-0.5">
+                  <template x-for="ev in (hook.events||[])" :key="ev">
+                    <span class="badge badge-sky text-xs" x-text="ev"></span>
+                  </template>
+                </div>
+              </div>
+              <span :class="hook.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="hook.enabled ? 'On' : 'Off'"></span>
+              <button @click="testHook(hook.id)" class="btn-secondary btn-sm text-xs">Test</button>
+              <button @click="deleteHook(hook.id)" class="btn-danger btn-sm text-xs">Delete</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Step Release Modal -->
+  <div x-show="stepReleaseModal.show" x-cloak class="modal-backdrop" @click.self="stepReleaseModal.show = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4">Release Held Step</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Action *</label>
+          <div class="flex gap-3 mt-1">
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="approve" /> Approve &amp; continue
+            </label>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="skip" /> Skip &amp; continue
+            </label>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="cancel" /> Cancel run
+            </label>
+          </div>
+        </div>
+        <div><label class="field-label">Your name *</label><input x-model="stepReleaseModal.releasedBy" class="field-input" placeholder="Alice" /></div>
+        <div><label class="field-label">Note *</label><textarea x-model="stepReleaseModal.note" class="field-input" rows="2" placeholder="Verified data looks correct…"></textarea></div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="stepReleaseModal.show = false" class="btn-secondary">Cancel</button>
+        <button @click="submitStepRelease()" :disabled="!stepReleaseModal.note.trim() || !stepReleaseModal.releasedBy.trim()" class="btn-primary">Release</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook Modal -->
+  <div x-show="showHookModal" x-cloak class="modal-backdrop" @click.self="showHookModal = false">
+    <div class="modal-box w-full max-w-md">
+      <h2 class="text-lg font-bold mb-4">New Webhook</h2>
+      <div class="space-y-3">
+        <div><label class="field-label">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" /></div>
+        <div><label class="field-label">URL *</label><input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" /></div>
+        <div>
+          <label class="field-label">Events *</label>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <template x-for="ev in hookEventOptions" :key="ev">
+              <label class="flex items-center gap-1 text-sm cursor-pointer">
+                <input type="checkbox" class="rounded" :checked="hookModal.events.includes(ev)" @change="toggleHookEvent(ev)" />
+                <span x-text="ev"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+        <div><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" /></div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showHookModal = false" class="btn-secondary">Cancel</button>
+        <button @click="saveHook()" :disabled="!hookModal.name || !hookModal.url || !hookModal.events.length" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config Modal -->
+  <div x-show="showConfigModal" x-cloak class="modal-backdrop" data-testid="config-modal" @click.self="showConfigModal = false">
+    <div class="modal-box w-full max-w-2xl">
+      <h2 class="text-lg font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
+      <div class="space-y-4">
+        <div class="grid-2">
+          <div>
+            <label class="field-label">Config Name *</label>
+            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" data-testid="config-modal-name-input" />
+          </div>
+          <div>
+            <label class="field-label">Environment</label>
+            <select x-model="configModal.env_name" class="field-input field-select" data-testid="config-modal-env-select">
+              <option value="dev">Dev</option>
+              <option value="qa">QA</option>
+              <option value="staging">Staging</option>
+              <option value="prod">Prod</option>
+            </select>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" /></div>
+          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" /></div>
+          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" /></div>
+          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" /></div>
+          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" /></div>
+          <div><label class="field-label">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" /></div>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="field-label">NAMED CONNECTIONS</span>
+              <span class="text-xs text-slate-400 ml-2">Override DB credentials per connection. Unset fields inherit from defaults above.</span>
+            </div>
+            <button @click="addNamedConnection()" type="button" class="btn-secondary btn-sm text-xs">+ Add Connection</button>
+          </div>
+          <template x-for="(conn, idx) in configModal.connections" :key="idx">
+            <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                <input x-model="conn.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="connection_name" />
+                <span class="text-xs text-slate-400 flex-1" x-text="namedConnectionSummary(conn)"></span>
+                <button @click="toggleNamedConnection(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="conn.expanded ? '▲' : '▼'"></button>
+                <button @click="removeNamedConnection(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
+              </div>
+              <div x-show="conn.expanded" class="p-3 grid-2">
+                <div><label class="field-label">DB Host</label><input x-model="conn.db_host" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" /></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="field-label">API ENDPOINTS</span>
+              <span class="text-xs text-slate-400 ml-2">REST endpoints usable as job/comparison data sources.</span>
+            </div>
+            <button @click="addApiEndpoint()" type="button" class="btn-secondary btn-sm text-xs">+ Add Endpoint</button>
+          </div>
+          <div class="mb-2">
+            <label class="field-label">Base Host (shared, optional)</label>
+            <input x-model="configModal.apiBaseHost" class="field-input" placeholder="https://api.example.com/v1" />
+            <span class="text-xs text-slate-400">Set once, then give each endpoint below a relative Path instead of repeating the full Base URL.</span>
+          </div>
+          <template x-for="(ep, idx) in configModal.apiEndpoints" :key="idx">
+            <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" />
+                <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || (configModal.apiBaseHost && ep.path ? configModal.apiBaseHost.replace(/\/$/, '') + '/' + ep.path.replace(/^\//, '') : 'not configured')"></span>
+                <span class="text-xs text-slate-400 uppercase" x-text="ep.method"></span>
+                <button @click="toggleApiEndpoint(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="ep.expanded ? '▲' : '▼'"></button>
+                <button @click="removeApiEndpoint(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
+              </div>
+              <div x-show="ep.expanded" class="p-3 space-y-3">
+                <div class="grid-2">
+                  <div>
+                    <label class="field-label">Base URL <span class="text-slate-400 font-normal" x-show="configModal.apiBaseHost">(leave blank to use Base Host + Path)</span></label>
+                    <input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" />
+                  </div>
+                  <div>
+                    <label class="field-label">Method</label>
+                    <select x-model="ep.method" class="field-input field-select">
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                    </select>
+                  </div>
+                </div>
+                <div x-show="configModal.apiBaseHost">
+                  <label class="field-label">Path (appended to Base Host)</label>
+                  <input x-model="ep.path" class="field-input" placeholder="orders" />
+                </div>
+                <div>
+                  <label class="field-label">Auth Type</label>
+                  <select x-model="ep.auth_type" class="field-input field-select">
+                    <option value="none">None</option>
+                    <option value="api_key">API Key Header</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                    <option value="sap_bo_logontoken">SAP BO Logon Token</option>
+                    <option value="sap_bo_basic">SAP BO Basic Logon</option>
+                  </select>
+                </div>
+                <div x-show="ep.auth_type === 'api_key'" class="grid-2">
+                  <div><label class="field-label">Header Name</label><input x-model="ep.api_key_header" class="field-input" placeholder="X-API-Key" /></div>
+                  <div><label class="field-label">API Key</label><input x-model="ep.api_key" type="password" class="field-input" /></div>
+                </div>
+                <div x-show="ep.auth_type === 'bearer'">
+                  <label class="field-label">Bearer Token</label><input x-model="ep.bearer_token" type="password" class="field-input" />
+                </div>
+                <div x-show="ep.auth_type === 'basic'" class="grid-2">
+                  <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" /></div>
+                  <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_logontoken'">
+                  <label class="field-label">X-SAP-LogonToken</label><input x-model="ep.sap_bo_logon_token" type="password" class="field-input" />
+                </div>
+                <div x-show="ep.auth_type === 'sap_bo_basic'" class="grid-2">
+                  <div><label class="field-label">BO Username</label><input x-model="ep.basic_username" class="field-input" /></div>
+                  <div><label class="field-label">BO Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                  <div>
+                    <label class="field-label">BO Auth Type</label>
+                    <select x-model="ep.sap_bo_auth_type" class="field-input field-select">
+                      <option value="secEnterprise">Enterprise</option>
+                      <option value="secWinAD">Windows AD</option>
+                      <option value="secLDAP">LDAP</option>
+                      <option value="secSAPR3">SAP R/3</option>
+                    </select>
+                  </div>
+                  <div><label class="field-label">Logon URL Override</label><input x-model="ep.sap_bo_logon_url" class="field-input" placeholder="https://bo.example.com/biprws/logon/long" /></div>
+                </div>
+                <div class="grid-2">
+                  <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json"></textarea></div>
+                  <div><label class="field-label">Query Params (one per line, "name=value")</label><textarea x-model="ep.query_params_raw" rows="2" class="field-input font-mono text-xs" placeholder="status=active"></textarea></div>
+                </div>
+                <div x-show="ep.method === 'POST'">
+                  <label class="field-label">Body (JSON)</label>
+                  <textarea x-model="ep.body_raw" rows="2" class="field-input font-mono text-xs" placeholder='{"filter": "active"}'></textarea>
+                </div>
+                <div class="grid-2">
+                  <div><label class="field-label">Timeout (s)</label><input x-model="ep.timeout" type="number" class="field-input" /></div>
+                  <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
+                    <input x-model="ep.verify_ssl" type="checkbox" class="rounded border-slate-300" /> Verify SSL certificate
+                  </label>
+                </div>
+                <div class="grid-2">
+                  <div>
+                    <label class="field-label">Response Format</label>
+                    <select x-model="ep.response_format" class="field-input field-select">
+                      <option value="json">JSON</option>
+                      <option value="csv">CSV</option>
+                      <option value="xlsx">XLSX</option>
+                      <option value="xls">XLS</option>
+                    </select>
+                  </div>
+                  <div x-show="ep.response_format === 'json'">
+                    <label class="field-label">JSON Root Path</label>
+                    <input x-model="ep.json_root_path" class="field-input" placeholder="data.items" />
+                  </div>
+                </div>
+                <div>
+                  <label class="field-label">Pagination</label>
+                  <select x-model="ep.pagination_type" class="field-input field-select">
+                    <option value="none">None</option>
+                    <option value="cursor">Cursor</option>
+                    <option value="page">Page / Limit</option>
+                  </select>
+                </div>
+                <div x-show="ep.pagination_type === 'cursor'" class="grid-2">
+                  <div><label class="field-label">Cursor Path</label><input x-model="ep.pagination_cursor_path" class="field-input" placeholder="meta.next_cursor" /></div>
+                  <div><label class="field-label">Cursor Query Param</label><input x-model="ep.pagination_cursor_param" class="field-input" placeholder="cursor" /></div>
+                </div>
+                <div x-show="ep.pagination_type === 'page'" class="grid-2">
+                  <div><label class="field-label">Page Param</label><input x-model="ep.pagination_page_param" class="field-input" placeholder="page" /></div>
+                  <div><label class="field-label">Size Param</label><input x-model="ep.pagination_size_param" class="field-input" placeholder="limit" /></div>
+                  <div><label class="field-label">Page Size</label><input x-model="ep.pagination_page_size" type="number" class="field-input" /></div>
+                </div>
+                <div x-show="ep.pagination_type !== 'none'">
+                  <label class="field-label">Max Pages</label>
+                  <input x-model="ep.pagination_max_pages" type="number" class="field-input" style="width:120px" />
+                </div>
+                <div class="flex items-center gap-2">
+                  <button @click="testApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Test</button>
+                  <button @click="previewApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Preview</button>
+                  <span x-show="ep.testResult" :class="ep.testResult && ep.testResult.ok ? 'text-emerald-600' : 'text-red-600'" class="text-xs" x-text="ep.testResult ? ep.testResult.message : ''"></span>
+                </div>
+                <p x-show="ep.previewError" x-text="ep.previewError" class="text-xs text-red-600"></p>
+                <div x-show="ep.previewResult" class="overflow-x-auto max-h-40 border border-slate-200 rounded">
+                  <table class="text-xs w-full">
+                    <thead class="bg-slate-100 sticky top-0">
+                      <tr><template x-for="col in (ep.previewResult?.columns || [])" :key="col"><th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap"></th></template></tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="(row, ri) in (ep.previewResult?.rows || [])" :key="ri">
+                        <tr :class="ri % 2 === 0 ? 'bg-white' : 'bg-slate-50'">
+                          <template x-for="(cell, ci) in row" :key="ci"><td x-text="cell ?? 'NULL'" class="px-2 py-1 whitespace-nowrap max-w-xs truncate"></td></template>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><label class="field-label">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" /></div>
+          <div><label class="field-label">BO User</label><input x-model="configModal.bo_user" class="field-input" /></div>
+          <div><label class="field-label">BO Password</label><input x-model="configModal.bo_password" type="password" class="field-input" /></div>
+          <div>
+            <label class="field-label">BO Auth Type</label>
+            <select x-model="configModal.bo_auth_type" class="field-input">
+              <option value="secEnterprise">Enterprise</option>
+              <option value="secWinAD">Windows AD (on-premises)</option>
+              <option value="secLDAP">LDAP</option>
+              <option value="secSAPR3">SAP R/3</option>
+            </select>
+          </div>
+          <div><label class="field-label">BO Timeout (s)</label><input x-model="configModal.bo_timeout" type="number" class="field-input" placeholder="60" /></div>
+          <div><label class="field-label">BO Proxy URL</label><input x-model="configModal.bo_proxy_url" class="field-input" placeholder="http://proxy.company:8080" /></div>
+          <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
+            <input x-model="configModal.bo_verify_ssl" type="checkbox" class="rounded border-slate-300" />
+            Verify BO SSL certificate
+          </label>
+        </div>
+        <div class="divider"></div>
+        <div class="grid-2">
+          <div><label class="field-label">Automic URL</label><input x-model="configModal.automic_url" class="field-input" /></div>
+          <div><label class="field-label">Automic User</label><input x-model="configModal.automic_user" class="field-input" /></div>
+          <div><label class="field-label">Automic Password</label><input x-model="configModal.automic_password" type="password" class="field-input" /></div>
+        </div>
+        <template x-if="configValidation">
+          <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
+               class="border rounded-lg p-3 text-sm" data-testid="config-validation-result">
+            <template x-if="configValidation.ok"><div>✓ Configuration is valid.</div></template>
+            <template x-if="!configValidation.ok">
+              <div>
+                <div class="font-semibold mb-1">Validation errors</div>
+                <template x-for="err in configValidation.errors" :key="err.field_name + err.message">
+                  <div data-testid="config-validation-error-row"><span class="font-mono" x-text="err.field_name"></span>: <span x-text="err.message"></span></div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showConfigModal = false" class="btn-secondary" data-testid="config-modal-cancel-btn">Cancel</button>
+        <button @click="validateConfig()" class="btn-secondary" data-testid="config-modal-validate-btn">Validate</button>
+        <button @click="saveConfig()" class="btn-primary" :disabled="!configModal.name" data-testid="config-modal-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>

@@ -744,6 +744,30 @@ git add frontend/vendor/
 git commit -m "bump alpinejs and chart.js vendor files"
 ```
 
+### Updating the UI After HTML or JS Changes
+
+`frontend/index.html` is itself a build output, exactly like `frontend/vendor/tailwind.css` above — it is committed to source control so the server never needs Node.js at runtime, but it is generated at dev time from smaller, per-tab source files.
+
+- Each tab's markup lives in its own partial: `frontend/partials/tab-<name>.html` (e.g. `tab-config.html`, `tab-launch.html`, `tab-monitor.html`, ...). Shared shell markup (the `<head>`, nav bar, modals, toast container, and `<script>` tags) lives directly in `frontend/index.template.html`, alongside `<!-- INCLUDE: partials/tab-<name>.html -->` markers showing where each partial is stitched in.
+- Each tab's behavior lives in its own module: `frontend/features/<name>.js`, loaded via `<script>` tags in `frontend/index.template.html`.
+
+To change a tab, edit its partial (`frontend/partials/tab-<name>.html`) and/or its feature module (`frontend/features/<name>.js`), then rebuild the concatenated HTML on a developer machine that has Node.js:
+
+```powershell
+# One-time: install dev dependencies
+npm install
+
+# Rebuild frontend/index.html from index.template.html + partials/*.html
+npm run build:html
+# Outputs: frontend/index.html
+
+# Commit the regenerated file alongside the partial you edited
+git add frontend/partials/tab-<name>.html frontend/index.html
+git commit -m "update <name> tab"
+```
+
+CI runs `npm run build:html` and fails the build if the regenerated `frontend/index.html` differs from the committed copy — this guarantees the partials and the committed HTML never drift apart. Never hand-edit `frontend/index.html` directly; edits there will be silently overwritten the next time someone runs `npm run build:html` and will cause CI to fail if committed without also updating the source partial.
+
 ### Reverse Proxy Configuration
 
 For production, place the application behind IIS, nginx, or your corporate reverse proxy. Example nginx upstream block:

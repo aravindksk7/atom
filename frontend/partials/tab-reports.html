@@ -1,0 +1,162 @@
+<div x-show="currentView === 'reports'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">Report Viewer</div>
+      <div class="section-sub">View generated HTML reports for completed runs</div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="font-semibold text-slate-700 mb-3">Select a Run</div>
+    <div class="flex gap-3">
+      <select data-testid="reports-run-select" x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
+        <option value="">— Choose run —</option>
+        <template x-for="run in runs" :key="run.run_id">
+          <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
+        </template>
+      </select>
+      <button data-testid="reports-load-btn" @click="loadReport()" :disabled="!reportRunId" class="btn-primary">Load</button>
+    </div>
+  </div>
+
+  <template x-if="reportRunId">
+    <div class="compare-subtabs mb-4">
+      <button data-testid="reports-subtab-report" @click="switchReportView('report')" :class="reportView === 'report' ? 'sub-tab active' : 'sub-tab'">Report</button>
+      <button data-testid="reports-subtab-metrics" @click="switchReportView('metrics')" :class="reportView === 'metrics' ? 'sub-tab active' : 'sub-tab'">Metrics</button>
+      <button data-testid="reports-subtab-logs" @click="switchReportView('logs')" :class="reportView === 'logs' ? 'sub-tab active' : 'sub-tab'">Logs</button>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'report'">
+    <div>
+      <div class="card p-0 overflow-hidden report-frame-card">
+      <iframe data-testid="reports-iframe" :src="reportBlobUrl" class="w-full h-full border-none"></iframe>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'metrics'">
+    <div class="space-y-4">
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <button data-testid="reports-metrics-refresh-btn" @click="loadRunMetrics()" :disabled="reportMetricsLoading" class="btn-secondary btn-sm">
+          <span x-text="reportMetricsLoading ? 'Refreshing…' : 'Refresh Metrics'"></span>
+        </button>
+      </div>
+      <template x-if="reportMetricsLoading">
+        <div class="card empty-state"><div class="empty-state-title">Loading metrics…</div></div>
+      </template>
+      <template x-if="!reportMetricsLoading && reportMetrics">
+        <div>
+          <div class="metric-grid mb-4">
+            <div class="metric-card metric-cyan">
+              <div class="metric-label">Pass Rate</div>
+              <div class="metric-value" x-text="metricsPassRate(reportMetrics) + '%'"></div>
+              <div class="metric-bar"><span :style="'width:' + metricsPassRate(reportMetrics) + '%'"></span></div>
+            </div>
+            <div class="metric-card metric-green"><div class="metric-label">Passed</div><div class="metric-value" x-text="reportMetrics.passed || 0"></div></div>
+            <div class="metric-card metric-rose"><div class="metric-label">Failed</div><div class="metric-value" x-text="reportMetrics.failed || 0"></div></div>
+            <div class="metric-card metric-amber"><div class="metric-label">Slow</div><div class="metric-value" x-text="reportMetrics.slow || 0"></div></div>
+            <div class="metric-card metric-violet"><div class="metric-label">Duration</div><div class="metric-value" x-text="(reportMetrics.total_duration_seconds || 0).toFixed(3) + 's'"></div></div>
+          </div>
+          <div class="card overflow-hidden p-0">
+            <table class="data-table">
+              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
+              <tbody>
+                <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
+                  <tr><td colspan="8" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                </template>
+                <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
+                  <tr :class="(t.status||'').toUpperCase()==='FAILED' ? 'metric-row-failed' : (t.status||'').toUpperCase()==='SLOW' ? 'metric-row-slow' : ''">
+                    <td class="font-mono text-xs" x-text="t.name"></td>
+                    <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
+                    <td :class="(t.status||'').toUpperCase()==='SLOW' ? 'text-amber-400 font-semibold' : ''" x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
+                    <td x-text="t.source_row_count ?? 0"></td>
+                    <td x-text="t.target_row_count ?? 0"></td>
+                    <td :class="(t.total_issues ?? 0) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'" x-text="t.total_issues ?? 0"></td>
+                    <td>
+                      <div class="metric-mini-bar">
+                        <span :style="'width:100%;background:' + ((t.status||'').toUpperCase()==='FAILED' ? 'var(--rose)' : (t.status||'').toUpperCase()==='SLOW' ? 'var(--amber)' : 'var(--emerald)')"></span>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+      <template x-if="!reportMetricsLoading && !reportMetrics">
+        <div class="card empty-state"><div class="empty-state-title">Metrics are not available for this run</div></div>
+      </template>
+    </div>
+  </template>
+
+  <template x-if="reportRunId && reportLoaded && reportView === 'logs'">
+    <div class="space-y-4">
+      <!-- Search bar + level chips -->
+      <div class="card">
+        <div class="flex flex-col gap-3">
+          <input
+            x-model.debounce.300ms="logFilterQuery"
+            class="field-input"
+            data-testid="reports-logs-search-input"
+            placeholder="Search logs… (live)"
+          />
+          <div class="flex gap-2 flex-wrap items-center">
+            <button class="level-chip" :class="logFilterLevel === '' ? 'chip-active-ALL' : ''" @click="logFilterLevel = ''" data-testid="reports-logs-level-ALL">ALL</button>
+            <button class="level-chip" :class="logFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="logFilterLevel = logFilterLevel === 'ERROR' ? '' : 'ERROR'" data-testid="reports-logs-level-ERROR">ERROR</button>
+            <button class="level-chip" :class="logFilterLevel === 'WARNING' ? 'chip-active-WARNING' : ''" @click="logFilterLevel = logFilterLevel === 'WARNING' ? '' : 'WARNING'" data-testid="reports-logs-level-WARNING">WARN</button>
+            <button class="level-chip" :class="logFilterLevel === 'INFO' ? 'chip-active-INFO' : ''" @click="logFilterLevel = logFilterLevel === 'INFO' ? '' : 'INFO'" data-testid="reports-logs-level-INFO">INFO</button>
+            <button class="level-chip" :class="logFilterLevel === 'DEBUG' ? 'chip-active-DEBUG' : ''" @click="logFilterLevel = logFilterLevel === 'DEBUG' ? '' : 'DEBUG'" data-testid="reports-logs-level-DEBUG">DEBUG</button>
+            <span class="text-muted text-xs ml-2" x-text="filteredLogEvents().length + ' / ' + allLogEvents.length + ' events'"></span>
+            <template x-if="allLogEventsTruncated">
+              <span class="text-xs text-amber ml-2" x-text="'Showing first 5,000 of ' + allLogEventsTotalLines.toLocaleString() + ' events'"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <template x-if="allLogEventsLoading">
+        <div class="card empty-state"><div class="empty-state-title">Loading logs…</div></div>
+      </template>
+
+      <!-- No events for this run -->
+      <template x-if="!allLogEventsLoading && allLogEvents.length === 0">
+        <div class="card empty-state"><div class="empty-state-title">No log events for this run.</div></div>
+      </template>
+
+      <!-- Log list -->
+      <template x-if="!allLogEventsLoading && allLogEvents.length > 0">
+        <div class="card p-0 overflow-hidden">
+          <div class="log-list">
+            <template x-if="filteredLogEvents().length === 0">
+              <div class="empty-state"><div class="empty-state-title">No events match the current filter.</div></div>
+            </template>
+            <template x-for="line in filteredLogEvents()" :key="line.number">
+              <div class="log-entry" :class="logLevelClass(line.level)">
+                <div class="log-entry-meta">
+                  <span class="font-mono" x-text="'#' + line.number"></span>
+                  <span class="badge" x-text="line.level"></span>
+                </div>
+                <pre x-html="highlightMatch(line.text, logFilterQuery)"></pre>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <template x-if="!reportLoaded && reportRunId">
+    <div class="card empty-state">
+      <div class="empty-state-title">Click "Load Report" to display the HTML report</div>
+    </div>
+  </template>
+  <template x-if="!reportRunId">
+    <div class="card empty-state">
+      <div class="empty-state-icon">📊</div>
+      <div class="empty-state-title">Select a run to view its report</div>
+    </div>
+  </template>
+</div>

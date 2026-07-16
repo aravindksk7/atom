@@ -1,0 +1,887 @@
+<div x-show="currentView === 'history'" x-cloak>
+
+  <!-- Detail view -->
+  <template x-if="selectedRun">
+    <div>
+      <div class="flex items-center gap-3 mb-4">
+        <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
+        <div class="section-title">Run Detail</div>
+        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="selectedRun.status"></span>
+      </div>
+
+      <!-- Summary stat cards -->
+      <div class="grid-stat mb-4">
+        <div class="stat-card stat-indigo">
+          <div class="stat-card-label">Total</div>
+          <div class="stat-card-value" x-text="selectedRun.total_tests"></div>
+        </div>
+        <div class="stat-card stat-emerald">
+          <div class="stat-card-label">Passed</div>
+          <div class="stat-card-value" x-text="selectedRun.passed"></div>
+        </div>
+        <div class="stat-card stat-rose">
+          <div class="stat-card-label">Failed</div>
+          <div class="stat-card-value" x-text="selectedRun.failed"></div>
+        </div>
+        <div class="stat-card stat-amber">
+          <div class="stat-card-label">Slow</div>
+          <div class="stat-card-value" x-text="selectedRun.slow"></div>
+        </div>
+        <div class="stat-card stat-violet">
+          <div class="stat-card-label">Error</div>
+          <div class="stat-card-value" x-text="selectedRun.error"></div>
+        </div>
+      </div>
+
+      <!-- Chart + meta -->
+      <div class="grid-2 mb-4">
+        <div class="card flex flex-col items-center justify-center gap-3">
+          <canvas id="runChart" width="180" height="180"></canvas>
+          <div class="text-muted text-xs">Pass/Fail/Slow distribution</div>
+        </div>
+        <div class="card space-y-2 text-sm">
+          <div><span class="text-muted">Run ID</span><br><span class="font-mono text-xs" x-text="selectedRun.run_id"></span></div>
+          <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
+          <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
+          <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
+          <div class="flex gap-3 pt-2 flex-wrap">
+            <button @click="openReportTab(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Report</button>
+            <button @click="navigateToRunArtifact(selectedRun.run_id, 'metrics')" class="text-indigo-500 hover:underline text-xs">Metrics</button>
+            <button @click="navigateToRunArtifact(selectedRun.run_id, 'logs')" class="text-indigo-500 hover:underline text-xs">Logs</button>
+            <button @click="downloadRunCsv(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Export CSV</button>
+            <button @click="downloadAllDifferences(selectedRun.run_id, 'csv')"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'csv')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'csv')"></button>
+            <button @click="downloadAllDifferences(selectedRun.run_id, 'parquet')"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'parquet')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'parquet')"></button>
+          </div>
+          <div class="pt-2 border-t border-slate-100 space-y-2">
+            <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
+              ★ Pin as Baseline
+            </button>
+            <div class="flex gap-1 items-center">
+              <input readonly :value="badgeUrl(selectedRun.run_id)"
+                     class="field-input text-xs py-1 flex-1 font-mono bg-slate-50" />
+              <button @click="copyBadgeUrl(selectedRun.run_id)" class="btn-secondary btn-sm text-xs px-2">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Per-test reconcile report -->
+      <div class="card overflow-hidden">
+        <template x-if="selectedResultCount() > 0">
+          <div class="flex items-center gap-3 px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+            <span class="text-xs font-semibold text-indigo-700" x-text="'Selected: ' + selectedResultCount() + ' tests'"></span>
+            <div class="flex gap-2 ml-auto">
+              <button @click="openBulkDecisionForm('bulk-accept')"
+                      class="btn-accept-confirm text-xs px-3 py-1.5">Accept all mismatches</button>
+              <button @click="openBulkDecisionForm('bulk-override')"
+                      class="btn-primary btn-sm text-xs">Pass with actions (bulk)</button>
+              <button @click="clearResultSelection()" class="btn-secondary btn-sm text-xs">Clear</button>
+            </div>
+          </div>
+        </template>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="w-10">
+                <input type="checkbox" @change="$el.checked ? selectAllResults() : deselectAllResults()"
+                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length > 0" />
+              </th>
+              <th>Test Name</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Src Rows</th>
+              <th>Tgt Rows</th>
+              <th>Mismatches</th>
+              <th></th>
+            </tr>
+          </thead>
+          <template x-for="r in selectedRun.results" :key="r.id">
+            <tbody>
+              <tr>
+                  <td class="font-mono text-xs" x-text="r.query_name"></td>
+                  <td>
+                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
+                    <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
+                  </td>
+                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
+                  <td x-text="r.source_row_count ?? '—'"></td>
+                  <td x-text="r.target_row_count ?? '—'"></td>
+                  <td>
+                    <span :class="totalMismatches(r) > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'"
+                          x-text="totalMismatches(r)"></span>
+                    <div x-show="totalMismatches(r) > 0"
+                         class="text-xs text-slate-400"
+                         x-text="mismatchBreakdownText(r)"></div>
+                  </td>
+                  <td class="flex gap-2 items-center">
+                    <button x-show="totalMismatches(r) > 0"
+                            @click="toggleMismatchExpand(selectedRun.run_id, r)"
+                            :class="expandedMismatches[r.id] !== undefined ? 'text-slate-400' : 'text-indigo-500'"
+                            class="hover:underline text-xs">
+                      <span x-text="expandedMismatches[r.id] !== undefined ? '▲ Collapse' : (expandingMismatch[r.id] ? '…' : '▼ Expand')"></span>
+                    </button>
+                    <button x-show="r.sample_rows && r.sample_rows.length > 0"
+                            @click="toggleSampleRowsExpand(r.id)"
+                            :class="expandedSampleRows[r.id] ? 'text-slate-400' : 'text-indigo-500'"
+                            class="hover:underline text-xs">
+                      <span x-text="(expandedSampleRows[r.id] ? '▲ Hide' : '▼ View') + ' read rows'"></span>
+                    </button>
+                    <button x-show="r.status === 'FAILED' && !r.override_reason"
+                            @click="toggleOutcomeOverrideForm(r.id)"
+                            class="text-emerald-500 hover:underline text-xs">Pass with actions</button>
+                    <button x-show="r.override_reason"
+                            @click="removeOutcomeOverride(selectedRun.run_id, r)"
+                            class="text-amber-500 hover:underline text-xs">Remove pass</button>
+                  </td>
+                </tr>
+                <tr x-show="outcomeOverrideForms[r.id]?.open || r.override_reason">
+                  <td colspan="8" class="px-4 py-3 bg-amber-50">
+                    <template x-if="r.override_reason">
+                      <div class="text-xs">
+                        <strong>Agreed actions:</strong> <span x-text="r.override_reason"></span>
+                        <span class="text-muted ml-2" x-text="r.overridden_by ? 'by ' + r.overridden_by : ''"></span>
+                      </div>
+                    </template>
+                    <template x-if="outcomeOverrideForms[r.id]?.open">
+                      <div class="flex gap-2 items-start">
+                        <textarea x-model="outcomeOverrideForms[r.id].reason" maxlength="4000" rows="2"
+                                  class="field-input flex-1" placeholder="Describe the agreed actions required to accept this failed outcome"></textarea>
+                        <button @click="passWithAgreedActions(selectedRun.run_id, r)"
+                                :disabled="outcomeOverrideForms[r.id].saving"
+                                class="btn-primary btn-sm">Save pass</button>
+                        <button @click="toggleOutcomeOverrideForm(r.id)" class="btn-secondary btn-sm">Cancel</button>
+                      </div>
+                    </template>
+                  </td>
+                </tr>
+                <!-- Error row -->
+                <tr x-show="r.error_message">
+                  <td colspan="8" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                </tr>
+                <!-- Inline mismatch diff rows -->
+                <template x-if="expandedMismatches[r.id] !== undefined">
+                  <tr>
+                    <td colspan="8" class="p-0">
+                      <div class="mismatch-expand-panel">
+                        <div class="mismatch-expand-header">
+                          <span x-text="'Mismatch details - ' + detailRowsLabel(expandedMismatches[r.id], r)"></span>
+                          <span x-show="totalMismatches(r) > 0"
+                                class="text-xs text-slate-400 ml-2"
+                                x-text="mismatchBreakdownText(r)"></span>
+                        </div>
+                        <table class="mismatch-diff-table">
+                          <thead>
+                            <tr>
+                              <th>Type</th>
+                              <th>Row Key</th>
+                              <th>Column</th>
+                              <th>Source Value</th>
+                              <th>Target Value</th>
+                              <th>Delta</th>
+                              <th>Decision</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-if="expandedMismatches[r.id].length === 0">
+                              <tr><td colspan="8" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
+                            </template>
+                            <template x-for="m in expandedMismatches[r.id]" :key="m.id">
+                              <tr :class="(m.accepted ? 'diff-accepted ' : '') + (m.mismatch_type === 'missing_in_target' ? 'diff-missing-target' : m.mismatch_type === 'missing_in_source' ? 'diff-missing-source' : 'diff-value')">
+                                <td><span class="diff-type-badge" x-text="m.mismatch_type || 'value'"></span></td>
+                                <td class="font-mono text-xs" x-text="m.key_values ? JSON.stringify(m.key_values) : '—'"></td>
+                                <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
+                                <td class="diff-src" x-text="m.source_value ?? '∅'"></td>
+                                <td class="diff-tgt" x-text="m.target_value ?? '∅'"></td>
+                                <td class="text-xs font-mono" x-text="m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) : '—'"></td>
+                                <td>
+                                  <template x-if="m.accepted">
+                                    <span class="accepted-badge">Accepted</span>
+                                  </template>
+                                  <template x-if="!m.accepted">
+                                    <div>
+                                      <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
+                                      <template x-if="acceptForms[m.id]?.open">
+                                        <div class="accept-form-inline">
+                                          <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                                          <button @click="submitAccept(selectedRun.run_id, r.id, m.id)" class="btn-accept-confirm">Save</button>
+                                          <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                        <template x-if="expandedMismatches[r.id] && expandedMismatches[r.id].length > 0 && expandedMismatches[r.id].length % 50 === 0">
+                          <div class="flex justify-center mt-2">
+                            <button @click="loadMoreInlineMismatches(selectedRun.run_id, r)"
+                                    :disabled="expandingMismatch[r.id]"
+                                    class="btn-secondary btn-sm text-xs">
+                              <span x-show="!expandingMismatch[r.id]">Load More</span>
+                              <span x-show="expandingMismatch[r.id]">Loading…</span>
+                            </button>
+                          </div>
+                        </template>
+                        <!-- Complete column statistics -->
+                        <div class="px-3 py-2 border-t border-slate-100 mt-2">
+                          <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="text-xs text-muted font-semibold">All columns</div>
+                            <input x-model="columnStatFilters[columnStatKey('history', r)]"
+                                   class="field-input text-xs py-1 max-w-48"
+                                   placeholder="Filter columns" />
+                          </div>
+                          <div class="overflow-auto max-h-48 border border-slate-100 rounded">
+                            <table class="mismatch-diff-table">
+                              <thead>
+                                <tr>
+                                  <th @click="setColumnStatSort('history', r, 'column')" class="cursor-pointer">Column</th>
+                                  <th @click="setColumnStatSort('history', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
+                                  <th @click="setColumnStatSort('history', r, 'compared_rows')" class="cursor-pointer">Compared</th>
+                                  <th @click="setColumnStatSort('history', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <template x-if="!r.column_stats || !r.column_stats.length">
+                                  <tr><td colspan="4" class="text-muted text-center py-2">No column statistics available</td></tr>
+                                </template>
+                                <template x-for="stat in columnStatsFor(r, 'history')" :key="stat.column">
+                                  <tr>
+                                    <td class="font-mono text-xs" x-text="stat.column"></td>
+                                    <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                                    <td x-text="stat.compared_rows"></td>
+                                    <td x-text="matchPctText(stat.match_pct)"></td>
+                                  </tr>
+                                </template>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                        <!-- Segment breakdown (stored at run time) -->
+                        <template x-if="r.segment_summary">
+                          <div class="px-3 py-2 border-t border-slate-100 mt-2">
+                            <div class="text-xs text-muted font-semibold mb-1">Stored detail rows by segment</div>
+                            <template x-for="[segCol, buckets] in Object.entries(r.segment_summary || {})" :key="segCol">
+                              <div class="mb-2">
+                                <div class="flex items-center gap-2 mb-1">
+                                  <span class="text-xs font-mono text-indigo-600" x-text="segCol"></span>
+                                  <button @click="loadSegmentDrill(selectedRun.run_id, r, segCol)"
+                                          :disabled="isSegDrillBusy(r, segCol)"
+                                          class="text-indigo-500 hover:underline text-xs ml-auto">
+                                    <span x-show="!segmentDrillLoading[r.id + ':' + segCol]">🔄 Re-query now</span>
+                                    <span x-show="segmentDrillLoading[r.id + ':' + segCol]">Loading…</span>
+                                  </button>
+                                </div>
+                                <template x-for="b in buckets" :key="b.value">
+                                  <div class="flex items-center gap-2 text-xs py-0.5">
+                                    <span class="font-mono w-28 truncate" x-text="b.value"></span>
+                                    <div class="flex-1 bg-slate-100 rounded h-2 max-w-56">
+                                      <div class="h-2 rounded bg-rose-400"
+                                           :style="'width:' + Math.min(100, 100 * b.mismatch_count / segmentMax(buckets)) + '%'"></div>
+                                    </div>
+                                    <span class="text-slate-500 font-semibold" x-text="b.mismatch_count + 'x'"></span>
+                                    <span class="text-muted" x-text="'(' + b.pct_of_total + '%)'"></span>
+                                  </div>
+                                </template>
+                                <template x-if="segmentDrill[r.id + ':' + segCol]">
+                                  <div class="mt-1 pl-2 border-l-2 border-indigo-200">
+                                    <div class="text-xs text-muted mb-0.5">Live counts (source vs target)</div>
+                                    <template x-for="row in segmentDrill[r.id + ':' + segCol]" :key="row.value">
+                                      <div class="flex items-center gap-2 text-xs py-0.5">
+                                        <span class="font-mono w-28 truncate" x-text="row.value"></span>
+                                        <span class="text-slate-600" x-text="row.source_count"></span>
+                                        <span class="text-muted">vs</span>
+                                        <span class="text-slate-600" x-text="row.target_count"></span>
+                                        <span class="font-semibold"
+                                              :class="row.delta === 0 ? 'text-emerald-600' : 'text-rose-500'"
+                                              x-text="(row.delta > 0 ? '+' : '') + row.delta"></span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+                <!-- Sample of rows actually read from the source -->
+                <template x-if="expandedSampleRows[r.id]">
+                  <tr>
+                    <td colspan="8" class="p-0">
+                      <div class="mismatch-expand-panel">
+                        <div class="mismatch-expand-header">
+                          <span x-text="'Rows read from source — showing ' + (r.sample_rows || []).length + ' of ' + (r.source_row_count ?? (r.sample_rows || []).length)"></span>
+                        </div>
+                        <table class="mismatch-diff-table">
+                          <thead>
+                            <tr>
+                              <template x-for="col in sampleRowColumns(r.sample_rows)" :key="col">
+                                <th x-text="col"></th>
+                              </template>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-if="!r.sample_rows || r.sample_rows.length === 0">
+                              <tr><td :colspan="Math.max(sampleRowColumns(r.sample_rows).length, 1)" class="text-muted text-center py-3">No rows stored</td></tr>
+                            </template>
+                            <template x-for="(row, idx) in (r.sample_rows || [])" :key="idx">
+                              <tr>
+                                <template x-for="col in sampleRowColumns(r.sample_rows)" :key="col">
+                                  <td class="font-mono text-xs" x-text="row[col] ?? '∅'"></td>
+                                </template>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+            </tbody>
+          </template>
+        </table>
+      </div>
+    </div>
+  </template>
+
+  <!-- History list / trends / lineage -->
+  <template x-if="!selectedRun">
+    <div>
+      <!-- Sub-tab switcher -->
+      <div class="flex gap-1 mb-4 border-b border-slate-200 pb-2">
+        <button @click="historySubTab='runs'" :class="historySubTab==='runs' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-runs">Runs</button>
+        <button @click="historySubTab='trends'; if(!trendsData && trendsJobName) loadTrends()" :class="historySubTab==='trends' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-trends">Trends</button>
+        <button @click="historySubTab='lineage'; loadLineage()" :class="historySubTab==='lineage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-lineage">Lineage</button>
+        <button @click="historySubTab='audit'; loadAudit()" :class="historySubTab==='audit' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-audit">Audit</button>
+        <button @click="historySubTab='profile'; loadProfile()" :class="historySubTab==='profile' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-profile">Profile</button>
+        <button @click="historySubTab='schema'; loadSchemaHistory()" :class="historySubTab==='schema' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-schema">Schema</button>
+        <button @click="historySubTab='coverage'; loadCoverage()" :class="historySubTab==='coverage' ? 'text-indigo-600 border-b-2 border-indigo-600 pb-2 -mb-2' : 'text-slate-500'" class="px-3 py-1 text-sm font-medium" data-testid="history-subtab-coverage">Coverage</button>
+      </div>
+
+      <!-- Trends panel -->
+      <div x-show="historySubTab==='trends'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Metric Trends</div>
+          <div class="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="trendsJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Metric</label>
+              <select x-model="trendsMetric" class="field-input field-select">
+                <option value="mismatch_rate">mismatch_rate</option>
+                <option value="row_count_delta">row_count_delta</option>
+                <option value="duration_seconds">duration_seconds</option>
+                <option value="total_issues">total_issues</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Window (days)</label>
+              <input x-model="trendsWindow" type="number" min="7" max="365" class="field-input" />
+            </div>
+          </div>
+          <button @click="loadTrends()" :disabled="!trendsJobName || trendsLoading" class="btn-primary btn-sm mb-3">
+            <span x-show="!trendsLoading">Load Trends</span>
+            <span x-show="trendsLoading">Loading…</span>
+          </button>
+          <template x-if="trendsData">
+            <div>
+              <div class="flex items-center gap-3 mb-2">
+                <span class="text-muted text-sm" x-text="trendsData.points.length + ' data points'"></span>
+                <template x-if="trendsData.drift_detected">
+                  <span class="badge badge-rose text-xs">⚠ Drift detected</span>
+                </template>
+              </div>
+              <div style="position:relative;height:200px">
+                <canvas id="trendsChart"></canvas>
+              </div>
+            </div>
+          </template>
+          <template x-if="trendsData && trendsData.points.length === 0">
+            <div class="empty-state py-4">
+              <div class="empty-state-title">No data for selected job/window</div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Lineage panel -->
+      <div x-show="historySubTab==='lineage'">
+        <div class="card mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-semibold text-slate-700">Job Dependency Graph</div>
+            <button @click="loadLineage()" class="btn-secondary btn-sm" :disabled="lineageLoading">
+              <span x-show="!lineageLoading">↻ Refresh</span>
+              <span x-show="lineageLoading">Loading…</span>
+            </button>
+          </div>
+          <template x-if="lineageGraph && lineageGraph.nodes.length > 0">
+            <div class="overflow-auto" x-html="lineageSvg()"></div>
+          </template>
+          <template x-if="!lineageGraph || lineageGraph.nodes.length === 0">
+            <div class="empty-state py-8">
+              <div class="empty-state-icon">🔗</div>
+              <div class="empty-state-title">No job dependencies configured</div>
+              <div class="empty-state-sub">Add <code>depends_on</code> to jobs to see their lineage here</div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Audit panel -->
+      <div x-show="historySubTab==='audit'">
+        <div class="card mb-4">
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <div>
+              <label class="field-label">Resource Type</label>
+              <input x-model="auditFilterResourceType" class="field-input" placeholder="run, job, config" />
+            </div>
+            <div>
+              <label class="field-label">Resource ID</label>
+              <input x-model="auditFilterResourceId" class="field-input" placeholder="optional" />
+            </div>
+            <button @click="loadAudit()" :disabled="auditLoading" class="btn-secondary btn-sm">
+              <span x-show="!auditLoading">Refresh</span>
+              <span x-show="auditLoading">Loading...</span>
+            </button>
+          </div>
+          <template x-if="auditEvents.length === 0 && !auditLoading">
+            <div class="empty-state py-6">
+              <div class="empty-state-title">No audit events found</div>
+            </div>
+          </template>
+          <template x-if="auditEvents.length > 0">
+            <div class="overflow-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Resource</th>
+                    <th>Diff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="event in auditEvents" :key="event.id">
+                    <tr>
+                      <td class="text-muted" x-text="fmtDate(event.created_at)"></td>
+                      <td class="font-mono text-xs" x-text="event.actor || '-'"></td>
+                      <td><span class="badge badge-blue text-xs" x-text="event.action"></span></td>
+                      <td class="font-mono text-xs" x-text="event.resource_type + (event.resource_id ? ':' + event.resource_id : '')"></td>
+                      <td class="font-mono text-xs" x-text="event.diff ? JSON.stringify(event.diff) : ''"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Profile panel -->
+      <div x-show="historySubTab==='profile'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Column Profile</div>
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="profileJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <button @click="loadProfile()" :disabled="!profileJobName || profileLoading" class="btn-primary btn-sm">
+              <span x-show="!profileLoading">Load Profile</span>
+              <span x-show="profileLoading">Loading…</span>
+            </button>
+            <button x-show="profileJobName" @click="suggestDQRules()" :disabled="profileLoading" class="btn-secondary btn-sm">✨ Suggest DQ Rules</button>
+          </div>
+          <template x-if="profileData && profileData.length === 0">
+            <div class="empty-state py-4"><div class="empty-state-title">No profile data — run a profile job first</div></div>
+          </template>
+          <template x-if="profileData && profileData.length > 0">
+            <div class="overflow-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Column</th>
+                    <th>Null Rate</th>
+                    <th>Distinct</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Mean</th>
+                    <th>Std Dev</th>
+                    <th>p25</th>
+                    <th>p50</th>
+                    <th>p75</th>
+                    <th>p95</th>
+                    <th>Captured</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="col in profileData" :key="col.column_name">
+                    <tr>
+                      <td class="font-mono text-xs font-semibold" x-text="col.column_name"></td>
+                      <td x-text="col.null_rate != null ? (col.null_rate * 100).toFixed(1) + '%' : '—'"></td>
+                      <td x-text="col.distinct_count ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.min_val ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.max_val ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.mean_val != null ? Number(col.mean_val).toFixed(4) : '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.std_val != null ? Number(col.std_val).toFixed(4) : '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p25 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p50 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p75 ?? '—'"></td>
+                      <td class="font-mono text-xs" x-text="col.p95 ?? '—'"></td>
+                      <td class="text-muted text-xs" x-text="fmtDate(col.captured_at)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <template x-if="suggestedRules && suggestedRules.length > 0">
+            <div class="mt-4 border-t border-slate-100 pt-3">
+              <div class="text-xs font-semibold text-slate-600 mb-2">Suggested DQ Rules</div>
+              <pre class="bg-slate-50 rounded p-3 text-xs font-mono overflow-auto max-h-48" x-text="JSON.stringify(suggestedRules, null, 2)"></pre>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Schema History panel -->
+      <div x-show="historySubTab==='schema'">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Schema Snapshot History</div>
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <div>
+              <label class="field-label">Job Name</label>
+              <select x-model="schemaJobName" class="field-input field-select">
+                <option value="">— Select job —</option>
+                <template x-for="job in jobs" :key="job.name">
+                  <option :value="job.name" x-text="job.name"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Environment</label>
+              <select x-model="schemaEnvironment" class="field-input field-select">
+                <option value="source">source</option>
+                <option value="target">target</option>
+                <option value="both">both</option>
+              </select>
+            </div>
+            <button @click="loadSchemaHistory()" :disabled="!schemaJobName || schemaLoading" class="btn-primary btn-sm">
+              <span x-show="!schemaLoading">Load History</span>
+              <span x-show="schemaLoading">Loading…</span>
+            </button>
+          </div>
+          <template x-if="schemaHistory && schemaHistory.length === 0">
+            <div class="empty-state py-4"><div class="empty-state-title">No schema snapshots — run a schema_snapshot job first</div></div>
+          </template>
+          <template x-if="schemaHistory && schemaHistory.length > 0">
+            <div class="space-y-3">
+              <template x-for="snap in schemaHistory" :key="snap.id">
+                <div class="border border-slate-200 rounded p-3">
+                  <div class="flex items-center gap-3 mb-2">
+                    <span class="font-mono text-xs text-muted" x-text="fmtDate(snap.captured_at)"></span>
+                    <span class="badge badge-blue text-xs" x-text="snap.environment"></span>
+                    <span class="text-xs text-muted">Run: <span class="font-mono" x-text="snap.run_id"></span></span>
+                  </div>
+                  <template x-if="snap.diff && (snap.diff.added?.length || snap.diff.removed?.length || snap.diff.changed?.length)">
+                    <div class="text-xs space-y-1 mb-2">
+                      <template x-if="snap.diff.added?.length">
+                        <div class="text-emerald-600">+ Added: <span x-text="snap.diff.added.join(', ')"></span></div>
+                      </template>
+                      <template x-if="snap.diff.removed?.length">
+                        <div class="text-rose-600">- Removed: <span x-text="snap.diff.removed.join(', ')"></span></div>
+                      </template>
+                      <template x-if="snap.diff.changed?.length">
+                        <div class="text-amber-600">~ Changed: <span x-text="snap.diff.changed.join(', ')"></span></div>
+                      </template>
+                    </div>
+                  </template>
+                  <div class="flex flex-wrap gap-1">
+                    <template x-for="col in (snap.columns || [])" :key="col.name">
+                      <span class="bg-slate-100 text-slate-600 text-xs font-mono px-1.5 py-0.5 rounded" x-text="col.name + ' (' + col.dtype + ')'"></span>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Coverage sub-tab -->
+      <div x-show="historySubTab==='coverage'">
+        <div class="flex items-center gap-4 mb-3">
+          <template x-if="coverageData">
+            <div class="text-sm text-muted">
+              <span x-text="coverageData.summary.tables"></span> tables ·
+              <span x-text="coverageData.summary.columns"></span> columns ·
+              <span class="text-emerald-600 font-semibold" x-text="coverageData.summary.tested_pct + '% tested'"></span> ·
+              <span class="text-amber-600" x-text="coverageData.summary.observed_pct + '% observed only'"></span>
+            </div>
+          </template>
+          <label class="flex items-center gap-1 text-xs text-muted ml-auto">
+            <input type="checkbox" x-model="coverageGapsOnly"> Gaps only
+          </label>
+          <button @click="coverageData=null; loadCoverage()" class="btn-secondary btn-sm text-xs">Refresh</button>
+        </div>
+        <div x-show="coverageLoading" class="text-muted text-sm">Loading…</div>
+        <template x-if="coverageData && coverageData.tables.length === 0">
+          <div class="text-muted text-sm">No coverage data yet — save jobs with SQL queries first.</div>
+        </template>
+        <template x-for="t in (coverageData?.tables || [])" :key="t.table">
+          <div class="mb-4 border border-slate-200 rounded-lg overflow-hidden">
+            <div class="px-3 py-2 bg-slate-50 flex items-center gap-3">
+              <span class="font-mono font-semibold text-sm" x-text="t.table"></span>
+              <span class="text-xs text-muted" x-text="t.job_count + ' job(s)'"></span>
+              <span class="ml-auto text-xs font-semibold"
+                    :class="t.tested_pct >= 70 ? 'text-emerald-600' : (t.tested_pct >= 30 ? 'text-amber-600' : 'text-rose-600')"
+                    x-text="t.tested_pct + '% tested'"></span>
+            </div>
+            <div class="px-3 py-2 flex flex-wrap gap-1">
+              <template x-for="c in coverageColumns(t)" :key="c.column">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono"
+                      :class="coverageLevelClass(c.level)"
+                      :title="'jobs: ' + c.jobs.join(', ') + (c.rules.length ? ' | rules: ' + c.rules.join(', ') : '')">
+                  <span x-text="c.column"></span>
+                </span>
+              </template>
+              <span x-show="coverageColumns(t).length === 0" class="text-xs text-muted">No gaps 🎉</span>
+            </div>
+          </div>
+        </template>
+        <!-- Flaky tests -->
+        <template x-if="flakyData && flakyData.length > 0">
+          <div class="mt-6">
+            <div class="text-sm font-semibold mb-2">Flaky tests (last 20 runs)</div>
+            <template x-for="f in flakyData" :key="f.query_name">
+              <div class="flex items-center gap-3 text-xs py-1">
+                <span class="font-mono w-48 truncate" x-text="f.query_name"></span>
+                <div class="flex-1 bg-slate-100 rounded h-2 max-w-48">
+                  <div class="h-2 rounded" :class="f.flaky ? 'bg-rose-500' : 'bg-amber-400'"
+                       :style="'width:' + Math.min(100, f.score * 100) + '%'"></div>
+                </div>
+                <span class="font-semibold w-12" x-text="f.score"></span>
+                <span class="text-muted" x-text="f.transitions + ' flips / ' + f.window + ' runs'"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <!-- Runs list (default) -->
+      <div x-show="historySubTab==='runs'">
+      <div class="section-header mb-4">
+        <div class="section-title">Run History</div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter">
+            <option value="">All statuses</option>
+            <option value="PENDING">PENDING</option>
+            <option value="RUNNING">RUNNING</option>
+            <option value="COMPLETED">COMPLETED</option>
+            <option value="FAILED">FAILED</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter">
+            <option value="">All types</option>
+            <option value="reconciliation">reconciliation</option>
+            <option value="bo_comparison">bo_comparison</option>
+          </select>
+          <button @click="historyFilterStatus=''; historyFilterRunType=''; loadRuns()" class="btn-secondary btn-sm" data-testid="history-clear-btn">Clear</button>
+          <button @click="loadRuns()" class="btn-secondary btn-sm" data-testid="history-refresh-btn">↻ Refresh</button>
+          <button @click="compareMode = !compareMode; compareResult = null"
+                  :class="compareMode ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'">
+            ⇄ Compare Runs
+          </button>
+        </div>
+      </div>
+
+      <!-- Compare panel -->
+      <template x-if="compareMode">
+        <div class="card mb-4">
+          <div class="font-semibold text-slate-700 mb-3">Compare Two Runs</div>
+          <div class="flex gap-3 mb-3 flex-wrap">
+            <div class="flex-1" style="min-width:200px">
+              <label class="field-label">Run A (baseline)</label>
+              <select x-model="compareRunA" class="field-input field-select">
+                <option value="">— Select —</option>
+                <template x-for="run in runs" :key="run.run_id">
+                  <option :value="run.run_id"
+                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                  </option>
+                </template>
+              </select>
+            </div>
+            <div class="flex-1" style="min-width:200px">
+              <label class="field-label">Run B (target)</label>
+              <select x-model="compareRunB" class="field-input field-select">
+                <option value="">— Select —</option>
+                <template x-for="run in runs" :key="run.run_id">
+                  <option :value="run.run_id"
+                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                  </option>
+                </template>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button @click="loadCompare()"
+                      :disabled="!compareRunA || !compareRunB || compareLoading"
+                      class="btn-primary">
+                <span x-show="!compareLoading">Compare →</span>
+                <span x-show="compareLoading">Loading…</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Compare result -->
+          <template x-if="compareResult">
+            <div>
+              <!-- Summary chips -->
+              <div class="flex gap-2 flex-wrap mb-3">
+                <span class="compare-chip chip-improved">▲ Improved: <strong x-text="compareResult.summary.improved"></strong></span>
+                <span class="compare-chip chip-regressed">▼ Regressed: <strong x-text="compareResult.summary.regressed"></strong></span>
+                <span class="compare-chip chip-unchanged">— Unchanged: <strong x-text="compareResult.summary.unchanged"></strong></span>
+                <template x-if="compareResult.summary.only_in_a > 0">
+                  <span class="compare-chip chip-gray">Only in A: <strong x-text="compareResult.summary.only_in_a"></strong></span>
+                </template>
+                <template x-if="compareResult.summary.only_in_b > 0">
+                  <span class="compare-chip chip-sky">Only in B: <strong x-text="compareResult.summary.only_in_b"></strong></span>
+                </template>
+              </div>
+
+              <!-- Run headers -->
+              <div class="compare-run-headers mb-2">
+                <div class="compare-col-label">Test</div>
+                <div class="compare-col-a">
+                  <span class="font-mono text-xs" x-text="compareResult.run_a.run_id.substring(0,8)+'…'"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_a.status)" x-text="compareResult.run_a.status"></span>
+                </div>
+                <div class="compare-col-b">
+                  <span class="font-mono text-xs" x-text="compareResult.run_b.run_id.substring(0,8)+'…'"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_b.status)" x-text="compareResult.run_b.status"></span>
+                </div>
+                <div class="compare-col-delta">Delta</div>
+              </div>
+
+              <!-- Comparison rows -->
+              <div class="compare-table">
+                <template x-for="t in compareResult.tests" :key="t.test_name">
+                  <div class="compare-row" x-data="{ d: compareDelta(t) }"
+                       :class="d.cls.includes('rose') ? 'compare-row-regressed' : d.cls.includes('green') ? 'compare-row-improved' : ''">
+                    <div class="compare-col-label font-mono text-xs" x-text="t.test_name"></div>
+                    <div class="compare-col-a">
+                      <template x-if="t.status_a">
+                        <span>
+                          <span class="badge" :class="statusBadgeClass(t.status_a)" x-text="t.status_a"></span>
+                          <span class="text-muted text-xs ml-1" x-text="t.duration_a != null ? t.duration_a.toFixed(2)+'s' : ''"></span>
+                          <template x-if="t.mismatches_a > 0">
+                            <span class="text-rose-500 text-xs ml-1" x-text="t.mismatches_a + ' mm'"></span>
+                          </template>
+                        </span>
+                      </template>
+                      <template x-if="!t.status_a"><span class="text-muted text-xs">—</span></template>
+                    </div>
+                    <div class="compare-col-b">
+                      <template x-if="t.status_b">
+                        <span>
+                          <span class="badge" :class="statusBadgeClass(t.status_b)" x-text="t.status_b"></span>
+                          <span class="text-muted text-xs ml-1" x-text="t.duration_b != null ? t.duration_b.toFixed(2)+'s' : ''"></span>
+                          <template x-if="t.mismatches_b > 0">
+                            <span class="text-rose-500 text-xs ml-1" x-text="t.mismatches_b + ' mm'"></span>
+                          </template>
+                        </span>
+                      </template>
+                      <template x-if="!t.status_b"><span class="text-muted text-xs">—</span></template>
+                    </div>
+                    <div class="compare-col-delta flex items-center gap-2">
+                      <span :class="d.cls" x-text="d.label"></span>
+                      <template x-if="t.result_id_b && t.mismatches_b > 0">
+                        <button class="text-indigo-500 hover:underline text-xs"
+                          @click="openMismatchDrawer(compareResult.run_b.run_id, { id: t.result_id_b, query_name: t.test_name })">
+                          View →
+                        </button>
+                      </template>
+                      <template x-if="t.result_id_a && !t.result_id_b && t.mismatches_a > 0">
+                        <button class="text-indigo-500 hover:underline text-xs"
+                          @click="openMismatchDrawer(compareResult.run_a.run_id, { id: t.result_id_a, query_name: t.test_name })">
+                          View →
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="runs.length === 0">
+        <div class="card empty-state">
+          <div class="empty-state-icon">📋</div>
+          <div class="empty-state-title">No test runs yet</div>
+        </div>
+      </template>
+      <div class="card overflow-hidden">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Status</th>
+              <th>Environments</th>
+              <th>Started</th>
+              <th>P / F / S</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="run in runs" :key="run.run_id">
+              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
+                <td class="font-mono text-xs text-slate-500">
+                  <span x-text="run.run_id.substring(0,8)+'…'"></span>
+                  <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
+                </td>
+                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
+                <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
+                <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
+                <td>
+                  <span class="text-emerald-600 font-semibold" x-text="run.passed"></span> /
+                  <span class="text-rose-600 font-semibold" x-text="run.failed"></span> /
+                  <span class="text-amber-500 font-semibold" x-text="run.slow"></span>
+                </td>
+                <td class="flex gap-2">
+                  <button @click.stop="viewRunDetail(run.run_id)" class="text-indigo-500 hover:underline text-xs">View →</button>
+                  <button @click.stop="deleteRun(run.run_id)" class="text-rose-500 hover:underline text-xs">Delete</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      </div><!-- end runs sub-tab -->
+    </div>
+  </template>
+</div>
