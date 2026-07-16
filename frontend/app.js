@@ -266,29 +266,6 @@ function _appRaw() {
     helpTitle: '',
     helpContent: '',
 
-    // -----------------------------------------------------------
-    // Contracts
-    // -----------------------------------------------------------
-    contracts: [],
-    contractsLoading: false,
-    selectedContract: null,
-    contractDetailLoading: false,
-    contractStatusMap: {},          // name → { status, open_breach }
-    contractBreachHistory: [],
-    contractVersionHistory: [],
-    contractStatusLoading: false,
-    contractBreachLoading: false,
-    contractVersionLoading: false,
-    showContractModal: false,
-    contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' },
-    contractModalEditing: false,
-    contractBumpType: 'minor',
-    showContractExamples: false,
-    contractExamples: window.CONTRACT_EXAMPLES || [],
-    expandedExampleId: null,
-    contractBumpNote: '',
-    contractBumpLoading: false,
-
     // ===========================================================
     // INIT
     // ===========================================================
@@ -1204,135 +1181,6 @@ function _appRaw() {
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
 
-    // ===========================================================
-    // CONTRACTS
-    // ===========================================================
-
-    async loadContracts() {
-      this.contractsLoading = true;
-      try {
-        this.contracts = await api('GET', '/api/contracts');
-        for (const c of this.contracts) {
-          try {
-            this.contractStatusMap[c.name] = await api('GET', `/api/contracts/${encodeURIComponent(c.name)}/status`);
-          } catch { this.contractStatusMap[c.name] = { status: 'UNKNOWN', open_breach: null }; }
-        }
-      } catch {}
-      this.contractsLoading = false;
-    },
-
-    async selectContract(contract) {
-      this.selectedContract = contract;
-      this.contractBreachHistory = [];
-      this.contractVersionHistory = [];
-      this.contractBreachLoading = true;
-      this.contractVersionLoading = true;
-      try { this.contractBreachHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/breaches`); } catch {}
-      this.contractBreachLoading = false;
-      try { this.contractVersionHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/versions`); } catch {}
-      this.contractVersionLoading = false;
-    },
-
-    openNewContractModal() {
-      this.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' };
-      this.contractModalEditing = false;
-      this.showContractModal = true;
-    },
-
-    useContractExample(ex) {
-      const c = ex.contract || {};
-      this.contractModal = {
-        name: c.name || '',
-        source_job: c.source_job || '',
-        owner: c.owner || '',
-        sla_hours: c.sla_hours != null ? c.sla_hours : 4,
-        consumers_raw: c.consumers_raw || (Array.isArray(c.consumers) ? c.consumers.join(', ') : ''),
-        breach_severity: c.breach_severity || 'error',
-        version: c.version || '1.0',
-      };
-      this.contractModalEditing = false;
-      this.showContractExamples = false;
-      this.expandedExampleId = null;
-      this.showContractModal = true;
-    },
-
-    openEditContractModal(contract) {
-      this.contractModal = {
-        name: contract.name,
-        source_job: contract.source_job,
-        owner: contract.owner,
-        sla_hours: contract.sla_hours,
-        consumers_raw: (contract.consumers || []).join(', '),
-        breach_severity: contract.breach_severity,
-        version: contract.version,
-      };
-      this.contractModalEditing = true;
-      this.showContractModal = true;
-    },
-
-    async saveContract() {
-      const consumers = this.contractModal.consumers_raw
-        ? this.contractModal.consumers_raw.split(',').map(s => s.trim()).filter(Boolean)
-        : [];
-      const payload = {
-        name: this.contractModal.name,
-        source_job: this.contractModal.source_job,
-        owner: this.contractModal.owner,
-        sla_hours: parseFloat(this.contractModal.sla_hours),
-        consumers,
-        breach_severity: this.contractModal.breach_severity,
-        version: this.contractModal.version,
-      };
-      try {
-        if (this.contractModalEditing) {
-          await api('PUT', `/api/contracts/${encodeURIComponent(this.contractModal.name)}`, {
-            owner: payload.owner, sla_hours: payload.sla_hours, consumers, breach_severity: payload.breach_severity,
-          });
-        } else {
-          await api('POST', '/api/contracts', payload);
-        }
-        this.showContractModal = false;
-        await this.loadContracts();
-        if (this.selectedContract && this.selectedContract.name === this.contractModal.name) {
-          const updated = this.contracts.find(c => c.name === this.contractModal.name);
-          if (updated) this.selectedContract = updated;
-        }
-      } catch (e) { alert('Save failed: ' + (e.message || e)); }
-    },
-
-    async deleteContract(name) {
-      if (!confirm(`Delete contract "${name}"?`)) return;
-      try {
-        await api('DELETE', `/api/contracts/${encodeURIComponent(name)}`);
-        if (this.selectedContract && this.selectedContract.name === name) this.selectedContract = null;
-        await this.loadContracts();
-      } catch (e) { alert('Delete failed: ' + (e.message || e)); }
-    },
-
-    async bumpContractVersion(name) {
-      this.contractBumpLoading = true;
-      try {
-        await api('POST', `/api/contracts/${encodeURIComponent(name)}/bump`, {
-          bump_type: this.contractBumpType, note: this.contractBumpNote || null,
-        });
-        this.contractBumpNote = '';
-        await this.loadContracts();
-        if (this.selectedContract && this.selectedContract.name === name) {
-          const updated = this.contracts.find(c => c.name === name);
-          if (updated) await this.selectContract(updated);
-        }
-      } catch (e) { alert('Bump failed: ' + (e.message || e)); }
-      this.contractBumpLoading = false;
-    },
-
-    contractStatusBadgeClass(name) {
-      const s = (this.contractStatusMap[name] || {}).status;
-      if (s === 'OK') return 'badge-ok';
-      if (s === 'BREACHED') return 'badge-breached';
-      if (s === 'OVERDUE') return 'badge-overdue';
-      return 'badge-unknown';
-    },
-
   };
   // Several feature slices (e.g. ETL_FEATURE_LAUNCH(), and `core` itself)
   // define real `get` accessors (filteredJobList, jobCatalogCountLabel,
@@ -1345,7 +1193,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}
