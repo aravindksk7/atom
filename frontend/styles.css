@@ -1030,8 +1030,10 @@ button:focus-visible {
   --panel: #0d0f12;
   --panel-2: #12161b;
   --panel-3: #171d24;
+  --panel-raised: #1c212c;
   --line: rgba(255,255,255,0.10);
   --line-strong: rgba(255,255,255,0.16);
+  --border: var(--line);
   --text: #f4f7fb;
   --text-soft: #c7d0dc;
   --muted: #8491a3;
@@ -1050,6 +1052,38 @@ button:focus-visible {
   --rose: #fb7185;
   --shadow: 0 18px 60px rgba(0,0,0,0.42);
   --font-display: 'IBM Plex Mono', 'Fira Code', Consolas, monospace;
+
+  /* ---- Redesign tokens (2026-07-16 spec): primary + group + semantic ---- */
+  --primary: #6366f1;
+  --primary-hover: #818cf8;
+  --primary-rgb: 99,102,241;
+  --primary-soft: rgba(99,102,241,0.10);
+  --accent-setup: #f59e0b;
+  --accent-exec: #22d3ee;
+  --accent-analysis: #a855f7;
+  --accent-system: #64748b;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #f43f5e;
+}
+
+/* ---- Light theme override (spec-scoped: tokens + sidebar/top bar/Home/
+   buttons/forms/cards/tables/status pills only — other tab-specific styling
+   keeps its dark look in both modes, per 2026-07-16 design spec) ---- */
+:root[data-theme="light"] {
+  --bg: #f7f8fb;
+  --panel: #ffffff;
+  --panel-2: #f3f5f9;
+  --panel-3: #eef0f5;
+  --panel-raised: #eef0f5;
+  --line: #e2e5eb;
+  --line-strong: #d3d8e0;
+  --border: var(--line);
+  --text: #151922;
+  --text-soft: #525a6b;
+  --muted: #8992a3;
+  --primary-soft: rgba(99,102,241,0.08);
+  --shadow: 0 10px 30px rgba(15,23,42,0.08);
 }
 
 html { background: var(--bg); }
