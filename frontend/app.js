@@ -180,15 +180,9 @@ function _appRaw() {
     // Reports tab logs-subtab state (allLogEvents*, logFilter*) moved to
     // features/reports.js (merged in app())
 
-    // -----------------------------------------------------------
-    // Global Logs tab (server-wide, no run_id required)
-    // -----------------------------------------------------------
-    globalLogEvents: [],
-    globalLogsLoading: false,
-    globalLogFilterQuery: '',
-    globalLogFilterLevel: '',
-    globalLogRunId: '',
-    globalLogsPollTimer: null,
+    // Global Logs tab state (globalLogEvents*, globalLogFilter*,
+    // globalLogRunId, globalLogsPollTimer) moved to features/logs.js
+    // (merged in app())
 
     // -----------------------------------------------------------
     // Mismatch drawer
@@ -714,6 +708,10 @@ function _appRaw() {
       }
     },
 
+    // highlightMatch() stays in core: shared by BOTH the Reports tab's
+    // logs subtab (features/reports.js) and the Global Logs tab
+    // (features/logs.js). Do not move — see the cross-reference comment
+    // at the top of reports.js for the other half of this note.
     highlightMatch(text, query) {
       const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       if (!query.trim()) return safe;
@@ -721,62 +719,8 @@ function _appRaw() {
       return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
     },
 
-    async loadGlobalLogs() {
-      const isFirstLoad = this.globalLogEvents.length === 0;
-      if (isFirstLoad) this.globalLogsLoading = true;
-      const params = new URLSearchParams({ limit: '1000' });
-      if (this.globalLogRunId.trim()) params.set('run_id', this.globalLogRunId.trim());
-      const logList = document.querySelector('.global-log-list');
-      const wasAtBottom = logList
-        ? logList.scrollHeight - logList.scrollTop - logList.clientHeight < 16
-        : true;
-      try {
-        const data = await api('GET', `/api/logs?${params.toString()}`);
-        this.globalLogEvents = data.lines || [];
-        if (wasAtBottom) {
-          this.$nextTick(() => {
-            if (logList) logList.scrollTop = logList.scrollHeight;
-          });
-        }
-      } catch (e) {
-        if (isFirstLoad) this.toast('error', 'Failed to load logs', e.message);
-        // Swallow errors on background poll ticks — the next poll recovers.
-      } finally {
-        this.globalLogsLoading = false;
-      }
-    },
-
-    filteredGlobalLogEvents() {
-      let events = this.globalLogEvents;
-      if (this.globalLogFilterLevel) {
-        const fl = (this.globalLogFilterLevel || '').toUpperCase();
-        events = events.filter(e => {
-          const el = (e.level || '').toUpperCase();
-          if (fl === 'WARNING') return el === 'WARNING' || el === 'WARN';
-          return el === fl;
-        });
-      }
-      if (this.globalLogFilterQuery.trim()) {
-        const q = this.globalLogFilterQuery.toLowerCase();
-        events = events.filter(e => (e.text || '').toLowerCase().includes(q));
-      }
-      return events;
-    },
-
-    startGlobalLogsPolling() {
-      this.loadGlobalLogs();
-      if (this.globalLogsPollTimer) return;
-      this.globalLogsPollTimer = setInterval(() => {
-        if (document.visibilityState === 'visible') this.loadGlobalLogs();
-      }, 5000);
-    },
-
-    stopGlobalLogsPolling() {
-      if (this.globalLogsPollTimer) {
-        clearInterval(this.globalLogsPollTimer);
-        this.globalLogsPollTimer = null;
-      }
-    },
+    // loadGlobalLogs / filteredGlobalLogEvents / startGlobalLogsPolling /
+    // stopGlobalLogsPolling moved to features/logs.js (merged in app())
 
     navigateToRunArtifact(runId, view) {
       this.resetReportArtifacts();
@@ -788,6 +732,8 @@ function _appRaw() {
       if (view === 'logs') this.loadAllLogEvents();
     },
 
+    // logLevelClass() stays in core for the same reason as highlightMatch()
+    // above: shared by both features/reports.js and features/logs.js.
     logLevelClass(level) {
       const value = (level || '').toUpperCase();
       if (value === 'ERROR') return 'log-level-error';
@@ -1193,7 +1139,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_LOGS()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}
