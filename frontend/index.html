@@ -56,24 +56,13 @@
      ============================================================ -->
 <nav class="top-nav">
   <div class="top-nav-inner">
-    <span class="brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-      ETL Framework
-    </span>
-    <div class="flex gap-1 flex-1">
-      <template x-for="tab in tabs" :key="tab.id">
-        <button
-          @click="onTabEnter(tab.id)"
-          :class="currentView === tab.id ? 'active' : ''"
-          class="tab-btn"
-          :data-testid="'nav-tab-' + tab.id">
-          <span class="tab-icon" x-html="tab.icon"></span>
-          <span x-text="tab.label"></span>
-        </button>
-      </template>
-    </div>
-    <div class="flex items-center gap-2">
+    <span class="page-title" x-text="(tabs.find(t => t.id === currentView) || {}).label || ''"></span>
+    <div class="flex items-center gap-3 ml-auto">
       <span class="text-xs" :class="apiOk ? 'text-emerald-500' : 'text-rose-400'" x-text="apiOk ? '● Connected' : '● Offline'"></span>
+      <button class="theme-toggle-btn" data-testid="theme-toggle-btn" @click="toggleTheme()" :aria-label="themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
+        <span x-show="themeMode === 'dark'">🌙</span>
+        <span x-show="themeMode === 'light'">☀️</span>
+      </button>
     </div>
   </div>
 </nav>
