@@ -148,6 +148,7 @@ function _appRaw() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>' },
     ],
     apiOk: false,
+    themeMode: localStorage.getItem('etl_theme') === 'light' ? 'light' : 'dark',
 
     // -----------------------------------------------------------
     // Auth setup wizard
@@ -284,7 +285,18 @@ function _appRaw() {
       else this.stopGlobalLogsPolling();
     },
 
+    applyTheme() {
+      document.documentElement.setAttribute('data-theme', this.themeMode);
+    },
+
+    toggleTheme() {
+      this.themeMode = this.themeMode === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('etl_theme', this.themeMode);
+      this.applyTheme();
+    },
+
     async init() {
+      this.applyTheme();
       this.storedTokenValue = normalizeToken(sessionStorage.getItem('etl_token'));
       await this.loadAuthSetupStatus();
       if (this.storedTokenValue) sessionStorage.setItem('etl_token', this.storedTokenValue);
