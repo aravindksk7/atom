@@ -2681,17 +2681,22 @@ function _appRaw() {
     },
 
   };
-  // ETL_FEATURE_LAUNCH() defines real `get` accessors (filteredJobList,
-  // jobCatalogCountLabel, estimatedSequenceDuration) — Object.assign would read
-  // each one immediately and freeze it as a one-time snapshot value (the same
-  // trap described above for `core`), so it's merged via defineProperties
-  // instead of folded into the plain Object.assign with the other slices.
-  return Object.defineProperties(
-    Object.defineProperties(
-      Object.assign({}, ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG()),
-      Object.getOwnPropertyDescriptors(ETL_FEATURE_LAUNCH())
-    ),
-    Object.getOwnPropertyDescriptors(core)
+  // Several feature slices (e.g. ETL_FEATURE_LAUNCH(), and `core` itself)
+  // define real `get` accessors (filteredJobList, jobCatalogCountLabel,
+  // estimatedSequenceDuration, ...). A plain Object.assign would read each
+  // one immediately and freeze it as a one-time snapshot value instead of a
+  // live computed property, silently breaking reactivity. Object.defineProperties
+  // + Object.getOwnPropertyDescriptors correctly copies getters AND plain data
+  // properties either way, so every slice — not just the ones that currently
+  // happen to declare getters — is merged uniformly through it. This removes
+  // the need to judge, slice by slice, whether "this one needs" special
+  // handling: future slices with getters are handled automatically, and
+  // forgetting to special-case a getter-bearing slice can no longer happen.
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH()];
+  const merged = FEATURE_SLICES.reduce(
+    (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
+    {}
   );
+  return Object.defineProperties(merged, Object.getOwnPropertyDescriptors(core));
 
 }
