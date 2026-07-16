@@ -1168,8 +1168,8 @@ body::before {
 .sidebar-collapse-btn {
   margin-top: 0.5rem;
   align-self: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1184,8 +1184,8 @@ body::before {
 /* ---- Slim top bar ---- */
 .page-title { color: var(--text); font-weight: 600; font-size: 0.9375rem; }
 .theme-toggle-btn {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: transparent;
