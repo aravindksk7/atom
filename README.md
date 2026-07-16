@@ -750,6 +750,7 @@ git commit -m "bump alpinejs and chart.js vendor files"
 
 - Each tab's markup lives in its own partial: `frontend/partials/tab-<name>.html` (e.g. `tab-config.html`, `tab-launch.html`, `tab-monitor.html`, ...). Shared shell markup (the `<head>`, nav bar, modals, toast container, and `<script>` tags) lives directly in `frontend/index.template.html`, alongside `<!-- INCLUDE: partials/tab-<name>.html -->` markers showing where each partial is stitched in.
 - Each tab's behavior lives in its own module: `frontend/features/<name>.js`, loaded via `<script>` tags in `frontend/index.template.html`.
+- Naming exception: `frontend/partials/tab-launch.html` gates on `x-show="currentView === 'jobs'"`, not `'launch'` — the partial name follows `features/launch.js` (Task 2's naming), but the tab's actual `currentView` identity string is the older `'jobs'`. All 10 other partials match their `currentView` value 1:1 with their filename.
 
 To change a tab, edit its partial (`frontend/partials/tab-<name>.html`) and/or its feature module (`frontend/features/<name>.js`), then rebuild the concatenated HTML on a developer machine that has Node.js:
 
