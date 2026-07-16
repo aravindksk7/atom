@@ -182,3 +182,39 @@ def test_preserve_masked_named_connection_secrets_on_config_update():
 
     assert result["connections"]["finance"]["db_password"] == "finance-secret"
     assert result["connections"]["hr"]["db_password"] == "new-secret"
+
+
+def test_loader_resolves_secret_uris(tmp_path, monkeypatch):
+    monkeypatch.setenv("QA_DB_PASS", "resolved-pass")
+    config = tmp_path / "envs.yml"
+    config.write_text(
+        "environments:\n"
+        "  qa:\n"
+        "    db_host: qa-host\n"
+        "    db_password: secret://env/QA_DB_PASS\n",
+        encoding="utf-8",
+    )
+    envs = ConfigLoader().load(str(config))
+    assert envs["qa"].db_password == "resolved-pass"
+
+
+def test_loader_merges_base_overlay(tmp_path):
+    config = tmp_path / "envs.yml"
+    config.write_text(
+        "environments:\n"
+        "  base:\n"
+        "    db_host: shared-host\n"
+        "    db_password: shared-pass\n"
+        "    db_port: 1433\n"
+        "  dev:\n"
+        "    db_name: dev_db\n"
+        "  qa:\n"
+        "    db_name: qa_db\n"
+        "    db_host: qa-override\n",
+        encoding="utf-8",
+    )
+    envs = ConfigLoader().load(str(config))
+    assert "base" not in envs
+    assert envs["dev"].db_host == "shared-host"
+    assert envs["dev"].db_name == "dev_db"
+    assert envs["qa"].db_host == "qa-override"

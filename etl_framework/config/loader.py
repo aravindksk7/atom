@@ -3,6 +3,7 @@ import re
 import yaml
 from pydantic import ValidationError
 from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.secrets import is_secret_uri, resolve_secret_uri
 from etl_framework.exceptions import ConfigurationError
 
 
@@ -21,10 +22,13 @@ class ConfigLoader:
                 f"got {type(raw).__name__}",
                 file_path=config_path,
             )
+        env_blocks = dict(raw.get("environments") or {})
+        base_overlay = env_blocks.pop("base", None) or {}
         envs = {}
-        for env_name, env_raw in (raw.get("environments") or {}).items():
+        for env_name, env_raw in env_blocks.items():
+            merged = {**base_overlay, **env_raw}
             resolved = {k: self._resolve_env_vars(str(v)) if isinstance(v, str) else v
-                        for k, v in env_raw.items()}
+                        for k, v in merged.items()}
             try:
                 env_config = EnvironmentConfig.model_validate({"name": env_name, **resolved})
             except ValidationError as exc:
@@ -39,6 +43,9 @@ class ConfigLoader:
         return envs
 
     def _resolve_env_vars(self, value: str) -> str:
+        if is_secret_uri(value):
+            return resolve_secret_uri(value)
+
         def resolver(match):
             var = match.group(1)
             val = os.environ.get(var)
