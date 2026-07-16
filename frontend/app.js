@@ -790,10 +790,13 @@ function _appRaw() {
       return this.storedTokenValue;
     },
 
+    // ===========================================================
+    // HOME – OVERVIEW STATS
+    // ===========================================================
     get homeStats() {
       return {
         activeRuns: this.runs.filter(r => r.status === 'RUNNING').length,
-        pendingJobs: this.runs.filter(r => r.status === 'PENDING').length,
+        pendingRuns: this.runs.filter(r => r.status === 'PENDING').length,
         connectedEnvironments: this.configs.length,
         lastRunStatus: this.runs.length ? this.runs[0].status : null,
       };
