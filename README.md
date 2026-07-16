@@ -108,6 +108,8 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - Contracts carry a semantic **version** (`1.0` by default); bump minor or major with `POST /api/contracts/{name}/bump`.
   - The **Contracts tab** in the UI lists all contracts with live OK / BREACHED / OVERDUE status badges, breach history, and inline version bump.
   - Derived endpoints expose the source job's DQ rules (`/rules`) and latest schema snapshot (`/schema`) without duplicating configuration.
+- **CI gate exit codes** — `python -m etl_framework.runner.cli --gate-run <run_id>` queries the run's status without needing `--config`/`--source-env`/`--target-env`, returning exit code `0` (passed), `1` (failed), `2` (cancelled), `3` (error), or `4` (not found) so CI pipelines can gate on the result.
+- **Shadow run profile** — set `run_settings.run_profile` to `"shadow"` (default `"full"`) to reconcile a `shadow_sample_frac` sample (default `0.02`) of rows instead of the full dataset, wrapping the comparison backend in `SamplingBackend` for cheap, fast per-PR checks.
 
 ## Architecture
 
@@ -2334,6 +2336,16 @@ The following special job types are supported in addition to the standard `recon
 | `cross_job_assertion` | `source_job`, `source_metric`, `target_job`, `target_metric`, `tolerance`, `tolerance_type` | Asserts that a metric from one job matches another within a tolerance |
 
 ## Testing
+
+### CI quality gate
+
+    # trigger a run via API, capture RUN_ID, then:
+    python -m etl_framework.runner.cli --gate-run "$RUN_ID" --output json
+    # exit codes: 0 passed, 1 failed, 2 cancelled, 3 error, 4 not found
+
+For cheap per-PR shadow runs, launch with `run_settings: {"run_profile": "shadow", "shadow_sample_frac": 0.02}` — every reconciliation samples ~2% of rows (missing rows always kept). Nightly runs use the default `full` profile.
+
+Run the suite in parallel: `python -m pytest tests/unit -n auto`. Most of the suite is parallel-safe and the pass count matches the serial run. A small number of route tests (`test_mismatch_search.py`, `test_selections_routes.py`) occasionally fail only under `-n auto` and only when run alongside the full suite (they pass standalone) — this is shared module-level/singleton state (e.g. `SessionLocal` monkeypatching, in-memory SQLite) racing across xdist workers, not a bug in the tests themselves. Known follow-up; if you hit it, re-run serially or scope `-n auto` to a subset of files.
 
 Run all tests:
 
