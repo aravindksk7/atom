@@ -18,6 +18,7 @@ from api.routes import contracts as contracts_routes
 from api.routes import logs as logs_routes
 from api.routes import coverage as coverage_routes
 from api.routes import gates as gates_routes
+from api.routes import expectations as expectations_routes
 from api.middleware.auth import BearerTokenMiddleware
 
 app = FastAPI(
@@ -63,6 +64,7 @@ app.include_router(logs_routes.router, prefix="/api/logs")
 app.include_router(selections_routes.router, prefix="/api/selections")
 app.include_router(coverage_routes.router, prefix="/api/coverage")
 app.include_router(gates_routes.router, prefix="/api/gates")
+app.include_router(expectations_routes.router)
 
 
 @app.get("/api/health")

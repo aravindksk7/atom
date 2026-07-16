@@ -19,7 +19,7 @@ def test_capture_schema_column_order():
 def test_diff_schemas_identical():
     cols = [{"name": "id", "dtype": "int64"}, {"name": "name", "dtype": "object"}]
     diff = diff_schemas(cols, cols)
-    assert diff == {"added": [], "removed": [], "changed": []}
+    assert diff == {"added": [], "removed": [], "changed": [], "compatibility": "full"}
 
 
 def test_diff_schemas_added_column():
@@ -41,4 +41,15 @@ def test_diff_schemas_type_changed():
     prev = [{"name": "amount", "dtype": "int64"}]
     curr = [{"name": "amount", "dtype": "float64"}]
     diff = diff_schemas(curr, prev)
-    assert diff["changed"] == [{"column": "amount", "from": "int64", "to": "float64"}]
+    assert diff["changed"] == [
+        {"column": "amount", "from": "int64", "to": "float64", "compatibility": "non_breaking"}
+    ]
+
+
+def test_diff_schemas_includes_compatibility():
+    from api.services.schema_snapshot_service import diff_schemas
+    current = [{"name": "id", "dtype": "int64"}]
+    previous = [{"name": "id", "dtype": "int32"}, {"name": "old", "dtype": "object"}]
+    diff = diff_schemas(current, previous)
+    assert diff["compatibility"] == "breaking"          # column removed
+    assert diff["changed"][0]["compatibility"] == "non_breaking"  # int32 -> int64

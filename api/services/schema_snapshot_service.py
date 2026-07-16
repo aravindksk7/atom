@@ -2,6 +2,8 @@
 from __future__ import annotations
 import pandas as pd
 
+from etl_framework.expectations.schema_compat import classify_diff
+
 
 def capture_schema(df: pd.DataFrame) -> list[dict]:
     """Return [{name, dtype}] preserving column order from the DataFrame."""
@@ -22,4 +24,4 @@ def diff_schemas(
         for name in curr_map
         if name in prev_map and curr_map[name] != prev_map[name]
     ]
-    return {"added": added, "removed": removed, "changed": changed}
+    return classify_diff({"added": added, "removed": removed, "changed": changed})

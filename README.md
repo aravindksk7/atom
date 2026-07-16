@@ -111,6 +111,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **Write-Audit-Publish gate** — `POST /api/gates/{job}/evaluate` returns a machine-readable `PROMOTE`/`HOLD` verdict (latest result status + open contract breaches) so orchestrators can gate a staging→production swap on data quality.
 - **CI gate exit codes** — `python -m etl_framework.runner.cli --gate-run <run_id>` queries the run's status without needing `--config`/`--source-env`/`--target-env`, returning exit code `0` (passed), `1` (failed), `2` (cancelled), `3` (error), or `4` (not found) so CI pipelines can gate on the result.
 - **Shadow run profile** — set `run_settings.run_profile` to `"shadow"` (default `"full"`) to reconcile a `shadow_sample_frac` sample (default `0.02`) of rows instead of the full dataset, wrapping the comparison backend in `SamplingBackend` for cheap, fast per-PR checks.
+- **Rules-as-code** — export job DQ rules to versioned YAML suites in `expectations/`, review them in PRs, and sync them back with `POST /api/expectations/sync`. Schema snapshot diffs now include a `compatibility` verdict (`full` / `non_breaking` / `risky` / `breaking`).
 
 ## Architecture
 
