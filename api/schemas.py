@@ -77,6 +77,8 @@ class RunSettings(BaseModel):
     chunk_size: int = Field(default=0, ge=0)
     use_hash_precheck: bool = True
     comparison_backend: Literal["pandas", "polars"] = "pandas"
+    run_profile: Literal["full", "shadow"] = "full"
+    shadow_sample_frac: float = Field(default=0.02, gt=0, le=1.0)
     mismatch_row_limit: int = Field(default=1000, ge=1)
     exclude_columns: list[str] = Field(default_factory=list)
     key_columns: list[str] = Field(default_factory=list)

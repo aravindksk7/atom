@@ -37,6 +37,7 @@ metrics = ["prometheus_client>=0.17"]
 stats = ["scipy>=1.10"]
 dev = [
     "pytest>=7.0",
+    "pytest-xdist>=3.5",
     "hypothesis>=6.0",
     "pytest-cov",
     "python-json-logger>=2.0",
