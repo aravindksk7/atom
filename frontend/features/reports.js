@@ -6,10 +6,10 @@
   // NOTE: this tab's logs subtab renders log lines via highlightMatch()
   // and logLevelClass() (see the x-for template in index.html's Reports
   // section, e.g. `x-html="highlightMatch(line.text, logFilterQuery)"`
-  // and `:class="logLevelClass(line.level)"`). Both functions remain in
-  // core (app.js) — do not move them here — because the Global Logs tab
-  // (features/logs.js) uses the exact same two functions on its own log
-  // lines. Moving either copy would orphan the other tab's markup.
+  // and `:class="logLevelClass(line.level)"`). Both are shared top-level
+  // utilities defined in app-config.js (APP_CONFIG.highlightMatch /
+  // APP_CONFIG.logLevelClass) — the Global Logs tab (features/logs.js)
+  // uses the exact same two functions on its own log lines.
   global.ETL_FEATURE_REPORTS = function () {
     return {
       // ===== STATE (extracted from app.js) =====

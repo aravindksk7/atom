@@ -4,6 +4,20 @@ const API = window.ETL_API_BASE || '';
 const APP_CONFIG = window.ETL_APP_CONFIG || {};
 const isTerminalStatusValue = APP_CONFIG.isTerminalStatusValue || ((status) =>
   ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase()));
+const highlightMatch = APP_CONFIG.highlightMatch || ((text, query) => {
+  const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  if (!query.trim()) return safe;
+  const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
+});
+const logLevelClass = APP_CONFIG.logLevelClass || ((level) => {
+  const value = (level || '').toUpperCase();
+  if (value === 'ERROR') return 'log-level-error';
+  if (value === 'WARNING' || value === 'WARN') return 'log-level-warn';
+  if (value === 'INFO') return 'log-level-info';
+  if (value === 'DEBUG') return 'log-level-debug';
+  return 'log-level-trace';
+});
 const HELP_METHODS = window.ETL_HELP_METHODS || {
   showHelp() {},
   initKeyboardShortcuts() {},
@@ -629,11 +643,11 @@ function _appRaw() {
 
     // Reports tab methods (resetReportArtifacts, switchReportView,
     // loadReport, loadAllLogEvents, filteredLogEvents, loadRunMetrics,
-    // loadRunLogs, metricsPassRate) moved to features/reports.js (merged
-    // in app()). openReportTab/openRunTab/navigateToRunArtifact stay here
-    // — they're called only from the History tab's run-detail markup, not
-    // from Reports itself. highlightMatch/logLevelClass stay here too —
-    // they're shared with the Global Logs tab (currentView === 'logs').
+    // metricsPassRate) moved to features/reports.js (merged in app()).
+    // openReportTab/openRunTab/navigateToRunArtifact stay here — they're
+    // called only from the History tab's run-detail markup, not from
+    // Reports itself. highlightMatch/logLevelClass moved to app-config.js
+    // as shared top-level utilities — see the const declarations above.
 
     // Differences Explorer tab methods (_applyDeepLink, selectDifferenceRun,
     // loadDifferenceInsights, selectDifferenceResult, differenceQueryString,
@@ -708,16 +722,11 @@ function _appRaw() {
       }
     },
 
-    // highlightMatch() stays in core: shared by BOTH the Reports tab's
-    // logs subtab (features/reports.js) and the Global Logs tab
-    // (features/logs.js). Do not move — see the cross-reference comment
-    // at the top of reports.js for the other half of this note.
-    highlightMatch(text, query) {
-      const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      if (!query.trim()) return safe;
-      const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return safe.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="log-highlight">$1</mark>');
-    },
+    // highlightMatch()/logLevelClass() moved to app-config.js as shared
+    // top-level utilities (APP_CONFIG.highlightMatch / .logLevelClass),
+    // same pattern as isTerminalStatusValue above. Still called bare
+    // (no `this.`) from index.html and from features/reports.js and
+    // features/logs.js, resolving to the top-level const declared above.
 
     // loadGlobalLogs / filteredGlobalLogEvents / startGlobalLogsPolling /
     // stopGlobalLogsPolling moved to features/logs.js (merged in app())
@@ -730,17 +739,6 @@ function _appRaw() {
       this.reportLoaded = true;
       if (view === 'metrics') this.loadRunMetrics();
       if (view === 'logs') this.loadAllLogEvents();
-    },
-
-    // logLevelClass() stays in core for the same reason as highlightMatch()
-    // above: shared by both features/reports.js and features/logs.js.
-    logLevelClass(level) {
-      const value = (level || '').toUpperCase();
-      if (value === 'ERROR') return 'log-level-error';
-      if (value === 'WARNING' || value === 'WARN') return 'log-level-warn';
-      if (value === 'INFO') return 'log-level-info';
-      if (value === 'DEBUG') return 'log-level-debug';
-      return 'log-level-trace';
     },
 
     setStoredToken(raw) {

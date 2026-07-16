@@ -4,9 +4,11 @@
   // viewer). Merged into the Alpine component via the FEATURE_SLICES
   // reduce in app.js.
   //
-  // NOTE: highlightMatch() and logLevelClass() remain in core (app.js)
-  // because the Reports tab's logs subtab (features/reports.js) also
-  // uses them — see reports.js's own cross-reference comment.
+  // NOTE: highlightMatch() and logLevelClass() are shared top-level
+  // utilities defined in app-config.js (APP_CONFIG.highlightMatch /
+  // APP_CONFIG.logLevelClass) — the Reports tab's logs subtab
+  // (features/reports.js) also uses them; see reports.js's own
+  // cross-reference comment.
   global.ETL_FEATURE_LOGS = function () {
     return {
       // ===== STATE (extracted from app.js) =====
