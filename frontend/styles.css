@@ -1072,9 +1072,8 @@ body::before {
   border-bottom: 1px solid var(--line);
 }
 .auth-status-bar {
-  background: rgba(5,5,5,0.92);
+  background: var(--panel);
   border-bottom-color: var(--line);
-  backdrop-filter: blur(18px);
 }
 .auth-status-bar.is-missing {
   background: linear-gradient(90deg, rgba(251,191,36,0.16), rgba(251,191,36,0.05));
@@ -1339,8 +1338,8 @@ select option {
   box-shadow: 0 10px 28px rgba(var(--primary-rgb),0.22);
 }
 .btn-primary:hover {
-  background: linear-gradient(135deg, #ffc233, #ff9142);
-  box-shadow: 0 14px 34px rgba(var(--accent-rgb),0.30);
+  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  box-shadow: 0 14px 34px rgba(var(--primary-rgb),0.30);
 }
 .btn-secondary,
 .btn-danger,
