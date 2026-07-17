@@ -95,6 +95,86 @@
 <main class="main-content">
 
 <!-- ====================================================================
+     TAB 0 – HOME / OVERVIEW
+     ==================================================================== -->
+<div x-show="currentView === 'home'" x-cloak data-testid="home-view">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Overview</div>
+      <div class="section-sub">At-a-glance status and quick actions</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <button class="stat-card" data-testid="home-stat-active-runs" @click="onTabEnter('monitor')">
+      <div class="stat-card-label">Active Runs</div>
+      <div class="stat-card-value" x-text="homeStats.activeRuns"></div>
+    </button>
+    <button class="stat-card" data-testid="home-stat-last-run" @click="onTabEnter('history')">
+      <div class="stat-card-label">Last Run Status</div>
+      <div class="stat-card-value">
+        <span x-show="homeStats.lastRunStatus" class="badge" :class="statusBadgeClass(homeStats.lastRunStatus)" x-text="homeStats.lastRunStatus"></span>
+        <span x-show="!homeStats.lastRunStatus" class="text-muted text-sm">No runs yet</span>
+      </div>
+    </button>
+    <button class="stat-card" data-testid="home-stat-environments" @click="onTabEnter('config')">
+      <div class="stat-card-label">Connected Environments</div>
+      <div class="stat-card-value" x-text="homeStats.connectedEnvironments"></div>
+    </button>
+    <button class="stat-card" data-testid="home-stat-pending-runs" @click="onTabEnter('monitor')">
+      <div class="stat-card-label">Pending Runs</div>
+      <div class="stat-card-value" x-text="homeStats.pendingRuns"></div>
+    </button>
+  </div>
+
+  <div class="flex gap-2 mt-4 mb-4">
+    <button class="btn-primary" data-testid="home-quick-action-new-config" @click="onTabEnter('config'); openNewConfigModal()">+ New Config</button>
+    <button class="btn-primary" data-testid="home-quick-action-launch" @click="onTabEnter('jobs')">▶ Launch Job</button>
+    <button class="btn-primary" data-testid="home-quick-action-reports" @click="onTabEnter('reports')">📊 View Reports</button>
+  </div>
+
+  <div class="card overflow-hidden mb-4">
+    <div class="section-header" style="padding: 0.75rem 1rem 0;">
+      <div class="section-title" style="font-size: 0.9375rem;">Recent Activity</div>
+    </div>
+    <table class="data-table" data-testid="home-recent-runs-table">
+      <thead>
+        <tr>
+          <th>Run ID</th>
+          <th>Status</th>
+          <th>Environments</th>
+          <th>Started</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="run in homeRecentRuns" :key="run.run_id">
+          <tr class="cursor-pointer" @click="onTabEnter('history'); viewRunDetail(run.run_id)" :data-testid="'home-recent-run-row-' + run.run_id">
+            <td class="font-mono text-xs text-slate-500" x-text="run.run_id.substring(0,8)+'…'"></td>
+            <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
+            <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
+            <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
+          </tr>
+        </template>
+        <template x-if="homeRecentRuns.length === 0">
+          <tr><td colspan="4" class="text-muted text-center py-4">No runs yet — launch a job to get started.</td></tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" data-testid="home-health-card">
+    <div class="section-title" style="font-size: 0.9375rem;">Connection Health</div>
+    <div class="flex items-center gap-2 mt-2">
+      <span x-show="!storedToken" class="text-muted text-sm">No API token set —
+        <button class="text-indigo-500 hover:underline" @click="openAuthModal()">set up access</button>
+      </span>
+      <span x-show="storedToken" class="text-sm" x-text="activeTokenName ? 'Connected as ' + activeTokenName + (activeTokenIsAdmin ? ' (Administrator)' : ' (Standard user)') : 'Connected'"></span>
+      <button x-show="storedToken" class="text-indigo-500 hover:underline text-sm" @click="goToTokenManagement()">Manage →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================
      TAB 1 – CONFIG EDITOR
      ==================================================================== -->
 <div x-show="currentView === 'config'" x-cloak>
