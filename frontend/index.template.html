@@ -13,29 +13,56 @@
 <body class="app-shell" x-data="app()" x-init="init()">
 <span class="sr-only">Validate Configuration Run Health Check Add Job Execution Sequence</span>
 
+<aside class="sidebar" :class="sidebarCollapsed ? 'is-collapsed' : ''" data-testid="app-sidebar">
+  <div class="sidebar-brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+    <span class="sidebar-brand-label" x-show="!sidebarCollapsed">ETL Framework</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <template x-for="tab in tabs.filter(t => !t.group)" :key="tab.id">
+      <button @click="onTabEnter(tab.id)" :class="currentView === tab.id ? 'active' : ''"
+              class="sidebar-nav-item" :data-testid="'nav-tab-' + tab.id">
+        <span class="sidebar-nav-icon" x-html="tab.icon"></span>
+        <span class="sidebar-nav-label" x-show="!sidebarCollapsed" x-text="tab.label"></span>
+      </button>
+    </template>
+
+    <template x-for="grp in tabGroups" :key="grp.id">
+      <div class="sidebar-group" :data-group="grp.id">
+        <div class="sidebar-group-header" x-show="!sidebarCollapsed" x-text="grp.label"></div>
+        <template x-for="tab in tabs.filter(t => t.group === grp.id)" :key="tab.id">
+          <button @click="onTabEnter(tab.id)" :class="currentView === tab.id ? 'active' : ''"
+                  class="sidebar-nav-item" :data-group="grp.id" :data-testid="'nav-tab-' + tab.id">
+            <span class="sidebar-nav-icon" x-html="tab.icon"></span>
+            <span class="sidebar-nav-label" x-show="!sidebarCollapsed" x-text="tab.label"></span>
+          </button>
+        </template>
+      </div>
+    </template>
+  </nav>
+
+  <button class="sidebar-collapse-btn" data-testid="sidebar-collapse-btn"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+          :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :style="sidebarCollapsed ? 'transform: rotate(180deg)' : ''"><polyline points="15 18 9 12 15 6"></polyline></svg>
+  </button>
+</aside>
+
+<div class="app-content">
+
 <!-- ============================================================
      TOP NAV
      ============================================================ -->
 <nav class="top-nav">
   <div class="top-nav-inner">
-    <span class="brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-      ETL Framework
-    </span>
-    <div class="flex gap-1 flex-1">
-      <template x-for="tab in tabs" :key="tab.id">
-        <button
-          @click="onTabEnter(tab.id)"
-          :class="currentView === tab.id ? 'active' : ''"
-          class="tab-btn"
-          :data-testid="'nav-tab-' + tab.id">
-          <span class="tab-icon" x-html="tab.icon"></span>
-          <span x-text="tab.label"></span>
-        </button>
-      </template>
-    </div>
-    <div class="flex items-center gap-2">
+    <span class="page-title" x-text="currentTabLabel"></span>
+    <div class="flex items-center gap-3 ml-auto">
       <span class="text-xs" :class="apiOk ? 'text-emerald-500' : 'text-rose-400'" x-text="apiOk ? '● Connected' : '● Offline'"></span>
+      <button class="theme-toggle-btn" data-testid="theme-toggle-btn" @click="toggleTheme()" :aria-label="themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
+        <span x-show="themeMode === 'dark'">🌙</span>
+        <span x-show="themeMode === 'light'">☀️</span>
+      </button>
     </div>
   </div>
 </nav>
@@ -66,6 +93,11 @@
      MAIN CONTENT
      ============================================================ -->
 <main class="main-content">
+
+<!-- ====================================================================
+     TAB 0 – HOME / OVERVIEW
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-home.html -->
 
 <!-- ====================================================================
      TAB 1 – CONFIG EDITOR
@@ -478,5 +510,6 @@
         </div>
       </div>
     </template>
+</div><!-- end .app-content -->
   </body>
 </html>

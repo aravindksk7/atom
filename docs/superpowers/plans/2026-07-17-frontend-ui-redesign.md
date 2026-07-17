@@ -10,13 +10,17 @@
 
 **Tech Stack:** Alpine.js 3, vanilla CSS (custom properties), Playwright (`@playwright/test`) for E2E.
 
+**Correction discovered during Task 5 execution:** `frontend/index.html` is a *generated* file — `scripts/build-html.js` assembles it from `frontend/index.template.html` plus `frontend/partials/*.html` (one partial per tab: `tab-config.html`, `tab-launch.html`, `tab-monitor.html`, `tab-history.html`, `tab-adapters.html`, `tab-reports.html`, `tab-differences.html`, `tab-compare.html`, `tab-logs.html`, `tab-contracts.html`, `tab-help.html`), and `.github/workflows/ci.yml` runs `npm run build:html` then `git diff --exit-code frontend/index.html` to fail the build if the generated file is out of sync. Every task below that touches `frontend/index.html` (Tasks 5, 6, 8) must make the identical edit in `frontend/index.template.html` instead (the top-nav/sidebar/body-wrapper/modal scaffolding all live directly in the template, not in any partial — confirmed the anchor text for all three tasks appears in `index.template.html` itself), then run `npm run build:html` and confirm `git status --porcelain -- frontend/index.html` is empty before committing both files together.
+
 ---
 
 ## File Structure
 
 - **Modify `frontend/styles.css`**: add new design tokens (primary/accent/semantic) to the existing dark `:root` block, add a new `:root[data-theme="light"]` override block (spec-scoped components only), add sidebar/Home/stat-card/status-pill/theme-toggle rules, repoint `.btn-primary`/`.field-input:focus` to the new `--primary` token, change `.app-shell` to a row layout with `.sidebar` + `.app-content`.
 - **Modify `frontend/app.js`**: add `group` field to each `tabs` entry (~app.js:126-149) plus a new `home` entry, add `themeMode` state + `toggleTheme()` + `applyTheme()` (called from `init()`), add `get homeStats()` and `get homeRecentRuns()` computed getters (derived from existing `runs`/`configs` state — no new API calls).
-- **Modify `frontend/index.html`**: wrap the whole `<body>` content in `<aside class="sidebar">…</aside><div class="app-content">…</div>` (two edits, top and bottom of body), replace the `<nav class="top-nav">` tab-strip (index.html:19-41) with a slim top bar + the new sidebar's grouped nav markup, insert a new `home` view block (the first view block, before the existing `config` view block at index.html:73).
+- **Modify `frontend/index.template.html`** (source of the generated `frontend/index.html` — see correction note above): wrap the whole `<body>` content in `<aside class="sidebar">…</aside><div class="app-content">…</div>` (two edits, top and bottom of body), replace the `<nav class="top-nav">` tab-strip with a slim top bar + the new sidebar's grouped nav markup, wire in a new `<!-- INCLUDE: partials/tab-home.html -->` marker before the Config tab's include.
+- **Create `frontend/partials/tab-home.html`**: the new Home/Overview tab's view block, following the existing one-partial-per-tab pattern.
+- **Regenerate `frontend/index.html`** via `npm run build:html` after every template/partial change, and commit the regenerated file alongside its source.
 - **Create `tests/e2e/15-home-and-nav.spec.ts`**: covers sidebar grouping/active state, Home tab stat cards/quick actions/recent activity navigation, and theme toggle persistence.
 
 ---
@@ -514,12 +518,15 @@ git commit -m "feat(frontend): wrap body in sidebar + app-content layout shell"
 
 ### Task 6: Remove old top-nav tab strip, add slim top bar
 
+**IMPORTANT — generated file:** `frontend/index.html` is generated from `frontend/index.template.html` (+ partials) by `scripts/build-html.js`; CI fails if the committed `index.html` doesn't match a fresh `npm run build:html`. The top-nav block edited below lives directly in `index.template.html` (not in any partial). Make the edit there, then regenerate — do not hand-edit `index.html`.
+
 **Files:**
-- Modify: `frontend/index.html:19-41` (old `<nav class="top-nav">`)
+- Modify: `frontend/index.template.html` (old `<nav class="top-nav">`, originally at index.html:19-41 before Task 5's sidebar wrapper shifted it — search by anchor text)
+- Generated (do not hand-edit): `frontend/index.html` — produced by `npm run build:html`
 
 - [ ] **Step 1: Replace the tab-strip nav with a slim status/theme/profile bar**
 
-Find (index.html:19-41):
+In `frontend/index.template.html`, find:
 
 ```html
 <nav class="top-nav">
@@ -564,21 +571,27 @@ Replace with:
 </nav>
 ```
 
-The tab-strip's `data-testid="'nav-tab-' + tab.id"` bindings already moved into the sidebar in Task 5 Step 1 — this step only removes the now-duplicate strip from the top bar and adds the page title + theme toggle. The existing `auth-status-bar` section (index.html:46-63, right after this nav) is untouched — it keeps its exact markup and `auth-status-connected` / `auth-status-open-btn` test IDs so `tests/e2e/fixtures.ts` and `tests/e2e/00-auth-setup.spec.ts` keep passing unmodified.
+The tab-strip's `data-testid="'nav-tab-' + tab.id"` bindings already moved into the sidebar in Task 5 Step 1 — this step only removes the now-duplicate strip from the top bar and adds the page title + theme toggle. The existing `auth-status-bar` section (right after this nav) is untouched — it keeps its exact markup and `auth-status-connected` / `auth-status-open-btn` test IDs so `tests/e2e/fixtures.ts` and `tests/e2e/00-auth-setup.spec.ts` keep passing unmodified.
 
-- [ ] **Step 2: Manual verification**
+- [ ] **Step 2: Regenerate and verify**
 
-Reload the dev server page. Expect: top bar shows only a page title (e.g. "Home"), connection dot, and a moon/sun toggle button. Click the toggle — expect the emoji swaps and (after Task 8's CSS lands) the page recolors; for now just confirm no console errors and `document.documentElement.getAttribute('data-theme')` changes between `dark`/`light` in devtools.
+Run: `npm run build:html`
+Then run: `git status --porcelain -- frontend/index.html`
+Expected: `index.html` shows as modified, reflecting exactly the same top-nav change just made in the template (no other diff).
 
-- [ ] **Step 3: Run the existing auth/nav Playwright specs to confirm no regression yet**
+- [ ] **Step 3: Manual verification**
+
+Reload the dev server page. Expect: top bar shows only a page title (e.g. "Home"), connection dot, and a moon/sun toggle button. Click the toggle — expect the emoji swaps and (after Task 9's CSS lands) the page recolors; for now just confirm no console errors and `document.documentElement.getAttribute('data-theme')` changes between `dark`/`light` in devtools.
+
+- [ ] **Step 4: Run the existing auth/nav Playwright specs to confirm no regression yet**
 
 Run: `npm run test:e2e -- tests/e2e/00-auth-setup.spec.ts tests/e2e/11-help.spec.ts`
 Expected: all tests PASS (these two specifically depend on `nav-tab-*` and `auth-status-*` test IDs, which is why they're checked first, before running the full suite at the end of the plan).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/index.html
+git add frontend/index.template.html frontend/index.html
 git commit -m "feat(frontend): replace top-nav tab strip with slim title/status/theme bar"
 ```
 
@@ -738,26 +751,18 @@ git commit -m "feat(frontend): style grouped sidebar and slim top bar"
 
 ### Task 8: Home tab view (markup)
 
+**IMPORTANT — generated file:** `frontend/index.html` is generated from `frontend/index.template.html` + `frontend/partials/*.html` by `scripts/build-html.js` (one partial per tab, wired via `<!-- INCLUDE: partials/<file>.html -->` markers in the template). CI regenerates `index.html` and fails the build on any diff. Follow the existing one-partial-per-tab pattern: create a new partial for Home rather than inlining its markup into the template.
+
 **Files:**
-- Modify: `frontend/index.html:73` (insert new view block right before the existing `config` view block)
+- Create: `frontend/partials/tab-home.html` (new Home view content)
+- Modify: `frontend/index.template.html` (insert a new INCLUDE marker for it, right before the Config tab's)
+- Generated (do not hand-edit): `frontend/index.html` — produced by `npm run build:html`
 
-- [ ] **Step 1: Insert the Home view block**
+- [ ] **Step 1: Create the Home partial**
 
-Find (index.html:70-73):
-
-```html
-<!-- ====================================================================
-     TAB 1 – CONFIG EDITOR
-     ==================================================================== -->
-<div x-show="currentView === 'config'" x-cloak>
-```
-
-Replace with:
+Create `frontend/partials/tab-home.html` with this exact content:
 
 ```html
-<!-- ====================================================================
-     TAB 0 – HOME / OVERVIEW
-     ==================================================================== -->
 <div x-show="currentView === 'home'" x-cloak data-testid="home-view">
   <div class="section-header">
     <div>
@@ -782,9 +787,9 @@ Replace with:
       <div class="stat-card-label">Connected Environments</div>
       <div class="stat-card-value" x-text="homeStats.connectedEnvironments"></div>
     </button>
-    <button class="stat-card" data-testid="home-stat-pending-jobs" @click="onTabEnter('monitor')">
-      <div class="stat-card-label">Pending Jobs</div>
-      <div class="stat-card-value" x-text="homeStats.pendingJobs"></div>
+    <button class="stat-card" data-testid="home-stat-pending-runs" @click="onTabEnter('monitor')">
+      <div class="stat-card-label">Pending Runs</div>
+      <div class="stat-card-value" x-text="homeStats.pendingRuns"></div>
     </button>
   </div>
 
@@ -834,21 +839,49 @@ Replace with:
     </div>
   </div>
 </div>
+```
+
+Note: this partial reads `homeStats.pendingRuns` (not `pendingJobs`) — Task 4 was revised during implementation to use this name, since the stat counts test-run records with status `PENDING`, not job-catalog entries.
+
+- [ ] **Step 2: Wire the new partial into the template**
+
+In `frontend/index.template.html`, find (search for this exact block):
+
+```html
+<!-- ====================================================================
+     TAB 1 – CONFIG EDITOR
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-config.html -->
+```
+
+Replace with:
+
+```html
+<!-- ====================================================================
+     TAB 0 – HOME / OVERVIEW
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-home.html -->
 
 <!-- ====================================================================
      TAB 1 – CONFIG EDITOR
      ==================================================================== -->
-<div x-show="currentView === 'config'" x-cloak>
+<!-- INCLUDE: partials/tab-config.html -->
 ```
 
-- [ ] **Step 2: Manual verification**
+- [ ] **Step 3: Regenerate and verify**
+
+Run: `npm run build:html`
+Then run: `git status --porcelain -- frontend/index.html`
+Expected: `index.html` shows as modified (it now contains the new Home view block) — this is expected and correct, unlike Task 5/6 where an already-hand-edited `index.html` must show *no* diff. Open the regenerated `frontend/index.html` and confirm the Home view block appears immediately before the Config tab's view block, with `data-testid="home-view"` present.
+
+- [ ] **Step 4: Manual verification**
 
 Reload the dev server, log in with a token. Expect the Home tab to load by default showing 4 stat cards, 3 quick-action buttons, a recent-activity table (or the empty-state row if no runs exist yet), and a connection health line. Click each stat card and confirm it navigates to the right tab (Monitor/History/Config). Click "+ New Config" and confirm the config modal opens with the Config tab active.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/index.html
+git add frontend/partials/tab-home.html frontend/index.template.html frontend/index.html
 git commit -m "feat(frontend): add Home/Overview tab with stats, quick actions, recent activity"
 ```
 
@@ -863,13 +896,15 @@ git commit -m "feat(frontend): add Home/Overview tab with stats, quick actions, 
 
 Append (anywhere after the `:root` block added in Task 1, e.g. right after the `.card::before` rule at `frontend/styles.css:1137-1144`):
 
+**Naming note (discovered during Task 8's code review):** this codebase already has a `.stat-card` class (`styles.css:188` light / `:1346` dark) paired with `.stat-indigo`/`.stat-emerald`/etc. gradient-background modifiers, used by existing dashboard tiles elsewhere (History/Monitor). Reusing `.stat-card`/`.stat-card-label`/`.stat-card-value` for Home's plain-panel clickable stat buttons would collide (equal-specificity, later-in-file rule wins) and break those existing colored tiles. Task 8's partial (`frontend/partials/tab-home.html`) was updated to use `.home-stat-card`/`.home-stat-card-label`/`.home-stat-card-value` instead — use those names below, NOT `.stat-card`. `.stat-row` has no existing definition, so it's reused as-is.
+
 ```css
 .stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
 }
-.stat-card {
+.home-stat-card {
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -878,9 +913,9 @@ Append (anywhere after the `:root` block added in Task 1, e.g. right after the `
   cursor: pointer;
   transition: border-color 0.1s;
 }
-.stat-card:hover { border-color: var(--primary); }
-.stat-card-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
-.stat-card-value { color: var(--text); font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+.home-stat-card:hover { border-color: var(--primary); }
+.home-stat-card-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.home-stat-card-value { color: var(--text); font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
 
 .status-pill {
   display: inline-flex;

@@ -26,6 +26,7 @@ test.describe('01 config', () => {
 
   test('create, validate, and save a new config', async ({ authedPage }) => {
     await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-config"]').click();
     await authedPage.locator('[data-testid="config-new-btn"]').click();
     const modal = authedPage.locator('[data-testid="config-modal"]');
     await expect(modal).toContainText('New Configuration');
@@ -54,6 +55,7 @@ test.describe('01 config', () => {
 
   test('negative: validating with an out-of-range DB port shows a field-level error', async ({ authedPage }) => {
     await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-config"]').click();
     await authedPage.locator('[data-testid="config-new-btn"]').click();
     await authedPage.locator('[data-testid="config-modal-name-input"]').fill(`e2e-invalid-${Date.now()}`);
     // db_port is validated server-side (EnvironmentConfig.validate_db_port: must be 1-65535).
@@ -74,6 +76,7 @@ test.describe('01 config', () => {
 
   test('negative: import-yaml with invalid YAML surfaces an error toast, does not create a config', async ({ authedPage }) => {
     await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-config"]').click();
     const countBefore = await authedPage.locator('[data-testid^="config-row-"][data-testid$="-edit-btn"]').count();
 
     // The Import YAML card is collapsed by default (yamlImportOpen starts false in
