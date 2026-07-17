@@ -1068,9 +1068,8 @@ body::before {
 .app-shell { position: relative; z-index: 1; }
 
 .top-nav {
-  background: rgba(5,5,5,0.88);
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(18px);
 }
 .auth-status-bar {
   background: rgba(5,5,5,0.92);
