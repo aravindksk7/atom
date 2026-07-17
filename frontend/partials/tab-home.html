@@ -7,24 +7,24 @@
   </div>
 
   <div class="stat-row">
-    <button class="stat-card" data-testid="home-stat-active-runs" @click="onTabEnter('monitor')">
-      <div class="stat-card-label">Active Runs</div>
-      <div class="stat-card-value" x-text="homeStats.activeRuns"></div>
+    <button class="home-stat-card" data-testid="home-stat-active-runs" @click="onTabEnter('monitor')">
+      <div class="home-stat-card-label">Active Runs</div>
+      <div class="home-stat-card-value" x-text="homeStats.activeRuns"></div>
     </button>
-    <button class="stat-card" data-testid="home-stat-last-run" @click="onTabEnter('history')">
-      <div class="stat-card-label">Last Run Status</div>
-      <div class="stat-card-value">
+    <button class="home-stat-card" data-testid="home-stat-last-run" @click="onTabEnter('history')">
+      <div class="home-stat-card-label">Last Run Status</div>
+      <div class="home-stat-card-value">
         <span x-show="homeStats.lastRunStatus" class="badge" :class="statusBadgeClass(homeStats.lastRunStatus)" x-text="homeStats.lastRunStatus"></span>
         <span x-show="!homeStats.lastRunStatus" class="text-muted text-sm">No runs yet</span>
       </div>
     </button>
-    <button class="stat-card" data-testid="home-stat-environments" @click="onTabEnter('config')">
-      <div class="stat-card-label">Connected Environments</div>
-      <div class="stat-card-value" x-text="homeStats.connectedEnvironments"></div>
+    <button class="home-stat-card" data-testid="home-stat-environments" @click="onTabEnter('config')">
+      <div class="home-stat-card-label">Connected Environments</div>
+      <div class="home-stat-card-value" x-text="homeStats.connectedEnvironments"></div>
     </button>
-    <button class="stat-card" data-testid="home-stat-pending-runs" @click="onTabEnter('monitor')">
-      <div class="stat-card-label">Pending Runs</div>
-      <div class="stat-card-value" x-text="homeStats.pendingRuns"></div>
+    <button class="home-stat-card" data-testid="home-stat-pending-runs" @click="onTabEnter('monitor')">
+      <div class="home-stat-card-label">Pending Runs</div>
+      <div class="home-stat-card-value" x-text="homeStats.pendingRuns"></div>
     </button>
   </div>
 

@@ -896,13 +896,15 @@ git commit -m "feat(frontend): add Home/Overview tab with stats, quick actions, 
 
 Append (anywhere after the `:root` block added in Task 1, e.g. right after the `.card::before` rule at `frontend/styles.css:1137-1144`):
 
+**Naming note (discovered during Task 8's code review):** this codebase already has a `.stat-card` class (`styles.css:188` light / `:1346` dark) paired with `.stat-indigo`/`.stat-emerald`/etc. gradient-background modifiers, used by existing dashboard tiles elsewhere (History/Monitor). Reusing `.stat-card`/`.stat-card-label`/`.stat-card-value` for Home's plain-panel clickable stat buttons would collide (equal-specificity, later-in-file rule wins) and break those existing colored tiles. Task 8's partial (`frontend/partials/tab-home.html`) was updated to use `.home-stat-card`/`.home-stat-card-label`/`.home-stat-card-value` instead — use those names below, NOT `.stat-card`. `.stat-row` has no existing definition, so it's reused as-is.
+
 ```css
 .stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
 }
-.stat-card {
+.home-stat-card {
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -911,9 +913,9 @@ Append (anywhere after the `:root` block added in Task 1, e.g. right after the `
   cursor: pointer;
   transition: border-color 0.1s;
 }
-.stat-card:hover { border-color: var(--primary); }
-.stat-card-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
-.stat-card-value { color: var(--text); font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+.home-stat-card:hover { border-color: var(--primary); }
+.home-stat-card-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.home-stat-card-value { color: var(--text); font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
 
 .status-pill {
   display: inline-flex;
