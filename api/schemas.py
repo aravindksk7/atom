@@ -388,6 +388,8 @@ class RunDetailOut(RunStatusOut):
     source_env: str | None = None
     target_env: str | None = None
     config_snapshot: dict | None = None
+    file_name_a: str | None = None
+    file_name_b: str | None = None
     results: list[TestResultOut] = []
 
 

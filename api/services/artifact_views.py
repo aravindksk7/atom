@@ -88,17 +88,24 @@ def render_metrics_html(metrics: dict) -> str:
     for test in tests:
         issues = int(test.get("total_issues") or 0)
         duration_s = float(test.get("duration_seconds") or 0)
+        source_file = test.get("source_file_name")
+        target_file = test.get("target_file_name")
+        if source_file or target_file:
+            files_cell = f"{html.escape(str(source_file or 'N/A'))} &rarr; {html.escape(str(target_file or 'N/A'))}"
+        else:
+            files_cell = '<span style="color:var(--muted)">N/A</span>'
         rows.append(
             "<tr>"
             f"<td class=\"mono\">{html.escape(str(test.get('name') or ''))}</td>"
             f"<td>{status_badge(str(test.get('status') or 'UNKNOWN'))}</td>"
             f"<td>{duration_s:.3f}s</td>"
+            f"<td class=\"mono\">{files_cell}</td>"
             f"<td>{test.get('source_row_count', 0)}</td>"
             f"<td>{test.get('target_row_count', 0)}</td>"
             f"<td>{issues}</td>"
             "</tr>"
         )
-    table = "\n".join(rows) if rows else '<tr><td colspan="6" class="empty">No per-test metrics were recorded.</td></tr>'
+    table = "\n".join(rows) if rows else '<tr><td colspan="7" class="empty">No per-test metrics were recorded.</td></tr>'
     body = f"""
 <div class="top">
   <div>
@@ -119,7 +126,7 @@ def render_metrics_html(metrics: dict) -> str:
 <section class="card">
   <h2>Per-Test Performance</h2>
   <table>
-    <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th></tr></thead>
+    <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Files</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th></tr></thead>
     <tbody>{table}</tbody>
   </table>
 </section>

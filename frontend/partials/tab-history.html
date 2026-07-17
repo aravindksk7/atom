@@ -96,6 +96,7 @@
               <th>Test Name</th>
               <th>Status</th>
               <th>Duration</th>
+              <th>Files</th>
               <th>Src Rows</th>
               <th>Tgt Rows</th>
               <th>Mismatches</th>
@@ -111,6 +112,7 @@
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
                   <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
+                  <td class="font-mono text-xs" x-text="((r.source_file_name || selectedRun.file_name_a) || (r.target_file_name || selectedRun.file_name_b)) ? ((r.source_file_name || selectedRun.file_name_a) || 'N/A') + ' → ' + ((r.target_file_name || selectedRun.file_name_b) || 'N/A') : '—'"></td>
                   <td x-text="r.source_row_count ?? '—'"></td>
                   <td x-text="r.target_row_count ?? '—'"></td>
                   <td>

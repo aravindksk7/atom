@@ -193,6 +193,8 @@ class RunReportSnapshot:
             "slow": self.slow,
             "error": self.error,
             "total_duration_seconds": round(total_duration, 6),
+            "file_name_a": self.file_name_a,
+            "file_name_b": self.file_name_b,
             "tests": [
                 {
                     "name": result.query_name,
@@ -201,8 +203,8 @@ class RunReportSnapshot:
                     "duration_seconds": float(result.duration_seconds or 0),
                     "source_row_count": result.source_row_count or 0,
                     "target_row_count": result.target_row_count or 0,
-                    "source_file_name": result.source_file_name,
-                    "target_file_name": result.target_file_name,
+                    "source_file_name": result.source_file_name or self.file_name_a,
+                    "target_file_name": result.target_file_name or self.file_name_b,
                     "total_issues": result.total_issues,
                 }
                 for result in self.results

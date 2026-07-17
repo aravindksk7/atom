@@ -60,16 +60,17 @@
           </div>
           <div class="card overflow-hidden p-0">
             <table class="data-table">
-              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
+              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Files</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
               <tbody>
                 <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
-                  <tr><td colspan="8" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                  <tr><td colspan="9" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
                 </template>
                 <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
                   <tr :class="(t.status||'').toUpperCase()==='FAILED' ? 'metric-row-failed' : (t.status||'').toUpperCase()==='SLOW' ? 'metric-row-slow' : ''">
                     <td class="font-mono text-xs" x-text="t.name"></td>
                     <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
                     <td :class="(t.status||'').toUpperCase()==='SLOW' ? 'text-amber-400 font-semibold' : ''" x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
+                    <td class="font-mono text-xs" x-text="(t.source_file_name || t.target_file_name) ? (t.source_file_name || 'N/A') + ' → ' + (t.target_file_name || 'N/A') : 'N/A'"></td>
                     <td x-text="t.source_row_count ?? 0"></td>
                     <td x-text="t.target_row_count ?? 0"></td>
                     <td :class="(t.total_issues ?? 0) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'" x-text="t.total_issues ?? 0"></td>

@@ -1378,6 +1378,8 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
         source_env=snapshot.source_env,
         target_env=snapshot.target_env,
         config_snapshot=snapshot.config_snapshot,
+        file_name_a=snapshot.file_name_a,
+        file_name_b=snapshot.file_name_b,
         results=results,
     )
 
