@@ -41,6 +41,14 @@ function readStoredTheme() {
   }
 }
 
+function readStoredBool(key) {
+  try {
+    return localStorage.getItem(key) === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
 async function api(method, path, body) {
   const token = normalizeToken(sessionStorage.getItem('etl_token'));
   const headers = { 'Content-Type': 'application/json' };
@@ -165,7 +173,7 @@ function _appRaw() {
     ],
     apiOk: false,
     themeMode: readStoredTheme(),
-    sidebarCollapsed: localStorage.getItem('etl_sidebar_collapsed') === 'true',
+    sidebarCollapsed: readStoredBool('etl_sidebar_collapsed'),
 
     // -----------------------------------------------------------
     // Auth setup wizard
@@ -314,7 +322,9 @@ function _appRaw() {
 
     async init() {
       this.applyTheme();
-      this.$watch('sidebarCollapsed', (v) => localStorage.setItem('etl_sidebar_collapsed', String(v)));
+      this.$watch('sidebarCollapsed', (v) => {
+        try { localStorage.setItem('etl_sidebar_collapsed', String(v)); } catch (_) {}
+      });
       this.storedTokenValue = normalizeToken(sessionStorage.getItem('etl_token'));
       await this.loadAuthSetupStatus();
       if (this.storedTokenValue) sessionStorage.setItem('etl_token', this.storedTokenValue);
