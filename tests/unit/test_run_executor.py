@@ -596,6 +596,93 @@ def test_run_with_segment_columns_persists_summary():
     assert tr.segment_summary["region"][0]["mismatch_count"] == 1
 
 
+def test_file_reconciliation_resolves_keys_and_persists_file_names():
+    db = _session()
+    RunRepository(db).create_run("file-run-001", "dev", "prod", {})
+    JobRepository(db).create(
+        {
+            "name": "file_job",
+            "description": "file_job",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": [],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "source_file_name": "source.csv",
+                "target_file_name": "target.csv",
+                "source_file_content_b64": "aWQsYW10CjEsMTAKMiwyMAo=",
+                "target_file_content_b64": "aWQsYW10CjEsMTAKMiwyNQo=",
+            },
+            "enabled": True,
+        }
+    )
+
+    RunExecutor(
+        db=db,
+        run_id="file-run-001",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=["file_job"],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = RunRepository(db).get_run("file-run-001")
+    tr = run.results[0]
+    assert run.status == "FAILED"
+    assert tr.value_mismatch_count == 1
+    assert tr.source_file_name == "source.csv"
+    assert tr.target_file_name == "target.csv"
+
+
+def test_file_reconciliation_falls_back_to_positional_match_without_shared_id():
+    db = _session()
+    RunRepository(db).create_run("file-run-002", "dev", "prod", {})
+    JobRepository(db).create(
+        {
+            "name": "file_job_no_id",
+            "description": "file_job_no_id",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": [],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "source_file_name": "no_id_source.csv",
+                "target_file_name": "no_id_target.csv",
+                # colA,colB\n1,2\n3,4\n -- no "id" column, no explicit key_columns
+                "source_file_content_b64": "Y29sQSxjb2xCCjEsMgozLDQK",
+                # colA,colB\n3,4\n1,9\n -- rows out of order relative to source, plus one mismatch
+                "target_file_content_b64": "Y29sQSxjb2xCCjMsNAoxLDkK",
+            },
+            "enabled": True,
+        }
+    )
+
+    RunExecutor(
+        db=db,
+        run_id="file-run-002",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=["file_job_no_id"],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = RunRepository(db).get_run("file-run-002")
+    tr = run.results[0]
+    # With no shared "id"-like column and no explicit key_columns, this must fall back
+    # to positional (sorted row-order) matching instead of failing outright -- that
+    # fallback is the entire point of this feature (comparing files with no natural key).
+    assert run.status == "FAILED"
+    assert tr.value_mismatch_count == 1
+    assert tr.source_file_name == "no_id_source.csv"
+    assert tr.target_file_name == "no_id_target.csv"
+
+
 def test_shadow_profile_wraps_backend_in_sampling():
     from etl_framework.reconciliation.backends.sampling_backend import SamplingBackend
     from tests.helpers.factories import make_job_definition

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import time
 from typing import Any
@@ -22,6 +23,7 @@ from etl_framework.automic.client import AutomicClient
 from etl_framework.sap_bo.client import BORestClient
 from etl_framework.reconciliation.backends.pandas_backend import PandasBackend
 from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
+from etl_framework.reconciliation.compare_utils import resolve_key_columns
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.reconciliation.segments import (
@@ -447,18 +449,32 @@ class RunExecutor:
         def run_job() -> ReconciliationResult:
             if not self._has_file_source(job, "source") or not self._has_file_source(job, "target"):
                 raise ValueError("file-backed reconciliation jobs require source and target files")
-            engines = self._build_file_engines(job)
-            if engines is None:
-                raise ValueError("file-backed reconciliation jobs require source and target files")
-            source_engine, target_engine = engines
-            return self._run_reconciliation_job(
-                job,
+            source_df = self._load_job_file_frame(job, "source")
+            target_df = self._load_job_file_frame(job, "target")
+            source_df, target_df, resolved_keys = resolve_key_columns(
+                source_df,
+                target_df,
+                job.key_columns or self._settings.key_columns,
+                job.exclude_columns or [],
+            )
+            run_job = job.model_copy(update={"key_columns": resolved_keys})
+            source_label = job.params.get("source_file_label") or job.params.get("label_a") or self._source_env
+            target_label = job.params.get("target_file_label") or job.params.get("label_b") or self._target_env
+            source_engine = FrameEngine(source_df, source_label)
+            target_engine = FrameEngine(target_df, target_label)
+            result = self._run_reconciliation_job(
+                run_job,
                 source_engine,
                 target_engine,
                 query=FILE_SOURCE_QUERY,
                 params={},
                 chunk_size=0,
                 use_hash_precheck=False,
+            )
+            return dataclasses.replace(
+                result,
+                source_file_name=self._job_file_name(job, "source"),
+                target_file_name=self._job_file_name(job, "target"),
             )
         return run_job
 
@@ -1149,6 +1165,15 @@ class RunExecutor:
         from api.services.file_source import read_tabular
 
         return read_tabular(path=path, content_b64=content_b64, file_name=file_name)
+
+    def _job_file_name(self, job: JobDefinition, prefix: str) -> str | None:
+        name = self._job_file_value(job, prefix, "name")
+        if name:
+            return str(name)
+        path = self._job_file_value(job, prefix, "path")
+        if path:
+            return Path(str(path)).name
+        return None
 
     def _build_file_engines(self, job: JobDefinition):
         source_df = self._load_job_file_frame(job, "source")

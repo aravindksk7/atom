@@ -85,8 +85,10 @@ def test_frontend_api_run_lifecycle_smoke(client):
     app_js = client.get("/app.js")
     assert app_js.status_code == 200
     assert "window.ETL_API_BASE || ''" in app_js.text
-    assert "job_sequence" in app_js.text
-    assert "run_settings" in app_js.text
+    launch_js = client.get("/features/launch.js")
+    assert launch_js.status_code == 200
+    assert "job_sequence" in launch_js.text
+    assert "run_settings" in launch_js.text
 
     jobs = client.get("/api/jobs")
     assert jobs.status_code == 200
@@ -211,7 +213,15 @@ def test_failed_result_can_pass_with_agreed_actions(client):
     assert removed.json()["override_reason"] is None
 
 
-def test_webhook_delivery_is_tracked_with_thread_owned_session(client):
+def test_webhook_delivery_is_tracked_with_thread_owned_session(client, monkeypatch):
+    from api.services import notifier
+
+    monkeypatch.setattr(
+        notifier,
+        "_post",
+        lambda url, payload, secret: notifier.DeliveryResult(False, error="test delivery failure"),
+    )
+
     hook = client.post(
         "/api/notifications",
         json={
@@ -238,7 +248,7 @@ def test_webhook_delivery_is_tracked_with_thread_owned_session(client):
     assert launch.status_code == 202
 
     deliveries = []
-    for _ in range(50):
+    for _ in range(250):
         response = client.get(f"/api/notifications/{hook_id}/deliveries")
         assert response.status_code == 200
         deliveries = response.json()

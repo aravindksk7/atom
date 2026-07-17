@@ -249,6 +249,8 @@ def _make_test_result(sample_rows):
     r.missing_in_source_count = 0
     r.error_message = None
     r.executed_at = None
+    r.source_file_name = None
+    r.target_file_name = None
     r.override_reason = None
     r.override_by = None
     r.override_at = None

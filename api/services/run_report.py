@@ -21,6 +21,8 @@ class ReportResult:
     missing_in_source_count: int
     error_message: str | None = None
     executed_at: datetime | None = None
+    source_file_name: str | None = None
+    target_file_name: str | None = None
     override_reason: str | None = None
     override_by: str | None = None
     override_at: datetime | None = None
@@ -153,6 +155,8 @@ class RunReportSnapshot:
     raw_error: int
     results: list[ReportResult]
     has_result_rows: bool
+    file_name_a: str | None = None
+    file_name_b: str | None = None
 
     @property
     def test_cases(self) -> list[ReportResult]:
@@ -197,6 +201,8 @@ class RunReportSnapshot:
                     "duration_seconds": float(result.duration_seconds or 0),
                     "source_row_count": result.source_row_count or 0,
                     "target_row_count": result.target_row_count or 0,
+                    "source_file_name": result.source_file_name,
+                    "target_file_name": result.target_file_name,
                     "total_issues": result.total_issues,
                 }
                 for result in self.results
@@ -236,6 +242,41 @@ def _snapshot_status(raw_status: str, results: list[ReportResult]) -> str:
     return raw_status
 
 
+def _basename(path: Any) -> str | None:
+    if not path or path in ("__sql__", "__file_source__"):
+        return None
+    from pathlib import Path
+    return Path(str(path)).name
+
+
+def _extract_compare_file_names(run: Any) -> tuple[str | None, str | None]:
+    """Real file names for ad-hoc Compare-tab runs (recon-file / BO-report uploads).
+
+    Job-sequence runs get their file names from each result's own
+    source_file_name/target_file_name column instead (see ReportResult) --
+    this only covers the single-result "Compare" tab flow, which stores the
+    original request (including any uploaded file name) in config_snapshot.
+    """
+    snapshot = getattr(run, "config_snapshot", None)
+    if not isinstance(snapshot, dict):
+        return None, None
+    request = snapshot.get("request")
+    if not isinstance(request, dict):
+        return None, None
+    request_type = snapshot.get("compare_request_type")
+    if request_type == "recon_file":
+        name_a = request.get("file_a_name") or _basename(request.get("file_a_path"))
+        name_b = request.get("file_b_name") or _basename(request.get("file_b_path"))
+        return name_a, name_b
+    if request_type == "bo_report":
+        source_a = request.get("source_a") if isinstance(request.get("source_a"), dict) else {}
+        source_b = request.get("source_b") if isinstance(request.get("source_b"), dict) else {}
+        name_a = source_a.get("file_name") or _basename(source_a.get("file_path"))
+        name_b = source_b.get("file_name") or _basename(source_b.get("file_path"))
+        return name_a, name_b
+    return None, None
+
+
 def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> RunReportSnapshot:
     results = [
         ReportResult(
@@ -251,6 +292,8 @@ def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> Run
             missing_in_source_count=_as_int(getattr(result, "missing_in_source_count", 0)),
             error_message=getattr(result, "error_message", None),
             executed_at=getattr(result, "executed_at", None),
+            source_file_name=getattr(result, "source_file_name", None),
+            target_file_name=getattr(result, "target_file_name", None),
             override_reason=getattr(result, "override_reason", None),
             override_by=getattr(result, "override_by", None),
             override_at=getattr(result, "override_at", None),
@@ -301,4 +344,6 @@ def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> Run
         raw_error=_as_int(getattr(run, "error", 0)),
         results=results,
         has_result_rows=bool(results),
+        file_name_a=_extract_compare_file_names(run)[0],
+        file_name_b=_extract_compare_file_names(run)[1],
     )

@@ -204,6 +204,9 @@
       <p><strong>Run ID:</strong> <span style="font-family: monospace;">{{ suite.run_id }}</span></p>
       <p><strong>Started:</strong> {{ suite.started_at }}</p>
       <p><strong>Environments:</strong> {{ suite.source_env }} &rarr; {{ suite.target_env }}</p>
+      {% if suite.file_name_a or suite.file_name_b %}
+      <p><strong>Files:</strong> {{ suite.file_name_a or '—' }} &rarr; {{ suite.file_name_b or '—' }}</p>
+      {% endif %}
       <hr>
     </div>
 
@@ -318,6 +321,7 @@
             <th>Test Name</th>
             <th>Status</th>
             <th>Duration</th>
+            <th>Files</th>
             <th>Source Rows</th>
             <th>Target Rows</th>
             <th>Mismatches</th>
@@ -334,13 +338,21 @@
               {% endif %}
             </td>
             <td>{{ "%.2f"|format(result.duration_seconds) if result.duration_seconds else "N/A" }}s</td>
+            <td style="font-family: monospace; font-size:0.86em; color:var(--soft);">
+              {% if result.source_file_name or result.target_file_name %}
+                <div>Source: {{ result.source_file_name or "N/A" }}</div>
+                <div>Target: {{ result.target_file_name or "N/A" }}</div>
+              {% else %}
+                <span style="color:var(--muted)">N/A</span>
+              {% endif %}
+            </td>
             <td>{{ result.source_row_count }}</td>
             <td>{{ result.target_row_count }}</td>
             <td style="{% if result.total_issues > 0 %}color: #fda4af; font-weight: bold;{% endif %}">{{ result.total_issues }}</td>
           </tr>
           {% if result.schema_diff %}
           <tr>
-            <td colspan="6" style="padding: 0; border: none;">
+            <td colspan="7" style="padding: 0; border: none;">
               <div class="warning-banner">
                 <strong>⚠️ Schema Mismatch Warning</strong>
                 <ul style="margin: 5px 0 0 0; padding-left: 20px;">

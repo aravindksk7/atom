@@ -65,6 +65,8 @@ def _ensure_compare_columns(bind) -> None:
         ensure_column(conn, "test_results", "override_reason", "ALTER TABLE test_results ADD COLUMN override_reason TEXT")
         ensure_column(conn, "test_results", "override_by", "ALTER TABLE test_results ADD COLUMN override_by VARCHAR(255)")
         ensure_column(conn, "test_results", "override_at", "ALTER TABLE test_results ADD COLUMN override_at DATETIME")
+        ensure_column(conn, "test_results", "source_file_name", "ALTER TABLE test_results ADD COLUMN source_file_name VARCHAR(1024)")
+        ensure_column(conn, "test_results", "target_file_name", "ALTER TABLE test_results ADD COLUMN target_file_name VARCHAR(1024)")
         ensure_column(conn, "test_results", "sample_rows", "ALTER TABLE test_results ADD COLUMN sample_rows JSON")
         ensure_column(conn, "test_results", "segment_summary", "ALTER TABLE test_results ADD COLUMN segment_summary JSON")
         ensure_column(conn, "test_results", "mismatch_summary", "ALTER TABLE test_results ADD COLUMN mismatch_summary JSON")

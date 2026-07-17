@@ -50,6 +50,36 @@ test.describe('02 launch/jobs', () => {
     await expect(authedPage.locator(`[data-testid="job-row-${name}"]`)).toBeVisible();
   });
 
+  test('file-mode reconciliation job can be saved with no key columns', async ({ authedPage }) => {
+    // canSaveJob() (frontend/features/launch.js) used to require non-empty
+    // key_columns_raw even for file-mode reconciliation jobs, blocking Save even
+    // though the backend now infers a shared ID column or falls back to positional
+    // row matching for file-backed jobs with no key columns.
+    const name = `e2e-file-job-nokey-${Date.now()}`;
+    createdJobNames.push(name);
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await authedPage.locator('[data-testid="job-new-btn"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeVisible();
+
+    await authedPage.locator('[data-testid="job-modal-name-input"]').fill(name);
+    // source_mode lives on the Basic tab (jobModalTab === 'basic', the modal's
+    // default tab), not Settings -- switch to Settings only after selecting it,
+    // since the file path / key columns fields live there instead.
+    await authedPage.locator('[data-testid="job-modal-source-mode-select"]').selectOption('files');
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    await authedPage.locator('[data-testid="job-modal-source-file-path-input"]').fill('C:\\temp\\source.csv');
+    await authedPage.locator('[data-testid="job-modal-target-file-path-input"]').fill('C:\\temp\\target.csv');
+    await authedPage.locator('[data-testid="job-modal-key-columns-input"]').fill('');
+
+    await expect(authedPage.locator('[data-testid="job-modal-save-btn"]')).toBeEnabled();
+    await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
+
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeHidden();
+    await expect(authedPage.locator(`[data-testid="job-row-${name}"]`)).toBeVisible();
+  });
+
   test('negative: saving without a query is blocked client-side (Save stays disabled)', async ({ authedPage }) => {
     // canSaveJob() for a SQL-mode reconciliation job requires BOTH m.query?.trim()
     // and non-empty key_columns_raw (frontend/app.js canSaveJob()). openNewJobModal()

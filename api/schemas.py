@@ -293,6 +293,8 @@ class TestResultOut(BaseModel):
     missing_in_source_count: int
     error_message: str | None = None
     executed_at: datetime | None = None
+    source_file_name: str | None = None
+    target_file_name: str | None = None
     override_reason: str | None = None
     overridden_by: str | None = None
     override_at: datetime | None = None
@@ -458,10 +460,13 @@ class JobDefinition(BaseModel):
                 _validate_job_file_source(self.params, "target")
                 if not _has_job_file_source(self.params, "source") or not _has_job_file_source(self.params, "target"):
                     raise ValueError("file-backed reconciliation jobs require source and target files")
-            elif not self.query.strip():
-                raise ValueError("reconciliation jobs require a query")
-            if not self.key_columns:
-                raise ValueError("reconciliation jobs require key_columns")
+                # key_columns is optional for file-backed jobs: RunExecutor infers a
+                # shared ID column, or falls back to positional row matching.
+            else:
+                if not self.query.strip():
+                    raise ValueError("reconciliation jobs require a query")
+                if not self.key_columns:
+                    raise ValueError("reconciliation jobs require key_columns")
         elif self.job_type == "freshness":
             if not self.params.get("timestamp_column"):
                 raise ValueError("freshness jobs require 'timestamp_column' in params")

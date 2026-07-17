@@ -33,10 +33,13 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
             _validate_file_source(params, "target", issues)
             if not _has_file_source(params, "source") or not _has_file_source(params, "target"):
                 issues.append(ValidationIssue("params", "file-backed reconciliation jobs require source and target files"))
-        elif not query.strip():
-            issues.append(ValidationIssue("query", "reconciliation jobs require a query"))
-        if not key_columns:
-            issues.append(ValidationIssue("key_columns", "reconciliation jobs require key_columns"))
+            # key_columns is optional for file-backed jobs -- RunExecutor infers a
+            # shared ID column or falls back to positional row matching.
+        else:
+            if not query.strip():
+                issues.append(ValidationIssue("query", "reconciliation jobs require a query"))
+            if not key_columns:
+                issues.append(ValidationIssue("key_columns", "reconciliation jobs require key_columns"))
     elif job_type == "freshness":
         if not params.get("timestamp_column"):
             issues.append(ValidationIssue("params.timestamp_column", "freshness jobs require timestamp_column"))

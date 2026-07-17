@@ -320,6 +320,8 @@ class RunRepository:
             missing_in_target_count=result.missing_in_target_count,
             missing_in_source_count=result.missing_in_source_count,
             executed_at=result.executed_at,
+            source_file_name=result.source_file_name,
+            target_file_name=result.target_file_name,
             sample_rows=result.sample_rows,
             segment_summary=result.segment_summary,
             mismatch_summary=result.mismatch_summary,

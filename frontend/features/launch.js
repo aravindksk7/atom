@@ -473,7 +473,9 @@
       const hasKeys = Boolean(m.key_columns_raw?.split(',').map(s => s.trim()).filter(Boolean).length);
       if (m.job_type === 'reconciliation') {
         if (m.source_mode === 'files') {
-          return Boolean(m.source_file_path && m.target_file_path && hasKeys);
+          // key_columns is optional for file-backed jobs: the backend infers a
+          // shared ID column, or falls back to positional row matching.
+          return Boolean(m.source_file_path && m.target_file_path);
         }
         return Boolean(m.query?.trim() && hasKeys);
       }

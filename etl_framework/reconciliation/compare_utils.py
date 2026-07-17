@@ -39,6 +39,80 @@ def value_columns(
     return [col for col in source_columns if col not in key_set and col in target_set]
 
 
+def _sort_for_positional_compare(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    exclude_columns: Iterable[Any] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Sort both sides before row-position fallback alignment."""
+    excluded = {str(col) for col in (exclude_columns or [])}
+    common_columns = [
+        col for col in df_a.columns
+        if col in df_b.columns and str(col) not in excluded
+    ]
+    if not common_columns:
+        return df_a.reset_index(drop=True), df_b.reset_index(drop=True)
+
+    def _sort_frame(df: pd.DataFrame) -> pd.DataFrame:
+        try:
+            return df.sort_values(
+                by=common_columns,
+                kind="mergesort",
+                na_position="first",
+            ).reset_index(drop=True)
+        except TypeError:
+            sort_keys = pd.DataFrame(index=df.index)
+            for idx, col in enumerate(common_columns):
+                sort_keys[f"__sort_{idx}"] = df[col].map(
+                    lambda value: "" if pd.isna(value) else str(value)
+                )
+            order = sort_keys.sort_values(
+                by=list(sort_keys.columns),
+                kind="mergesort",
+                na_position="first",
+            ).index
+            return df.loc[order].reset_index(drop=True)
+
+    return _sort_frame(df_a), _sort_frame(df_b)
+
+
+def resolve_key_columns(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    key_columns: Iterable[Any] | None,
+    exclude_columns: Iterable[Any] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Resolve the key columns to compare two frames by.
+
+    If `key_columns` is given, validates it exists on both sides and returns
+    the frames unchanged. If empty, tries to infer a shared ID-like column;
+    if none can be found, falls back to positional (row-order) matching via a
+    synthetic `__row__` column, after sorting both frames by their shared
+    columns for stability -- so two files with no natural key can still be
+    compared instead of failing outright.
+    """
+    source = [str(col) for col in df_a.columns]
+    target_set = {str(col) for col in df_b.columns}
+    shared = [col for col in source if col in target_set]
+    requested = [str(col) for col in (key_columns or []) if str(col)]
+    if requested:
+        missing = [col for col in requested if col not in shared]
+        if missing:
+            raise ValueError(f"key_columns not present in both sources: {missing}")
+        return df_a, df_b, requested
+    for candidate in ("id", "ID", "Id"):
+        if candidate in shared:
+            return df_a, df_b, [candidate]
+    if len(shared) == 1:
+        return df_a, df_b, [shared[0]]
+    sorted_a, sorted_b = _sort_for_positional_compare(df_a, df_b, exclude_columns)
+    sorted_a = sorted_a.copy()
+    sorted_b = sorted_b.copy()
+    sorted_a.insert(0, "__row__", range(1, len(sorted_a) + 1))
+    sorted_b.insert(0, "__row__", range(1, len(sorted_b) + 1))
+    return sorted_a, sorted_b, ["__row__"]
+
+
 def value_mismatch_mask(
     both: pd.DataFrame,
     src_col: str,

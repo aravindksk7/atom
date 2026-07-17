@@ -105,6 +105,8 @@ def _test_result_out(result) -> TestResultOut:
         missing_in_source_count=result.missing_in_source_count,
         error_message=result.error_message,
         executed_at=result.executed_at,
+        source_file_name=result.source_file_name,
+        target_file_name=result.target_file_name,
         override_reason=result.override_reason,
         overridden_by=result.override_by,
         override_at=result.override_at,

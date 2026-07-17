@@ -349,7 +349,7 @@
         </div>
         <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
           <label class="field-label">Input Source</label>
-          <select x-model="jobModal.source_mode" class="field-input field-select">
+          <select x-model="jobModal.source_mode" class="field-input field-select" data-testid="job-modal-source-mode-select">
             <option value="sql">SQL Query</option>
             <option value="files">Files</option>
           </select>
@@ -420,11 +420,11 @@
           <div class="grid-2">
             <div>
               <label class="field-label" x-text="jobModal.job_type === 'reconciliation' ? 'Source File Path' : 'Input File Path'"></label>
-              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" />
+              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" data-testid="job-modal-source-file-path-input" />
             </div>
             <div x-show="jobModal.job_type === 'reconciliation'">
               <label class="field-label">Target File Path</label>
-              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" />
+              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" data-testid="job-modal-target-file-path-input" />
             </div>
             <div>
               <label class="field-label">Source Label</label>

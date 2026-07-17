@@ -36,6 +36,8 @@ class ReconciliationResult:
     sample_rows: list[dict] | None = None
     segment_summary: dict | None = None  # segment col -> top-N mismatch buckets
     mismatch_summary: dict[str, Any] | None = None
+    source_file_name: str | None = None
+    target_file_name: str | None = None
 
     @property
     def total_issues(self) -> int:

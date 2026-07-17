@@ -147,6 +147,8 @@ class TestResult(Base):
     missing_in_source_count = Column(Integer, default=0, nullable=False)
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime(timezone=True), nullable=True)
+    source_file_name = Column(String(1024), nullable=True)
+    target_file_name = Column(String(1024), nullable=True)
     sample_rows = Column(JSON, nullable=True)
     segment_summary = Column(JSON, nullable=True)
     mismatch_summary = Column(JSON, nullable=True)

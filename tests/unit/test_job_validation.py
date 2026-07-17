@@ -18,6 +18,20 @@ def test_invalid_reconciliation_job_reports_missing_fields():
         raise_for_validation_issues(issues)
 
 
+def test_file_backed_reconciliation_does_not_require_key_columns():
+    issues = validate_job_definition({
+        "name": "files",
+        "job_type": "reconciliation",
+        "params": {
+            "source_mode": "files",
+            "source_file_path": r"c:\temp\RMS_FUT_20260601_qa.xml",
+            "target_file_path": r"c:\temp\RMS_FUT_20260601_prod.xml",
+        },
+        "key_columns": [],
+    })
+    assert issues == []
+
+
 def test_file_backed_reconciliation_requires_both_files():
     issues = validate_job_definition({
         "name": "files",
