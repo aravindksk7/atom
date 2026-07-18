@@ -792,7 +792,7 @@ def create_difference_export(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_session),
 ):
-    fmt = validate_difference_format(body.format)
+    fmt = body.format
     repo = RunRepository(db)
     if repo.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")

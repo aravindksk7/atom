@@ -125,3 +125,41 @@ def test_export_filename_html_uses_html_suffix():
     name = export_filename("run-1", "html", "exp-1")
     assert name.endswith(".html")
     assert "run-1" in name and "exp-1" in name
+
+
+def test_create_export_job_accepts_html_format(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from etl_framework.repository.database import Base, get_db
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr("api.routes.runs.run_difference_export_job", lambda export_id: None)
+
+    def override_get_db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with Session(engine) as db:
+            raw, _ = TokenRepository(db).create("test-runner")
+            run_id = str(uuid.uuid4())
+            RunRepository(db).create_run(run_id, "dev", "qa", {})
+
+        client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+        resp = client.post(f"/api/runs/{run_id}/exports", json={"format": "html"})
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["format"] == "html"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
