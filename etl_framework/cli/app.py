@@ -49,10 +49,13 @@ def main_options(
                                 help="Atom API base URL, e.g. http://atom.internal:8000"),
     token: Optional[str] = typer.Option(None, "--token", envvar="ATOM_API_TOKEN",
                                         help="Bearer token for the Atom API"),
-    output: str = typer.Option("text", "--output", help="Output style: text or json"),
+    output: str = typer.Option("text", "--output",
+                               help="Output style: text or json"),
 ):
     if output not in ("text", "json"):
-        raise typer.BadParameter("--output must be 'text' or 'json'")
+        raise typer.BadParameter(
+            "--output must be 'text' or 'json'"
+        )
     ctx.obj = {"client": _make_client(api_url, token), "output": output}
 
 
@@ -139,7 +142,7 @@ def run(
     json_out: Optional[Path] = typer.Option(None, "--json-out",
                                             help="Write run detail JSON here"),
     html_out: Optional[Path] = typer.Option(None, "--html-out",
-                                            help="Write HTML report here"),
+                                             help="Write HTML report here"),
     timeout: float = typer.Option(3600.0, "--timeout",
                                   help="Max seconds to wait for completion"),
     poll_interval: float = typer.Option(10.0, "--poll-interval",

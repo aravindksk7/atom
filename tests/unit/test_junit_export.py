@@ -117,10 +117,12 @@ def test_empty_run_renders_empty_suite(db):
 def test_timestamp_and_classname_present(db):
     from api.services.junit_export import render_junit_xml
 
-    run = _make_run(db, results=[dict(query_name="j1", status="PASSED", duration_seconds=1.0)])
+    run = _make_run(db, results=[
+        dict(query_name="orders_recon", status="PASSED", duration_seconds=1.0)
+    ])
     suite = _parse(render_junit_xml(run))
     assert suite.get("timestamp") == "2026-07-18T10:00:00+00:00"
-    assert suite.find("testcase").get("classname") == "atom.dev"
+    assert suite.find("testcase").get("classname") == "orders_recon"
 
 
 def test_control_chars_in_error_message_are_sanitized():

@@ -1087,7 +1087,7 @@ git commit -m "feat(cli): implement atom selections and atom runs commands"
 - Modify: `etl_framework/cli/app.py` (replace the `report` stub)
 - Test: `tests/unit/test_cli_app.py` (append)
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Append to `tests/unit/test_cli_app.py`:
 
@@ -1130,7 +1130,7 @@ def test_report_unknown_run_exits_4(fake_client):
     assert result.exit_code == 4
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_cli_app.py -k report -v`
 Expected: FAIL (stub exits 0 without output).
@@ -1350,6 +1350,8 @@ def test_run_json_output_emits_machine_readable_verdict(fake_client):
 Run: `python -m pytest tests/unit/test_cli_app.py -k "test_run_" -v`
 Expected: FAIL (stub exits 0, no output).
 
+Actual: existing Task 8 tests were already partially passing; additional missing-coverage tests failed before implementation.
+
 - [ ] **Step 3: Implement the command**
 
 In `etl_framework/cli/app.py`, add helpers above the commands and replace the `run` stub:
@@ -1481,12 +1483,14 @@ def run(
 
 Note: `typer.Exit` is not a subclass of the `Atom*` exceptions, so raising it inside the `try` block is safe — it propagates.
 
-- [ ] **Step 4: Run the full unit suite**
+- [x] **Step 4: Run the full unit suite**
 
 Run: `python -m pytest tests/unit/test_cli_app.py tests/unit/test_cli_client.py tests/unit/test_cli_render.py -v`
 Expected: all PASSED
 
-- [ ] **Step 5: Commit**
+Actual: `33 passed in 2.25s`.
+
+- [ ] **Step 5: Commit** *(skipped by agent: commits require explicit request)*
 
 ```bash
 git add etl_framework/cli/app.py tests/unit/test_cli_app.py
@@ -1500,7 +1504,7 @@ git commit -m "feat(cli): implement atom run with polling, gating and artifacts"
 **Files:**
 - Create: `tests/integration/test_cli_against_api.py`
 
-- [ ] **Step 1: Write the integration test (env-gated, skipped by default)**
+- [x] **Step 1: Write the integration test (env-gated, skipped by default)**
 
 Create `tests/integration/test_cli_against_api.py`:
 
@@ -1554,12 +1558,14 @@ def test_report_unknown_run_exits_4():
 
 Running `python -m etl_framework.cli.app` requires the `if __name__ == "__main__": main()` guard added in Task 3 — it is already there.
 
-- [ ] **Step 2: Verify it is skipped in a normal run**
+- [x] **Step 2: Verify it is skipped in a normal run**
 
 Run: `python -m pytest tests/integration/test_cli_against_api.py -v`
 Expected: 3 skipped ("ATOM_IT_API_URL not set").
 
-- [ ] **Step 3 (manual, if docker is available): run the lane for real**
+Actual: `3 skipped in 0.28s`.
+
+- [ ] **Step 3 (manual, if docker is available): run the lane for real** *(not run: live Docker API/token not configured)*
 
 ```bash
 docker compose -f docker-compose.integration.yml up -d
@@ -1570,7 +1576,7 @@ docker compose -f docker-compose.integration.yml down
 
 Expected: 3 passed. If docker is unavailable, note it and move on — the lane is env-gated by design.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Commit** *(skipped by agent: commits require explicit request)*
 
 ```bash
 git add tests/integration/test_cli_against_api.py
@@ -1584,7 +1590,7 @@ git commit -m "test(cli): add env-gated integration lane for atom CLI"
 **Files:**
 - Create: `docs/cli.md`
 
-- [ ] **Step 1: Write the CLI docs**
+- [x] **Step 1: Write the CLI docs**
 
 Create `docs/cli.md`:
 
@@ -1659,17 +1665,21 @@ Discovery listings. `atom runs --limit N` caps the list (default 20).
           junit: atom-junit.xml
 ```
 
-- [ ] **Step 2: Run the full test suite**
+- [x] **Step 2: Run the full test suite**
 
 Run: `python -m pytest tests/unit -x -q`
 Expected: all pass, no regressions.
 
-- [ ] **Step 3: Manual smoke of the console script**
+Actual: `1144 passed, 2 skipped, 7 warnings in 80.75s`.
 
-Run: `atom --help` and `atom run --help`
-Expected: full option listing matches the docs above.
+- [x] **Step 3: Manual smoke of the console script**
 
-- [ ] **Step 4: Commit**
+Run: `atom --help` and `atom --api-url http://example.invalid run --help`
+Expected: full option listing matches the docs above. `--api-url` is supplied for subcommand help because Typer validates the required global option first.
+
+Actual: both help commands rendered successfully.
+
+- [ ] **Step 4: Commit** *(skipped by agent: commits require explicit request)*
 
 ```bash
 git add docs/cli.md

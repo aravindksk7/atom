@@ -277,6 +277,33 @@ def test_run_writes_junit_artifact(tmp_path, fake_client):
     assert out.read_bytes() == b"<testsuites/>"
 
 
+def test_run_writes_json_and_html_artifacts(tmp_path, fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0},
+        extra={
+            ("GET", "/api/runs/r-9"): {"run_id": "r-9", "status": "PASSED"},
+            ("GET-BYTES", "/api/runs/r-9/report"): b"<html>ok</html>",
+        }))
+    json_out = tmp_path / "run.json"
+    html_out = tmp_path / "run.html"
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS + [
+        "--json-out", str(json_out), "--html-out", str(html_out)])
+    assert result.exit_code == 0
+    assert json.loads(json_out.read_text(encoding="utf-8"))["run_id"] == "r-9"
+    assert html_out.read_bytes() == b"<html>ok</html>"
+
+
+def test_run_requires_source_env(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({})
+    result = runner.invoke(app, BASE_ARGS + ["run", "3"])
+    assert result.exit_code != 0
+    assert "source-env" in result.output
+
+
 def test_run_timeout_exits_6_and_prints_run_id(fake_client):
     from etl_framework.cli.app import app
 

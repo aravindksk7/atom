@@ -52,11 +52,10 @@ def render_junit_xml(run) -> str:
             started_at = started_at.replace(tzinfo=timezone.utc)
         suite.set("timestamp", started_at.isoformat())
 
-    classname = f"atom.{run.source_env or 'run'}"
     for result in results:
         case = ET.SubElement(suite, "testcase", {
             "name": result.query_name,
-            "classname": classname,
+            "classname": _sanitize(result.query_name),
             "time": f"{float(result.duration_seconds or 0.0):.3f}",
         })
         status = result.effective_status
