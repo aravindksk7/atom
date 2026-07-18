@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -20,6 +21,7 @@ def _default_gate_session_factory():
 
 _gate_session_factory = None  # test seam; resolved lazily in _gate_exit_code
 _stats_session_factory = None  # test seam; resolved lazily in _scheduler_stats_exit_code
+_report_session_factory = None  # test seam; resolved lazily in _scheduler_report_exit_code
 
 
 def _gate_exit_code(run_id: str, output: str) -> int:
@@ -56,6 +58,18 @@ def _default_stats_session_factory():
     from etl_framework.repository.database import SessionLocal, init_db
     init_db()
     return SessionLocal
+
+
+def _default_report_session_factory():
+    from etl_framework.repository.database import SessionLocal, init_db
+    init_db()
+    return SessionLocal
+
+
+def _parse_report_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _print_scheduler_stats_text(stats: dict) -> None:
@@ -114,6 +128,72 @@ def _scheduler_stats_exit_code(args) -> int:
             session.close()
 
 
+def _scheduler_report_filters(args):
+    from api.services.scheduler_reporting import SchedulerReportFilters
+
+    return SchedulerReportFilters(
+        from_dt=_parse_report_datetime(args.from_dt),
+        to_dt=_parse_report_datetime(args.to_dt),
+        days=args.days,
+        job=args.job,
+        status=args.status,
+        exit_code=args.exit_code,
+    )
+
+
+def _format_scheduler_report_text(summary: dict, rows: list[dict], summary_only: bool) -> str:
+    counts = summary["summary"]
+    lines = [
+        "Scheduler report",
+        f"Events: total={counts['total_events']}",
+        (
+            f"Outcomes: passed={counts['passed']} failed={counts['failed']} "
+            f"error={counts['error']} cancelled={counts['cancelled']} blocked={counts['blocked']}"
+        ),
+        f"Success rate: {counts['success_rate'] if counts['success_rate'] is not None else 'n/a'}",
+    ]
+    if not summary_only:
+        for row in rows:
+            lines.append(
+                f"{row['created_at']} {row['schedule_name']} {row['status']} "
+                f"exit={row['exit_code']} run={row['run_id'] or 'n/a'}"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _scheduler_report_exit_code(args) -> int:
+    from api.services.scheduler_reporting import SchedulerReportingService
+
+    session = None
+    try:
+        factory = _report_session_factory or _default_report_session_factory()
+        session = factory()
+        service = SchedulerReportingService(session)
+        filters = _scheduler_report_filters(args)
+        summary = service.summary(filters)
+        rows = [] if args.summary else service.export_rows(filters)
+        if args.format == "json":
+            output = json.dumps({"summary": summary, "rows": rows}, default=str)
+        elif args.format == "csv":
+            output = service.export_csv(filters)
+        else:
+            output = _format_scheduler_report_text(summary, rows, args.summary)
+        if args.report_output:
+            Path(args.report_output).write_text(output, encoding="utf-8")
+        else:
+            print(output, end="")
+        return 0
+    except Exception as exc:
+        if args.format == "json":
+            print(json.dumps({"error": str(exc), "exit_code": 1}))
+        else:
+            print(f"ERROR scheduler report: {exc}")
+        return 1
+    finally:
+        if session is not None:
+            session.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ETL Framework Test Runner")
     parser.add_argument("--config", required=False, help="Path to environment config YAML")
@@ -133,6 +213,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--days", type=int, default=30, help="Scheduler stats lookback window in days, 1..365")
     parser.add_argument("--fail-on-stopped", action="store_true", help="Scheduler stats gate: fail when scheduler is unavailable or stopped")
     parser.add_argument("--min-success-rate", type=float, default=None, help="Scheduler stats gate: fail when aggregate success rate is below this percentage")
+    parser.add_argument("--scheduler-report", action="store_true", help="Report scheduler telemetry, then stop")
+    parser.add_argument("--summary", action="store_true", help="Only include scheduler report summary output")
+    parser.add_argument("--from", dest="from_dt", default=None, help="Scheduler report start timestamp (ISO 8601)")
+    parser.add_argument("--to", dest="to_dt", default=None, help="Scheduler report end timestamp (ISO 8601)")
+    parser.add_argument("--job", default=None, help="Scheduler report job or schedule-name filter")
+    parser.add_argument("--status", default=None, help="Scheduler report status filter")
+    parser.add_argument("--exit-code", type=int, default=None, help="Scheduler report exit-code filter")
+    parser.add_argument("--format", choices=["text", "json", "csv"], default="text", help="Scheduler report output format")
+    parser.add_argument("--report-output", default=None, help="Write scheduler report output to this path")
     return parser
 
 
@@ -142,14 +231,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(level=args.log_level, log_format=args.log_format)
     if args.gate_run:
         return _gate_exit_code(args.gate_run, args.output)
+    if (args.scheduler_stats or args.scheduler_report) and (args.days < 1 or args.days > 365):
+        parser.error("--days must be between 1 and 365")
     if args.scheduler_stats:
-        if args.days < 1 or args.days > 365:
-            parser.error("--days must be between 1 and 365")
         if args.min_success_rate is not None and (args.min_success_rate < 0 or args.min_success_rate > 100):
             parser.error("--min-success-rate must be between 0 and 100")
         return _scheduler_stats_exit_code(args)
+    if args.scheduler_report:
+        return _scheduler_report_exit_code(args)
     if not (args.config and args.source_env and args.target_env):
-        parser.error("--config, --source-env and --target-env are required unless --gate-run or --scheduler-stats is used")
+        parser.error("--config, --source-env and --target-env are required unless --gate-run, --scheduler-stats, or --scheduler-report is used")
     environments = ConfigLoader().load(args.config)
 
     missing = [name for name in (args.source_env, args.target_env) if name not in environments]
