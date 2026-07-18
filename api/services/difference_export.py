@@ -399,7 +399,7 @@ def _write_sql_compare(db: Session, payload: dict[str, Any], writer: DifferenceW
         key_columns=req.key_columns or [],
         exclude_columns=req.exclude_columns or [],
         options=req.advanced,
-        test_name=req.label_a or "sql_comparison",
+        test_name=req.label_a or "file_a",
         writer=writer,
     )
 
@@ -432,7 +432,7 @@ def _write_recon_file_compare(db: Session, payload: dict[str, Any], writer: Diff
             key_columns=req.key_columns or [],
             exclude_columns=req.exclude_columns or [],
             options=req.advanced,
-            test_name=req.label_a or "recon_file",
+            test_name=req.label_a or "file_a",
             writer=writer,
         )
         return

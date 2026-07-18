@@ -129,3 +129,19 @@ def test_full_difference_download_requires_job_when_stored_rows_are_truncated(cl
     assert body["requires_export_job"] is True
     assert body["stored_rows"] == 1
     assert body["total_issues"] == 2
+
+
+def test_recon_file_and_sql_compare_recompute_use_file_a_fallback():
+    """Both _write_sql_compare and _write_recon_file_compare must fall back to
+    "file_a" (not "sql_comparison"/"recon_file") when label_a is unset, matching
+    the real compare success path's fallback in compare_service.py
+    (_run_tabular_file_compare -> reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a"))."""
+    import inspect
+
+    from api.services import difference_export as de
+
+    sql_src = inspect.getsource(de._write_sql_compare)
+    assert 'req.label_a or "file_a"' in sql_src or "req.label_a or 'file_a'" in sql_src
+
+    recon_src = inspect.getsource(de._write_recon_file_compare)
+    assert 'req.label_a or "file_a"' in recon_src or "req.label_a or 'file_a'" in recon_src
