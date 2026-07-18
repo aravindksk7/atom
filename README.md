@@ -86,6 +86,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - Manage **API tokens** (Bearer token auth on all `/api/*` routes).
 - Configure **webhook notifications** for run events (`run.failed`, `run.passed`, etc.) with optional HMAC-SHA256 signing.
 - Schedule recurring runs with **APScheduler cron expressions**.
+- **Scheduler Reporting System** — review telemetry-backed schedule summaries, filtered failures, timelines, metrics, and exports from the Scheduler Reports UI tab, `/api/scheduler-reports/*` endpoints, or the standalone CLI.
 - View the **job lineage DAG** (job → job dependency graph) in the History tab.
 - **Audit log** — every create, update, delete, and mismatch-accept action is recorded with actor, action, resource type, resource ID, and a JSON diff. Queryable via `GET /api/audit`.
 - **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
@@ -1207,6 +1208,14 @@ For scheduled production checks, let APScheduler trigger the recurring job and h
 
 ```powershell
 python -m etl_framework.runner.cli --scheduler-stats --days 30 --fail-on-stopped --min-success-rate 95 --output text
+```
+
+Generate scheduler reports from telemetry without launching the web server:
+
+```powershell
+python -m etl_framework.runner.cli --scheduler-report --summary --days 30
+python -m etl_framework.runner.cli --scheduler-report --status failed --exit-code 1 --format json --days 30
+python -m etl_framework.runner.cli --scheduler-report --format csv --report-output scheduler-report.csv --days 30
 ```
 
 Automation notes:
