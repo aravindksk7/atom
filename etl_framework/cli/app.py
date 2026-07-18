@@ -71,9 +71,41 @@ def run(ctx: typer.Context) -> None:
 
 
 @app.command()
-def report(ctx: typer.Context) -> None:
+def report(
+    ctx: typer.Context,
+    run_id: str = typer.Argument(..., help="Run id to fetch"),
+    format: str = typer.Option("json", "--format",
+                               help="junit, json, csv or html"),
+    out: Optional[Path] = typer.Option(None, "--out",
+                                       help="Write to file instead of stdout"),
+) -> None:
     """Fetch results for a past run."""
-    raise typer.Exit(EXIT_PASSED)
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    if format not in ("junit", "json", "csv", "html"):
+        raise typer.BadParameter("--format must be junit, json, csv or html")
+    if format == "html" and out is None:
+        raise typer.BadParameter("--out is required with --format html")
+    try:
+        if format == "json":
+            content = json.dumps(
+                client.get_json(f"/api/runs/{run_id}"), indent=2, default=str
+            ).encode()
+        elif format == "junit":
+            content = client.get_bytes(f"/api/runs/{run_id}/junit")
+        elif format == "csv":
+            content = client.get_bytes(f"/api/runs/{run_id}/export")
+        else:  # html
+            content = client.get_bytes(f"/api/runs/{run_id}/report")
+    except AtomNotFoundError as exc:
+        raise _fail(output, EXIT_NOT_FOUND, str(exc))
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if out is not None:
+        out.write_bytes(content)
+    else:
+        sys.stdout.write(content.decode())
 
 
 @app.command()

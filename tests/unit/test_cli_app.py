@@ -121,3 +121,41 @@ def test_selections_connection_error_exits_5(fake_client):
     fake_client({("GET", "/api/selections"): AtomConnectionError("refused")})
     result = runner.invoke(app, BASE_ARGS + ["selections"])
     assert result.exit_code == 5
+
+
+def test_report_junit_writes_file(tmp_path, fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET-BYTES", "/api/runs/r-1/junit"): b"<testsuites/>"})
+    out = tmp_path / "junit.xml"
+    result = runner.invoke(
+        app, BASE_ARGS + ["report", "r-1", "--format", "junit", "--out", str(out)]
+    )
+    assert result.exit_code == 0
+    assert out.read_bytes() == b"<testsuites/>"
+
+
+def test_report_json_defaults_to_stdout(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET", "/api/runs/r-1"): {"run_id": "r-1", "status": "PASSED"}})
+    result = runner.invoke(app, BASE_ARGS + ["report", "r-1"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["run_id"] == "r-1"
+
+
+def test_report_html_requires_out(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({})
+    result = runner.invoke(app, BASE_ARGS + ["report", "r-1", "--format", "html"])
+    assert result.exit_code != 0
+    assert "--out" in result.output
+
+
+def test_report_unknown_run_exits_4(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET", "/api/runs/nope"): AtomNotFoundError("Run not found")})
+    result = runner.invoke(app, BASE_ARGS + ["report", "nope"])
+    assert result.exit_code == 4
