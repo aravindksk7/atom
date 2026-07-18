@@ -223,6 +223,54 @@ def test_refresh_all_timezones_noop_when_not_started():
     svc.refresh_all_timezones()  # must not raise
 
 
+def test_run_schedule_telemetry_failure_does_not_block_execution(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+    import api.services.scheduler_telemetry as telemetry
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        db = testing_session()
+        selection = JobSelectionRepository(db).create(
+            name="nightly-selection",
+            description="",
+            tags=[],
+            job_sequence=[],
+            run_settings={},
+        )
+        ScheduleRepository(db).create(_sched_data(
+            name="nightly",
+            enabled=True,
+            selection_id=selection.id,
+            selection_version=1,
+        ))
+        db.close()
+
+        executed = []
+
+        def fail_record(*args, **kwargs):
+            raise RuntimeError("telemetry down")
+
+        def fake_execute(**kwargs):
+            executed.append(kwargs["run_id"])
+
+        monkeypatch.setattr(telemetry.SchedulerTelemetryRepository, "record_event", fail_record)
+        monkeypatch.setattr("api.routes.runs._execute_run", fake_execute)
+        monkeypatch.setattr("api.routes.runs._snapshot_from_trigger", lambda trigger, db: {})
+
+        svc._run_schedule(1, "nightly")
+
+        assert len(executed) == 1
+    finally:
+        _db_module.SessionLocal = previous
+
+
 def test_schedule_stats_route_returns_payload(monkeypatch):
     from fastapi.testclient import TestClient
     from api.main import app

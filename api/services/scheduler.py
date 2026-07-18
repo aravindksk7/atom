@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -83,12 +84,25 @@ def _run_schedule(schedule_id: int, name: str) -> None:
     from etl_framework.repository.repository import ScheduleRepository, JobSelectionRepository, RunRepository
     from api.routes.runs import _execute_run, _snapshot_from_trigger
     from api.schemas import RunTrigger
+    from api.services.scheduler_telemetry import record_scheduler_event
 
     db = SessionLocal()
     try:
         repo = ScheduleRepository(db)
         sched = repo.get(schedule_id)
-        if sched is None or not sched.enabled:
+        if sched is None:
+            record_scheduler_event(
+                db,
+                None,
+                "missed",
+                "ERROR",
+                schedule_id=schedule_id,
+                schedule_name=name,
+                error_summary="Schedule not found",
+            )
+            return
+        if not sched.enabled:
+            record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Schedule disabled")
             return
 
         sel_repo = JobSelectionRepository(db)
@@ -114,7 +128,10 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             job_sequence=version.job_sequence or [],
             run_settings=version.run_settings_json or {},
         )
+        started_at = datetime.now(timezone.utc)
+        started_perf = time.perf_counter()
         run_id = str(_uuid.uuid4())
+        record_scheduler_event(db, sched, "started", "RUNNING", run_id=run_id, started_at=started_at)
         config_snapshot = _snapshot_from_trigger(trigger, db)
         config_snapshot["job_sequence"] = [
             s.model_dump() if hasattr(s, "model_dump") else s for s in trigger.job_sequence
@@ -137,9 +154,38 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             run_settings=trigger.run_settings,
             config_snapshot=config_snapshot,
         )
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        run = run_repo.get_run(run_id)
+        terminal_status = (run.status if run is not None else "COMPLETED") or "COMPLETED"
+        exit_code = 0 if terminal_status in {"PASSED", "COMPLETED"} else 1
+        record_scheduler_event(
+            db,
+            sched,
+            "completed" if exit_code == 0 else "failed",
+            terminal_status,
+            run_id=run_id,
+            exit_code=exit_code,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+            error_summary=getattr(run, "error_message", None) if run is not None else None,
+        )
         repo.touch(schedule_id, last_run_at=datetime.now(timezone.utc))
         logger.info("Scheduled run '%s' started as %s", name, run_id)
     except Exception as exc:
+        from etl_framework.repository.database import SessionLocal as _TelemetrySessionLocal
+        from api.services.scheduler_telemetry import record_scheduler_event_best_effort
+        record_scheduler_event_best_effort(
+            _TelemetrySessionLocal,
+            schedule_id=schedule_id,
+            schedule_name=name,
+            event_state="failed",
+            status="ERROR",
+            exit_code=1,
+            finished_at=datetime.now(timezone.utc),
+            error_summary=str(exc),
+        )
         logger.exception("Scheduled run '%s' failed: %s", name, exc)
     finally:
         db.close()
