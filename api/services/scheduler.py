@@ -112,6 +112,14 @@ def _run_schedule(schedule_id: int, name: str) -> None:
                 "Schedule '%s' references missing selection %s v%s; skipping run",
                 name, sched.selection_id, sched.selection_version,
             )
+            record_scheduler_event(
+                db,
+                sched,
+                "skipped",
+                "ERROR",
+                exit_code=1,
+                error_summary=f"Selection version not found: selection {sched.selection_id} v{sched.selection_version}",
+            )
             return
 
         run_repo = RunRepository(db)
@@ -119,6 +127,13 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             logger.info(
                 "Schedule '%s' skipped because selection %s already has an active run",
                 name, sched.selection_id,
+            )
+            record_scheduler_event(
+                db,
+                sched,
+                "skipped",
+                "BLOCKED",
+                error_summary=f"Selection {sched.selection_id} already has an active run",
             )
             return
 

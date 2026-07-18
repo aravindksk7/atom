@@ -364,3 +364,103 @@ def test_run_schedule_skips_when_selection_has_active_run(monkeypatch):
         assert executed == []
     finally:
         _db_module.SessionLocal = previous
+
+
+def test_run_schedule_records_telemetry_for_active_run_skip(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+        from etl_framework.repository.repository import SchedulerTelemetryRepository
+
+        db = testing_session()
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection",
+            description="",
+            tags=[],
+            job_sequence=[],
+            run_settings={},
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=1,
+        ))
+        RunRepository(db).create_run(
+            "active-run", "dev", "prod", {}, selection_id=selection.id, selection_version=1,
+        )
+        schedule_id = schedule.id
+        schedule_name = schedule.name
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        svc._run_schedule(schedule_id, schedule_name)
+
+        db = testing_session()
+        events = SchedulerTelemetryRepository(db).query_events()
+        db.close()
+        assert executed == []
+        assert len(events) == 1
+        assert events[0].event_state == "skipped"
+        assert events[0].status == "BLOCKED"
+        assert events[0].schedule_id == schedule_id
+    finally:
+        _db_module.SessionLocal = previous
+
+
+def test_run_schedule_records_telemetry_for_missing_selection_version(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+        from etl_framework.repository.repository import SchedulerTelemetryRepository
+
+        db = testing_session()
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection",
+            description="",
+            tags=[],
+            job_sequence=[],
+            run_settings={},
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=2,
+        ))
+        schedule_id = schedule.id
+        schedule_name = schedule.name
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        svc._run_schedule(schedule_id, schedule_name)
+
+        db = testing_session()
+        events = SchedulerTelemetryRepository(db).query_events()
+        runs = RunRepository(db).list_runs()
+        db.close()
+        assert executed == []
+        assert runs == []
+        assert len(events) == 1
+        assert events[0].event_state == "skipped"
+        assert events[0].status == "ERROR"
+        assert events[0].exit_code == 1
+        assert events[0].schedule_id == schedule_id
+    finally:
+        _db_module.SessionLocal = previous

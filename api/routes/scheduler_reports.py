@@ -16,7 +16,7 @@ router = APIRouter(tags=["scheduler-reports"])
 def _filters(
     from_dt: Annotated[datetime | None, Query(alias="from")] = None,
     to_dt: Annotated[datetime | None, Query(alias="to")] = None,
-    days: int | None = Query(7, ge=1, le=365),
+    days: int | None = Query(30, ge=1, le=365),
     schedule_id: int | None = Query(None, ge=1),
     job: str | None = None,
     status: str | None = None,

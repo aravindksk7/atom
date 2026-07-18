@@ -24,7 +24,7 @@ TERMINAL_FAILURE = {"FAILED", "ERROR", "CANCELLED", "BLOCKED"}
 class SchedulerReportFilters:
     from_dt: datetime | None = None
     to_dt: datetime | None = None
-    days: int | None = 7
+    days: int | None = 30
     schedule_id: int | None = None
     job: str | None = None
     status: str | None = None
@@ -122,14 +122,19 @@ class SchedulerReportingService:
 
     def grid(self, filters: SchedulerReportFilters) -> dict:
         events = self._events(filters)
-        latest = SchedulerTelemetryRepository(self._db).latest_by_schedule()
+        latest: dict[int, SchedulerTelemetryEvent] = {}
+        for event in events:
+            if event.schedule_id is not None:
+                latest[event.schedule_id] = event
+        event_schedule_ids = set(latest)
         runtime = self._runtime()
         runtime_jobs = runtime.get("jobs", {}) or {}
         rows = []
+        job_filter = filters.job.lower() if filters.job else None
         for schedule in ScheduleRepository(self._db).list():
             if filters.schedule_id is not None and schedule.id != filters.schedule_id:
                 continue
-            if filters.job and filters.job.lower() not in schedule.name.lower():
+            if job_filter and job_filter not in schedule.name.lower() and schedule.id not in event_schedule_ids:
                 continue
             last = latest.get(schedule.id)
             next_run_at = (runtime_jobs.get(schedule.id) or runtime_jobs.get(str(schedule.id)) or {}).get("next_run_at")

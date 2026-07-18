@@ -129,6 +129,88 @@ def test_service_returns_warning_when_telemetry_empty():
     assert "No scheduler telemetry found for the selected filters" in summary["warnings"]
 
 
+def test_grid_uses_filtered_events_for_latest_status():
+    db = _session()
+    nightly = _schedule(db, "nightly")
+    now = datetime(2026, 7, 18, 5, 0, tzinfo=timezone.utc)
+    telemetry = SchedulerTelemetryRepository(db)
+    telemetry.record_event(
+        schedule_id=nightly.id,
+        schedule_name="nightly",
+        event_state="completed",
+        status="PASSED",
+        exit_code=0,
+        created_at=now - timedelta(hours=2),
+    )
+    telemetry.record_event(
+        schedule_id=nightly.id,
+        schedule_name="nightly",
+        event_state="failed",
+        status="FAILED",
+        exit_code=1,
+        created_at=now - timedelta(hours=1),
+    )
+
+    rows = SchedulerReportingService(db).grid(SchedulerReportFilters(
+        from_dt=now - timedelta(days=1),
+        to_dt=now,
+        status="PASSED",
+        exit_code=0,
+    ))["rows"]
+
+    assert len(rows) == 1
+    assert rows[0]["last_status"] == "PASSED"
+    assert rows[0]["last_exit_code"] == 0
+
+
+def test_grid_keeps_schedule_name_match_without_filtered_event():
+    db = _session()
+    nightly = _schedule(db, "nightly")
+    now = datetime(2026, 7, 18, 5, 0, tzinfo=timezone.utc)
+    SchedulerTelemetryRepository(db).record_event(
+        schedule_id=nightly.id,
+        schedule_name="nightly",
+        event_state="failed",
+        status="FAILED",
+        exit_code=1,
+        created_at=now - timedelta(hours=1),
+    )
+
+    rows = SchedulerReportingService(db).grid(SchedulerReportFilters(
+        from_dt=now - timedelta(days=1),
+        to_dt=now,
+        job="night",
+        status="PASSED",
+    ))["rows"]
+
+    assert len(rows) == 1
+    assert rows[0]["schedule_name"] == "nightly"
+    assert rows[0]["last_status"] is None
+
+
+def test_job_filter_matches_telemetry_job_name():
+    db = _session()
+    nightly = _schedule(db, "nightly")
+    now = datetime(2026, 7, 18, 5, 0, tzinfo=timezone.utc)
+    SchedulerTelemetryRepository(db).record_event(
+        schedule_id=nightly.id,
+        schedule_name="nightly",
+        job_name="orders-load",
+        event_state="completed",
+        status="PASSED",
+        exit_code=0,
+        created_at=now,
+    )
+
+    summary = SchedulerReportingService(db).summary(SchedulerReportFilters(
+        from_dt=now - timedelta(hours=1),
+        to_dt=now + timedelta(hours=1),
+        job="orders",
+    ))
+
+    assert summary["summary"]["total_events"] == 1
+
+
 def test_prune_uses_30_day_default():
     db = _session()
     sched = _schedule(db, "nightly")

@@ -3529,8 +3529,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="section-sub">Monitor scheduled jobs, inspect timelines, analyze outcomes, export telemetry, and manage schedules.</div>
     </div>
     <div class="flex gap-2 flex-wrap">
-      <a class="btn-secondary" :href="schedulerReportExportUrl('json')" download="scheduler-report.json">Export JSON</a>
-      <a class="btn-secondary" :href="schedulerReportExportUrl('csv')" download="scheduler-report.csv">Export CSV</a>
+      <button class="btn-secondary" @click="schedulerReportDownload('json')">Export JSON</button>
+      <button class="btn-secondary" @click="schedulerReportDownload('csv')">Export CSV</button>
       <button class="btn-primary" @click="loadSchedulerReports()" :disabled="schedulerReportLoading">
         <span x-show="!schedulerReportLoading">Refresh</span>
         <span x-show="schedulerReportLoading">Refreshing...</span>

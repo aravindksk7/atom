@@ -1104,7 +1104,10 @@ class SchedulerTelemetryRepository:
             q = q.filter(SchedulerTelemetryEvent.schedule_id == filters.schedule_id)
         if filters.job:
             pattern = f"%{filters.job.lower()}%"
-            q = q.filter(func.lower(SchedulerTelemetryEvent.schedule_name).like(pattern))
+            q = q.filter(or_(
+                func.lower(SchedulerTelemetryEvent.schedule_name).like(pattern),
+                func.lower(SchedulerTelemetryEvent.job_name).like(pattern),
+            ))
         if filters.status:
             q = q.filter(SchedulerTelemetryEvent.status == filters.status.upper())
         if filters.exit_code is not None:

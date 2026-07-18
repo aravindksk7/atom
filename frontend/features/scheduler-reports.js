@@ -119,8 +119,15 @@
         await this.loadSchedulerReports();
       },
 
-      schedulerReportExportUrl(format) {
-        return `/api/scheduler-reports/export?format=${format}&${this.schedulerReportParams()}`;
+      async schedulerReportDownload(format) {
+        try {
+          const { blob, disposition } = await apiBlob(`/api/scheduler-reports/export?format=${format}&${this.schedulerReportParams()}`);
+          const fallback = `scheduler-report.${format}`;
+          const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
+          triggerDownload(blob, filename);
+        } catch (e) {
+          this.toast('error', 'Export failed', e.message);
+        }
       },
 
       renderSchedulerReportCharts() {

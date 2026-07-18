@@ -73,6 +73,15 @@ def test_summary_endpoint_returns_scheduler_report(client):
     assert body["summary"]["passed"] == 1
 
 
+def test_summary_endpoint_defaults_to_30_day_lookback(client):
+    resp = client.get("/api/scheduler-reports/summary")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filters"]["days"] == 30
+    assert body["summary"]["total_events"] == 1
+
+
 @pytest.mark.parametrize("path,key", [
     ("/api/scheduler-reports/grid", "rows"),
     ("/api/scheduler-reports/timeline", "segments"),
