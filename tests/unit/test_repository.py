@@ -216,3 +216,17 @@ def test_run_complete_updates_counters(db):
     assert run.total_tests == 4
     assert run.passed == 3
     assert run.failed == 1
+
+
+def test_has_active_run_for_selection(db):
+    repo = RunRepository(db)
+    repo.create_run("run-a1", "dev", "prod", {}, selection_id=7, selection_version=1)
+    assert repo.has_active_run_for_selection(7) is True
+    assert repo.has_active_run_for_selection(8) is False
+
+    repo.update_run_status("run-a1", "COMPLETED", completed_at=datetime.now(timezone.utc))
+    assert repo.has_active_run_for_selection(7) is False
+
+    repo.create_run("run-a2", "dev", "prod", {}, selection_id=7, selection_version=1)
+    repo.update_run_status("run-a2", "RUNNING", started_at=datetime.now(timezone.utc))
+    assert repo.has_active_run_for_selection(7) is True

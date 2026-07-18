@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from etl_framework.exceptions import SchemaValidationError
+from etl_framework.exceptions import CompareRowLimitExceeded, SchemaValidationError
 from etl_framework.reconciliation.backends.base import ComparisonBackend
-from etl_framework.reconciliation.chunker import build_chunk_query, build_hash_query, hashes_match
+from etl_framework.reconciliation.chunker import build_hash_query, hashes_match, load_in_chunks
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.reconciliation.normalizer import TypeNormalizer
 from etl_framework.runner.state import TestStatus
@@ -48,6 +48,7 @@ class ReconciliationEngine:
         parallel_columns: bool = False,
         parallel_workers: int = 4,
         segment_columns: list[str] | None = None,
+        max_compare_rows: int = 0,
     ):
         self._source_engine = source_engine
         self._target_engine = target_engine
@@ -71,6 +72,7 @@ class ReconciliationEngine:
         self._parallel_columns: bool = parallel_columns
         self._parallel_workers: int = parallel_workers
         self._segment_columns: list[str] = segment_columns or []
+        self._max_compare_rows = max_compare_rows
 
     def reconcile(
         self,
@@ -121,29 +123,14 @@ class ReconciliationEngine:
                         )
                         return self._apply_slo(early_result, max_duration_seconds)
 
-                # Chunked loading: paginate through source and target in chunks.
-                chunks_src, chunks_tgt = [], []
-                offset = 0
-                while True:
-                    q_src = build_chunk_query(query, self._key_columns, offset, self._chunk_size)
-                    q_tgt = build_chunk_query(query, self._key_columns, offset, self._chunk_size)
-                    chunk_src = self._normalizer.normalize(
-                        self._source_engine.execute_query(q_src, params)
-                    )
-                    chunk_tgt = self._normalizer.normalize(
-                        self._target_engine.execute_query(q_tgt, params)
-                    )
-                    if chunk_src.empty and chunk_tgt.empty:
-                        break
-                    if not chunk_src.empty:
-                        chunks_src.append(chunk_src)
-                    if not chunk_tgt.empty:
-                        chunks_tgt.append(chunk_tgt)
-                    offset += self._chunk_size
-                    if len(chunk_src) < self._chunk_size or len(chunk_tgt) < self._chunk_size:
-                        break
-                df_source = pd.concat(chunks_src, ignore_index=True) if chunks_src else pd.DataFrame()
-                df_target = pd.concat(chunks_tgt, ignore_index=True) if chunks_tgt else pd.DataFrame()
+                df_source = load_in_chunks(
+                    self._source_engine, query, self._key_columns,
+                    self._chunk_size, params, self._normalizer.normalize,
+                )
+                df_target = load_in_chunks(
+                    self._target_engine, query, self._key_columns,
+                    self._chunk_size, params, self._normalizer.normalize,
+                )
             else:
                 df_source = self._normalizer.normalize(
                     self._source_engine.execute_query(query, params)
@@ -151,6 +138,10 @@ class ReconciliationEngine:
                 df_target = self._normalizer.normalize(
                     self._target_engine.execute_query(query, params)
                 )
+
+            total_rows = len(df_source) + len(df_target)
+            if self._max_compare_rows and total_rows > self._max_compare_rows:
+                raise CompareRowLimitExceeded(query_name, total_rows, self._max_compare_rows)
 
             df_source, df_target = self._filter_incremental(df_source, df_target)
             schema_diff = self._validate_schemas(df_source, df_target, query_name)

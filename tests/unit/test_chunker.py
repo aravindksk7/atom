@@ -1,6 +1,13 @@
+import re
+
 import pandas as pd
 import pytest
-from etl_framework.reconciliation.chunker import build_hash_query, build_chunk_query, hashes_match
+from etl_framework.reconciliation.chunker import (
+    build_hash_query,
+    build_chunk_query,
+    hashes_match,
+    load_in_chunks,
+)
 
 
 def test_build_hash_query_wraps_original():
@@ -79,3 +86,40 @@ def test_hashes_match_empty_vs_nonempty_returns_false():
 def test_hashes_match_copy_not_identity():
     df = pd.DataFrame({"id": [1, 2], "hash_value": [10, 20]})
     assert hashes_match(df, df.copy()) is True
+
+
+class _WindowEngine:
+    """Fake engine honoring the OFFSET/FETCH pagination emitted by build_chunk_query."""
+
+    def __init__(self, name: str, df: pd.DataFrame) -> None:
+        self._env = type("E", (), {"name": name})()
+        self._df = df
+
+    def execute_query(self, query: str, params=None) -> pd.DataFrame:
+        m = re.search(r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)", query, re.I)
+        if not m:
+            return self._df.copy()
+        o, n = int(m.group(1)), int(m.group(2))
+        return self._df.iloc[o:o + n].reset_index(drop=True)
+
+
+def test_load_in_chunks_paginates_fully():
+    df = pd.DataFrame({"id": [1, 2, 3, 4, 5], "v": list("abcde")})
+    out = load_in_chunks(_WindowEngine("dev", df), "SELECT * FROM t", ["id"], 2)
+    assert len(out) == 5
+    assert list(out["id"]) == [1, 2, 3, 4, 5]
+
+
+def test_load_in_chunks_single_read_when_disabled():
+    df = pd.DataFrame({"id": [1, 2], "v": ["a", "b"]})
+    assert len(load_in_chunks(_WindowEngine("dev", df), "q", ["id"], 0)) == 2
+    assert len(load_in_chunks(_WindowEngine("dev", df), "q", [], 5)) == 2
+
+
+def test_load_in_chunks_applies_normalize():
+    df = pd.DataFrame({"id": [1, 2, 3], "v": [1, 2, 3]})
+    out = load_in_chunks(
+        _WindowEngine("dev", df), "SELECT * FROM t", ["id"], 2,
+        normalize=lambda d: d.assign(v=d["v"] * 10),
+    )
+    assert list(out["v"]) == [10, 20, 30]

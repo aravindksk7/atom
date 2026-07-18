@@ -44,6 +44,42 @@ def build_chunk_query(
     )
 
 
+def load_in_chunks(
+    engine,
+    query: str,
+    key_columns: list[str],
+    chunk_size: int,
+    params: dict | None = None,
+    normalize=None,
+) -> pd.DataFrame:
+    """Load a query fully via OFFSET/FETCH pagination.
+
+    Falls back to a single read when chunk_size is 0 or key_columns are empty
+    because ORDER BY keys are required for deterministic pagination. normalize,
+    when given, is applied to every chunk and to single-read frames.
+    """
+    _n = normalize or (lambda df: df)
+    _execute = (
+        (lambda q: engine.execute_query(q, params))
+        if params is not None
+        else engine.execute_query
+    )
+    if not chunk_size or not key_columns:
+        return _n(_execute(query))
+    parts: list[pd.DataFrame] = []
+    offset = 0
+    while True:
+        q = build_chunk_query(query, key_columns, offset, chunk_size)
+        chunk = _n(_execute(q))
+        if chunk.empty:
+            break
+        parts.append(chunk)
+        if len(chunk) < chunk_size:
+            break
+        offset += chunk_size
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
 def hashes_match(df_source: pd.DataFrame, df_target: pd.DataFrame) -> bool:
     if len(df_source) != len(df_target):
         return False

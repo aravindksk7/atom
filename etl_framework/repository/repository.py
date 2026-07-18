@@ -279,6 +279,17 @@ class RunRepository:
             q = q.filter(TestRun.run_type == run_type)
         return apply_pagination(q.order_by(TestRun.id.desc()), limit, offset).all()
 
+    def has_active_run_for_selection(self, selection_id: int) -> bool:
+        return (
+            self._db.query(TestRun.id)
+            .filter(
+                TestRun.selection_id == selection_id,
+                TestRun.status.in_(["PENDING", "RUNNING"]),
+            )
+            .first()
+            is not None
+        )
+
     def update_run_status(self, run_id: str, status: str, **kwargs) -> TestRun | None:
         run = self.get_run(run_id)
         if run is None:

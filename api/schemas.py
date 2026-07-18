@@ -80,6 +80,7 @@ class RunSettings(BaseModel):
     run_profile: Literal["full", "shadow"] = "full"
     shadow_sample_frac: float = Field(default=0.02, gt=0, le=1.0)
     mismatch_row_limit: int = Field(default=1000, ge=1)
+    max_compare_rows: int = Field(default=0, ge=0)
     exclude_columns: list[str] = Field(default_factory=list)
     key_columns: list[str] = Field(default_factory=list)
     health_check: bool = False

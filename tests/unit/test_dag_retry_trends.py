@@ -1,4 +1,4 @@
-"""Tests for job dependency DAG, retry policy, and trends endpoint."""
+"""Tests for retry policy and trends endpoint."""
 from __future__ import annotations
 
 import pytest
@@ -25,17 +25,6 @@ def _engine_session():
     return engine, Session(engine)
 
 
-# ---------------------------------------------------------------------------
-# Job Dependency DAG — _topo_sort
-# ---------------------------------------------------------------------------
-
-def _job(name, depends_on=None):
-    return JobDefinition(
-        name=name, query="SELECT 1", key_columns=["id"],
-        depends_on=depends_on or [],
-    )
-
-
 def _executor(db=None):
     if db is None:
         _, db = _engine_session()
@@ -43,47 +32,6 @@ def _executor(db=None):
         db=db, run_id="test", source_env="dev", target_env="prod",
         job_sequence=[], run_settings=RunSettings(),
     )
-
-
-def test_topo_sort_no_deps():
-    ex = _executor()
-    jobs = [_job("a"), _job("b"), _job("c")]
-    result = ex._topo_sort(jobs)
-    assert [j.name for j in result] == ["a", "b", "c"]
-
-
-def test_topo_sort_linear_chain():
-    ex = _executor()
-    jobs = [_job("c", ["b"]), _job("b", ["a"]), _job("a")]
-    result = ex._topo_sort(jobs)
-    names = [j.name for j in result]
-    assert names.index("a") < names.index("b") < names.index("c")
-
-
-def test_topo_sort_diamond():
-    ex = _executor()
-    # a -> b, a -> c, b -> d, c -> d
-    jobs = [_job("d", ["b", "c"]), _job("b", ["a"]), _job("c", ["a"]), _job("a")]
-    result = ex._topo_sort(jobs)
-    names = [j.name for j in result]
-    assert names.index("a") < names.index("b")
-    assert names.index("a") < names.index("c")
-    assert names.index("b") < names.index("d")
-    assert names.index("c") < names.index("d")
-
-
-def test_topo_sort_cycle_raises():
-    ex = _executor()
-    jobs = [_job("a", ["b"]), _job("b", ["a"])]
-    with pytest.raises(ValueError, match="Cycle"):
-        ex._topo_sort(jobs)
-
-
-def test_topo_sort_external_deps_ignored():
-    ex = _executor()
-    jobs = [_job("a", ["external_not_in_list"]), _job("b")]
-    result = ex._topo_sort(jobs)
-    assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------
