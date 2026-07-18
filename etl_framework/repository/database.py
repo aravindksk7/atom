@@ -134,6 +134,38 @@ def _ensure_compare_columns(bind) -> None:
             "created_at DATETIME)"
         )
         ensure_index(conn, "ix_scheduled_runs_name", "CREATE UNIQUE INDEX IF NOT EXISTS ix_scheduled_runs_name ON scheduled_runs (name)")
+        ensure_table(conn, "scheduler_telemetry_events",
+            "CREATE TABLE IF NOT EXISTS scheduler_telemetry_events ("
+            "id INTEGER PRIMARY KEY, "
+            "schedule_id INTEGER REFERENCES scheduled_runs(id) ON DELETE SET NULL, "
+            "schedule_name VARCHAR(255) NOT NULL, "
+            "job_name VARCHAR(255), "
+            "selection_id INTEGER, "
+            "selection_version INTEGER, "
+            "run_id VARCHAR(36), "
+            "event_state VARCHAR(32) NOT NULL, "
+            "status VARCHAR(32) NOT NULL, "
+            "exit_code INTEGER, "
+            "started_at DATETIME, "
+            "finished_at DATETIME, "
+            "duration_ms INTEGER, "
+            "error_summary TEXT, "
+            "metadata_json JSON, "
+            "created_at DATETIME NOT NULL)"
+        )
+        ensure_index(conn, "ix_scheduler_telemetry_events_schedule_id", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_schedule_id ON scheduler_telemetry_events (schedule_id)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_schedule_name", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_schedule_name ON scheduler_telemetry_events (schedule_name)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_job_name", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_job_name ON scheduler_telemetry_events (job_name)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_selection_id", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_selection_id ON scheduler_telemetry_events (selection_id)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_run_id", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_run_id ON scheduler_telemetry_events (run_id)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_event_state", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_event_state ON scheduler_telemetry_events (event_state)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_status", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_status ON scheduler_telemetry_events (status)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_exit_code", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_exit_code ON scheduler_telemetry_events (exit_code)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_started_at", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_started_at ON scheduler_telemetry_events (started_at)")
+        ensure_index(conn, "ix_scheduler_telemetry_events_created_at", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_events_created_at ON scheduler_telemetry_events (created_at)")
+        ensure_index(conn, "ix_scheduler_telemetry_schedule_created", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_schedule_created ON scheduler_telemetry_events (schedule_id, created_at)")
+        ensure_index(conn, "ix_scheduler_telemetry_status_created", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_status_created ON scheduler_telemetry_events (status, created_at)")
+        ensure_index(conn, "ix_scheduler_telemetry_state_created", "CREATE INDEX IF NOT EXISTS ix_scheduler_telemetry_state_created ON scheduler_telemetry_events (event_state, created_at)")
 
         # --- P3: job lineage table ---
         ensure_table(conn, "job_lineage_edges",

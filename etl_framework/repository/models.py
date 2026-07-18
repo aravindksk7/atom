@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from etl_framework.repository.database import Base
 
@@ -296,6 +296,34 @@ class ScheduledRun(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     selection_id = Column(Integer, nullable=True, index=True)
     selection_version = Column(Integer, nullable=True)
+
+
+class SchedulerTelemetryEvent(Base):
+    __tablename__ = "scheduler_telemetry_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("scheduled_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    schedule_name = Column(String(255), nullable=False, index=True)
+    job_name = Column(String(255), nullable=True, index=True)
+    selection_id = Column(Integer, nullable=True, index=True)
+    selection_version = Column(Integer, nullable=True)
+    run_id = Column(String(36), nullable=True, index=True)
+    event_state = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    exit_code = Column(Integer, nullable=True, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error_summary = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    schedule = relationship("ScheduledRun")
+
+
+Index("ix_scheduler_telemetry_schedule_created", SchedulerTelemetryEvent.schedule_id, SchedulerTelemetryEvent.created_at)
+Index("ix_scheduler_telemetry_status_created", SchedulerTelemetryEvent.status, SchedulerTelemetryEvent.created_at)
+Index("ix_scheduler_telemetry_state_created", SchedulerTelemetryEvent.event_state, SchedulerTelemetryEvent.created_at)
 
 
 # ---------------------------------------------------------------------------

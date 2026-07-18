@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import case, insert, or_, cast, String, func
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
     RunStep, JobSelection, JobSelectionVersion, AppSettings, TERMINAL_STATUSES,
+    SchedulerTelemetryEvent,
 )
 
 
@@ -1034,6 +1036,99 @@ class ScheduleRepository:
             if next_run_at:
                 sched.next_run_at = next_run_at
             self._db.commit()
+
+
+@dataclass(frozen=True)
+class SchedulerTelemetryQuery:
+    from_dt: datetime | None = None
+    to_dt: datetime | None = None
+    schedule_id: int | None = None
+    job: str | None = None
+    status: str | None = None
+    exit_code: int | None = None
+
+
+class SchedulerTelemetryRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def record_event(
+        self,
+        *,
+        schedule_id: int | None,
+        schedule_name: str,
+        event_state: str,
+        status: str,
+        job_name: str | None = None,
+        selection_id: int | None = None,
+        selection_version: int | None = None,
+        run_id: str | None = None,
+        exit_code: int | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+        duration_ms: int | None = None,
+        error_summary: str | None = None,
+        metadata_json: dict | None = None,
+        created_at: datetime | None = None,
+    ) -> SchedulerTelemetryEvent:
+        event = SchedulerTelemetryEvent(
+            schedule_id=schedule_id,
+            schedule_name=schedule_name,
+            job_name=job_name,
+            selection_id=selection_id,
+            selection_version=selection_version,
+            run_id=run_id,
+            event_state=event_state.lower(),
+            status=status.upper(),
+            exit_code=exit_code,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+            error_summary=error_summary,
+            metadata_json=metadata_json or {},
+            created_at=created_at or datetime.now(timezone.utc),
+        )
+        self._db.add(event)
+        self._db.commit()
+        self._db.refresh(event)
+        return event
+
+    def query_events(self, filters: SchedulerTelemetryQuery | None = None) -> list[SchedulerTelemetryEvent]:
+        filters = filters or SchedulerTelemetryQuery()
+        q = self._db.query(SchedulerTelemetryEvent)
+        if filters.from_dt is not None:
+            q = q.filter(SchedulerTelemetryEvent.created_at >= filters.from_dt)
+        if filters.to_dt is not None:
+            q = q.filter(SchedulerTelemetryEvent.created_at <= filters.to_dt)
+        if filters.schedule_id is not None:
+            q = q.filter(SchedulerTelemetryEvent.schedule_id == filters.schedule_id)
+        if filters.job:
+            pattern = f"%{filters.job.lower()}%"
+            q = q.filter(func.lower(SchedulerTelemetryEvent.schedule_name).like(pattern))
+        if filters.status:
+            q = q.filter(SchedulerTelemetryEvent.status == filters.status.upper())
+        if filters.exit_code is not None:
+            q = q.filter(SchedulerTelemetryEvent.exit_code == filters.exit_code)
+        return q.order_by(SchedulerTelemetryEvent.created_at.asc(), SchedulerTelemetryEvent.id.asc()).all()
+
+    def latest_by_schedule(self) -> dict[int, SchedulerTelemetryEvent]:
+        rows = self._db.query(SchedulerTelemetryEvent).order_by(
+            SchedulerTelemetryEvent.schedule_id.asc(),
+            SchedulerTelemetryEvent.created_at.desc(),
+            SchedulerTelemetryEvent.id.desc(),
+        ).all()
+        latest: dict[int, SchedulerTelemetryEvent] = {}
+        for row in rows:
+            if row.schedule_id is not None and row.schedule_id not in latest:
+                latest[row.schedule_id] = row
+        return latest
+
+    def prune_older_than(self, cutoff: datetime) -> int:
+        deleted = self._db.query(SchedulerTelemetryEvent).filter(
+            SchedulerTelemetryEvent.created_at < cutoff
+        ).delete(synchronize_session=False)
+        self._db.commit()
+        return int(deleted or 0)
 
 
 # ---------------------------------------------------------------------------
