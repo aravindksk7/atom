@@ -14,4 +14,16 @@ test.describe('11 help', () => {
     await authedPage.locator('[data-testid="help-search-input"]').fill('zzz_no_such_help_topic_zzz');
     await expect(authedPage.locator('text=No help topics match')).toBeVisible();
   });
+
+  test('job automation guide is visible and searchable', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+
+    await expect(authedPage.locator('text=Job Design, Scheduling & Automation').first()).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('pytest');
+    await expect(authedPage.locator('text=Run from external pytest')).toBeVisible();
+    await authedPage.locator('[data-testid="help-search-input"]').fill('ci/cd');
+    await expect(authedPage.locator('text=Gate CI/CD pipelines')).toBeVisible();
+  });
 });

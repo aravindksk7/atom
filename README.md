@@ -38,6 +38,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - [Using The Web UI](#using-the-web-ui)
   - [Job Launcher — Step-By-Step](#job-launcher--step-by-step)
   - [Creating And Managing Jobs](#creating-and-managing-jobs)
+  - [Job Design, Scheduling, And Automation](#job-design-scheduling-and-automation)
   - [Job Types Reference](#job-types-reference)
   - [Run Settings Reference](#run-settings-reference)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
@@ -973,6 +974,247 @@ All job management is available from the **Job Catalog** card in the Launch tab 
 #### Edit or delete a job
 
 Click the pencil icon on any catalog row to open the edit form. Click the trash icon to delete. Deletion is permanent; the job will not appear in future runs but historical run results are retained.
+
+### Job Design, Scheduling, And Automation
+
+Use the same saved job definition everywhere: the UI, REST API, schedules, external pytest suites, and CI/CD pipelines. This keeps the modeled test reviewed once and executed consistently from every entry point.
+
+#### Lifecycle model
+
+| Object | Purpose | Created from | Executed by |
+|---|---|---|---|
+| Job | Reusable test definition: job type, query or input source, keys, rules, dependencies, and pass condition | UI Job Catalog or `POST /api/jobs` | UI Launch, `POST /api/runs`, schedules, pytest, CI/CD |
+| Run | One execution record with status, results, mismatches, reports, logs, and metrics | UI Run Tests, `POST /api/runs`, `POST /api/runs/test-suite`, schedule trigger | Monitor, History, reports, gates |
+| Schedule | Recurring trigger that stores environment labels, config, job sequence, run settings, cron, and enabled state | UI Schedules sub-tab or `POST /api/schedules` | APScheduler cron or `POST /api/schedules/{schedule_id}/run-now` |
+| Gate | Machine-readable pass/fail decision for automation | Latest job result or run id | `POST /api/gates/{job}/evaluate` or `python -m etl_framework.runner.cli --gate-run <run_id>` |
+
+#### UI workflow
+
+1. Open **Launch -> Job Catalog -> + New Job**.
+2. Pick the job type and model the required inputs:
+   - `reconciliation`: query or file inputs plus `key_columns`.
+   - `api_reconciliation`: saved REST endpoints plus `key_columns`.
+   - `bo_report`: SAP BO document/report parameters.
+   - `automic_job`: Automic job name or run id.
+   - `dbt_artifact`, `freshness`, `profile`, `schema_snapshot`, or `cross_job_assertion`: fill the type-specific `params`.
+3. Add optional DQ rules, dependencies, excluded columns, pass conditions, and tags.
+4. Click **Save** so UI runs, API runs, schedules, pytest, and CI/CD all reuse the same definition.
+5. Select the saved jobs, order them, tune **Run Settings**, and click **Run Tests**.
+6. Watch **Monitor** for live progress, then review **History**, **Reports**, and **Logs**.
+7. Open **Launch -> Schedules**, create a cron schedule, enable it, and click **Run Now** to execute the saved schedule immediately.
+
+#### API workflow
+
+Authenticate every `/api/*` request with a Bearer token created in **Config -> Security**.
+
+```powershell
+$base = "http://127.0.0.1:8000"
+$h = @{ Authorization = "Bearer etl_<token>" }
+```
+
+Create or update a saved job:
+
+```powershell
+$job = @{
+  name = "orders_recon"
+  description = "Compare source and target orders"
+  tags = @("daily", "orders")
+  job_type = "reconciliation"
+  query = "SELECT order_id, amount, status FROM orders"
+  key_columns = @("order_id")
+  exclude_columns = @("updated_at")
+  rules = @(
+    @{ type = "not_null"; column = "order_id"; severity = "error" },
+    @{ type = "row_count_min"; min_value = 1; severity = "error" }
+  )
+  pass_condition = @{ require_status = @("PASSED"); max_value_mismatches = 0 }
+  enabled = $true
+} | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "$base/api/jobs" -Headers $h -ContentType "application/json" -Body $job
+# For an existing job, use PUT /api/jobs/{name}:
+# Invoke-RestMethod -Method Put -Uri "$base/api/jobs/orders_recon" -Headers $h -ContentType "application/json" -Body $job
+```
+
+Trigger a run and poll for completion:
+
+```powershell
+$runBody = @{
+  source_env = "dev"
+  target_env = "prod"
+  job_sequence = @("orders_recon")
+  run_settings = @{
+    use_live_connections = $true
+    execution_mode = "sequential"
+    max_workers = 2
+    metrics_enabled = $true
+  }
+} | ConvertTo-Json -Depth 8
+
+$run = Invoke-RestMethod -Method Post -Uri "$base/api/runs" -Headers $h -ContentType "application/json" -Body $runBody
+$runId = $run.run_id
+
+do {
+  Start-Sleep -Seconds 5
+  $status = Invoke-RestMethod -Method Get -Uri "$base/api/runs/$runId/status" -Headers $h
+  "$($status.run_id) $($status.status)"
+} while ($status.status -in @("PENDING", "RUNNING"))
+
+if ($status.status -ne "PASSED") { throw "ETL run $runId finished with $($status.status)" }
+```
+
+Create a reusable Job Selection with `POST /api/selections`, create a schedule from that selection with `POST /api/schedules`, then execute the schedule immediately:
+
+```powershell
+$selectionBody = @{
+  name = "orders-recon-selection"
+  description = "Reusable automation selection for orders reconciliation"
+  tags = @("daily", "orders")
+  job_sequence = @("orders_recon")
+  run_settings = @{ use_live_connections = $true; execution_mode = "sequential" }
+} | ConvertTo-Json -Depth 8
+
+$selection = Invoke-RestMethod -Method Post -Uri "$base/api/selections" -Headers $h -ContentType "application/json" -Body $selectionBody
+
+$scheduleBody = @{
+  name = "weekday-orders-recon"
+  cron_expr = "0 6 * * 1-5"
+  selection_id = $selection.id
+  selection_version = $selection.latest_version
+  source_env = "dev"
+  target_env = "prod"
+  enabled = $true
+} | ConvertTo-Json -Depth 8
+
+$schedule = Invoke-RestMethod -Method Post -Uri "$base/api/schedules" -Headers $h -ContentType "application/json" -Body $scheduleBody
+Invoke-RestMethod -Method Post -Uri "$base/api/schedules/$($schedule.id)/run-now" -Headers $h
+```
+
+Evaluate a job gate after a run has completed:
+
+```powershell
+$gate = Invoke-RestMethod -Method Post -Uri "$base/api/gates/orders_recon/evaluate" -Headers $h
+if ($gate.verdict -ne "PROMOTE") { throw "Gate held orders_recon: $($gate.reason)" }
+```
+
+#### External pytest integration
+
+External pytest suites can treat the ETL service as a black-box quality gate. Keep the service URL and token in environment variables and trigger saved jobs from fixtures or tests.
+
+```python
+import os
+import time
+
+import requests
+
+BASE_URL = os.environ.get("ETL_BASE_URL", "http://127.0.0.1:8000")
+TOKEN = os.environ["ETL_API_TOKEN"]
+HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+TERMINAL = {"PASSED", "FAILED", "ERROR", "CANCELLED"}
+
+
+def wait_for_run(run_id: str, timeout_seconds: int = 600) -> dict:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        response = requests.get(f"{BASE_URL}/api/runs/{run_id}/status", headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+        if payload["status"] in TERMINAL:
+            return payload
+        time.sleep(5)
+    raise AssertionError(f"run {run_id} did not finish within {timeout_seconds} seconds")
+
+
+def test_orders_reconciliation_promotes():
+    response = requests.post(
+        f"{BASE_URL}/api/runs",
+        headers=HEADERS,
+        json={
+            "source_env": "dev",
+            "target_env": "prod",
+            "job_sequence": ["orders_recon"],
+            "run_settings": {"use_live_connections": True, "execution_mode": "sequential"},
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    status = wait_for_run(response.json()["run_id"])
+    assert status["status"] == "PASSED"
+
+    gate = requests.post(f"{BASE_URL}/api/gates/orders_recon/evaluate", headers=HEADERS, timeout=10)
+    gate.raise_for_status()
+    assert gate.json()["verdict"] == "PROMOTE"
+```
+
+To execute the repository's own pytest suite as a tracked framework run, call the suite-runner endpoint and poll the returned run id:
+
+```python
+def test_framework_pytest_suite_passes():
+    response = requests.post(f"{BASE_URL}/api/runs/test-suite", headers=HEADERS, timeout=10)
+    response.raise_for_status()
+    status = wait_for_run(response.json()["run_id"], timeout_seconds=900)
+    assert status["status"] == "PASSED"
+```
+
+#### CI/CD pipeline integration
+
+Use secret variables for `ETL_BASE_URL` and `ETL_API_TOKEN`. A pipeline stage can trigger a run through the API, wait for completion, and then use the CLI gate exit code to fail or pass the pipeline when the CI runner can access the same application database/storage as the ETL service. If CI only has HTTP access to the service, fail the pipeline from the API status or gate response instead of the local CLI gate.
+
+```yaml
+etl_quality_gate:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install -e ".[dev]"
+    - |
+      python - <<'PY'
+      import os, time, requests
+      base = os.environ["ETL_BASE_URL"].rstrip("/")
+      headers = {"Authorization": f"Bearer {os.environ['ETL_API_TOKEN']}"}
+      run = requests.post(
+          f"{base}/api/runs",
+          headers=headers,
+          json={"source_env": "dev", "target_env": "prod", "job_sequence": ["orders_recon"]},
+          timeout=10,
+      )
+      run.raise_for_status()
+      run_id = run.json()["run_id"]
+      print(f"RUN_ID={run_id}")
+      with open("run_id.txt", "w", encoding="utf-8") as fh:
+          fh.write(run_id)
+      terminal = {"PASSED", "FAILED", "ERROR", "CANCELLED"}
+      while True:
+          response = requests.get(f"{base}/api/runs/{run_id}/status", headers=headers, timeout=10)
+          response.raise_for_status()
+          status = response.json()
+          print(status["status"])
+          if status["status"] in terminal:
+              if status["status"] != "PASSED":
+                  raise SystemExit(f"ETL run {run_id} finished with {status['status']}")
+              break
+          time.sleep(5)
+      PY
+    - python -m etl_framework.runner.cli --gate-run $(cat run_id.txt)
+    - python -m etl_framework.runner.cli --scheduler-stats --fail-on-stopped --min-success-rate 95 --output json > scheduler-stats.json
+  artifacts:
+    when: always
+    paths:
+      - run_id.txt
+      - scheduler-stats.json
+```
+
+For scheduled production checks, let APScheduler trigger the recurring job and have CI/CD enforce scheduler health across the last 30 days:
+
+```powershell
+python -m etl_framework.runner.cli --scheduler-stats --days 30 --fail-on-stopped --min-success-rate 95 --output text
+```
+
+Automation notes:
+
+- Store tokens, DB passwords, SAP BO credentials, and Automic credentials in the app config or CI secret store, not in README snippets or committed pipeline files.
+- Use saved jobs for automated runs so UI, pytest, and CI/CD share the same reviewed model.
+- Make scheduled jobs safe to retry; avoid destructive SQL and non-idempotent external side effects.
+- Publish run logs and scheduler stats artifacts such as `scheduler-stats.json`; when your pipeline can reach the app report API, also download `GET /api/runs/{run_id}/report` and publish it as a CI artifact.
 
 #### Bulk import jobs (API)
 

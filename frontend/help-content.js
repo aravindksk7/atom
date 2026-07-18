@@ -152,6 +152,56 @@
       ],
     },
     {
+      id: 'job-automation',
+      title: 'Job Design, Scheduling & Automation',
+      intro: 'Follow the complete lifecycle for reusable jobs: model the test, save it, run it now, schedule it, trigger it through the API, and gate pytest or CI/CD automation on the result.',
+      steps: [
+        {
+          title: 'Design the job model',
+          text: 'Start from the business check you need: choose the job type, source and target systems, query or file/API/artifact inputs, key columns, excluded columns, DQ rules, dependencies, and pass conditions. Keep jobs idempotent so UI, schedules, pytest, and CI/CD can run the same definition safely.',
+          where: 'Launch -> Job Catalog -> + New Job',
+        },
+        {
+          title: 'Save a reusable job',
+          text: 'Click Save in the job editor. The saved job becomes the canonical definition used by the Launch tab, POST /api/runs, schedules, external pytest tests, CI/CD stages, reports, lineage, and gates.',
+          where: 'Job editor -> Save',
+          tip: 'Prefer saved jobs over ad hoc automation payloads so every execution path runs the same reviewed configuration.',
+        },
+        {
+          title: 'Execute from the UI',
+          text: 'Select one or more saved jobs, order them, set Run Settings, then click Run Tests. Monitor streams queued/running/passed/failed/skipped states and History stores the durable run record and report links.',
+          where: 'Launch -> Job Catalog -> Run Tests',
+        },
+        {
+          title: 'Schedule from the UI',
+          text: 'Open the Schedules sub-tab, choose the saved jobs or sequence, set source/target labels, config, run settings, cron expression, and Enabled. Save the schedule, then use Run Now to execute it immediately outside its normal cron time.',
+          where: 'Launch -> Schedules sub-tab',
+        },
+        {
+          title: 'Execute through the API',
+          text: 'Use Bearer auth, create or update jobs with POST /api/jobs or PUT /api/jobs/{name}, start runs with POST /api/runs, poll GET /api/runs/{run_id}/status, and evaluate POST /api/gates/{job}/evaluate after completion.',
+          where: 'API -> /api/jobs, /api/runs, /api/gates/{job}/evaluate',
+        },
+        {
+          title: 'Schedule through the API',
+          text: 'Create or reuse a Job Selection with POST /api/selections to store job_sequence and run_settings. Then create recurring execution with POST /api/schedules using only name, cron_expr, selection_id, optional selection_version, source_env, target_env, and enabled. Call POST /api/schedules/{schedule_id}/run-now to execute the saved schedule immediately.',
+          where: 'API -> /api/selections, /api/schedules',
+          tip: 'Use GET /api/schedules/stats to confirm scheduler health and recent schedule outcomes.',
+        },
+        {
+          title: 'Run from external pytest',
+          text: 'In an external pytest suite, call the running FastAPI service with a scoped token, trigger a saved job or POST /api/runs/test-suite, wait for a terminal status, then assert PASSED or call the job gate endpoint for the promotion verdict.',
+          where: 'pytest -> requests/httpx client fixture',
+        },
+        {
+          title: 'Gate CI/CD pipelines',
+          text: 'In CI/CD, keep tokens in secret variables, trigger or reference a run, and wait for completion. Use python -m etl_framework.runner.cli --gate-run <run_id> only when CI can access the same app database/storage; otherwise fail from API status or gate responses. Download GET /api/runs/{run_id}/report and publish logs plus scheduler stats as artifacts.',
+          where: 'Pipeline stage -> API or CLI gate',
+          warn: 'Do not hard-code tokens, DB passwords, or BO/Automic credentials in job definitions or pipeline YAML.',
+        },
+      ],
+    },
+    {
       id: 'monitor',
       title: 'Monitor',
       intro: 'The Monitor tab shows live progress for the active run via Server-Sent Events (SSE), with automatic fallback to 5-second polling if the stream drops.',
