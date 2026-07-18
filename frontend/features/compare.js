@@ -786,6 +786,29 @@
       }
     },
 
+    async downloadFullHtmlReport(runId) {
+      if (!runId || this.isDifferenceExportBusy(runId, 'html')) return;
+      let summary;
+      try {
+        summary = await api('GET', `/api/runs/${runId}/differences/summary`);
+      } catch (e) {
+        this.toast('error', 'Failed to load mismatch summary', e.message);
+        return;
+      }
+      const estMb = ((summary.total_issues || 0) * 1.8 / 1024).toFixed(1);
+      if (!confirm(`This run has ${summary.total_issues} total mismatches (~${estMb} MB estimated). Continue?`)) return;
+      const key = this.differenceExportKey(runId, 'html');
+      this.differenceExports = { ...this.differenceExports, [key]: { status: 'PENDING' } };
+      try {
+        const job = await api('POST', `/api/runs/${runId}/exports`, { format: 'html' });
+        this.differenceExports = { ...this.differenceExports, [key]: job };
+        await this.pollDifferenceExport(runId, job.export_id, 'html');
+      } catch (e) {
+        this.differenceExports = { ...this.differenceExports, [key]: { status: 'FAILED', error_message: e.message } };
+        this.toast('error', 'Full report download failed', e.message);
+      }
+    },
+
     async pollDifferenceExport(runId, exportId, format) {
       const key = this.differenceExportKey(runId, format);
       for (let attempt = 0; attempt < 240; attempt++) {
@@ -793,7 +816,8 @@
         this.differenceExports = { ...this.differenceExports, [key]: status };
         if (status.status === 'COMPLETED') {
           const { blob, disposition } = await apiBlob(`/api/runs/${runId}/exports/${exportId}/download`);
-          const fallback = `all_differences_${runId}_${exportId}.${format === 'parquet' ? 'parquet' : 'csv'}`;
+          const ext = format === 'parquet' ? 'parquet' : format === 'html' ? 'html' : 'csv';
+          const fallback = `all_differences_${runId}_${exportId}.${ext}`;
           const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
           triggerDownload(blob, filename);
           this.differenceExports = { ...this.differenceExports, [key]: { ...status, status: 'DOWNLOADED' } };

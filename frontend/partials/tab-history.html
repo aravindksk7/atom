@@ -58,6 +58,11 @@
                     :disabled="isDifferenceExportBusy(selectedRun.run_id, 'parquet')"
                     class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
                     x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'parquet')"></button>
+            <button @click="downloadFullHtmlReport(selectedRun.run_id)"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'html')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    data-testid="history-download-full-report-btn"
+                    x-text="'Download Full HTML Report ' + differenceExportLabel(selectedRun.run_id, 'html')"></button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">

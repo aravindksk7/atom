@@ -2168,6 +2168,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     :disabled="isDifferenceExportBusy(selectedRun.run_id, 'parquet')"
                     class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
                     x-text="'All differences ' + differenceExportLabel(selectedRun.run_id, 'parquet')"></button>
+            <button @click="downloadFullHtmlReport(selectedRun.run_id)"
+                    :disabled="isDifferenceExportBusy(selectedRun.run_id, 'html')"
+                    class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
+                    data-testid="history-download-full-report-btn"
+                    x-text="'Download Full HTML Report ' + differenceExportLabel(selectedRun.run_id, 'html')"></button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
@@ -3361,16 +3366,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <div class="card overflow-hidden p-0">
             <table class="data-table">
-              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
+              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Files</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
               <tbody>
                 <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
-                  <tr><td colspan="8" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
+                  <tr><td colspan="9" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
                 </template>
                 <template x-for="t in (reportMetrics.tests || [])" :key="t.name">
                   <tr :class="(t.status||'').toUpperCase()==='FAILED' ? 'metric-row-failed' : (t.status||'').toUpperCase()==='SLOW' ? 'metric-row-slow' : ''">
                     <td class="font-mono text-xs" x-text="t.name"></td>
                     <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
                     <td :class="(t.status||'').toUpperCase()==='SLOW' ? 'text-amber-400 font-semibold' : ''" x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
+                    <td class="font-mono text-xs" x-text="(t.source_file_name || t.target_file_name) ? (t.source_file_name || 'N/A') + ' → ' + (t.target_file_name || 'N/A') : 'N/A'"></td>
                     <td x-text="t.source_row_count ?? 0"></td>
                     <td x-text="t.target_row_count ?? 0"></td>
                     <td :class="(t.total_issues ?? 0) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'" x-text="t.total_issues ?? 0"></td>
@@ -3875,7 +3881,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <template x-if="boCompareResult.results && boCompareResult.results.length">
           <table data-testid="compare-bo-results-table" class="data-table">
-            <thead><tr><th>Test</th><th>Status</th><th>Files</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
+            <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
             <tbody>
               <template x-for="r in boCompareResult.results" :key="r.id">
               <tr>
@@ -3885,7 +3891,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
-                  <td class="font-mono text-xs" x-text="((r.source_file_name || boCompareResult.file_name_a) || (r.target_file_name || boCompareResult.file_name_b)) ? ((r.source_file_name || boCompareResult.file_name_a) || 'N/A') + ' → ' + ((r.target_file_name || boCompareResult.file_name_b) || 'N/A') : '—'"></td>
                   <td>
                     <span x-text="totalMismatches(r)"></span>
                     <div x-show="totalMismatches(r) > 0"
