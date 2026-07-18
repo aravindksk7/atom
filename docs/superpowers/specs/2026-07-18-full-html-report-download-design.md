@@ -129,3 +129,23 @@ export failures (`_friendly_export_error`) — no new error class.
 - E2E (`tests/e2e/06-reports.spec.ts` or `08b-compare-reconciliation.spec.ts`): click
   button → confirm dialog shows count → confirm → poll → download fires; downloaded
   file's search box finds a mismatch beyond the original truncation cutoff.
+
+### Implementation notes (2026-07-18)
+
+Implemented per the plan (`docs/superpowers/plans/2026-07-18-full-html-report-download.md`)
+with these deviations:
+
+- **Task 1 prerequisite fix** (not in the original spec): `_write_sql_compare` /
+  `_write_recon_file_compare` used `"sql_comparison"`/`"recon_file"` as `test_name`
+  fallbacks while the real compare success path uses `req.label_a or "file_a"` --
+  aligned to `"file_a"` so recomputed rows group with their `TestResult`.
+- **Template `data-key` fix** (discovered during Task 3): `{{ mm.key_values | tojson }}`
+  inside a double-quoted attribute truncated at the first `"` because Jinja's `tojson`
+  leaves double quotes unescaped (safe for single-quoted attributes only). Now
+  `| tojson | forceescape`, which fixes key-value search and accept/reject row keying
+  for server-rendered rows in *all* reports, not just full ones.
+- **E2E content verification** (`tests/e2e/04-history.spec.ts`, not `06-reports.spec.ts`):
+  reading the browser's downloaded file EPERMs on Windows (AV scan lock on the
+  Playwright artifact), so the test asserts the download event + filename from the UI
+  click, then verifies content by streaming the same COMPLETED export-job artifact
+  through the API.
