@@ -140,3 +140,74 @@ def test_write_full_html_report_key_values_round_trip_as_dict_not_double_encoded
     parsed = json.loads(unescape(match.group(1)))
     # single-encoded dict, not a JSON string containing an escaped JSON string
     assert parsed == {"id": 42}
+
+
+def test_write_full_html_report_real_recompute_renders_every_row_untruncated(tmp_path, monkeypatch):
+    """No mocks: a recon_file compare with 150 differing rows (well past the report's
+    usual 100-row display cap) recomputed from the real CSV files must render all 150
+    mismatch rows and no truncation banners/buttons."""
+    from api.services import difference_export as de
+    from etl_framework.repository.models import TestRun
+
+    # _UPLOAD_BASES is resolved from env at import time, so patch the module
+    # globals directly to allow reading CSVs from tmp_path
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path,))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+
+    n_rows, n_diffs = 200, 150
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text(
+        "id,amount\n" + "\n".join(f"{i},{i}" for i in range(1, n_rows + 1)) + "\n",
+        encoding="utf-8",
+    )
+    tgt.write_text(
+        "id,amount\n" + "\n".join(
+            f"{i},{i + 1000 if i <= n_diffs else i}" for i in range(1, n_rows + 1)
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    request = {
+        "file_a_path": str(src),
+        "file_b_path": str(tgt),
+        "key_columns": ["id"],
+    }
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-full-html-real-recompute",
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "recon_file", "request": request},
+        )
+        result = ReconciliationResult(
+            query_name="Run / File A",  # ReconFileCompareRequest.label_a default
+            source_env="dev",
+            target_env="prod",
+            source_row_count=n_rows,
+            target_row_count=n_rows,
+            matched_count=n_rows - n_diffs,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=n_diffs,
+            mismatches=[],
+            status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc),
+            duration_seconds=0.1,
+        )
+        repo.add_test_result(run.run_id, result)
+        run_id = run.run_id
+
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        out_path = tmp_path / "report_full.html"
+        row_count = de.write_full_html_report(db, run, out_path)
+
+    assert row_count == n_diffs
+    html = out_path.read_text(encoding="utf-8")
+    assert html.count("<tr data-mismatch") == n_diffs
+    assert "load-all-btn-global" not in html
+    assert "truncation-note" not in html
