@@ -159,3 +159,145 @@ def test_report_unknown_run_exits_4(fake_client):
     fake_client({("GET", "/api/runs/nope"): AtomNotFoundError("Run not found")})
     result = runner.invoke(app, BASE_ARGS + ["report", "nope"])
     assert result.exit_code == 4
+
+
+RUN_ARGS = ["run", "3", "--source-env", "dev", "--target-env", "qa",
+            "--poll-interval", "0"]
+
+
+def _launch_responses(final_status, extra=None):
+    responses = {
+        ("POST", "/api/selections/3/launch"): {"run_id": "r-9", "status": "PENDING"},
+        ("GET", "/api/runs/r-9/status"): [
+            {"run_id": "r-9", "status": "RUNNING", "passed": 0, "failed": 0, "error": 0},
+            final_status,
+        ],
+    }
+    responses.update(extra or {})
+    return responses
+
+
+def test_run_passed_exits_0(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 5, "failed": 0, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 0
+    assert "PASSED" in result.output
+
+
+def test_run_failed_exits_1(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "FAILED", "passed": 4, "failed": 1, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 1
+
+
+def test_run_cancelled_exits_2(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "CANCELLED", "passed": 0, "failed": 0, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 2
+
+
+def test_run_error_exits_3(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "COMPLETED", "passed": 4, "failed": 0, "error": 1}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 3
+
+
+def test_run_no_wait_prints_run_id_and_exits_0(fake_client):
+    from etl_framework.cli.app import app
+
+    client = fake_client({
+        ("POST", "/api/selections/3/launch"): {"run_id": "r-9", "status": "PENDING"},
+    })
+    result = runner.invoke(app, BASE_ARGS + ["run", "3", "--source-env", "dev",
+                                             "--no-wait"])
+    assert result.exit_code == 0
+    assert "r-9" in result.output
+    assert ("GET", "/api/runs/r-9/status") not in client.calls
+
+
+def test_run_resolves_selection_by_name(fake_client):
+    from etl_framework.cli.app import app
+
+    responses = _launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0})
+    responses[("GET", "/api/selections")] = [
+        [{"id": 3, "name": "Nightly Regression", "job_count": 1,
+          "archived": False, "updated_at": None}],
+    ]
+    fake_client(responses)
+    result = runner.invoke(app, BASE_ARGS + ["run", "Nightly Regression",
+                                             "--source-env", "dev",
+                                             "--poll-interval", "0"])
+    assert result.exit_code == 0
+
+
+def test_run_unknown_selection_name_exits_4(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET", "/api/selections"): [[]]})
+    result = runner.invoke(app, BASE_ARGS + ["run", "Ghost", "--source-env", "dev"])
+    assert result.exit_code == 4
+
+
+def test_run_passes_ci_context_to_launch(fake_client):
+    from etl_framework.cli.app import app
+
+    client = fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS + [
+        "--ci-commit-sha", "a1b2c3", "--ci-pipeline-url", "https://gl/p/1",
+        "--ci-ref", "main"])
+    assert result.exit_code == 0
+    payload = next(c[1] for c in client.calls if c[0] == "PAYLOAD")
+    assert payload["ci_context"] == {
+        "commit_sha": "a1b2c3", "pipeline_url": "https://gl/p/1", "ref": "main"}
+
+
+def test_run_writes_junit_artifact(tmp_path, fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0},
+        extra={("GET-BYTES", "/api/runs/r-9/junit"): b"<testsuites/>"}))
+    out = tmp_path / "junit.xml"
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS + ["--junit-out", str(out)])
+    assert result.exit_code == 0
+    assert out.read_bytes() == b"<testsuites/>"
+
+
+def test_run_timeout_exits_6_and_prints_run_id(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({
+        ("POST", "/api/selections/3/launch"): {"run_id": "r-9", "status": "PENDING"},
+        ("GET", "/api/runs/r-9/status"): [
+            {"run_id": "r-9", "status": "RUNNING", "passed": 0, "failed": 0, "error": 0},
+        ],
+    })
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS + ["--timeout", "0"])
+    assert result.exit_code == 6
+    assert "r-9" in result.output
+
+
+def test_run_json_output_emits_machine_readable_verdict(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "FAILED", "passed": 4, "failed": 1, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS[:4] + ["--output", "json"] + RUN_ARGS)
+    assert result.exit_code == 1
+    verdict = json.loads(result.output)
+    assert verdict["run_id"] == "r-9"
+    assert verdict["exit_code"] == 1
