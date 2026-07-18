@@ -111,3 +111,17 @@ def test_create_export_job_accepts_json_format(monkeypatch):
         assert data["status"] in ("PENDING", "RUNNING", "COMPLETED", "FAILED")
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_media_type_for_html():
+    from api.services.difference_export import media_type_for
+
+    assert media_type_for("html") == "text/html"
+
+
+def test_export_filename_html_uses_html_suffix():
+    from api.services.difference_export import export_filename
+
+    name = export_filename("run-1", "html", "exp-1")
+    assert name.endswith(".html")
+    assert "run-1" in name and "exp-1" in name

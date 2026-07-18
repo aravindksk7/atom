@@ -422,7 +422,7 @@
                     data-test="{{ result.query_name }}"
                     data-column="{{ mm.column_name }}"
                     data-type="{{ mm.mismatch_type }}"
-                    data-key="{{ mm.key_values | tojson }}"
+                    data-key="{{ mm.key_values | tojson | forceescape }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
                     data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}"
                     data-accepted="{{ 'true' if mm.accepted else 'false' }}"

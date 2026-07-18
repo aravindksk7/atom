@@ -220,6 +220,8 @@ def media_type_for(fmt: str) -> str:
         return "application/vnd.apache.parquet"
     if fmt == "json":
         return "application/x-ndjson"
+    if fmt == "html":
+        return "text/html"
     return "text/csv"
 
 
@@ -228,6 +230,8 @@ def export_filename(run_id: str, fmt: str, export_id: str | None = None) -> str:
         suffix = "parquet"
     elif fmt == "json":
         suffix = "jsonl"
+    elif fmt == "html":
+        suffix = "html"
     else:
         suffix = "csv"
     stem = f"all_differences_{run_id}"
@@ -331,7 +335,10 @@ def run_difference_export_job(export_id: str) -> None:
             raise RuntimeError("Run not found")
 
         path = export_dir(job.run_id) / export_filename(job.run_id, job.format, job.export_id)
-        row_count = write_recomputed_differences(db, run, job.format, path)
+        if job.format == "html":
+            row_count = write_full_html_report(db, run, path)
+        else:
+            row_count = write_recomputed_differences(db, run, job.format, path)
         job.status = "COMPLETED"
         job.artifact_path = str(path)
         job.row_count = row_count
@@ -374,6 +381,50 @@ def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path
         else:
             _write_reconciliation_run(db, run, writer)
         return writer.row_count
+
+
+def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
+    """Recompute the run's complete difference set and render it into a single,
+    self-contained HTML report at `path` -- no live API calls needed to view the
+    whole comparison, unlike the capped report the "Report" view/download produces.
+    """
+    from api.services.artifact_service import _current_app_timezone
+    from api.services.run_report import build_run_report_snapshot
+    from etl_framework.reporting.generator import ReportGenerator
+
+    tmp_path = path.with_suffix(".rows.jsonl")
+    row_count = write_recomputed_differences(db, run, "json", tmp_path)
+
+    rows_by_test: dict[str, list[dict[str, Any]]] = {}
+    with tmp_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            key_values = row.get("key_values")
+            if isinstance(key_values, str):
+                try:
+                    key_values = json.loads(key_values)
+                except (TypeError, ValueError):
+                    key_values = {}
+            rows_by_test.setdefault(row.get("test_name") or "", []).append({
+                "column_name": row.get("column_name"),
+                "mismatch_type": row.get("mismatch_type"),
+                "key_values": key_values,
+                "source_value": row.get("source_value"),
+                "target_value": row.get("target_value"),
+            })
+    tmp_path.unlink(missing_ok=True)
+
+    snapshot = build_run_report_snapshot(run, include_mismatches=False)
+    for result in snapshot.results:
+        result.mismatches = rows_by_test.get(result.query_name, [])
+        result.total_issues_override = len(result.mismatches)
+
+    generator = ReportGenerator(output_dir=str(path.parent), timezone=_current_app_timezone())
+    generator.generate(snapshot, filename=path.name)
+    return row_count
 
 
 def _write_sql_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
