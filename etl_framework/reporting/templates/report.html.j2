@@ -310,7 +310,7 @@
           <option value="missing_in_source">Missing ←</option>
         </select>
         <input id="filter-search" type="text" placeholder="Search key values… (/ to focus)"
-               oninput="filterState.search=this.value;applyFilters()">
+               oninput="clearTimeout(window.__filterSearchDebounce); var _v=this.value; window.__filterSearchDebounce=setTimeout(function(){filterState.search=_v;applyFilters();}, 200);">
         <button class="filter-clear-btn" onclick="clearFilters()">✕ Clear</button>
         <span id="filter-count"></span>
       </div>

@@ -323,3 +323,8 @@ def test_analytics_use_uncapped_aggregate_counts(tmp_path):
     assert '"status": 6000' in html
     assert '"value_diff": 12000' in html
     assert ">total<" in html
+
+
+def test_filter_search_is_debounced(tmp_path):
+    html = _render(_make_suite(), tmp_path)
+    assert "setTimeout" in html.split('id="filter-search"')[1][:400]
