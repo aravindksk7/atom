@@ -12,6 +12,7 @@ from typing import Optional
 
 import typer
 
+from etl_framework.cli import render
 from etl_framework.cli.client import (
     AtomAPIError,
     AtomAuthError,
@@ -78,13 +79,36 @@ def report(ctx: typer.Context) -> None:
 @app.command()
 def selections(ctx: typer.Context) -> None:
     """List job selections."""
-    raise typer.Exit(EXIT_PASSED)
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        items = client.get_json("/api/selections")
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(items, default=str))
+    else:
+        print(render.selections_table(items))
 
 
 @app.command()
-def runs(ctx: typer.Context) -> None:
+def runs(
+    ctx: typer.Context,
+    limit: int = typer.Option(20, "--limit", min=1, help="Max runs to show"),
+) -> None:
     """List recent runs."""
-    raise typer.Exit(EXIT_PASSED)
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        items = client.get_json("/api/runs")[:limit]
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(items, default=str))
+    else:
+        print(render.runs_table(items))
 
 
 def main() -> None:
