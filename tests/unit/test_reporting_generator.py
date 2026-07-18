@@ -34,3 +34,24 @@ def test_report_generator_binds_configured_timezone_to_filter():
     utc_dt = datetime(2026, 7, 1, 18, 30, 0, tzinfo=timezone.utc)
     expected = utc_dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M %Z")
     assert filt(utc_dt) == expected
+
+
+def test_report_generator_accepts_filename_override(tmp_path):
+    import types
+
+    from etl_framework.reporting.generator import ReportGenerator
+
+    suite = types.SimpleNamespace(
+        run_id="run-xyz",
+        started_at=None, source_env="dev", target_env="prod",
+        test_cases=[], reconciliation_results=[],
+        total_passed=0, total_failed=0, total_skipped=0, total_issues=0,
+    )
+    gen = ReportGenerator(output_dir=str(tmp_path))
+    path = gen.generate(suite, filename="custom_name.html")
+
+    assert path.endswith("custom_name.html")
+    assert (tmp_path / "custom_name.html").exists()
+    # default (no filename passed) still uses report_{run_id}.html
+    default_path = gen.generate(suite)
+    assert default_path.endswith("report_run-xyz.html")

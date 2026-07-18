@@ -42,11 +42,11 @@ class ReportGenerator:
         self._jinja_env = Environment(loader=loader, autoescape=True)
         self._jinja_env.filters["to_local"] = lambda v: to_local(v, self._timezone)
 
-    def generate(self, suite_result) -> str:
+    def generate(self, suite_result, filename: str | None = None) -> str:
         """
         Renders template with suite_result context.
         Creates output_dir if missing.
-        Writes file to {output_dir}/report_{run_id}.html.
+        Writes file to {output_dir}/{filename or report_{run_id}.html}.
         Returns the file path written.
         """
         try:
@@ -62,7 +62,7 @@ class ReportGenerator:
         html_content = template.render(suite=suite_result)
         
         run_id = getattr(suite_result, "run_id", "unknown_run")
-        report_path = self._output_dir / f"report_{run_id}.html"
+        report_path = self._output_dir / (filename or f"report_{run_id}.html")
         tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(dir=self._output_dir, suffix=".html.tmp")
