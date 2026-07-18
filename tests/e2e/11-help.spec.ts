@@ -26,4 +26,20 @@ test.describe('11 help', () => {
     await authedPage.locator('[data-testid="help-search-input"]').fill('ci/cd');
     await expect(authedPage.locator('text=Gate CI/CD pipelines')).toBeVisible();
   });
+
+  test('CLI and JUnit help is visible and searchable', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+
+    await expect(authedPage.locator('text=CLI & CI/CD').first()).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('atom run');
+    await expect(authedPage.locator('text=Launch and gate with atom run')).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('JUnit');
+    await expect(authedPage.locator('text=Collect JUnit and run artifacts')).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('exit code 6');
+    await expect(authedPage.locator('text=Read gate exit codes')).toBeVisible();
+  });
 });

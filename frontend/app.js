@@ -1178,6 +1178,7 @@ function _appRaw() {
       return this.helpSections.filter((s) => this.helpSectionMatches(s, q));
     },
     helpStepMatches(step, q) {
+      q = this.helpNormalize(q);
       if (!q) return true;
       const hay = [step.title, step.text, step.where, step.tip, step.warn]
         .map((v) => this.helpNormalize(v)).join(' ');

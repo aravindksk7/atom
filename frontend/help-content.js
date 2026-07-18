@@ -195,9 +195,54 @@
         },
         {
           title: 'Gate CI/CD pipelines',
-          text: 'In CI/CD, keep tokens in secret variables, trigger or reference a run, and wait for completion. Use python -m etl_framework.runner.cli --gate-run <run_id> only when CI can access the same app database/storage; otherwise fail from API status or gate responses. Download GET /api/runs/{run_id}/report and publish logs plus scheduler stats as artifacts.',
-          where: 'Pipeline stage -> API or CLI gate',
-          warn: 'Do not hard-code tokens, DB passwords, or BO/Automic credentials in job definitions or pipeline YAML.',
+          text: 'In CI/CD, prefer the HTTP-only atom CLI: store ATOM_API_URL and ATOM_API_TOKEN as secrets, run atom run against a saved Job Selection, publish --junit-out as a test artifact, and let exit codes gate promotion. Use python -m etl_framework.runner.cli --gate-run <run_id> only for legacy jobs that can access the same app database/storage.',
+          where: 'Pipeline stage -> atom run / atom report',
+          warn: 'Do not hard-code tokens, DB passwords, BO/Automic credentials, or pipeline-only secrets in job definitions or pipeline YAML.',
+        },
+      ],
+    },
+    {
+      id: 'cli-cicd',
+      title: 'CLI & CI/CD',
+      intro: 'Use the HTTP-only atom CLI to launch saved Job Selections from any CI system, wait for completion, gate the pipeline with exit codes, and collect JUnit/JSON/HTML artifacts.',
+      steps: [
+        {
+          title: 'Install and configure the CLI',
+          text: 'Install the package, then set ATOM_API_URL to the FastAPI base URL and ATOM_API_TOKEN to a bearer token. You can also pass --api-url and --token on each command. Use --output json when a pipeline needs machine-readable output.',
+          where: 'Terminal: pip install -e .; atom --api-url http://127.0.0.1:8000 --token <token> selections',
+          warn: 'Keep tokens in CI secret variables. Do not hard-code tokens, DB passwords, BO credentials, or Automic credentials in pipeline YAML.',
+        },
+        {
+          title: 'Discover selections and recent runs',
+          text: 'Run atom selections to list saved Job Selections and atom runs --limit N to list recent runs. These commands help CI jobs resolve what can be launched and inspect recent status without direct database access.',
+          where: 'CLI: atom selections; atom --output json runs --limit 5',
+        },
+        {
+          title: 'Launch and gate with atom run',
+          text: 'Run atom run SELECTION --source-env dev --target-env qa to launch a saved Job Selection by id or exact name. The CLI posts to /api/selections/{id}/launch, polls /api/runs/{run_id}/status, prints a summary, and exits with the gate code.',
+          where: 'CLI: atom run "Nightly Regression" --source-env dev --target-env qa --poll-interval 10 --timeout 3600',
+          tip: '--no-wait launches the run, prints the run id, and exits 0 so another job can poll or collect reports later.',
+        },
+        {
+          title: 'Attach CI context',
+          text: 'Pass --ci-commit-sha, --ci-pipeline-url, and --ci-ref so the launched run records the commit, pipeline URL, and branch or tag that produced it.',
+          where: 'CLI: atom run "Nightly Regression" --source-env dev --ci-commit-sha "$CI_COMMIT_SHA" --ci-pipeline-url "$CI_PIPELINE_URL" --ci-ref "$CI_COMMIT_REF_NAME"',
+        },
+        {
+          title: 'Collect JUnit and run artifacts',
+          text: 'Use --junit-out for CI test reports, --json-out for the run detail payload, and --html-out for the generated HTML report when one exists. Later, use atom report RUN_ID --format junit|json|csv|html --out PATH to fetch artifacts for an existing run.',
+          where: 'CLI: atom run "Nightly Regression" --source-env dev --junit-out atom-junit.xml --json-out atom-run.json --html-out atom-report.html',
+          tip: 'The API endpoint GET /api/runs/{run_id}/junit returns application/xml and maps each job result to a JUnit testcase.',
+        },
+        {
+          title: 'Read gate exit codes',
+          text: 'Exit code 0 means passed, 1 failed, 2 cancelled, 3 run error, 4 selection or run not found, 5 auth or connection failure after retries, and exit code 6 timed out while waiting. On timeout, the CLI prints the run id so you can fetch reports later.',
+          where: 'Pipeline shell: atom run "Nightly Regression" --source-env dev --junit-out atom-junit.xml',
+        },
+        {
+          title: 'Publish artifacts in CI',
+          text: 'In GitLab, Jenkins, or GitHub Actions, install the package, set API URL and token secrets, run atom run with --junit-out, and publish the JUnit file as a test report artifact. The CLI is HTTP-only, so the CI runner does not need direct DB access.',
+          where: 'GitLab example: artifacts:reports:junit -> atom-junit.xml',
         },
       ],
     },
@@ -300,6 +345,12 @@
           title: 'Browse metrics',
           text: 'The metrics dashboard shows run-level charts and trends. Metric drift is detected with σ-based analysis across a rolling window.',
           where: 'Reports -> metrics',
+        },
+        {
+          title: 'Export JUnit for CI tools',
+          text: 'Every completed run can be rendered as JUnit XML with GET /api/runs/{run_id}/junit or atom report RUN_ID --format junit --out junit.xml. CI viewers group each Atom job as a testcase and show failures/errors with mismatch counts and error messages.',
+          where: 'History/Reports -> run id; CLI: atom report <run_id> --format junit --out junit.xml',
+          tip: 'Use atom run --junit-out during the pipeline when you want the launch and artifact collection in one command.',
         },
         {
           title: 'Search global logs',
