@@ -785,6 +785,20 @@ def download_all_differences(
     )
 
 
+@router.get("/{run_id}/differences/summary")
+def get_differences_summary(
+    run_id: str,
+    db: Session = Depends(get_session),
+):
+    """Total mismatch count vs. what's actually stored -- used by the frontend to
+    show a size estimate before starting a full-differences export/report."""
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return stored_completeness_summary(db, run)
+
+
 @router.post("/{run_id}/exports", response_model=DifferenceExportStatusOut, status_code=202)
 def create_difference_export(
     run_id: str,

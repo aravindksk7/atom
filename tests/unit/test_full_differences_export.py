@@ -145,3 +145,19 @@ def test_recon_file_and_sql_compare_recompute_use_file_a_fallback():
 
     recon_src = inspect.getsource(de._write_recon_file_compare)
     assert 'req.label_a or "file_a"' in recon_src or "req.label_a or 'file_a'" in recon_src
+
+
+def test_differences_summary_reports_stored_vs_total(client):
+    run_id = _create_run_with_result(total_issues=5, stored_rows=2)
+
+    resp = client.get(f"/api/runs/{run_id}/differences/summary")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_issues"] == 5
+    assert body["stored_rows"] == 2
+
+
+def test_differences_summary_404s_for_missing_run(client):
+    resp = client.get("/api/runs/does-not-exist/differences/summary")
+    assert resp.status_code == 404
