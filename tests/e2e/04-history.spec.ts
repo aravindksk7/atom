@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures';
-import { seedBaselineRun, deleteJob, authedContext } from './api-helpers';
+import { seedBaselineRun, createFileJob, triggerRun, waitForTerminal, deleteJob, authedContext } from './api-helpers';
+
+function assertFullReportContainsAllMismatches(html: string) {
+  expect(html).toContain('data-mismatch');
+  // the global "Load all differences" button only renders when some section is
+  // still truncated -- a full report must never show it
+  expect(html).not.toContain('load-all-btn-global');
+}
 
 test.describe('04 history', () => {
   // adminToken is worker-scoped (fixtures.ts), so it's available to beforeAll/afterAll
@@ -80,5 +87,43 @@ test.describe('04 history', () => {
     await expect(statCards.filter({ hasText: 'Failed' }).locator('.stat-card-value')).toHaveText('1');
 
     await expect(authedPage.locator('.data-table').getByText('1 value / 1 missing in target / 1 missing in source')).toBeVisible();
+  });
+
+  test('Download Full HTML Report produces a self-contained file with all mismatches', async ({ authedPage, adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    let fullReportJobName = '';
+    try {
+      fullReportJobName = `e2e-full-html-report-${Date.now()}`;
+      await createFileJob(ctx, fullReportJobName);
+      const { run_id } = await triggerRun(ctx, [fullReportJobName]);
+      await waitForTerminal(ctx, run_id);
+
+      await authedPage.goto('/');
+      await authedPage.locator('[data-testid="nav-tab-history"]').click();
+      await authedPage.locator('[data-testid="history-subtab-runs"]').click();
+      await authedPage.locator(`[data-testid="history-run-row-${run_id}"]`).click();
+      await expect(authedPage.locator('[data-testid="run-detail-back-btn"]')).toBeVisible();
+
+      authedPage.once('dialog', (d) => d.accept());
+      const downloadPromise = authedPage.waitForEvent('download');
+      await authedPage.locator('[data-testid="history-download-full-report-btn"]').click();
+      const download = await downloadPromise;
+
+      expect(download.suggestedFilename()).toContain('.html');
+      // Reading the browser's download artifact EPERMs on Windows (AV scan lock),
+      // so verify the content through the API instead: POST /exports reuses the
+      // COMPLETED job the button just created, and the download route streams the
+      // exact same artifact file the browser download served.
+      const jobResp = await ctx.post(`/api/runs/${run_id}/exports`, { data: { format: 'html' } });
+      const exportJob = await jobResp.json();
+      expect(exportJob.status).toBe('COMPLETED');
+      const artifactResp = await ctx.get(`/api/runs/${run_id}/exports/${exportJob.export_id}/download`);
+      expect(artifactResp.ok()).toBeTruthy();
+      const html = await artifactResp.text();
+      assertFullReportContainsAllMismatches(html);
+    } finally {
+      if (fullReportJobName) await deleteJob(ctx, fullReportJobName);
+      await ctx.dispose();
+    }
   });
 });
