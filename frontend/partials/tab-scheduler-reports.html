@@ -1,0 +1,107 @@
+<div x-show="currentView === 'scheduler-reports'" x-cloak data-testid="scheduler-reports-tab">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Scheduler Reports</div>
+      <div class="section-sub">Monitor scheduled jobs, inspect timelines, analyze outcomes, export telemetry, and manage schedules.</div>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <a class="btn-secondary" :href="schedulerReportExportUrl('json')" download="scheduler-report.json">Export JSON</a>
+      <a class="btn-secondary" :href="schedulerReportExportUrl('csv')" download="scheduler-report.csv">Export CSV</a>
+      <button class="btn-primary" @click="loadSchedulerReports()" :disabled="schedulerReportLoading">
+        <span x-show="!schedulerReportLoading">Refresh</span>
+        <span x-show="schedulerReportLoading">Refreshing...</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="card scheduler-report-filters mb-4">
+    <select class="field-input field-select" x-model.number="schedulerReportFilters.days" @change="loadSchedulerReports()">
+      <option :value="7">Last 7 days</option>
+      <option :value="30">Last 30 days</option>
+      <option :value="90">Last 90 days</option>
+    </select>
+    <input class="field-input" x-model.debounce.300ms="schedulerReportFilters.job" @input="loadSchedulerReports()" placeholder="Filter by job or schedule" />
+    <select class="field-input field-select" x-model="schedulerReportFilters.status" @change="loadSchedulerReports()">
+      <option value="">All statuses</option>
+      <option value="PASSED">Passed</option>
+      <option value="FAILED">Failed</option>
+      <option value="ERROR">Error</option>
+      <option value="CANCELLED">Cancelled</option>
+      <option value="BLOCKED">Blocked</option>
+    </select>
+    <input class="field-input" type="number" x-model="schedulerReportFilters.exitCode" @input.debounce.300ms="loadSchedulerReports()" placeholder="Exit code" />
+  </div>
+
+  <template x-if="schedulerReportError">
+    <div class="alert-error mb-4" x-text="schedulerReportError"></div>
+  </template>
+
+  <template x-if="schedulerReportWarnings.length">
+    <div class="alert-warn mb-4">
+      <template x-for="warning in schedulerReportWarnings" :key="warning"><div x-text="warning"></div></template>
+    </div>
+  </template>
+
+  <div class="scheduler-report-cards mb-4" x-show="schedulerReportSummary">
+    <div class="metric-card metric-slate"><div class="metric-label">Scheduler</div><div class="metric-value" x-text="schedulerReportSummary?.scheduler?.running ? 'Running' : 'Stopped'"></div></div>
+    <div class="metric-card metric-emerald"><div class="metric-label">Success Rate</div><div class="metric-value" x-text="(schedulerReportSummary?.summary?.success_rate ?? 'N/A') + (schedulerReportSummary?.summary?.success_rate == null ? '' : '%')"></div></div>
+    <div class="metric-card metric-rose"><div class="metric-label">Failures</div><div class="metric-value" x-text="(schedulerReportSummary?.summary?.failed || 0) + (schedulerReportSummary?.summary?.error || 0)"></div></div>
+    <div class="metric-card metric-indigo"><div class="metric-label">Query Time</div><div class="metric-value" x-text="(schedulerReportSummary?.performance?.report_query_ms || 0) + ' ms'"></div></div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="font-semibold mb-3">Live Status Grid</div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Schedule</th><th>Status</th><th>Enabled</th><th>Cron</th><th>Next Run</th><th>Duration</th><th>Exit</th><th>Actions</th></tr></thead>
+        <tbody>
+          <template x-for="row in schedulerReportGrid" :key="row.schedule_id">
+            <tr>
+              <td x-text="row.schedule_name"></td>
+              <td><span :class="schedulerStatusClass(row.last_status)" x-text="row.last_status || 'No telemetry'"></span></td>
+              <td x-text="row.enabled ? 'Yes' : 'No'"></td>
+              <td class="font-mono text-xs" x-text="row.cron_expr"></td>
+              <td x-text="row.next_run_at || 'Not scheduled'"></td>
+              <td x-text="row.last_duration_seconds == null ? 'N/A' : row.last_duration_seconds + 's'"></td>
+              <td x-text="row.last_exit_code == null ? 'N/A' : row.last_exit_code"></td>
+              <td class="flex gap-1 flex-wrap">
+                <button class="btn-secondary btn-sm" @click="schedulerReportRunNow(row)">Run</button>
+                <button class="btn-secondary btn-sm" @click="schedulerReportToggle(row)" x-text="row.enabled ? 'Disable' : 'Enable'"></button>
+                <button class="btn-secondary btn-sm" @click="schedulerReportEdit(row)">Edit</button>
+                <button class="btn-danger btn-sm" @click="schedulerReportDelete(row)">Delete</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="scheduler-report-panels">
+    <div class="card">
+      <div class="font-semibold mb-3">Execution Timeline</div>
+      <div class="scheduler-timeline">
+        <template x-for="segment in schedulerReportTimeline" :key="segment.schedule_name + '-' + segment.started_at + '-' + segment.status">
+          <div class="scheduler-timeline-row">
+            <div class="scheduler-timeline-label" x-text="segment.schedule_name"></div>
+            <div class="scheduler-timeline-bar" :class="schedulerStatusClass(segment.status)" :title="segment.status + ' · ' + (segment.duration_seconds || 0) + 's'" x-text="segment.status"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+    <div class="card">
+      <div class="font-semibold mb-3">Outcome Analytics</div>
+      <canvas id="scheduler-report-outcomes-chart" height="180"></canvas>
+    </div>
+  </div>
+
+  <div x-show="schedulerReportEditing" x-cloak class="modal-backdrop" @click.self="schedulerReportEditing = null">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <div class="drawer-header"><div class="drawer-title">Edit Schedule</div><button class="drawer-close" @click="schedulerReportEditing = null">x</button></div>
+      <label class="field-label">Cron expression</label>
+      <input class="field-input mb-3" x-model="schedulerReportEditing.cron_expr" />
+      <label class="inline-flex items-center gap-2 mb-4"><input type="checkbox" x-model="schedulerReportEditing.enabled" /> Enabled</label>
+      <div class="flex gap-2 justify-end"><button class="btn-secondary" @click="schedulerReportEditing = null">Cancel</button><button class="btn-primary" @click="schedulerReportSaveEdit()">Save</button></div>
+    </div>
+  </div>
+</div>

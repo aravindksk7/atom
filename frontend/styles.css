@@ -2034,3 +2034,67 @@ select option {
   .help-sidebar { position: static; top: auto; }
   .help-nav { max-height: none; }
 }
+
+.scheduler-report-filters,
+.scheduler-report-cards,
+.scheduler-report-panels {
+  display: grid;
+  gap: 1rem;
+}
+
+.scheduler-report-filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scheduler-report-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scheduler-report-panels {
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr);
+}
+
+.scheduler-timeline {
+  display: grid;
+  gap: .75rem;
+  overflow-x: auto;
+}
+
+.scheduler-timeline-row {
+  display: grid;
+  grid-template-columns: 160px minmax(180px, 1fr);
+  gap: .75rem;
+  align-items: center;
+}
+
+.scheduler-timeline-label {
+  font-size: .8rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduler-timeline-bar {
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  font-size: .75rem;
+  min-width: 96px;
+  text-align: center;
+}
+
+.metric-indigo {
+  border-color: rgba(99, 102, 241, 0.24);
+}
+
+@media (max-width: 900px) {
+  .scheduler-report-filters,
+  .scheduler-report-cards,
+  .scheduler-report-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .scheduler-timeline-row {
+    grid-template-columns: 120px minmax(180px, 1fr);
+  }
+}

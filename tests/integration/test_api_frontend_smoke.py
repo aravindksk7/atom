@@ -165,6 +165,15 @@ def test_frontend_api_run_lifecycle_smoke(client):
     assert runs.json()[0]["run_id"] == run_id
 
 
+def test_scheduler_reports_tab_is_present_in_frontend(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Scheduler Reports" in html
+    assert "data-testid=\"nav-tab-scheduler-reports\"" in html or "nav-tab-' + tab.id" in html
+    assert "data-testid=\"scheduler-reports-tab\"" in html
+
+
 def test_failed_result_can_pass_with_agreed_actions(client):
     launch = client.post(
         "/api/runs",
