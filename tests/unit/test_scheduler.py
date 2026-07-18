@@ -212,3 +212,51 @@ def test_refresh_all_timezones_noop_when_not_started():
     from api.services import scheduler as svc
     svc._scheduler = None
     svc.refresh_all_timezones()  # must not raise
+
+
+def test_schedule_stats_route_returns_payload(monkeypatch):
+    from fastapi.testclient import TestClient
+    from api.main import app
+    from api.dependencies import get_session
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import TokenRepository
+
+    db = _session()
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    raw, _ = TokenRepository(db).create("test-scheduler-stats")
+
+    def override_session():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+        response = client.get("/api/schedules/stats?days=30")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window_days"] == 30
+    assert "scheduler" in body
+    assert "summary" in body
+    assert "schedules" in body
+
+
+def test_schedule_stats_route_validates_days(monkeypatch):
+    from fastapi.testclient import TestClient
+    from api.main import app
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import TokenRepository
+
+    db = _session()
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    raw, _ = TokenRepository(db).create("test-scheduler-stats-validation")
+
+    client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+    response = client.get("/api/schedules/stats?days=0")
+
+    assert response.status_code == 422

@@ -1908,6 +1908,45 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <!-- ── Schedules sub-tab ── -->
   <div x-show="launchSubTab === 'schedules'">
+    <div class="section-card mb-4">
+      <div class="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <h3 class="text-base font-semibold text-slate-900">Scheduler Statistics</h3>
+          <p class="text-sm text-muted">Execution and runtime health for the last 30 days.</p>
+        </div>
+        <button @click="loadSchedulerStats()" class="btn-secondary btn-sm" :disabled="schedulerStatsLoading">Refresh</button>
+      </div>
+      <template x-if="schedulerStatsError">
+        <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="schedulerStatsError"></div>
+      </template>
+      <template x-if="schedulerStats">
+        <div>
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div class="text-xs text-muted uppercase tracking-wide">Scheduler</div>
+              <div class="text-lg font-semibold" x-text="schedulerStateLabel()"></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div class="text-xs text-muted uppercase tracking-wide">Enabled</div>
+              <div class="text-lg font-semibold" x-text="schedulerStats.summary.enabled_schedules"></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div class="text-xs text-muted uppercase tracking-wide">Runs</div>
+              <div class="text-lg font-semibold" x-text="schedulerStats.summary.runs_triggered"></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div class="text-xs text-muted uppercase tracking-wide">Success Rate</div>
+              <div class="text-lg font-semibold" x-text="formatSchedulerPercent(schedulerStats.summary.success_rate)"></div>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div class="text-xs text-muted uppercase tracking-wide">Avg Duration</div>
+              <div class="text-lg font-semibold" x-text="formatSchedulerDuration(schedulerStats.summary.average_duration_seconds)"></div>
+            </div>
+          </div>
+          <div class="text-xs text-muted" x-text="`Generated ${formatDateTime(schedulerStats.generated_at)} | APScheduler jobs ${schedulerStats.scheduler.job_count}`"></div>
+        </div>
+      </template>
+    </div>
     <div class="flex justify-end mb-3">
       <button @click="openNewScheduleModal()" class="btn-primary">+ New Schedule</button>
     </div>
@@ -1936,6 +1975,18 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
                 <span x-show="sched.next_run_at" x-text="'Next: ' + fmtDate(sched.next_run_at)"></span>
               </div>
+              <template x-if="schedulerStats">
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 text-xs text-slate-600">
+                  <template x-for="stat in schedulerStats.schedules.filter(item => item.id === sched.id)" :key="stat.id">
+                    <div class="contents">
+                      <div class="bg-white border border-slate-200 rounded-lg px-2 py-1">Next: <span x-text="stat.next_run_at ? formatDateTime(stat.next_run_at) : 'n/a'"></span></div>
+                      <div class="bg-white border border-slate-200 rounded-lg px-2 py-1">Last: <span x-text="stat.last_status || 'No recent runs'"></span></div>
+                      <div class="bg-white border border-slate-200 rounded-lg px-2 py-1">Rate: <span x-text="formatSchedulerPercent(stat.success_rate)"></span></div>
+                      <div class="bg-white border border-slate-200 rounded-lg px-2 py-1">Registered: <span x-text="stat.registered ? 'yes' : 'no'"></span></div>
+                    </div>
+                  </template>
+                </div>
+              </template>
             </div>
             <div class="flex gap-2 flex-shrink-0">
               <button @click="runScheduleNow(sched.id)" class="btn-secondary btn-sm">▶ Now</button>

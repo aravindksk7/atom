@@ -54,6 +54,9 @@
     // Schedules
     // -----------------------------------------------------------
     schedules: [],
+    schedulerStats: null,
+    schedulerStatsLoading: false,
+    schedulerStatsError: '',
     launchSubTab: 'jobs',
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
@@ -634,6 +637,40 @@
     // ===========================================================
     async loadSchedules() {
       try { this.schedules = await api('GET', '/api/schedules'); } catch {}
+      await this.loadSchedulerStats();
+    },
+
+    async loadSchedulerStats() {
+      this.schedulerStatsLoading = true;
+      this.schedulerStatsError = '';
+      try {
+        this.schedulerStats = await api('GET', '/api/schedules/stats?days=30');
+      } catch (e) {
+        this.schedulerStatsError = e.message || 'Unable to load scheduler statistics';
+      } finally {
+        this.schedulerStatsLoading = false;
+      }
+    },
+
+    formatSchedulerPercent(value) {
+      return value === null || value === undefined ? 'n/a' : `${Number(value).toFixed(2)}%`;
+    },
+
+    formatSchedulerDuration(value) {
+      if (value === null || value === undefined) return 'n/a';
+      if (value < 60) return `${Number(value).toFixed(1)}s`;
+      return `${(Number(value) / 60).toFixed(1)}m`;
+    },
+
+    formatDateTime(value) {
+      return this.fmtDate(value);
+    },
+
+    schedulerStateLabel() {
+      const scheduler = this.schedulerStats?.scheduler;
+      if (!scheduler) return 'Loading';
+      if (!scheduler.available) return 'Unavailable';
+      return scheduler.running ? 'Running' : 'Stopped';
     },
 
     openNewScheduleModal() {
@@ -700,7 +737,7 @@
       try {
         await api('POST', `/api/schedules/${id}/run-now`);
         this.toast('success', 'Run triggered');
-        setTimeout(() => this.loadRuns(), 1000);
+        setTimeout(() => { this.loadRuns(); this.loadSchedulerStats(); }, 1000);
       } catch (e) {
         this.toast('error', 'Trigger failed', e.message);
       }

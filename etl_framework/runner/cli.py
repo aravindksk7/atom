@@ -19,6 +19,7 @@ def _default_gate_session_factory():
 
 
 _gate_session_factory = None  # test seam; resolved lazily in _gate_exit_code
+_stats_session_factory = None  # test seam; resolved lazily in _scheduler_stats_exit_code
 
 
 def _gate_exit_code(run_id: str, output: str) -> int:
@@ -51,6 +52,68 @@ def _gate_exit_code(run_id: str, output: str) -> int:
         session.close()
 
 
+def _default_stats_session_factory():
+    from etl_framework.repository.database import SessionLocal, init_db
+    init_db()
+    return SessionLocal
+
+
+def _print_scheduler_stats_text(stats: dict) -> None:
+    summary = stats["summary"]
+    scheduler = stats["scheduler"]
+    gate = stats["gate"]
+    state = "running" if scheduler["running"] else "stopped"
+    if not scheduler["available"]:
+        state = "unavailable"
+    print(f"Scheduler: {state} jobs={scheduler['job_count']} timezone={scheduler['timezone']}")
+    print(
+        f"Window: {stats['window_days']} days schedules={summary['total_schedules']} "
+        f"enabled={summary['enabled_schedules']} runs={summary['runs_triggered']}"
+    )
+    print(
+        f"Outcomes: passed={summary['passed']} failed={summary['failed']} "
+        f"error={summary['error']} cancelled={summary['cancelled']} blocked={summary['blocked']}"
+    )
+    print(
+        f"Success rate: {summary['success_rate'] if summary['success_rate'] is not None else 'n/a'} "
+        f"avg_duration_seconds={summary['average_duration_seconds'] if summary['average_duration_seconds'] is not None else 'n/a'}"
+    )
+    print(f"Gate: {gate['status']} exit={gate['exit_code']}")
+    for reason in gate["reasons"]:
+        print(f"- {reason}")
+
+
+def _scheduler_stats_exit_code(args) -> int:
+    from api.services.scheduler_stats import GateOptions, build_scheduler_stats
+
+    session = None
+    try:
+        factory = _stats_session_factory or _default_stats_session_factory()
+        session = factory()
+        stats = build_scheduler_stats(
+            session,
+            days=args.days,
+            gate_options=GateOptions(
+                fail_on_stopped=args.fail_on_stopped,
+                min_success_rate=args.min_success_rate,
+            ),
+        )
+        if args.output == "json":
+            print(json.dumps(stats, default=str))
+        else:
+            _print_scheduler_stats_text(stats)
+        return int(stats["gate"]["exit_code"])
+    except Exception as exc:
+        if args.output == "json":
+            print(json.dumps({"error": str(exc), "exit_code": 1}))
+        else:
+            print(f"ERROR scheduler stats: {exc}")
+        return 1
+    finally:
+        if session is not None:
+            session.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ETL Framework Test Runner")
     parser.add_argument("--config", required=False, help="Path to environment config YAML")
@@ -66,6 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--gate-run", default=None, metavar="RUN_ID",
         help="CI gate: exit 0=passed 1=failed 2=cancelled 3=error 4=not-found for the given run, then stop",
     )
+    parser.add_argument("--scheduler-stats", action="store_true", help="Report scheduler execution and runtime statistics, then stop")
+    parser.add_argument("--days", type=int, default=30, help="Scheduler stats lookback window in days, 1..365")
+    parser.add_argument("--fail-on-stopped", action="store_true", help="Scheduler stats gate: fail when scheduler is unavailable or stopped")
+    parser.add_argument("--min-success-rate", type=float, default=None, help="Scheduler stats gate: fail when aggregate success rate is below this percentage")
     return parser
 
 
@@ -75,8 +142,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(level=args.log_level, log_format=args.log_format)
     if args.gate_run:
         return _gate_exit_code(args.gate_run, args.output)
+    if args.scheduler_stats:
+        if args.days < 1 or args.days > 365:
+            parser.error("--days must be between 1 and 365")
+        if args.min_success_rate is not None and (args.min_success_rate < 0 or args.min_success_rate > 100):
+            parser.error("--min-success-rate must be between 0 and 100")
+        return _scheduler_stats_exit_code(args)
     if not (args.config and args.source_env and args.target_env):
-        parser.error("--config, --source-env and --target-env are required unless --gate-run is used")
+        parser.error("--config, --source-env and --target-env are required unless --gate-run or --scheduler-stats is used")
     environments = ConfigLoader().load(args.config)
 
     missing = [name for name in (args.source_env, args.target_env) if name not in environments]
@@ -107,3 +180,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Source: {args.source_env} -> Target: {args.target_env}")
         print("No test cases registered yet - use this runner programmatically.")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

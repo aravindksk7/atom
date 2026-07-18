@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -78,6 +79,16 @@ def _resolve_and_validate(db: Session, body: "ScheduleCreate") -> int:
     jobs_by_name = {j.name: j for j in JobRepository(db).list()}
     _validate_env_requirements(version.job_sequence or [], jobs_by_name, body.target_env)
     return version_number
+
+
+@router.get("/stats")
+def scheduler_stats(
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    db: Session = Depends(get_session),
+):
+    from api.services.scheduler_stats import build_scheduler_stats
+
+    return build_scheduler_stats(db, days=days)
 
 
 @router.get("", response_model=list[ScheduleOut])

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+
 from etl_framework.runner.cli import build_parser, main
 
 
@@ -70,3 +74,115 @@ def test_gate_run_exit_codes(tmp_path, monkeypatch):
     assert cli.main(["--gate-run", "run-cancel"]) == 2
     assert cli.main(["--gate-run", "run-err"]) == 3
     assert cli.main(["--gate-run", "run-ghost"]) == 4
+
+
+def _session_factory():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from etl_framework.repository.database import Base
+    import etl_framework.repository.models  # noqa: F401
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
+
+
+def test_scheduler_stats_cli_json_report_exits_zero(monkeypatch, capsys):
+    from etl_framework.runner import cli
+
+    factory = _session_factory()
+    monkeypatch.setattr(cli, "_stats_session_factory", factory)
+
+    code = cli.main(["--scheduler-stats", "--output", "json"])
+
+    assert code == 0
+    body = json.loads(capsys.readouterr().out)
+    assert body["window_days"] == 30
+    assert body["gate"]["exit_code"] == 0
+
+
+def test_scheduler_stats_cli_gate_returns_nonzero(monkeypatch, capsys):
+    from etl_framework.runner import cli
+
+    factory = _session_factory()
+    monkeypatch.setattr(cli, "_stats_session_factory", factory)
+    monkeypatch.setattr(
+        "api.services.scheduler_stats.get_scheduler_runtime_snapshot",
+        lambda: {"available": True, "running": False, "job_count": 0, "timezone": "UTC", "jobs": {}},
+    )
+
+    code = cli.main(["--scheduler-stats", "--fail-on-stopped", "--output", "json"])
+
+    assert code == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body["gate"]["status"] == "failed"
+
+
+def test_scheduler_stats_cli_validates_days():
+    from etl_framework.runner import cli
+
+    try:
+        cli.main(["--scheduler-stats", "--days", "0"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected parser validation failure")
+
+
+def test_scheduler_stats_cli_validates_min_success_rate():
+    from etl_framework.runner import cli
+
+    try:
+        cli.main(["--scheduler-stats", "--min-success-rate", "101"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected parser validation failure")
+
+
+def test_scheduler_stats_module_entrypoint_outputs_json():
+    result = subprocess.run(
+        [sys.executable, "-m", "etl_framework.runner.cli", "--scheduler-stats", "--output", "json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    body = json.loads(result.stdout)
+    assert body["window_days"] == 30
+    assert body["gate"]["exit_code"] == 0
+
+
+def test_scheduler_stats_cli_json_error_returns_one(monkeypatch, capsys):
+    from etl_framework.runner import cli
+
+    def broken_factory():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(cli, "_stats_session_factory", broken_factory)
+
+    code = cli.main(["--scheduler-stats", "--output", "json"])
+
+    assert code == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body == {"error": "database unavailable", "exit_code": 1}
+
+
+def test_scheduler_stats_cli_text_error_returns_one(monkeypatch, capsys):
+    from etl_framework.runner import cli
+
+    def broken_factory():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(cli, "_stats_session_factory", broken_factory)
+
+    code = cli.main(["--scheduler-stats", "--output", "text"])
+
+    assert code == 1
+    assert "ERROR scheduler stats: database unavailable" in capsys.readouterr().out

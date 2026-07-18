@@ -21,6 +21,61 @@ def _job_id(schedule_id: int) -> str:
     return f"etl_schedule_{schedule_id}"
 
 
+def _parse_schedule_id_from_job_id(job_id: str) -> int | None:
+    prefix = "etl_schedule_"
+    if not job_id.startswith(prefix):
+        return None
+    try:
+        return int(job_id[len(prefix):])
+    except ValueError:
+        return None
+
+
+def _iso_or_none(value) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def get_scheduler_runtime_snapshot() -> dict:
+    """Return read-only APScheduler state for status and statistics reports."""
+    if not _APSCHEDULER_AVAILABLE:
+        return {
+            "available": False,
+            "running": False,
+            "job_count": 0,
+            "timezone": "UTC",
+            "jobs": {},
+        }
+    if _scheduler is None:
+        return {
+            "available": True,
+            "running": False,
+            "job_count": 0,
+            "timezone": "UTC",
+            "jobs": {},
+        }
+    jobs = {}
+    for job in _scheduler.get_jobs():
+        schedule_id = _parse_schedule_id_from_job_id(job.id)
+        if schedule_id is None:
+            continue
+        jobs[schedule_id] = {
+            "job_id": job.id,
+            "next_run_at": _iso_or_none(job.next_run_time),
+        }
+    timezone_value = getattr(_scheduler, "timezone", None)
+    return {
+        "available": True,
+        "running": bool(getattr(_scheduler, "running", False)),
+        "job_count": len(jobs),
+        "timezone": str(timezone_value or "UTC"),
+        "jobs": jobs,
+    }
+
+
 def _run_schedule(schedule_id: int, name: str) -> None:
     """Called by APScheduler; runs inside a daemon thread."""
     import uuid as _uuid
