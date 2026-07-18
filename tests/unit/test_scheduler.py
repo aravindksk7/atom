@@ -8,7 +8,11 @@ from sqlalchemy.pool import StaticPool
 
 from etl_framework.repository.database import Base
 import etl_framework.repository.models  # noqa: F401
-from etl_framework.repository.repository import ScheduleRepository
+from etl_framework.repository.repository import (
+    JobSelectionRepository,
+    RunRepository,
+    ScheduleRepository,
+)
 
 
 def _session() -> Session:
@@ -163,9 +167,12 @@ def test_add_job_uses_current_app_timezone(monkeypatch):
 
     class FakeScheduler:
         def add_job(self, func, trigger=None, id=None, args=None,
-                     replace_existing=None, misfire_grace_time=None):
+                     replace_existing=None, misfire_grace_time=None,
+                     max_instances=None, coalesce=None):
             added["trigger"] = trigger
             added["id"] = id
+            added["max_instances"] = max_instances
+            added["coalesce"] = coalesce
 
     monkeypatch.setattr(svc, "_scheduler", FakeScheduler())
     monkeypatch.setattr(svc, "_current_timezone", lambda: "America/New_York")
@@ -177,6 +184,8 @@ def test_add_job_uses_current_app_timezone(monkeypatch):
 
     svc._add_job(FakeSched())
     assert added["id"] == "etl_schedule_1"
+    assert added["max_instances"] == 1
+    assert added["coalesce"] is True
     assert str(added["trigger"].timezone) == "America/New_York"
 
 
@@ -212,3 +221,50 @@ def test_refresh_all_timezones_noop_when_not_started():
     from api.services import scheduler as svc
     svc._scheduler = None
     svc.refresh_all_timezones()  # must not raise
+
+
+def test_run_schedule_skips_when_selection_has_active_run(monkeypatch):
+    from api.services import scheduler as svc
+    from etl_framework.repository.database import Base
+    import etl_framework.repository.database as _db_module
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+
+        db = testing_session()
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection",
+            description="",
+            tags=[],
+            job_sequence=[],
+            run_settings={},
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=1,
+        ))
+        RunRepository(db).create_run(
+            "active-run", "dev", "prod", {}, selection_id=selection.id, selection_version=1,
+        )
+        schedule_id = schedule.id
+        schedule_name = schedule.name
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        svc._run_schedule(schedule_id, schedule_name)
+
+        db = testing_session()
+        runs = RunRepository(db).list_runs()
+        db.close()
+        assert [run.run_id for run in runs] == ["active-run"]
+        assert executed == []
+    finally:
+        _db_module.SessionLocal = previous

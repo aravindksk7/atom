@@ -39,7 +39,8 @@ from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.utils.context import set_run_id
 from etl_framework.utils.tracing import span
 
-HOLD_POLL_INTERVAL_SECONDS = int(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
+HOLD_POLL_INTERVAL_SECONDS = float(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
+HOLD_TIMEOUT_SECONDS = float(os.environ.get("HOLD_TIMEOUT_SECONDS", "86400"))
 BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
 FILE_SOURCE_QUERY = "__file_source__"
 
@@ -188,6 +189,8 @@ class RunExecutor:
 
             try:
                 self._apply_health_gate()
+                jobs_index = self._build_jobs_index()
+                self._validate_dependencies(steps, jobs_index)
                 step_repo = RunStepRepository(self._db)
                 step_repo.materialize_steps(self._run_id, steps)
 
@@ -195,17 +198,27 @@ class RunExecutor:
                 all_results: list[ReconciliationResult] = []
                 prev_result: ReconciliationResult | None = None
                 cancelled = False
-                jobs_index = self._build_jobs_index()
+                blocked = False
 
                 for i, seq_step in enumerate(steps):
-                    # Condition gate: check previous step's outcome before running this step
-                    if seq_step.condition is not None and prev_result is not None:
-                        if not self._check_condition(seq_step.condition, prev_result):
+                    # Condition gate: check immediate previous step's outcome before running this step.
+                    if seq_step.condition is not None and i > 0:
+                        if prev_result is None or not self._check_condition(seq_step.condition, prev_result):
                             step_repo.cancel_remaining(self._run_id, from_index=i)
+                            blocked = True
                             break
 
-                    if seq_step.wait_seconds > 0:
-                        time.sleep(seq_step.wait_seconds)
+                    if self._run_repo.is_cancel_requested(self._run_id):
+                        step_repo.cancel_remaining(self._run_id, from_index=i)
+                        cancelled = True
+                        break
+
+                    if seq_step.wait_seconds > 0 and self._sleep_with_cancel_check(
+                        seq_step.wait_seconds
+                    ):
+                        step_repo.cancel_remaining(self._run_id, from_index=i)
+                        cancelled = True
+                        break
 
                     step_repo.update_status(self._run_id, i, "RUNNING")
 
@@ -219,9 +232,8 @@ class RunExecutor:
                     all_states.append(state)
 
                     step_results = self._persist_states([state])
-                    if step_results:
-                        prev_result = step_results[0]
-                        all_results.extend(step_results)
+                    prev_result = step_results[0] if step_results else None
+                    all_results.extend(step_results)
 
                     job_outcome = state.status.value if hasattr(state.status, "value") else str(state.status)
                     step_repo.update_status(self._run_id, i, job_outcome)
@@ -250,6 +262,19 @@ class RunExecutor:
                         completed_at=datetime.now(timezone.utc),
                     )
                     self._fire_webhooks("CANCELLED")
+                elif blocked:
+                    self._write_metrics(all_results)
+                    self._run_repo.update_run_status(
+                        self._run_id,
+                        "BLOCKED",
+                        completed_at=datetime.now(timezone.utc),
+                        total_tests=len(all_states),
+                        passed=sum(1 for state in all_states if state.status == TestStatus.PASSED),
+                        failed=sum(1 for state in all_states if state.status == TestStatus.FAILED),
+                        slow=sum(1 for state in all_states if state.status == TestStatus.SLOW),
+                        error=sum(1 for state in all_states if state.status == TestStatus.ERROR),
+                    )
+                    self._fire_webhooks("BLOCKED")
                 else:
                     self._write_metrics(all_results)
                     self._complete_run(all_states)
@@ -306,12 +331,35 @@ class RunExecutor:
         return True
 
     def _poll_for_release(self, step_repo: RunStepRepository, step_index: int) -> str:
+        waited = 0.0
         while True:
             time.sleep(HOLD_POLL_INTERVAL_SECONDS)
+            waited += HOLD_POLL_INTERVAL_SECONDS
             self._db.expire_all()
+            if self._run_repo.is_cancel_requested(self._run_id):
+                return "cancel"
             step = step_repo.get_step(self._run_id, step_index)
             if step is None or step.status != "HELD":
                 return (step.release_action or "approve") if step else "approve"
+            if HOLD_TIMEOUT_SECONDS > 0 and waited >= HOLD_TIMEOUT_SECONDS:
+                step_repo.update_status(
+                    self._run_id,
+                    step_index,
+                    "CANCELLED",
+                    release_action="cancel",
+                    release_note="hold timed out",
+                    released_at=datetime.now(timezone.utc),
+                )
+                return "cancel"
+
+    def _sleep_with_cancel_check(self, seconds: float) -> bool:
+        remaining = float(seconds)
+        while remaining > 0:
+            time.sleep(min(1.0, remaining))
+            remaining -= 1.0
+            if self._run_repo.is_cancel_requested(self._run_id):
+                return True
+        return False
 
     def _fire_held_webhook(self, step_index: int, job_name: str) -> None:
         try:
@@ -328,34 +376,27 @@ class RunExecutor:
         except Exception:
             pass
 
-    def _resolve_jobs(self) -> list[JobDefinition]:
-        jobs_by_name = {job.name: self._job_to_definition(job) for job in self._job_repo.list()}
-        jobs_by_name.update({job.name: job for job in _SEED_JOBS if job.name not in jobs_by_name})
-        requested = [jobs_by_name[n] for n in self._job_sequence if n in jobs_by_name]
-        return self._topo_sort(requested)
+    def _validate_dependencies(
+        self, steps: list[SequenceStep], jobs_index: dict[str, JobDefinition]
+    ) -> None:
+        """Fail fast when the user-ordered sequence contradicts depends_on.
 
-    def _topo_sort(self, jobs: list[JobDefinition]) -> list[JobDefinition]:
-        name_set = {j.name for j in jobs}
-        by_name = {j.name: j for j in jobs}
-        in_degree: dict[str, int] = {j.name: 0 for j in jobs}
-        graph: dict[str, list[str]] = {j.name: [] for j in jobs}
-        for job in jobs:
+        Only dependencies that are themselves part of the sequence are
+        enforced; external depends_on entries are informational.
+        """
+        position = {s.job_name: i for i, s in enumerate(steps)}
+        for i, s in enumerate(steps):
+            job = jobs_index.get(s.job_name)
+            if job is None:
+                continue
             for dep in job.depends_on:
-                if dep in name_set:
-                    graph[dep].append(job.name)
-                    in_degree[job.name] += 1
-        queue = [n for n, d in in_degree.items() if d == 0]
-        sorted_names: list[str] = []
-        while queue:
-            node = queue.pop(0)
-            sorted_names.append(node)
-            for child in graph[node]:
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    queue.append(child)
-        if len(sorted_names) != len(jobs):
-            raise ValueError("Cycle detected in job dependency graph")
-        return [by_name[n] for n in sorted_names]
+                dep_pos = position.get(dep)
+                if dep_pos is not None and dep_pos > i:
+                    raise ValueError(
+                        f"Job '{s.job_name}' depends on '{dep}' but is sequenced "
+                        f"before it (position {i} vs {dep_pos}). Reorder the "
+                        f"job sequence so dependencies run first."
+                    )
 
     def _apply_health_gate(self) -> None:
         if not self._settings.health_check:
@@ -503,6 +544,7 @@ class RunExecutor:
             use_hash_precheck=use_hash_precheck,
             backend=self._build_backend(job),
             segment_columns=segment_columns,
+            max_compare_rows=self._settings.max_compare_rows,
         )
         result = engine.reconcile(
             query=query,

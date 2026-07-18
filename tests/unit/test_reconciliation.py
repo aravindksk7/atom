@@ -82,6 +82,18 @@ def test_identical_data_passes_with_zero_mismatches():
     assert result.total_issues == 0
 
 
+def test_max_compare_rows_guardrail_raises():
+    from etl_framework.exceptions import CompareRowLimitExceeded
+
+    df = pd.DataFrame({"id": range(10), "v": range(10)})
+    engine = _make_engine(df, df.copy(), max_compare_rows=5)
+
+    with pytest.raises(CompareRowLimitExceeded) as exc_info:
+        engine.reconcile("SELECT 1", "too_big")
+
+    assert "max_compare_rows=5" in str(exc_info.value)
+
+
 def test_capped_mismatch_details_keep_uncapped_column_aggregates():
     row_count = 6_000
     source = pd.DataFrame({
@@ -396,6 +408,19 @@ def test_chunk_size_nonzero_unequal_row_counts_no_infinite_loop():
     result = engine.reconcile("SELECT 1", "unequal_rows")
     # Must terminate and report missing_in_source_count
     assert result.missing_in_source_count == 1
+
+
+def test_chunk_size_nonzero_loads_longer_side_fully():
+    """Chunked mode must continue loading until both sides are exhausted."""
+    source = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    target = pd.DataFrame({"id": [1, 2, 3, 4, 5], "val": ["a", "b", "c", "d", "e"]})
+    engine = _make_paginating_engine(source, target, chunk_size=2)
+
+    result = engine.reconcile("SELECT 1", "longer_target")
+
+    assert result.source_row_count == 3
+    assert result.target_row_count == 5
+    assert result.missing_in_source_count == 2
 
 
 # --- Hash pre-check tests (Task 9, use_hash_precheck=True) ---

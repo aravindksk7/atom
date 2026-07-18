@@ -223,3 +223,78 @@ def test_hold_skip_continues_run(db_path):
         assert steps_rows[1].status not in {"PENDING", "HELD"}
     finally:
         check_session.close()
+
+
+def test_hold_times_out_and_cancels(monkeypatch, db_path):
+    monkeypatch.setattr(_re_module, "HOLD_POLL_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(_re_module, "HOLD_TIMEOUT_SECONDS", 0.15)
+
+    engine = _make_engine(db_path)
+    run_id = str(uuid.uuid4())
+    setup_session = _session(engine)
+    try:
+        RunRepository(setup_session).create_run(run_id, "dev", "prod")
+    finally:
+        setup_session.close()
+
+    executor_session = _session(engine)
+    try:
+        from api.services.run_executor import RunExecutor
+
+        RunExecutor(
+            db=executor_session,
+            run_id=run_id,
+            source_env="dev",
+            target_env="prod",
+            job_sequence=[SequenceStep(job_name="orders_reconciliation", hold_after=True)],
+            run_settings=RunSettings(metrics_enabled=False),
+        ).execute()
+    finally:
+        executor_session.close()
+
+    check_session = _session(engine)
+    try:
+        run = RunRepository(check_session).get_run(run_id)
+        step = RunStepRepository(check_session).get_step(run_id, 0)
+        assert run.status == "CANCELLED"
+        assert step.status == "CANCELLED"
+        assert step.release_note == "hold timed out"
+    finally:
+        check_session.close()
+
+
+def test_cancel_request_releases_held_step(monkeypatch, db_path):
+    monkeypatch.setattr(_re_module, "HOLD_POLL_INTERVAL_SECONDS", 0.05)
+
+    engine = _make_engine(db_path)
+    run_id = str(uuid.uuid4())
+    setup_session = _session(engine)
+    try:
+        RunRepository(setup_session).create_run(run_id, "dev", "prod")
+    finally:
+        setup_session.close()
+
+    steps = [SequenceStep(job_name="orders_reconciliation", hold_after=True)]
+    t = threading.Thread(
+        target=_run_executor_in_thread,
+        args=(engine, run_id, steps),
+        daemon=True,
+    )
+    t.start()
+
+    assert _wait_for_held(engine, run_id, 0, timeout=5), "Timed out waiting for step 0 to be HELD"
+
+    cancel_session = _session(engine)
+    try:
+        RunRepository(cancel_session).request_cancel(run_id)
+    finally:
+        cancel_session.close()
+
+    t.join(timeout=2)
+    assert not t.is_alive(), "Executor thread did not finish after cancel request"
+
+    check_session = _session(engine)
+    try:
+        assert RunRepository(check_session).get_run(run_id).status == "CANCELLED"
+    finally:
+        check_session.close()

@@ -45,6 +45,14 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             )
             return
 
+        run_repo = RunRepository(db)
+        if run_repo.has_active_run_for_selection(sched.selection_id):
+            logger.info(
+                "Schedule '%s' skipped because selection %s already has an active run",
+                name, sched.selection_id,
+            )
+            return
+
         trigger = RunTrigger(
             source_env=sched.source_env,
             target_env=sched.target_env,
@@ -58,7 +66,7 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         ]
         config_snapshot["run_settings"] = trigger.run_settings.model_dump()
 
-        RunRepository(db).create_run(
+        run_repo.create_run(
             run_id=run_id,
             source_env=trigger.source_env,
             target_env=trigger.target_env,
@@ -143,6 +151,8 @@ def _add_job(sched) -> None:
             args=[sched.id, sched.name],
             replace_existing=True,
             misfire_grace_time=300,
+            max_instances=1,
+            coalesce=True,
         )
     except Exception as exc:
         logger.warning("Failed to schedule '%s': %s", sched.name, exc)

@@ -82,6 +82,16 @@ class SchemaValidationError(ETLFrameworkError):
         )
 
 
+class CompareRowLimitExceeded(RuntimeError):
+    """Total loaded rows exceeded the configured max_compare_rows guardrail."""
+
+    def __init__(self, query_name: str, total_rows: int, limit: int) -> None:
+        super().__init__(
+            f"Compare aborted for '{query_name}': {total_rows} rows loaded "
+            f"exceeds max_compare_rows={limit}"
+        )
+
+
 class RepositoryError(ETLFrameworkError):
     def __init__(self, backend: str, operation: str, original_error: Exception) -> None:
         self.backend = backend

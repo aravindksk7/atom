@@ -133,9 +133,9 @@ def test_cancel_endpoint_idempotent_when_called_twice(client):
 # --- executor cooperative cancellation ---
 
 from unittest.mock import patch
-from api.schemas import RunSettings
+from api.schemas import RunSettings, SequenceStep
 from api.services.run_executor import RunExecutor
-from etl_framework.repository.repository import JobRepository
+from etl_framework.repository.repository import JobRepository, RunStepRepository
 
 
 def _session() -> Session:  # noqa: F811 — redefine for local use
@@ -189,3 +189,53 @@ def test_executor_stops_after_current_step_when_cancel_requested():
         ).execute()
 
     assert RunRepository(db).get_run("run-x").status == "CANCELLED"
+
+
+def test_precancelled_run_executes_no_steps():
+    db = _session()
+    RunRepository(db).create_run("run-c1", "dev", "prod", {})
+    _create_job(db, "job-a")
+    repo = RunRepository(db)
+    repo.request_cancel("run-c1")
+
+    RunExecutor(
+        db=db,
+        run_id="run-c1",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=[SequenceStep(job_name="job-a", wait_seconds=0)],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = repo.get_run("run-c1")
+    assert run.status == "CANCELLED"
+    steps = RunStepRepository(db).list_steps("run-c1")
+    assert steps[0].status == "CANCELLED"
+    assert run.results == []
+
+
+def test_cancel_during_wait_seconds_executes_no_steps(monkeypatch):
+    db = _session()
+    RunRepository(db).create_run("run-c2", "dev", "prod", {})
+    _create_job(db, "job-a")
+    repo = RunRepository(db)
+
+    def request_cancel_during_sleep(seconds):
+        repo.request_cancel("run-c2")
+
+    monkeypatch.setattr("api.services.run_executor.time.sleep", request_cancel_during_sleep)
+
+    RunExecutor(
+        db=db,
+        run_id="run-c2",
+        source_env="dev",
+        target_env="prod",
+        job_sequence=[SequenceStep(job_name="job-a", wait_seconds=10)],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = repo.get_run("run-c2")
+    assert run.status == "CANCELLED"
+    steps = RunStepRepository(db).list_steps("run-c2")
+    assert steps[0].status == "CANCELLED"
+    assert run.results == []
