@@ -121,3 +121,43 @@ def test_timestamp_and_classname_present(db):
     suite = _parse(render_junit_xml(run))
     assert suite.get("timestamp") == "2026-07-18T10:00:00+00:00"
     assert suite.find("testcase").get("classname") == "atom.dev"
+
+
+def test_control_chars_in_error_message_are_sanitized():
+    """error_message may contain raw control chars (e.g. from a DB driver
+    exception). ElementTree does not sanitize XML-illegal chars, so they
+    must be stripped before being written into an attribute/text node or
+    the resulting document is not parseable XML."""
+    from api.services.junit_export import render_junit_xml
+
+    run = TestRun(
+        run_id="run-junit-ctrl", status="FAILED", source_env="dev", target_env="qa",
+        started_at=datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc),
+        total_tests=1,
+    )
+    run.results = [
+        TestResult(run_id="run-junit-ctrl", query_name="broken_job", status="ERROR",
+                   duration_seconds=0.1, error_message="bad\x00\x1bchar"),
+    ]
+    xml_text = render_junit_xml(run)
+    root = ET.fromstring(xml_text)  # raises ParseError if XML is invalid
+    suite = root.find("testsuite")
+    error = suite.find("testcase").find("error")
+    assert error is not None
+    assert "badchar" in error.get("message")
+
+
+def test_naive_started_at_is_rendered_as_utc():
+    """SQLite round-trips DateTime(timezone=True) columns as naive, but the
+    rendered JUnit timestamp should still be offset-qualified. Construct the
+    TestRun directly (bypassing the DB) to pin a naive started_at."""
+    from api.services.junit_export import render_junit_xml
+
+    run = TestRun(
+        run_id="run-junit-naive", status="PASSED", source_env="dev", target_env="qa",
+        started_at=datetime(2026, 7, 18, 10, 0),  # naive, no tzinfo
+        total_tests=0,
+    )
+    run.results = []
+    suite = _parse(render_junit_xml(run))
+    assert suite.get("timestamp") == "2026-07-18T10:00:00+00:00"

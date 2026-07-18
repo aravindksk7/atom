@@ -1,8 +1,22 @@
 """Render a TestRun and its results as JUnit XML for CI test-report ingestion."""
 from __future__ import annotations
 
+import re
 from datetime import timezone
 from xml.etree import ElementTree as ET
+
+# XML 1.0 disallows most C0 control characters. Tab (\x09), newline (\x0A),
+# and carriage return (\x0D) are valid; everything else in \x00-\x1F is not.
+# ElementTree does not sanitize these, so error/failure text sourced from
+# arbitrary upstream messages (e.g. raw DB driver errors) can produce XML
+# that downstream parsers (or ET.fromstring itself) reject.
+_ILLEGAL_XML_CHARS_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _sanitize(text) -> str:
+    if text is None:
+        return text
+    return _ILLEGAL_XML_CHARS_RE.sub("", str(text))
 
 
 def _failure_message(result) -> str:
@@ -47,13 +61,14 @@ def render_junit_xml(run) -> str:
         })
         status = result.effective_status
         if status == "FAILED":
+            message = _sanitize(_failure_message(result))
             node = ET.SubElement(case, "failure", {
-                "message": _failure_message(result),
+                "message": message,
                 "type": "ReconciliationFailure",
             })
-            node.text = result.error_message or _failure_message(result)
+            node.text = _sanitize(result.error_message) or message
         elif status == "ERROR":
-            message = result.error_message or "execution error"
+            message = _sanitize(result.error_message) or "execution error"
             node = ET.SubElement(case, "error", {
                 "message": message,
                 "type": "ExecutionError",
