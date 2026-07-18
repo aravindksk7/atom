@@ -1481,6 +1481,17 @@ def get_run_markdown_summary(run_id: str, db: Session = Depends(get_session)):
     return PlainTextResponse(_render_markdown_summary(run), media_type="text/markdown")
 
 
+@router.get("/{run_id}/junit")
+def get_run_junit(run_id: str, db: Session = Depends(get_session)):
+    from api.services.junit_export import render_junit_xml
+
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return Response(content=render_junit_xml(run), media_type="application/xml")
+
+
 @router.delete("/{run_id}", status_code=204)
 def delete_run(run_id: str, request: Request, db: Session = Depends(get_session)):
     repo = RunRepository(db)
