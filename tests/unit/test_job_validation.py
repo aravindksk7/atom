@@ -57,6 +57,49 @@ def test_file_backed_reconciliation_accepts_job_file_paths():
     assert issues == []
 
 
+def test_bo_live_reconciliation_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "bo-live",
+        "job_type": "reconciliation",
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "rep-1",
+            "bo_report_id": "bo-rep-1",
+            "target_file_path": r"c:\temp\RMS_FUT_20260601_prod.xml",
+        },
+        "key_columns": [],
+    })
+    assert issues == []
+
+
+def test_bo_live_reconciliation_requires_report_id():
+    issues = validate_job_definition({
+        "name": "bo-live",
+        "job_type": "reconciliation",
+        "params": {
+            "source_mode": "bo_live",
+            "bo_report_id": "bo-rep-1",
+            "target_file_path": r"c:\temp\RMS_FUT_20260601_prod.xml",
+        },
+        "key_columns": [],
+    })
+    assert any(issue.field == "params.report_id" for issue in issues)
+
+
+def test_bo_live_reconciliation_requires_target_file():
+    issues = validate_job_definition({
+        "name": "bo-live",
+        "job_type": "reconciliation",
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "rep-1",
+            "bo_report_id": "bo-rep-1",
+        },
+        "key_columns": [],
+    })
+    assert any(issue.field == "params" for issue in issues)
+
+
 def test_api_reconciliation_requires_endpoint_and_keys():
     issues = validate_job_definition({"name": "api", "job_type": "api_reconciliation", "params": {}, "key_columns": []})
     assert {issue.field for issue in issues} == {"params.source_api_endpoint", "key_columns"}

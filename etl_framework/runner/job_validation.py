@@ -27,8 +27,18 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
     if not str(_get(job, "name", "") or "").strip():
         issues.append(ValidationIssue("name", "job name is required"))
     if job_type == "reconciliation":
-        uses_files = params.get("source_mode") == "files" or _has_file_source(params, "source") or _has_file_source(params, "target")
-        if uses_files:
+        source_mode = params.get("source_mode")
+        if source_mode == "bo_live":
+            if not params.get("report_id"):
+                issues.append(ValidationIssue("params.report_id", "bo_live reconciliation jobs require report_id"))
+            if not params.get("bo_report_id"):
+                issues.append(ValidationIssue("params.bo_report_id", "bo_live reconciliation jobs require bo_report_id"))
+            _validate_file_source(params, "target", issues)
+            if not _has_file_source(params, "target"):
+                issues.append(ValidationIssue("params", "bo_live reconciliation jobs require a target file"))
+            # key_columns is optional -- RunExecutor infers a shared ID column
+            # or falls back to positional row matching.
+        elif source_mode == "files" or _has_file_source(params, "source") or _has_file_source(params, "target"):
             _validate_file_source(params, "source", issues)
             _validate_file_source(params, "target", issues)
             if not _has_file_source(params, "source") or not _has_file_source(params, "target"):
