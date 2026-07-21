@@ -453,12 +453,22 @@ class JobDefinition(BaseModel):
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
         elif self.job_type == "reconciliation":
-            uses_files = (
-                self.params.get("source_mode") == "files"
+            source_mode = self.params.get("source_mode")
+            if source_mode == "bo_live":
+                if not self.params.get("report_id"):
+                    raise ValueError("bo_live reconciliation jobs require 'report_id' in params")
+                if not self.params.get("bo_report_id"):
+                    raise ValueError("bo_live reconciliation jobs require 'bo_report_id' in params")
+                _validate_job_file_source(self.params, "target")
+                if not _has_job_file_source(self.params, "target"):
+                    raise ValueError("bo_live reconciliation jobs require a target file")
+                # key_columns is optional: RunExecutor infers a shared ID column,
+                # or falls back to positional row matching.
+            elif (
+                source_mode == "files"
                 or _has_job_file_source(self.params, "source")
                 or _has_job_file_source(self.params, "target")
-            )
-            if uses_files:
+            ):
                 _validate_job_file_source(self.params, "source")
                 _validate_job_file_source(self.params, "target")
                 if not _has_job_file_source(self.params, "source") or not _has_job_file_source(self.params, "target"):
