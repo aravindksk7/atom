@@ -352,6 +352,7 @@
           <select x-model="jobModal.source_mode" class="field-input field-select" data-testid="job-modal-source-mode-select">
             <option value="sql">SQL Query</option>
             <option value="files">Files</option>
+            <option value="bo_live">Live BO Report</option>
           </select>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -360,7 +361,7 @@
       </div>
 
       <div x-show="jobModalTab === 'settings'" class="space-y-3">
-        <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'files'">
+        <div x-show="jobModal.job_type === 'reconciliation' && !['files', 'bo_live'].includes(jobModal.source_mode)">
           <label class="field-label">SQL Query</label>
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
@@ -440,7 +441,7 @@
           <label class="field-label">Key Columns (comma-separated)</label>
           <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
         </div>
-        <div x-show="jobModal.job_type === 'bo_report'" class="grid-2">
+        <div x-show="jobModal.job_type === 'bo_report' || (jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'bo_live')" class="grid-2">
           <div>
             <label class="field-label">BO Document ID</label>
             <input x-model="jobModal.bo_report_id" class="field-input" placeholder="101" />
@@ -456,6 +457,37 @@
               <option value="csv">csv</option>
               <option value="pdf">pdf</option>
             </select>
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'bo_live'"
+             class="border border-slate-200 rounded-lg p-3">
+          <div class="mode-row mb-2">
+            <button type="button" @click="jobModal.target_source_mode = 'path'"
+                    :class="jobModal.target_source_mode !== 'upload' ? 'pill active' : 'pill'"
+                    data-testid="job-modal-bo-live-target-mode-path">Path</button>
+            <button type="button" @click="jobModal.target_source_mode = 'upload'"
+                    :class="jobModal.target_source_mode === 'upload' ? 'pill active' : 'pill'"
+                    data-testid="job-modal-bo-live-target-mode-upload">Upload</button>
+          </div>
+          <div class="grid-2">
+            <div x-show="jobModal.target_source_mode !== 'upload'">
+              <label class="field-label">Target File Path (prod snapshot)</label>
+              <input x-model="jobModal.target_file_path" class="field-input"
+                     placeholder="C:\snapshots\prod_report.xlsx"
+                     data-testid="job-modal-bo-live-target-path-input" />
+            </div>
+            <div x-show="jobModal.target_source_mode === 'upload'">
+              <label class="field-label">Target File Upload (prod snapshot)</label>
+              <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt"
+                     @change="handleJobTargetFileUpload($event)" class="field-input"
+                     data-testid="job-modal-bo-live-target-upload-input" />
+              <p x-show="jobModal.target_file_name" class="text-xs text-slate-500 mt-1"
+                 x-text="'Selected: ' + jobModal.target_file_name"></p>
+            </div>
+            <div>
+              <label class="field-label">Target Label</label>
+              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Prod snapshot" />
+            </div>
           </div>
         </div>
         <div x-show="jobModal.job_type === 'automic_job'" class="grid-2">
