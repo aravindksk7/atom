@@ -455,11 +455,13 @@ class RunExecutor:
             return self._build_case_automic(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
-        if (
-            job.job_type == "reconciliation"
-            and job.params.get("source_mode") == "bo_live"
-            and self._settings.use_live_connections
-        ):
+        if job.job_type == "reconciliation" and job.params.get("source_mode") == "bo_live":
+            if not self._settings.use_live_connections:
+                def run_job() -> ReconciliationResult:
+                    raise ValueError(
+                        "bo_live reconciliation jobs require live connections to be enabled"
+                    )
+                return run_job
             return self._build_case_bo_live_recon(job)
         if job.job_type == "reconciliation" and self._uses_file_sources(job):
             return self._build_case_file_reconciliation(job)

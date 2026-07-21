@@ -219,6 +219,62 @@ def test_bo_live_recon_raises_without_target_file():
         executor._build_case_bo_live_recon(job)()
 
 
+def test_bo_live_recon_errors_loudly_when_live_connections_disabled(tmp_path, monkeypatch):
+    """A bo_live job must never fall through to the generic file-reconciliation
+    path when live connections are off: it must fail loudly instead of
+    silently diffing the target file against a copy of itself (false PASS)."""
+    target = tmp_path / "prod_snapshot.csv"
+    target.write_text("id,value\n1,alpha\n2,beta\n", encoding="utf-8")
+
+    from api.services import file_source
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    db = _session()
+    RunRepository(db).create_run("r-bo-live-disabled", "qa", "prod", {})
+    JobRepository(db).create({
+        "name": "qa_vs_prod",
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": "",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "101",
+            "bo_report_id": "1",
+            "format": "csv",
+            "target_file_path": str(target),
+        },
+        "enabled": True,
+    })
+    executor = RunExecutor(
+        db=db,
+        run_id="r-bo-live-disabled",
+        source_env="qa",
+        target_env="prod",
+        job_sequence=["qa_vs_prod"],
+        run_settings=RunSettings(use_live_connections=False, metrics_enabled=False),
+        config_snapshot=_BO_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        executor.execute()
+        MockBO.assert_not_called()
+
+    run = RunRepository(db).get_run("r-bo-live-disabled")
+    assert run.status == "ERROR"
+    result = run.results[0]
+    assert result.status == TestStatus.ERROR.value
+    assert "live connections" in (result.error_message or "")
+    # Must not be a spurious clean PASS from self-comparing the target file.
+    assert result.status != TestStatus.PASSED.value
+    assert (result.value_mismatch_count or 0) == 0
+    assert result.source_row_count in (None, 0)
+
+
 def test_uses_file_sources_false_for_bo_live_job_even_with_target_file():
     executor = RunExecutor(
         db=None,

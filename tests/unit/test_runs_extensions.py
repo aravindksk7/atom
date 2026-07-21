@@ -425,6 +425,34 @@ def test_drilldown_rejects_non_reconciliation_job(client):
     assert resp.status_code == 400
 
 
+def test_drilldown_rejects_bo_live_job(client):
+    run_id, result_id = _run_job_and_get_result({
+        "name": "bo_live_job",
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": "",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "101",
+            "bo_report_id": "1",
+            "format": "csv",
+            "target_file_path": "nonexistent_target.csv",
+        },
+        "enabled": True,
+    })
+
+    resp = client.post(
+        f"/api/runs/{run_id}/results/{result_id}/drilldown",
+        json={"segment_column": "region"},
+    )
+    assert resp.status_code == 400
+    assert "bo_live" in resp.json()["detail"]
+
+
 def test_drilldown_404_on_unknown_result(client):
     resp = client.post(
         "/api/runs/nope/results/99999/drilldown",
