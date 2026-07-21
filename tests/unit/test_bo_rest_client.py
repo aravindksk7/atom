@@ -288,6 +288,41 @@ def test_list_documents_pages_past_server_enforced_page_cap(authenticated_client
     assert docs[-1]["id"] == "24"
 
 
+def test_list_documents_stops_when_server_ignores_page_param(authenticated_client):
+    """Some on-prem biprws deployments ignore the `page` query param entirely
+    and re-serve page 1's content on every request. A same-size batch is
+    normally treated as "keep going" (see the page-cap test above), so
+    without a repeat check this would loop until _MAX_PAGES re-appending the
+    same rows -- inflating the count without adding real documents."""
+    same_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"documents": same_page}
+    with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get:
+        docs = authenticated_client.list_documents()
+    assert len(docs) == 10
+    assert mock_get.call_count == 2
+
+
+def test_list_documents_dedupes_overlapping_pages(authenticated_client):
+    """Defensive net for pages that overlap without being fully identical
+    (e.g. an off-by-one server cursor) -- duplicate ids across pages should
+    collapse to one entry each, keeping the first occurrence."""
+    page_size = 10
+    first_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(page_size)]
+    second_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(5, 5 + page_size)]
+    third_page = []
+    responses = []
+    for page_docs in (first_page, second_page, third_page):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": page_docs}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses):
+        docs = authenticated_client.list_documents()
+    assert [d["id"] for d in docs] == [str(i) for i in range(15)]
+
+
 # ---------------------------------------------------------------------------
 # list_reports
 # ---------------------------------------------------------------------------

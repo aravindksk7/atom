@@ -39,6 +39,22 @@ def _unwrap_collection(data: dict, plural_key: str, singular_key: str, *fallback
     return _as_list(container)
 
 
+def _dedupe_by_id(items: list[dict]) -> list[dict]:
+    """Drop later entries sharing an already-seen non-empty id, keeping the
+    first occurrence's order. Entries with no id are kept as-is — they can't
+    be told apart this way, and the UI already tolerates missing ids."""
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for item in items:
+        item_id = str(item.get("id", ""))
+        if item_id:
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+        deduped.append(item)
+    return deduped
+
+
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
@@ -165,10 +181,19 @@ class BORestClient:
         what we *asked for* is not proof there's no more data — only an
         empty page, or a page shorter than the *previous* page, means the
         collection is exhausted.
+
+        Some on-prem deployments go further and ignore the `page` param
+        entirely, re-serving page 1's content forever. A batch whose ids
+        exactly match the previous batch's ids is that case, not "more of
+        the same page size" — stop instead of looping to `_MAX_PAGES`. As a
+        second line of defense (e.g. overlapping-but-not-identical pages),
+        entries are de-duplicated by id after paging finishes; entries
+        without an id can't be told apart this way and are left as-is.
         """
         raw: list[dict] = []
         page = 1
         previous_batch_size: int | None = None
+        previous_batch_ids: list[str] | None = None
         while page <= self._MAX_PAGES:
             response = self._session.get(
                 url,
@@ -186,12 +211,16 @@ class BORestClient:
                     response_body=response.text,
                 )
             batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
+            batch_ids = [str(item.get("id", "")) for item in batch]
+            if batch and batch_ids == previous_batch_ids:
+                break
             raw.extend(batch)
             if not batch or (previous_batch_size is not None and len(batch) < previous_batch_size):
                 break
             previous_batch_size = len(batch)
+            previous_batch_ids = batch_ids
             page += 1
-        return raw
+        return _dedupe_by_id(raw)
 
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""
