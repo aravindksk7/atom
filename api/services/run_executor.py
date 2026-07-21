@@ -1244,6 +1244,8 @@ class RunExecutor:
         )
 
     def _uses_file_sources(self, job: JobDefinition) -> bool:
+        if job.params.get("source_mode") == "bo_live":
+            return False
         return bool(
             job.params.get("source_mode") == "files"
             or self._has_file_source(job, "source")

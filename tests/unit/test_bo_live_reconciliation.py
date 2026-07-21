@@ -217,3 +217,29 @@ def test_bo_live_recon_raises_without_target_file():
 
     with pytest.raises(ValueError, match="target file"):
         executor._build_case_bo_live_recon(job)()
+
+
+def test_uses_file_sources_false_for_bo_live_job_even_with_target_file():
+    executor = RunExecutor(
+        db=None,
+        run_id="test-run",
+        source_env="qa",
+        target_env="prod",
+        job_sequence=[],
+        run_settings=RunSettings(use_live_connections=False, metrics_enabled=False),
+        config_snapshot=_BO_SNAPSHOT,
+    )
+
+    job = MagicMock()
+    job.params = {
+        "source_mode": "bo_live",
+        "report_id": "101",
+        "bo_report_id": "1",
+        "target_file_path": "prod_snapshot.csv",
+    }
+
+    # bo_live jobs must not be routed to file-backed reconciliation just
+    # because target file params are present, even when live connections
+    # are disabled: that would raise a misleading "source and target
+    # files" error instead of falling through to the generic run path.
+    assert executor._uses_file_sources(job) is False
