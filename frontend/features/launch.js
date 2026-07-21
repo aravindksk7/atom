@@ -136,6 +136,7 @@
         source_mode: 'sql',
         source_file_path: '', target_file_path: '',
         source_file_label: '', target_file_label: '',
+        target_source_mode: 'path', target_file_b64: '', target_file_name: '',
         key_columns_raw: 'id', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
@@ -247,6 +248,9 @@
         target_file_path: job.params?.target_file_path || job.params?.file_b_path || '',
         source_file_label: job.params?.source_file_label || job.params?.label_a || '',
         target_file_label: job.params?.target_file_label || job.params?.label_b || '',
+        target_file_b64: job.params?.target_file_content_b64 || '',
+        target_file_name: job.params?.target_file_name || '',
+        target_source_mode: job.params?.target_file_content_b64 ? 'upload' : 'path',
         tags_raw: (job.tags || []).join(', '), enabled: job.enabled !== false,
         depends_on_raw: (job.depends_on || []).join(', '),
         rules: (job.rules || []).map(r => this._hydrateDQRule(r)),
@@ -321,6 +325,22 @@
       }
     },
 
+    handleJobTargetFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const bytes = new Uint8Array(e.target.result);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        this.jobModal.target_file_b64 = btoa(binary);
+        this.jobModal.target_file_name = file.name;
+      };
+      reader.readAsArrayBuffer(file);
+    },
+
     addDQRule() {
       this.jobModal.rules.push(this.newDQRule());
     },
@@ -360,6 +380,20 @@
           if (m.target_file_path) params.target_file_path = m.target_file_path;
           if (m.target_file_label) params.target_file_label = m.target_file_label;
         }
+      }
+      const usesBoLive = m.job_type === 'reconciliation' && m.source_mode === 'bo_live';
+      if (usesBoLive) {
+        params.source_mode = 'bo_live';
+        if (m.bo_report_id) params.report_id = m.bo_report_id;
+        if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
+        params.format = m.bo_format || 'xlsx';
+        if (m.target_source_mode === 'upload' && m.target_file_b64) {
+          params.target_file_content_b64 = m.target_file_b64;
+          if (m.target_file_name) params.target_file_name = m.target_file_name;
+        } else if (m.target_file_path) {
+          params.target_file_path = m.target_file_path;
+        }
+        if (m.target_file_label) params.target_file_label = m.target_file_label;
       }
       if (m.job_type === 'automic_job') {
         if (m.automic_job_name) params.job_name = m.automic_job_name;
@@ -414,7 +448,7 @@
       return {
         name: m.name, description: m.description,
         job_type: m.job_type,
-        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource ? m.query : '',
+        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource && !usesBoLive ? m.query : '',
         key_columns: keyColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
@@ -479,6 +513,12 @@
           // key_columns is optional for file-backed jobs: the backend infers a
           // shared ID column, or falls back to positional row matching.
           return Boolean(m.source_file_path && m.target_file_path);
+        }
+        if (m.source_mode === 'bo_live') {
+          const hasTarget = m.target_source_mode === 'upload'
+            ? Boolean(m.target_file_b64)
+            : Boolean(m.target_file_path);
+          return Boolean(m.bo_report_id && m.bo_page_id && hasTarget);
         }
         return Boolean(m.query?.trim() && hasKeys);
       }
