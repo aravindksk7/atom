@@ -455,6 +455,12 @@ class RunExecutor:
             return self._build_case_automic(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
+        if (
+            job.job_type == "reconciliation"
+            and job.params.get("source_mode") == "bo_live"
+            and self._settings.use_live_connections
+        ):
+            return self._build_case_bo_live_recon(job)
         if job.job_type == "reconciliation" and self._uses_file_sources(job):
             return self._build_case_file_reconciliation(job)
 
@@ -515,6 +521,59 @@ class RunExecutor:
             return dataclasses.replace(
                 result,
                 source_file_name=self._job_file_name(job, "source"),
+                target_file_name=self._job_file_name(job, "target"),
+            )
+        return run_job
+
+    def _build_case_bo_live_recon(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            if not self._has_file_source(job, "target"):
+                raise ValueError("bo_live reconciliation jobs require a target file")
+
+            from api.services.file_source import read_tabular
+
+            creds = self._config_snapshot.get("bo_credentials", {})
+            env = EnvironmentConfig(name=creds.get("name", "bo"), **{
+                k: v for k, v in creds.items() if k != "name"
+            })
+            client = BORestClient(env)
+            client.authenticate()
+            doc_id = job.params.get("report_id", "")
+            report_id = job.params.get("bo_report_id", "")
+            fmt = job.params.get("format", "xlsx")
+            try:
+                data = client.download_report(doc_id, report_id, fmt)
+            finally:
+                client.logout()
+            source_df = read_tabular(
+                content_b64=base64.b64encode(data).decode("ascii"),
+                file_name=f"bo_report_{doc_id}_{report_id}.{fmt}",
+            )
+            target_df = self._load_job_file_frame(job, "target")
+
+            source_df, target_df, resolved_keys = resolve_key_columns(
+                source_df,
+                target_df,
+                job.key_columns or self._settings.key_columns,
+                job.exclude_columns or [],
+            )
+            run_job = job.model_copy(update={"key_columns": resolved_keys})
+            source_label = job.params.get("source_file_label") or job.params.get("label_a") or self._source_env
+            target_label = job.params.get("target_file_label") or job.params.get("label_b") or self._target_env
+            source_engine = FrameEngine(source_df, source_label)
+            target_engine = FrameEngine(target_df, target_label)
+            result = self._run_reconciliation_job(
+                run_job,
+                source_engine,
+                target_engine,
+                query=FILE_SOURCE_QUERY,
+                params={},
+                chunk_size=0,
+                use_hash_precheck=False,
+            )
+            return dataclasses.replace(
+                result,
+                source_file_name=None,
                 target_file_name=self._job_file_name(job, "target"),
             )
         return run_job
