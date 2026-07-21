@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { test, expect } from './fixtures';
 import { authedContext, deleteJob } from './api-helpers';
 
@@ -72,6 +73,34 @@ test.describe('02 launch/jobs', () => {
     await authedPage.locator('[data-testid="job-modal-source-file-path-input"]').fill('C:\\temp\\source.csv');
     await authedPage.locator('[data-testid="job-modal-target-file-path-input"]').fill('C:\\temp\\target.csv');
     await authedPage.locator('[data-testid="job-modal-key-columns-input"]').fill('');
+
+    await expect(authedPage.locator('[data-testid="job-modal-save-btn"]')).toBeEnabled();
+    await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
+
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeHidden();
+    await expect(authedPage.locator(`[data-testid="job-row-${name}"]`)).toBeVisible();
+  });
+
+  test('bo_live reconciliation job (live QA pull vs uploaded prod file) can be saved', async ({ authedPage }) => {
+    const name = `e2e-bo-live-job-${Date.now()}`;
+    createdJobNames.push(name);
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await authedPage.locator('[data-testid="job-new-btn"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeVisible();
+
+    await authedPage.locator('[data-testid="job-modal-name-input"]').fill(name);
+    await authedPage.locator('[data-testid="job-modal-source-mode-select"]').selectOption('bo_live');
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+
+    await authedPage.locator('input.field-input[placeholder="101"]').fill('9001');
+    await authedPage.locator('input.field-input[placeholder="1"]').fill('2');
+
+    await authedPage.locator('[data-testid="job-modal-bo-live-target-mode-upload"]').click();
+    await authedPage.locator('[data-testid="job-modal-bo-live-target-upload-input"]')
+      .setInputFiles(path.join(__dirname, 'fixtures', 'data', 'target.csv'));
+    await expect(authedPage.getByText('Selected: target.csv')).toBeVisible();
 
     await expect(authedPage.locator('[data-testid="job-modal-save-btn"]')).toBeEnabled();
     await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
