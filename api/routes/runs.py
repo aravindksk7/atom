@@ -1143,6 +1143,11 @@ def drilldown_result(
         config_snapshot=snapshot,
     )
     job_def = ex._job_to_definition(saved)
+    if job_def.params.get("source_mode") == "bo_live":
+        raise HTTPException(
+            status_code=400,
+            detail="Drill-down is not supported for bo_live reconciliation jobs",
+        )
     seg = payload.segment_column
 
     try:

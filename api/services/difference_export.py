@@ -525,6 +525,8 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         if saved is None or saved.job_type != "reconciliation":
             continue
         job = executor._job_to_definition(saved)
+        if job.params.get("source_mode") == "bo_live":
+            continue
         src_engine, tgt_engine = executor._build_engines(job)
         df_a = src_engine.execute_query(job.query, job.params)
         df_b = tgt_engine.execute_query(job.query, job.params)

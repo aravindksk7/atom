@@ -113,6 +113,137 @@ def test_create_export_job_accepts_json_format(monkeypatch):
         app.dependency_overrides.pop(get_db, None)
 
 
+def test_write_reconciliation_run_skips_bo_live_job_instead_of_self_comparing(tmp_path, monkeypatch):
+    """A bo_live reconciliation job has no source file -- only a live BO pull and a
+    target file. _write_reconciliation_run (used by both the differences export
+    and the full HTML report) must exclude it entirely, mirroring the existing
+    skip for non-reconciliation job types, rather than falling through to
+    _build_engines -- which would self-compare the target file against a copy of
+    itself and silently produce a spurious zero-mismatch entry, even for a run
+    whose real (live) execution found genuine mismatches."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.services import difference_export as de
+    from api.services import file_source
+    from api.services.run_executor import RunExecutor
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+    from etl_framework.runner.state import TestStatus
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    # A real file pair for a normal file-backed reconciliation job, to prove
+    # that job is still recomputed and included while the bo_live job is not.
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text("id,value\n1,alpha\n", encoding="utf-8")
+    tgt.write_text("id,value\n1,beta\n", encoding="utf-8")
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    calls: list[str] = []
+    original_build_engines = RunExecutor._build_engines
+
+    def _spy_build_engines(self, job):
+        calls.append(job.name)
+        return original_build_engines(self, job)
+
+    monkeypatch.setattr(RunExecutor, "_build_engines", _spy_build_engines)
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "bo_live_job",
+            "description": "",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None, "target_env": None,
+            "params": {
+                "source_mode": "bo_live",
+                "report_id": "101",
+                "bo_report_id": "1",
+                "format": "csv",
+                "target_file_path": str(tgt),
+            },
+            "enabled": True,
+        })
+        JobRepository(db).create({
+            "name": "normal_job",
+            "description": "",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None, "target_env": None,
+            "params": {
+                "source_file_path": str(src),
+                "target_file_path": str(tgt),
+            },
+            "enabled": True,
+        })
+
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-bo-live-export",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={
+                "compare_request_type": "unknown",
+                "request": {},
+                "job_sequence": ["bo_live_job", "normal_job"],
+            },
+        )
+        # The run's own real (live) execution found a genuine mismatch for the
+        # bo_live job -- re-exporting must not contradict that with a bogus 0.
+        repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="bo_live_job",
+            source_env="qa",
+            target_env="prod",
+            source_row_count=1,
+            target_row_count=1,
+            matched_count=0,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=1,
+            mismatches=[],
+            status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc),
+            duration_seconds=0.1,
+        ))
+        run_id = run.run_id
+
+    out_path = tmp_path / "diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    # The bo_live job must never reach _build_engines (which would self-compare
+    # the target file against a copy of itself), while the normal job still does.
+    assert "bo_live_job" not in calls
+    assert "normal_job" in calls
+
+    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+    assert row_count == len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["test_name"] == "normal_job"
+
+
 def test_media_type_for_html():
     from api.services.difference_export import media_type_for
 
