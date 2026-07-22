@@ -424,3 +424,83 @@ def test_aggregate_reconciliation_results_gives_automated_pairs_distinct_keys() 
     mismatch_pair_tags = [m.key_values["__pair__"] for m in aggregate.mismatches]
     assert mismatch_pair_tags[0] != mismatch_pair_tags[1]
     assert all(tag for tag in mismatch_pair_tags)
+
+
+def test_aggregate_reconciliation_results_escalates_to_error_when_a_pair_errors() -> None:
+    from datetime import datetime, timezone
+    from etl_framework.reconciliation.file_mapping import (
+        DiscoveredFile as _DF,
+        FileGroup as _FG,
+        FilePair as _FP,
+        FileMappingResult as _FMR,
+        aggregate_reconciliation_results,
+    )
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    def _result(status, mismatch_summary=None):
+        return ReconciliationResult(
+            query_name="pair", source_env="s", target_env="t",
+            source_row_count=1, target_row_count=1, matched_count=1 if status == TestStatus.PASSED else 0,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=status,
+            executed_at=datetime(2026, 7, 23, tzinfo=timezone.utc), duration_seconds=0.1,
+            mismatch_summary=mismatch_summary,
+        )
+
+    east_source = _FG(key=("east",), files=[_DF("/s/e.csv", "e.csv", {"region": "east"})])
+    east_target = _FG(key=("east",), files=[_DF("/t/e.dat", "e.dat", {"region": "east"})])
+    west_source = _FG(key=("west",), files=[_DF("/s/w.csv", "w.csv", {"region": "west"})])
+    west_target = _FG(key=("west",), files=[_DF("/t/w.dat", "w.dat", {"region": "west"})])
+    mapping = _FMR(
+        match_on=("region",),
+        pairs=[
+            _FP(key=("east",), source=east_source, target=east_target),
+            _FP(key=("west",), source=west_source, target=west_target),
+        ],
+        unmatched_sources=[], unmatched_targets=[],
+    )
+    pair_results = [
+        _result(TestStatus.PASSED),
+        _result(TestStatus.ERROR, mismatch_summary={"error": "target file was truncated mid-write"}),
+    ]
+
+    aggregate = aggregate_reconciliation_results("regional_sales_recon", mapping, pair_results)
+
+    assert aggregate.status == TestStatus.ERROR
+    assert aggregate.mismatch_summary["pairs_total"] == 2
+    assert aggregate.mismatch_summary["pairs_passed"] == 1
+    assert aggregate.mismatch_summary["pairs_errored"] == 1
+    by_region = {p["key"]["region"]: p for p in aggregate.mismatch_summary["file_pairs"]}
+    assert by_region["east"]["error"] is None
+    assert by_region["west"]["error"] == "target file was truncated mid-write"
+
+
+def test_aggregate_reconciliation_results_all_passed_still_reports_zero_errored() -> None:
+    from datetime import datetime, timezone
+    from etl_framework.reconciliation.file_mapping import (
+        DiscoveredFile as _DF,
+        FileGroup as _FG,
+        FilePair as _FP,
+        FileMappingResult as _FMR,
+        aggregate_reconciliation_results,
+    )
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    def _result(status):
+        return ReconciliationResult(
+            query_name="pair", source_env="s", target_env="t",
+            source_row_count=1, target_row_count=1, matched_count=1,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=status,
+            executed_at=datetime(2026, 7, 23, tzinfo=timezone.utc), duration_seconds=0.1,
+        )
+
+    group = _FG(key=("east",), files=[_DF("/s/e.csv", "e.csv", {"region": "east"})])
+    mapping = _FMR(match_on=("region",), pairs=[_FP(key=("east",), source=group, target=group)], unmatched_sources=[], unmatched_targets=[])
+
+    aggregate = aggregate_reconciliation_results("job", mapping, [_result(TestStatus.PASSED)])
+
+    assert aggregate.status == TestStatus.PASSED
+    assert aggregate.mismatch_summary["pairs_errored"] == 0

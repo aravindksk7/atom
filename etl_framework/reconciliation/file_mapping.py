@@ -297,6 +297,7 @@ def aggregate_reconciliation_results(
     all_mismatches: list[MismatchRecord] = []
     pair_summaries: list[dict[str, Any]] = []
     pairs_passed = 0
+    pairs_errored = 0
     for pair, result in zip(mapping.pairs, pair_results):
         if mapping.match_on:
             pair_key = dict(zip(mapping.match_on, pair.key))
@@ -312,9 +313,17 @@ def aggregate_reconciliation_results(
             ))
         if result.status == TestStatus.PASSED:
             pairs_passed += 1
+        elif result.status == TestStatus.ERROR:
+            pairs_errored += 1
+        error_message = (
+            result.mismatch_summary.get("error")
+            if isinstance(result.mismatch_summary, dict)
+            else None
+        )
         pair_summaries.append({
             "key": pair_key,
             "status": result.status.value,
+            "error": error_message,
             "source_files": [f.file_name for f in pair.source.files],
             "target_files": [f.file_name for f in pair.target.files],
             "source_row_count": result.source_row_count,
@@ -329,6 +338,13 @@ def aggregate_reconciliation_results(
     total_source_files = sum(len(p.source.files) for p in mapping.pairs)
     total_target_files = sum(len(p.target.files) for p in mapping.pairs)
 
+    if pairs_errored:
+        overall_status = TestStatus.ERROR
+    elif pairs_passed == total_pairs:
+        overall_status = TestStatus.PASSED
+    else:
+        overall_status = TestStatus.FAILED
+
     return ReconciliationResult(
         query_name=job_name,
         source_env=pair_results[0].source_env if pair_results else "",
@@ -340,7 +356,7 @@ def aggregate_reconciliation_results(
         missing_in_source_count=sum(r.missing_in_source_count for r in pair_results),
         value_mismatch_count=sum(r.value_mismatch_count for r in pair_results),
         mismatches=all_mismatches,
-        status=TestStatus.PASSED if pairs_passed == total_pairs else TestStatus.FAILED,
+        status=overall_status,
         executed_at=min((r.executed_at for r in pair_results), default=datetime.now(timezone.utc)),
         duration_seconds=sum(r.duration_seconds for r in pair_results),
         mismatch_summary={
@@ -350,6 +366,7 @@ def aggregate_reconciliation_results(
             "pairs_total": total_pairs,
             "pairs_passed": pairs_passed,
             "pairs_failed": total_pairs - pairs_passed,
+            "pairs_errored": pairs_errored,
         },
         source_file_name=f"{total_source_files} file(s) across {total_pairs} pair(s)",
         target_file_name=f"{total_target_files} file(s) across {total_pairs} pair(s)",
