@@ -345,3 +345,27 @@ def _filename_similarity(source_name: str, target_name: str) -> float:
     source_stem = Path(source_name).stem
     target_stem = Path(target_name).stem
     return difflib.SequenceMatcher(None, source_stem, target_stem).ratio()
+
+
+def _column_signature_similarity(source_columns: Sequence[str], target_columns: Sequence[str]) -> float:
+    """Jaccard similarity of two column-name sets. Two schemas with no
+    columns at all are considered a perfect match (there's nothing to
+    disagree on); otherwise |intersection| / |union|.
+    """
+    source_set = set(source_columns)
+    target_set = set(target_columns)
+    if not source_set and not target_set:
+        return 1.0
+    union = source_set | target_set
+    if not union:
+        return 1.0
+    return len(source_set & target_set) / len(union)
+
+
+def _row_count_ratio(source_rows: int, target_rows: int) -> float:
+    """Ratio of the smaller row count to the larger, in [0, 1]. Two empty
+    datasets are considered a perfect match.
+    """
+    if source_rows == 0 and target_rows == 0:
+        return 1.0
+    return min(source_rows, target_rows) / max(source_rows, target_rows)
