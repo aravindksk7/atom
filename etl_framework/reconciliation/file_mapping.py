@@ -12,6 +12,8 @@ for why that triplication existed before this module).
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from pathlib import Path
 
 _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?\}")
 
@@ -69,3 +71,34 @@ def compile_token_pattern(pattern: str) -> re.Pattern[str]:
         pos = match.end()
     regex_parts.append(_glob_segment_to_regex(pattern[pos:]))
     return re.compile("^" + "".join(regex_parts) + "$")
+
+
+@dataclass(frozen=True)
+class DiscoveredFile:
+    path: str
+    file_name: str
+    tokens: dict[str, str]
+
+
+def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
+    """Match every file directly under ``root`` against ``pattern``.
+
+    ``root`` must already be a trusted, resolved directory -- callers outside
+    this module (e.g. ``RunExecutor``) are responsible for allow-listing it
+    first (see ``api.services.file_source.resolve_allowed_path``), the same
+    way every other file-backed job resolves paths today.
+    """
+    regex = compile_token_pattern(pattern)
+    discovered: list[DiscoveredFile] = []
+    for candidate in sorted(Path(root).iterdir()):
+        if not candidate.is_file():
+            continue
+        match = regex.match(candidate.name)
+        if match is None:
+            continue
+        discovered.append(DiscoveredFile(
+            path=str(candidate),
+            file_name=candidate.name,
+            tokens=match.groupdict(),
+        ))
+    return discovered
