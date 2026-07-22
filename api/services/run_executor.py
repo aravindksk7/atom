@@ -586,10 +586,12 @@ class RunExecutor:
         def run_job() -> ReconciliationResult:
             from api.services.file_source import read_tabular, resolve_allowed_path
             from etl_framework.reconciliation.file_mapping import (
+                FileMappingManifestWriter,
                 FileMappingSpec,
                 aggregate_reconciliation_results,
                 discover_local_files,
                 pair_files,
+                pair_files_automated,
             )
 
             spec = FileMappingSpec.from_params(job.params)
@@ -597,7 +599,24 @@ class RunExecutor:
             target_root = resolve_allowed_path(spec.target.root)
             source_files = discover_local_files(source_root, spec.source.pattern)
             target_files = discover_local_files(target_root, spec.target.pattern)
-            mapping = pair_files(source_files, target_files, spec.match_on)
+
+            if spec.strategy == "automated":
+                source_frames = {
+                    f.path: read_tabular(path=f.path, file_name=f.file_name) for f in source_files
+                }
+                target_frames = {
+                    f.path: read_tabular(path=f.path, file_name=f.file_name) for f in target_files
+                }
+                mapping, similarity_scores = pair_files_automated(
+                    source_files, source_frames, target_files, target_frames, spec.automated,
+                )
+            else:
+                mapping = pair_files(source_files, target_files, spec.match_on)
+                similarity_scores = None
+
+            FileMappingManifestWriter(
+                f"logs/file_mapping_manifest_{self._run_id}_{job.name}.json"
+            ).write(self._run_id, job.name, spec, mapping, similarity_scores)
 
             if mapping.unmatched_sources or mapping.unmatched_targets:
                 if spec.unmatched_policy == "fail":

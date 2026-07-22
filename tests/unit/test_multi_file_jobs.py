@@ -293,3 +293,55 @@ def test_run_executor_multi_file_reconciliation_warn_policy_proceeds_and_logs(tm
         "unmatched" in record.message and "regional_sales_recon" in record.message
         for record in caplog.records
     )
+
+
+import json
+
+
+def test_run_executor_multi_file_automated_strategy_pairs_and_writes_manifest(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.chdir(tmp_path)
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_east.csv").write_text("id,value\n1,alpha\n2,bravo\n", encoding="utf-8")
+    (target_dir / "financials_east.dat").write_text("id,value\n1,alpha\n2,bravo\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="auto_sales_recon",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "automated",
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "*.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "*.dat"},
+                "automated_mapping": {"similarity_threshold": 0.3},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run-auto", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.PASSED
+    assert result.mismatch_summary["pairs_total"] == 1
+
+    manifest_path = tmp_path / "logs" / "file_mapping_manifest_test-run-auto_auto_sales_recon.json"
+    assert manifest_path.exists()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["strategy"] == "automated"
+    assert payload["pairs"][0]["mapping_method"] == "automated"
+    assert payload["pairs"][0]["similarity_score"] >= 0.3
