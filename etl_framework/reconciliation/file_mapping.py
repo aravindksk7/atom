@@ -16,10 +16,11 @@ import difflib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import pandas as pd
 
@@ -618,3 +619,29 @@ def _parse_readiness(raw: Any, side: str) -> "ReadinessSpec | None":
         poll_interval_seconds=float(poll_interval),
         timeout_seconds=float(timeout),
     )
+
+
+def wait_for_ready_files(
+    discover: Callable[[], list[DiscoveredFile]],
+    readiness: ReadinessSpec,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[DiscoveredFile]:
+    """Poll ``discover`` until it returns at least ``readiness.expected_count``
+    files, or raise ``TimeoutError`` once ``readiness.timeout_seconds`` has
+    elapsed. For a local root a live process is still actively writing into
+    (e.g. several files spooled by one DB job), this avoids pairing/comparing
+    against a partial write. ``sleep`` is injectable for tests; production
+    callers use the real ``time.sleep``.
+    """
+    waited = 0.0
+    discovered = discover()
+    while len(discovered) < readiness.expected_count:
+        if waited >= readiness.timeout_seconds:
+            raise TimeoutError(
+                f"only {len(discovered)} of {readiness.expected_count} expected file(s) "
+                f"appeared within {readiness.timeout_seconds}s"
+            )
+        sleep(readiness.poll_interval_seconds)
+        waited += readiness.poll_interval_seconds
+        discovered = discover()
+    return discovered
