@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?\}")
 
@@ -102,3 +103,82 @@ def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
             tokens=match.groupdict(),
         ))
     return discovered
+
+
+@dataclass(frozen=True)
+class FileGroup:
+    key: tuple[str, ...]
+    files: list[DiscoveredFile]
+
+
+@dataclass(frozen=True)
+class FilePair:
+    key: tuple[str, ...]
+    source: FileGroup
+    target: FileGroup
+
+
+@dataclass(frozen=True)
+class FileMappingResult:
+    match_on: tuple[str, ...]
+    pairs: list[FilePair]
+    unmatched_sources: list[FileGroup]
+    unmatched_targets: list[FileGroup]
+
+
+def _group_by_key(
+    files: list[DiscoveredFile], match_on: Sequence[str]
+) -> dict[tuple[str, ...], FileGroup]:
+    buckets: dict[tuple[str, ...], list[DiscoveredFile]] = {}
+    for discovered in files:
+        try:
+            key = tuple(discovered.tokens[name] for name in match_on)
+        except KeyError as exc:
+            raise ValueError(
+                f"file '{discovered.file_name}' matched the pattern but is "
+                f"missing match_on token {exc}"
+            ) from exc
+        buckets.setdefault(key, []).append(discovered)
+    return {
+        key: FileGroup(key=key, files=sorted(group, key=lambda d: d.file_name))
+        for key, group in buckets.items()
+    }
+
+
+def pair_files(
+    source_files: list[DiscoveredFile],
+    target_files: list[DiscoveredFile],
+    match_on: Sequence[str],
+) -> FileMappingResult:
+    """Group each side's discovered files by the values of ``match_on``
+    tokens, then join the two sides on that key. A key present on both
+    sides becomes one ``FilePair`` (possibly many files per side, if several
+    shards share a key); a key present on only one side is reported as
+    unmatched. An empty ``match_on`` collapses every discovered file on a
+    side into a single group (key ``()``), for patterns that need dynamic
+    discovery but no pairing key at all.
+    """
+    source_groups = _group_by_key(source_files, match_on)
+    target_groups = _group_by_key(target_files, match_on)
+
+    pairs: list[FilePair] = []
+    unmatched_sources: list[FileGroup] = []
+    unmatched_targets: list[FileGroup] = []
+
+    for key in sorted(set(source_groups) | set(target_groups)):
+        source_group = source_groups.get(key)
+        target_group = target_groups.get(key)
+        if source_group is not None and target_group is not None:
+            pairs.append(FilePair(key=key, source=source_group, target=target_group))
+        elif source_group is not None:
+            unmatched_sources.append(source_group)
+        else:
+            assert target_group is not None
+            unmatched_targets.append(target_group)
+
+    return FileMappingResult(
+        match_on=tuple(match_on),
+        pairs=pairs,
+        unmatched_sources=unmatched_sources,
+        unmatched_targets=unmatched_targets,
+    )

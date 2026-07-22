@@ -1,6 +1,8 @@
 # tests/unit/test_file_mapping.py
 from __future__ import annotations
 
+import pytest
+
 from etl_framework.reconciliation.file_mapping import compile_token_pattern
 
 
@@ -45,3 +47,72 @@ def test_discover_local_files_matches_pattern_and_extracts_tokens(tmp_path) -> N
 def test_discover_local_files_returns_empty_list_when_nothing_matches(tmp_path) -> None:
     (tmp_path / "unrelated.csv").write_text("id,value\n1,a\n", encoding="utf-8")
     assert discover_local_files(tmp_path, "sales_data_{region}.csv") == []
+
+
+from etl_framework.reconciliation.file_mapping import pair_files, DiscoveredFile
+
+
+def _df(name: str, **tokens: str) -> DiscoveredFile:
+    return DiscoveredFile(path=f"/x/{name}", file_name=name, tokens=tokens)
+
+
+def test_pair_files_matches_one_to_one() -> None:
+    sources = [_df("sales_east_20260101.csv", region="east", date="20260101")]
+    targets = [_df("fin_east_20260101.dat", region="east", date="20260101")]
+
+    mapping = pair_files(sources, targets, ["region", "date"])
+
+    assert len(mapping.pairs) == 1
+    assert mapping.pairs[0].key == ("east", "20260101")
+    assert not mapping.unmatched_sources
+    assert not mapping.unmatched_targets
+
+
+def test_pair_files_collapses_shards_sharing_a_key_into_one_group() -> None:
+    sources = [
+        _df("sales_east_p1_20260101.csv", region="east", date="20260101"),
+        _df("sales_east_p2_20260101.csv", region="east", date="20260101"),
+    ]
+    targets = [_df("fin_east_20260101.dat", region="east", date="20260101")]
+
+    mapping = pair_files(sources, targets, ["region", "date"])
+
+    assert len(mapping.pairs) == 1
+    assert len(mapping.pairs[0].source.files) == 2
+    assert len(mapping.pairs[0].target.files) == 1
+
+
+def test_pair_files_reports_unmatched_groups_on_either_side() -> None:
+    sources = [
+        _df("sales_east_20260101.csv", region="east", date="20260101"),
+        _df("sales_north_20260101.csv", region="north", date="20260101"),
+    ]
+    targets = [
+        _df("fin_east_20260101.dat", region="east", date="20260101"),
+        _df("fin_west_20260101.dat", region="west", date="20260101"),
+    ]
+
+    mapping = pair_files(sources, targets, ["region", "date"])
+
+    assert len(mapping.pairs) == 1
+    assert [g.key for g in mapping.unmatched_sources] == [("north", "20260101")]
+    assert [g.key for g in mapping.unmatched_targets] == [("west", "20260101")]
+
+
+def test_pair_files_raises_when_a_file_is_missing_a_match_on_token() -> None:
+    sources = [_df("sales_east.csv", region="east")]  # no "date" token captured
+
+    with pytest.raises(ValueError, match="missing match_on token"):
+        pair_files(sources, [], ["region", "date"])
+
+
+def test_pair_files_with_empty_match_on_collapses_every_file_into_one_group_per_side() -> None:
+    sources = [_df("sales_data_20260101.csv"), _df("sales_data_20260102.csv")]
+    targets = [_df("fin_data_20260101.dat")]
+
+    mapping = pair_files(sources, targets, [])
+
+    assert len(mapping.pairs) == 1
+    assert mapping.pairs[0].key == ()
+    assert len(mapping.pairs[0].source.files) == 2
+    assert len(mapping.pairs[0].target.files) == 1
