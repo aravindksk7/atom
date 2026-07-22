@@ -345,3 +345,61 @@ def test_run_executor_multi_file_automated_strategy_pairs_and_writes_manifest(tm
     assert payload["strategy"] == "automated"
     assert payload["pairs"][0]["mapping_method"] == "automated"
     assert payload["pairs"][0]["similarity_score"] >= 0.3
+
+
+def test_safe_path_component_strips_path_traversal_characters() -> None:
+    from api.services.run_executor import _safe_path_component
+
+    assert _safe_path_component("../../evil") == "______evil"
+    assert _safe_path_component("normal_job-name123") == "normal_job-name123"
+
+
+def test_run_executor_multi_file_manifest_path_sanitizes_traversal_in_job_name(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.chdir(tmp_path)
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="../../evil",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {
+                    "kind": "local", "root": str(source_dir),
+                    "pattern": "sales_{region}_{date:%Y%m%d}.csv",
+                },
+                "target": {
+                    "kind": "local", "root": str(target_dir),
+                    "pattern": "financials_{region}_{date:%Y%m%d}.dat",
+                },
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    executor._build_case(job)()
+
+    logs_dir = tmp_path / "logs"
+    manifest_files = list(logs_dir.glob("file_mapping_manifest_*.json"))
+    assert len(manifest_files) == 1
+    assert manifest_files[0].parent == logs_dir  # stayed inside logs/, didn't escape
+    assert ".." not in manifest_files[0].name

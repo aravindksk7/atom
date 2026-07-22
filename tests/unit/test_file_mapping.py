@@ -353,3 +353,15 @@ def test_file_mapping_spec_rejects_unknown_signal() -> None:
                 "automated_mapping": {"signals": ["made_up_signal"]},
             }
         })
+
+
+def test_file_mapping_spec_rejects_boolean_similarity_threshold() -> None:
+    with pytest.raises(ValueError, match="similarity_threshold must be"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "strategy": "automated",
+                "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+                "automated_mapping": {"similarity_threshold": True},
+            }
+        })

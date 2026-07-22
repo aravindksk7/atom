@@ -44,6 +44,15 @@ HOLD_TIMEOUT_SECONDS = float(os.environ.get("HOLD_TIMEOUT_SECONDS", "86400"))
 BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
 FILE_SOURCE_QUERY = "__file_source__"
 
+
+def _safe_path_component(value: str) -> str:
+    """Slugify a value for safe interpolation into a filesystem path
+    (e.g. a job name in a manifest filename) -- replace anything that
+    isn't alphanumeric, dash, or underscore with an underscore, so a job
+    name like '../../evil' can't escape the intended directory."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", value)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -615,7 +624,7 @@ class RunExecutor:
                 similarity_scores = None
 
             FileMappingManifestWriter(
-                f"logs/file_mapping_manifest_{self._run_id}_{job.name}.json"
+                f"logs/file_mapping_manifest_{_safe_path_component(self._run_id)}_{_safe_path_component(job.name)}.json"
             ).write(self._run_id, job.name, spec, mapping, similarity_scores)
 
             if mapping.unmatched_sources or mapping.unmatched_targets:

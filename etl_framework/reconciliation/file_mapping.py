@@ -25,6 +25,9 @@ import pandas as pd
 
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.runner.state import TestStatus
+from etl_framework.utils.logging import get_logger
+
+logger = get_logger("reconciliation.file_mapping")
 
 _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?\}")
 
@@ -557,3 +560,8 @@ class FileMappingManifestWriter:
 
         with open(self._output_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
+
+        logger.info(
+            "File mapping manifest written to %s (%d pair(s), %d unmatched source group(s), %d unmatched target group(s))",
+            self._output_path, len(mapping.pairs), len(mapping.unmatched_sources), len(mapping.unmatched_targets),
+        )
