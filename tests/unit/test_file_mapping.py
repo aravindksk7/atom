@@ -504,3 +504,62 @@ def test_aggregate_reconciliation_results_all_passed_still_reports_zero_errored(
 
     assert aggregate.status == TestStatus.PASSED
     assert aggregate.mismatch_summary["pairs_errored"] == 0
+
+
+from etl_framework.reconciliation.file_mapping import ReadinessSpec
+
+
+def test_file_mapping_spec_parses_readiness_on_a_source() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {
+                "kind": "local", "root": "/spool", "pattern": "sales_{region}.csv",
+                "readiness": {"expected_count": 3, "poll_interval_seconds": 2, "timeout_seconds": 60},
+            },
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        }
+    })
+
+    assert spec.source.readiness == ReadinessSpec(expected_count=3, poll_interval_seconds=2.0, timeout_seconds=60.0)
+    assert spec.target.readiness is None
+
+
+def test_file_mapping_spec_readiness_defaults_poll_interval_and_timeout() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {
+                "kind": "local", "root": "/spool", "pattern": "sales_{region}.csv",
+                "readiness": {"expected_count": 2},
+            },
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        }
+    })
+
+    assert spec.source.readiness == ReadinessSpec(expected_count=2, poll_interval_seconds=5.0, timeout_seconds=300.0)
+
+
+def test_file_mapping_spec_rejects_readiness_without_expected_count() -> None:
+    with pytest.raises(ValueError, match="expected_count must be a positive integer"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "match_on": ["region"],
+                "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv", "readiness": {}},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+            }
+        })
+
+
+def test_file_mapping_spec_rejects_non_positive_poll_interval() -> None:
+    with pytest.raises(ValueError, match="poll_interval_seconds must be a positive number"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "match_on": ["region"],
+                "source": {
+                    "kind": "local", "root": "/spool", "pattern": "sales_{region}.csv",
+                    "readiness": {"expected_count": 1, "poll_interval_seconds": 0},
+                },
+                "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+            }
+        })

@@ -202,6 +202,7 @@ class FileSourceSpec:
     kind: str
     root: str
     pattern: str
+    readiness: "ReadinessSpec | None" = None
 
 
 @dataclass(frozen=True)
@@ -265,7 +266,8 @@ def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
     pattern = raw.get("pattern")
     if not root or not pattern:
         raise ValueError(f"file_mapping.{side} requires both 'root' and 'pattern'")
-    return FileSourceSpec(kind=kind, root=root, pattern=pattern)
+    readiness = _parse_readiness(raw.get("readiness"), side)
+    return FileSourceSpec(kind=kind, root=root, pattern=pattern, readiness=readiness)
 
 
 def _group_summary(group: FileGroup, match_on: tuple[str, ...]) -> dict[str, Any]:
@@ -588,3 +590,31 @@ class FileMappingManifestWriter:
             "File mapping manifest written to %s (%d pair(s), %d unmatched source group(s), %d unmatched target group(s))",
             self._output_path, len(mapping.pairs), len(mapping.unmatched_sources), len(mapping.unmatched_targets),
         )
+
+
+@dataclass(frozen=True)
+class ReadinessSpec:
+    expected_count: int
+    poll_interval_seconds: float = 5.0
+    timeout_seconds: float = 300.0
+
+
+def _parse_readiness(raw: Any, side: str) -> "ReadinessSpec | None":
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"file_mapping.{side}.readiness must be an object")
+    expected_count = raw.get("expected_count")
+    if not isinstance(expected_count, int) or isinstance(expected_count, bool) or expected_count < 1:
+        raise ValueError(f"file_mapping.{side}.readiness.expected_count must be a positive integer")
+    poll_interval = raw.get("poll_interval_seconds", 5.0)
+    if not isinstance(poll_interval, (int, float)) or isinstance(poll_interval, bool) or poll_interval <= 0:
+        raise ValueError(f"file_mapping.{side}.readiness.poll_interval_seconds must be a positive number")
+    timeout = raw.get("timeout_seconds", 300.0)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+        raise ValueError(f"file_mapping.{side}.readiness.timeout_seconds must be a positive number")
+    return ReadinessSpec(
+        expected_count=int(expected_count),
+        poll_interval_seconds=float(poll_interval),
+        timeout_seconds=float(timeout),
+    )
