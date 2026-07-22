@@ -387,7 +387,11 @@ def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
 
 
 def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:
-    if ext == ".csv":
+    if ext in (".csv", ".dat"):
+        # .dat is a common extension for delimited flat-file spools (e.g. the
+        # financials_{YYYYMMDD}.dat baseline exports multi-file reconciliation
+        # pairs against). _read_csv_bytes sniffs the delimiter on fallback, so
+        # comma/tab/semicolon/pipe .dat files all parse.
         return _read_csv_bytes(raw)
     if ext in (".xlsx", ".xls"):
         return pd.read_excel(io.BytesIO(raw))
@@ -457,6 +461,14 @@ def _resolve_allowed_path(path: str) -> Path:
             detail=f"Invalid file path. Allowed server-side base directories: {_allowed_bases_detail(bases)}",
         )
     return resolved
+
+
+def resolve_allowed_path(path: str) -> Path:
+    """Public entry point for callers outside this module (e.g. the
+    multi-file discovery resolver in etl_framework.reconciliation.file_mapping)
+    that need the same server-side directory allow-listing ``read_tabular``
+    already enforces, without duplicating it."""
+    return _resolve_allowed_path(path)
 
 
 def read_tabular(
