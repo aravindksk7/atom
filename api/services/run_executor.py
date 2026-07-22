@@ -601,13 +601,26 @@ class RunExecutor:
                 discover_local_files,
                 pair_files,
                 pair_files_automated,
+                wait_for_ready_files,
             )
 
             spec = FileMappingSpec.from_params(job.params)
             source_root = resolve_allowed_path(spec.source.root)
             target_root = resolve_allowed_path(spec.target.root)
-            source_files = discover_local_files(source_root, spec.source.pattern)
-            target_files = discover_local_files(target_root, spec.target.pattern)
+
+            if spec.source.readiness is not None:
+                source_files = wait_for_ready_files(
+                    lambda: discover_local_files(source_root, spec.source.pattern), spec.source.readiness,
+                )
+            else:
+                source_files = discover_local_files(source_root, spec.source.pattern)
+
+            if spec.target.readiness is not None:
+                target_files = wait_for_ready_files(
+                    lambda: discover_local_files(target_root, spec.target.pattern), spec.target.readiness,
+                )
+            else:
+                target_files = discover_local_files(target_root, spec.target.pattern)
 
             if spec.strategy == "automated":
                 source_frames = {

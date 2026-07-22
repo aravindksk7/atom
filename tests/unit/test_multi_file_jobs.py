@@ -548,3 +548,87 @@ def test_run_executor_multi_file_reconciliation_runs_pairs_via_test_runner(tmp_p
 
     assert result.status == TestStatus.PASSED
     assert len(captured_cases) == 1  # one pair in this job
+
+
+def test_run_executor_multi_file_readiness_satisfied_without_waiting(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon", job_type="reconciliation", query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {
+                    "kind": "local", "root": str(source_dir),
+                    "pattern": "sales_data_{region}_{date:%Y%m%d}.csv",
+                    "readiness": {"expected_count": 1, "poll_interval_seconds": 0.01, "timeout_seconds": 1},
+                },
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.PASSED
+
+
+def test_run_executor_multi_file_readiness_times_out_when_files_never_arrive(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon", job_type="reconciliation", query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {
+                    "kind": "local", "root": str(source_dir),
+                    "pattern": "sales_data_{region}_{date:%Y%m%d}.csv",
+                    # Only 1 file will ever exist -- expecting 5 must time out quickly.
+                    "readiness": {"expected_count": 5, "poll_interval_seconds": 0.05, "timeout_seconds": 0.15},
+                },
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    with pytest.raises(TimeoutError, match="only 1 of 5 expected file"):
+        executor._build_case(job)()
