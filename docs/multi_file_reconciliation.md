@@ -119,13 +119,52 @@ Every multi_file job execution (explicit or automated) writes
 mapping method and (for automated pairs) its similarity score breakdown, plus
 every unmatched group -- an audit trail for why files were or weren't paired.
 
-## Current limitations (Phase 2)
+## Parallel execution and failure isolation
+
+Pairs within one job run concurrently, using the run's `max_workers` setting
+(the same setting used elsewhere for job-level parallelism, default 4). If
+one pair's files can't be read or compared, that pair's result becomes an
+`ERROR`-status entry in `mismatch_summary["file_pairs"]` (with the failure
+message under `"error"`) instead of crashing the whole job — every other
+pair's real result is still computed and reported. The aggregate job status
+becomes `ERROR` whenever at least one pair errored (`mismatch_summary`
+gains a `pairs_errored` count alongside the existing `pairs_total` /
+`pairs_passed` / `pairs_failed`).
+
+## Readiness (waiting for a live spool to finish writing)
+
+For a local root a live process is still actively writing into, add a
+`readiness` block to either side's source spec:
+
+```json
+{
+  "source": {
+    "kind": "local",
+    "root": "/spool/live_exports",
+    "pattern": "sales_data_{region}_{date:%Y%m%d}.csv",
+    "readiness": {
+      "expected_count": 6,
+      "poll_interval_seconds": 5,
+      "timeout_seconds": 300
+    }
+  }
+}
+```
+
+Discovery polls that side every `poll_interval_seconds` until at least
+`expected_count` files match the pattern, or fails the whole job with a
+clear error once `timeout_seconds` elapses — so the job doesn't race a
+partial spool and compare against files that haven't all landed yet.
+`poll_interval_seconds` defaults to 5, `timeout_seconds` to 300.
+
+## Current limitations (Phase 3)
 
 - `kind: "local"` only — S3 and SFTP sources are on the roadmap.
+- Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't
+  a supported multi_file source kind yet (a separate, later-phase item), so
+  it has no readiness support here either.
 - Automated matching pairs single files only; shard-collapsing (many files
   on one side sharing a key) is `strategy: "explicit"` only.
-- Pairs are compared sequentially; per-pair parallelism and per-pair failure
-  isolation are on the roadmap.
 - No dedicated web UI repeater yet; multi-file jobs are created via the API
   (or a hand-written JSON/YAML payload) until the job editor's file-mapping
   UI ships. The lineage manifest is a JSON file on disk, not yet surfaced in
