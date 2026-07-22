@@ -403,3 +403,42 @@ def test_run_executor_multi_file_manifest_path_sanitizes_traversal_in_job_name(t
     assert len(manifest_files) == 1
     assert manifest_files[0].parent == logs_dir  # stayed inside logs/, didn't escape
     assert ".." not in manifest_files[0].name
+
+
+import pandas as pd
+
+from api.services.frame_engine import FrameEngine
+
+
+def test_run_reconciliation_job_accepts_segment_columns_override(monkeypatch) -> None:
+    """When segment_columns is passed explicitly, _resolve_segment_columns
+    must not be called at all -- this is the thread-safety fix that lets
+    multiple pairs run in parallel without hitting the shared DB session.
+    """
+    job = JobDefinition(
+        name="orders_recon", job_type="reconciliation", query="SELECT 1",
+        key_columns=["id"], params={"source_mode": "sql"},
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+
+    def _boom(_job):
+        raise AssertionError("_resolve_segment_columns should not be called when an override is given")
+
+    executor._resolve_segment_columns = _boom
+
+    source_df = pd.DataFrame({"id": [1], "value": ["a"]})
+    target_df = pd.DataFrame({"id": [1], "value": ["a"]})
+    source_engine = FrameEngine(source_df, "source")
+    target_engine = FrameEngine(target_df, "target")
+
+    result = executor._run_reconciliation_job(
+        job, source_engine, target_engine,
+        query="__file_source__", params={}, chunk_size=0, use_hash_precheck=False,
+        segment_columns=[],
+    )
+
+    assert result.status == TestStatus.PASSED

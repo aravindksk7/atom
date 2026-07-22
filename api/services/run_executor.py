@@ -689,8 +689,10 @@ class RunExecutor:
         params: dict[str, Any] | None,
         chunk_size: int,
         use_hash_precheck: bool,
+        segment_columns: list[str] | None = None,
     ) -> ReconciliationResult:
-        segment_columns = self._resolve_segment_columns(job)
+        if segment_columns is None:
+            segment_columns = self._resolve_segment_columns(job)
         engine = ReconciliationEngine(
             source_engine=source_engine,
             target_engine=target_engine,
