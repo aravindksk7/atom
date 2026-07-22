@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -497,3 +499,61 @@ def pair_files_automated(
         unmatched_sources=unmatched_sources,
         unmatched_targets=unmatched_targets,
     ), scores
+
+
+class FileMappingManifestWriter:
+    """Writes a lineage artifact recording every file-mapping decision for
+    one multi_file job execution -- which files were discovered, how they
+    were paired (and with what similarity score, for automated matches), and
+    which groups were left unmatched. Mirrors the existing
+    ``etl_framework.reporting.metrics.MetricsWriter`` pattern (a small class
+    holding an output path, with a single ``write`` method).
+    """
+
+    def __init__(self, output_path: str) -> None:
+        self._output_path = output_path
+
+    def write(
+        self,
+        run_id: str,
+        job_name: str,
+        spec: FileMappingSpec,
+        mapping: FileMappingResult,
+        similarity_scores: list[SimilarityScore] | None,
+    ) -> None:
+        parent = os.path.dirname(self._output_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        scores_by_pair_key = (
+            {(s.source.path, s.target.path): s for s in similarity_scores}
+            if similarity_scores is not None
+            else {}
+        )
+
+        pairs_payload = []
+        for pair in mapping.pairs:
+            score = None
+            if pair.source.files and pair.target.files:
+                score = scores_by_pair_key.get((pair.source.files[0].path, pair.target.files[0].path))
+            pairs_payload.append({
+                "mapping_method": spec.strategy,
+                "similarity_score": score.score if score is not None else None,
+                "signal_scores": score.signal_scores if score is not None else None,
+                "source_files": [f.file_name for f in pair.source.files],
+                "target_files": [f.file_name for f in pair.target.files],
+            })
+
+        payload = {
+            "run_id": run_id,
+            "job_name": job_name,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "strategy": spec.strategy,
+            "match_on": list(mapping.match_on),
+            "pairs": pairs_payload,
+            "unmatched_sources": [_group_summary(g, mapping.match_on) for g in mapping.unmatched_sources],
+            "unmatched_targets": [_group_summary(g, mapping.match_on) for g in mapping.unmatched_targets],
+        }
+
+        with open(self._output_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
