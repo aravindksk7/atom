@@ -464,6 +464,9 @@ class JobDefinition(BaseModel):
                     raise ValueError("bo_live reconciliation jobs require a target file")
                 # key_columns is optional: RunExecutor infers a shared ID column,
                 # or falls back to positional row matching.
+            elif source_mode == "multi_file":
+                from etl_framework.reconciliation.file_mapping import FileMappingSpec
+                FileMappingSpec.from_params(self.params)
             elif (
                 source_mode == "files"
                 or _has_job_file_source(self.params, "source")
