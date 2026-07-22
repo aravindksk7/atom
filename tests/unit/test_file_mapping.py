@@ -563,3 +563,58 @@ def test_file_mapping_spec_rejects_non_positive_poll_interval() -> None:
                 "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
             }
         })
+
+
+def test_aggregate_reconciliation_results_counts_passed_failed_errored_pairs_independently() -> None:
+    """A job with one PASSED, one genuinely FAILED, and one ERRORed pair
+    must report counts that sum to pairs_total -- pairs_failed must not
+    double-count the errored pair."""
+    from datetime import datetime, timezone
+    from etl_framework.reconciliation.file_mapping import (
+        DiscoveredFile as _DF,
+        FileGroup as _FG,
+        FilePair as _FP,
+        FileMappingResult as _FMR,
+        aggregate_reconciliation_results,
+    )
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    def _result(status, mismatch_summary=None):
+        return ReconciliationResult(
+            query_name="pair", source_env="s", target_env="t",
+            source_row_count=1, target_row_count=1,
+            matched_count=1 if status == TestStatus.PASSED else 0,
+            missing_in_target_count=0, missing_in_source_count=0,
+            value_mismatch_count=1 if status == TestStatus.FAILED else 0,
+            mismatches=[], status=status,
+            executed_at=datetime(2026, 7, 23, tzinfo=timezone.utc), duration_seconds=0.1,
+            mismatch_summary=mismatch_summary,
+        )
+
+    def _group(name: str, region: str) -> "_FG":
+        return _FG(key=(region,), files=[_DF(f"/x/{name}", name, {"region": region})])
+
+    mapping = _FMR(
+        match_on=("region",),
+        pairs=[
+            _FP(key=("east",), source=_group("e_s.csv", "east"), target=_group("e_t.dat", "east")),
+            _FP(key=("west",), source=_group("w_s.csv", "west"), target=_group("w_t.dat", "west")),
+            _FP(key=("north",), source=_group("n_s.csv", "north"), target=_group("n_t.dat", "north")),
+        ],
+        unmatched_sources=[], unmatched_targets=[],
+    )
+    pair_results = [
+        _result(TestStatus.PASSED),
+        _result(TestStatus.FAILED),
+        _result(TestStatus.ERROR, mismatch_summary={"error": "read failed"}),
+    ]
+
+    aggregate = aggregate_reconciliation_results("mixed_job", mapping, pair_results)
+
+    summary = aggregate.mismatch_summary
+    assert summary["pairs_total"] == 3
+    assert summary["pairs_passed"] == 1
+    assert summary["pairs_failed"] == 1
+    assert summary["pairs_errored"] == 1
+    assert summary["pairs_passed"] + summary["pairs_failed"] + summary["pairs_errored"] == summary["pairs_total"]

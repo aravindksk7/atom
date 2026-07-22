@@ -368,7 +368,7 @@ def aggregate_reconciliation_results(
             "unmatched_targets": [_group_summary(g, mapping.match_on) for g in mapping.unmatched_targets],
             "pairs_total": total_pairs,
             "pairs_passed": pairs_passed,
-            "pairs_failed": total_pairs - pairs_passed,
+            "pairs_failed": total_pairs - pairs_passed - pairs_errored,
             "pairs_errored": pairs_errored,
         },
         source_file_name=f"{total_source_files} file(s) across {total_pairs} pair(s)",
