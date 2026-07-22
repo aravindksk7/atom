@@ -255,3 +255,22 @@ def test_aggregate_reconciliation_results_rejects_length_mismatch() -> None:
 
     with pytest.raises(ValueError, match="one result per mapped pair"):
         aggregate_reconciliation_results("job", mapping, [_pair_result(TestStatus.PASSED)])
+
+
+def test_pair_files_true_m_to_n_multiple_files_both_sides() -> None:
+    sources = [
+        _df("sales_east_p1.csv", region="east"),
+        _df("sales_east_p2.csv", region="east"),
+    ]
+    targets = [
+        _df("fin_east_p1.dat", region="east"),
+        _df("fin_east_p2.dat", region="east"),
+    ]
+
+    mapping = pair_files(sources, targets, ["region"])
+
+    assert len(mapping.pairs) == 1
+    assert len(mapping.pairs[0].source.files) == 2
+    assert len(mapping.pairs[0].target.files) == 2
+    assert not mapping.unmatched_sources
+    assert not mapping.unmatched_targets

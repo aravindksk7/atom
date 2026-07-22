@@ -287,7 +287,7 @@ def aggregate_reconciliation_results(
         for mismatch in result.mismatches:
             all_mismatches.append(dataclasses.replace(
                 mismatch,
-                key_values={"__pair__": pair_key, **mismatch.key_values},
+                key_values={**mismatch.key_values, "__pair__": pair_key},
             ))
         if result.status == TestStatus.PASSED:
             pairs_passed += 1

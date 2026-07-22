@@ -197,3 +197,49 @@ def test_run_executor_multi_file_reconciliation_fails_fast_on_unmatched_by_defau
 
     with pytest.raises(ValueError, match="unmatched source group"):
         executor._build_case(job)()
+
+
+def test_run_executor_multi_file_reconciliation_ignore_policy_proceeds_with_unmatched(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    # east matches on both sides; north exists only on source (unmatched).
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (source_dir / "sales_data_north_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+                "unmatched_policy": "ignore",
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.PASSED
+    assert result.mismatch_summary["pairs_total"] == 1
+    assert len(result.mismatch_summary["unmatched_sources"]) == 1
+    assert result.mismatch_summary["unmatched_sources"][0]["key"] == {"region": "north", "date": "20260101"}
