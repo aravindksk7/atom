@@ -298,7 +298,13 @@ def aggregate_reconciliation_results(
     pair_summaries: list[dict[str, Any]] = []
     pairs_passed = 0
     for pair, result in zip(mapping.pairs, pair_results):
-        pair_key = dict(zip(mapping.match_on, pair.key))
+        if mapping.match_on:
+            pair_key = dict(zip(mapping.match_on, pair.key))
+        else:
+            pair_key = {
+                "source_file": pair.source.files[0].file_name if pair.source.files else None,
+                "target_file": pair.target.files[0].file_name if pair.target.files else None,
+            }
         for mismatch in result.mismatches:
             all_mismatches.append(dataclasses.replace(
                 mismatch,

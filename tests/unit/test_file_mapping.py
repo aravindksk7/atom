@@ -365,3 +365,62 @@ def test_file_mapping_spec_rejects_boolean_similarity_threshold() -> None:
                 "automated_mapping": {"similarity_threshold": True},
             }
         })
+
+
+def test_aggregate_reconciliation_results_gives_automated_pairs_distinct_keys() -> None:
+    from datetime import datetime, timezone
+    from etl_framework.reconciliation.file_mapping import (
+        DiscoveredFile as _DF,
+        FileGroup as _FG,
+        FilePair as _FP,
+        FileMappingResult as _FMR,
+        aggregate_reconciliation_results,
+    )
+    from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    def _pair_result(mismatches):
+        return ReconciliationResult(
+            query_name="pair", source_env="s", target_env="t",
+            source_row_count=1, target_row_count=1, matched_count=0,
+            missing_in_target_count=0, missing_in_source_count=0,
+            value_mismatch_count=len(mismatches), mismatches=mismatches,
+            status=TestStatus.FAILED if mismatches else TestStatus.PASSED,
+            executed_at=datetime(2026, 7, 23, tzinfo=timezone.utc), duration_seconds=0.1,
+        )
+
+    east_source = _FG(key=("sales_east.csv",), files=[_DF("/s/sales_east.csv", "sales_east.csv", {})])
+    east_target = _FG(key=("financials_east.dat",), files=[_DF("/t/financials_east.dat", "financials_east.dat", {})])
+    west_source = _FG(key=("sales_west.csv",), files=[_DF("/s/sales_west.csv", "sales_west.csv", {})])
+    west_target = _FG(key=("financials_west.dat",), files=[_DF("/t/financials_west.dat", "financials_west.dat", {})])
+
+    mapping = _FMR(
+        match_on=(),  # automated strategy always produces an empty match_on
+        pairs=[
+            _FP(key=("sales_east.csv", "financials_east.dat"), source=east_source, target=east_target),
+            _FP(key=("sales_west.csv", "financials_west.dat"), source=west_source, target=west_target),
+        ],
+        unmatched_sources=[],
+        unmatched_targets=[],
+    )
+    east_mismatch = MismatchRecord(
+        key_values={"id": 1}, column_name="value", source_value="alpha",
+        target_value="zulu", mismatch_type="value_diff",
+    )
+    west_mismatch = MismatchRecord(
+        key_values={"id": 2}, column_name="value", source_value="bravo",
+        target_value="yankee", mismatch_type="value_diff",
+    )
+    pair_results = [_pair_result([east_mismatch]), _pair_result([west_mismatch])]
+
+    aggregate = aggregate_reconciliation_results("auto_job", mapping, pair_results)
+
+    # Every automated pair must get a distinct, non-empty key -- not the
+    # same {} for both pairs.
+    pair_keys = [fp["key"] for fp in aggregate.mismatch_summary["file_pairs"]]
+    assert pair_keys[0] != pair_keys[1]
+    assert all(key for key in pair_keys)  # none are empty {}
+
+    mismatch_pair_tags = [m.key_values["__pair__"] for m in aggregate.mismatches]
+    assert mismatch_pair_tags[0] != mismatch_pair_tags[1]
+    assert all(tag for tag in mismatch_pair_tags)
