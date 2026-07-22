@@ -455,6 +455,8 @@ class RunExecutor:
             return self._build_case_automic(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
+        if job.job_type == "reconciliation" and job.params.get("source_mode") == "multi_file":
+            return self._build_case_multi_file_reconciliation(job)
         if job.job_type == "reconciliation" and job.params.get("source_mode") == "bo_live":
             if not self._settings.use_live_connections:
                 def run_job() -> ReconciliationResult:
@@ -578,6 +580,75 @@ class RunExecutor:
                 source_file_name=None,
                 target_file_name=self._job_file_name(job, "target"),
             )
+        return run_job
+
+    def _build_case_multi_file_reconciliation(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            from api.services.file_source import read_tabular, resolve_allowed_path
+            from etl_framework.reconciliation.file_mapping import (
+                FileMappingSpec,
+                aggregate_reconciliation_results,
+                discover_local_files,
+                pair_files,
+            )
+
+            spec = FileMappingSpec.from_params(job.params)
+            source_root = resolve_allowed_path(spec.source.root)
+            target_root = resolve_allowed_path(spec.target.root)
+            source_files = discover_local_files(source_root, spec.source.pattern)
+            target_files = discover_local_files(target_root, spec.target.pattern)
+            mapping = pair_files(source_files, target_files, spec.match_on)
+
+            if mapping.unmatched_sources or mapping.unmatched_targets:
+                if spec.unmatched_policy == "fail":
+                    raise ValueError(
+                        f"multi_file reconciliation for '{job.name}' has "
+                        f"{len(mapping.unmatched_sources)} unmatched source group(s) and "
+                        f"{len(mapping.unmatched_targets)} unmatched target group(s); "
+                        "set file_mapping.unmatched_policy to 'warn' or 'ignore' to proceed anyway"
+                    )
+                if spec.unmatched_policy == "warn":
+                    logger.warning(
+                        "multi_file reconciliation for '%s' proceeding with %d unmatched "
+                        "source group(s) and %d unmatched target group(s)",
+                        job.name, len(mapping.unmatched_sources), len(mapping.unmatched_targets),
+                    )
+
+            if not mapping.pairs:
+                raise ValueError(f"multi_file reconciliation for '{job.name}' matched zero file pairs")
+
+            pair_results: list[ReconciliationResult] = []
+            for pair in mapping.pairs:
+                source_df = pd.concat(
+                    [read_tabular(path=f.path, file_name=f.file_name) for f in pair.source.files],
+                    ignore_index=True,
+                )
+                target_df = pd.concat(
+                    [read_tabular(path=f.path, file_name=f.file_name) for f in pair.target.files],
+                    ignore_index=True,
+                )
+                source_df, target_df, resolved_keys = resolve_key_columns(
+                    source_df,
+                    target_df,
+                    job.key_columns or self._settings.key_columns,
+                    job.exclude_columns or [],
+                )
+                pair_job = job.model_copy(update={"key_columns": resolved_keys})
+                source_label = "/".join(f.file_name for f in pair.source.files)
+                target_label = "/".join(f.file_name for f in pair.target.files)
+                source_engine = FrameEngine(source_df, source_label)
+                target_engine = FrameEngine(target_df, target_label)
+                pair_results.append(self._run_reconciliation_job(
+                    pair_job,
+                    source_engine,
+                    target_engine,
+                    query=FILE_SOURCE_QUERY,
+                    params={},
+                    chunk_size=0,
+                    use_hash_precheck=False,
+                ))
+
+            return aggregate_reconciliation_results(job.name, mapping, pair_results)
         return run_job
 
     def _run_reconciliation_job(
