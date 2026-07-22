@@ -204,6 +204,7 @@ class FileMappingSpec:
     source: FileSourceSpec
     target: FileSourceSpec
     unmatched_policy: str = "fail"
+    automated: "AutomatedMappingSpec | None" = None
 
     @classmethod
     def from_params(cls, params: dict[str, Any]) -> "FileMappingSpec":
@@ -213,10 +214,10 @@ class FileMappingSpec:
                 "multi_file reconciliation jobs require a 'file_mapping' object in params"
             )
         strategy = raw.get("strategy", "explicit")
-        if strategy != "explicit":
+        if strategy not in ("explicit", "automated"):
             raise ValueError(
                 f"file_mapping.strategy '{strategy}' is not supported yet; "
-                "only 'explicit' is implemented"
+                "'explicit' and 'automated' are implemented"
             )
         match_on = tuple(raw.get("match_on") or [])
         source = _parse_file_source(raw.get("source"), "source")
@@ -227,12 +228,18 @@ class FileMappingSpec:
                 "file_mapping.unmatched_policy must be 'fail', 'warn', or "
                 f"'ignore', got {unmatched_policy!r}"
             )
+        automated = (
+            _parse_automated_mapping(raw.get("automated_mapping"))
+            if strategy == "automated"
+            else None
+        )
         return cls(
             strategy=strategy,
             match_on=match_on,
             source=source,
             target=target,
             unmatched_policy=unmatched_policy,
+            automated=automated,
         )
 
 
@@ -382,3 +389,31 @@ def _combined_similarity(signal_scores: dict[str, float], signals: Sequence[str]
     """
     selected = [signal_scores[name] for name in signals]
     return sum(selected) / len(selected)
+
+
+@dataclass(frozen=True)
+class AutomatedMappingSpec:
+    similarity_threshold: float = 0.7
+    signals: tuple[str, ...] = KNOWN_SIMILARITY_SIGNALS
+
+
+def _parse_automated_mapping(raw: Any) -> AutomatedMappingSpec:
+    if raw is None:
+        return AutomatedMappingSpec()
+    if not isinstance(raw, dict):
+        raise ValueError("file_mapping.automated_mapping must be an object")
+    threshold = raw.get("similarity_threshold", 0.7)
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not (0.0 <= threshold <= 1.0):
+        raise ValueError(
+            "file_mapping.automated_mapping.similarity_threshold must be a "
+            f"number between 0.0 and 1.0, got {threshold!r}"
+        )
+    signals = tuple(raw.get("signals") or KNOWN_SIMILARITY_SIGNALS)
+    unknown = [name for name in signals if name not in KNOWN_SIMILARITY_SIGNALS]
+    if unknown:
+        raise ValueError(
+            f"file_mapping.automated_mapping.signals has unknown signal(s): {unknown}"
+        )
+    if not signals:
+        raise ValueError("file_mapping.automated_mapping.signals must not be empty")
+    return AutomatedMappingSpec(similarity_threshold=float(threshold), signals=signals)

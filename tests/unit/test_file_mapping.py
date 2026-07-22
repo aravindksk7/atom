@@ -274,3 +274,82 @@ def test_pair_files_true_m_to_n_multiple_files_both_sides() -> None:
     assert len(mapping.pairs[0].target.files) == 2
     assert not mapping.unmatched_sources
     assert not mapping.unmatched_targets
+
+
+from etl_framework.reconciliation.file_mapping import AutomatedMappingSpec
+
+
+def test_file_mapping_spec_parses_automated_strategy_with_defaults() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "strategy": "automated",
+            "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+        }
+    })
+
+    assert spec.strategy == "automated"
+    assert spec.automated == AutomatedMappingSpec(similarity_threshold=0.7, signals=("filename_tokens", "column_signature", "row_count_ratio"))
+
+
+def test_file_mapping_spec_parses_automated_strategy_with_overrides() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "strategy": "automated",
+            "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+            "automated_mapping": {
+                "similarity_threshold": 0.9,
+                "signals": ["filename_tokens", "row_count_ratio"],
+            },
+        }
+    })
+
+    assert spec.automated == AutomatedMappingSpec(similarity_threshold=0.9, signals=("filename_tokens", "row_count_ratio"))
+
+
+def test_file_mapping_spec_explicit_strategy_has_no_automated_config() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        }
+    })
+
+    assert spec.automated is None
+
+
+def test_file_mapping_spec_rejects_unknown_strategy() -> None:
+    with pytest.raises(ValueError, match="is not supported yet"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "strategy": "ml_based",
+                "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+            }
+        })
+
+
+def test_file_mapping_spec_rejects_bad_similarity_threshold() -> None:
+    with pytest.raises(ValueError, match="similarity_threshold must be"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "strategy": "automated",
+                "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+                "automated_mapping": {"similarity_threshold": 1.5},
+            }
+        })
+
+
+def test_file_mapping_spec_rejects_unknown_signal() -> None:
+    with pytest.raises(ValueError, match="unknown signal"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "strategy": "automated",
+                "source": {"kind": "local", "root": "/spool", "pattern": "*.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+                "automated_mapping": {"signals": ["made_up_signal"]},
+            }
+        })
