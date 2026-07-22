@@ -12,6 +12,7 @@ for why that triplication existed before this module).
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -333,3 +334,14 @@ def aggregate_reconciliation_results(
         source_file_name=f"{total_source_files} file(s) across {total_pairs} pair(s)",
         target_file_name=f"{total_target_files} file(s) across {total_pairs} pair(s)",
     )
+
+
+def _filename_similarity(source_name: str, target_name: str) -> float:
+    """Compare two filenames by their stem (name minus extension) using
+    ``difflib``'s ratio, so ``sales_east_20260101.csv`` and
+    ``financials_east_20260101.dat`` score higher than two unrelated names,
+    regardless of extension.
+    """
+    source_stem = Path(source_name).stem
+    target_stem = Path(target_name).stem
+    return difflib.SequenceMatcher(None, source_stem, target_stem).ratio()
