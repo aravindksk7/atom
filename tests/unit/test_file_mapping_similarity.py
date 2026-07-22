@@ -49,3 +49,22 @@ def test_row_count_ratio_uses_min_over_max() -> None:
 
 def test_row_count_ratio_both_zero_scores_one() -> None:
     assert _row_count_ratio(0, 0) == 1.0
+
+
+from etl_framework.reconciliation.file_mapping import _combined_similarity, KNOWN_SIMILARITY_SIGNALS
+
+
+def test_known_similarity_signals_are_the_three_documented_signals() -> None:
+    assert KNOWN_SIMILARITY_SIGNALS == ("filename_tokens", "column_signature", "row_count_ratio")
+
+
+def test_combined_similarity_averages_all_signals_by_default() -> None:
+    signal_scores = {"filename_tokens": 1.0, "column_signature": 0.5, "row_count_ratio": 0.0}
+    score = _combined_similarity(signal_scores, KNOWN_SIMILARITY_SIGNALS)
+    assert score == (1.0 + 0.5 + 0.0) / 3
+
+
+def test_combined_similarity_averages_only_selected_signals() -> None:
+    signal_scores = {"filename_tokens": 1.0, "column_signature": 0.5, "row_count_ratio": 0.0}
+    score = _combined_similarity(signal_scores, ("filename_tokens", "column_signature"))
+    assert score == (1.0 + 0.5) / 2

@@ -369,3 +369,16 @@ def _row_count_ratio(source_rows: int, target_rows: int) -> float:
     if source_rows == 0 and target_rows == 0:
         return 1.0
     return min(source_rows, target_rows) / max(source_rows, target_rows)
+
+
+KNOWN_SIMILARITY_SIGNALS: tuple[str, ...] = ("filename_tokens", "column_signature", "row_count_ratio")
+
+
+def _combined_similarity(signal_scores: dict[str, float], signals: Sequence[str]) -> float:
+    """Average the named ``signals`` out of ``signal_scores`` (which always
+    carries all of ``KNOWN_SIMILARITY_SIGNALS`` -- ``signals`` just selects
+    which ones count toward the final score, so the manifest can still show
+    every signal even when only some are configured to matter).
+    """
+    selected = [signal_scores[name] for name in signals]
+    return sum(selected) / len(selected)
