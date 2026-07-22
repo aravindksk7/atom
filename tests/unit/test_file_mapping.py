@@ -183,3 +183,75 @@ def test_file_mapping_spec_rejects_unsupported_kind() -> None:
                 "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
             }
         })
+
+
+from datetime import datetime, timezone
+
+from etl_framework.reconciliation.file_mapping import (
+    FileGroup,
+    FileMappingResult,
+    FilePair,
+    aggregate_reconciliation_results,
+)
+from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.runner.state import TestStatus
+
+
+def _pair_result(status: TestStatus, mismatches: list[MismatchRecord] | None = None) -> ReconciliationResult:
+    return ReconciliationResult(
+        query_name="pair",
+        source_env="source",
+        target_env="target",
+        source_row_count=2,
+        target_row_count=2,
+        matched_count=2 if status == TestStatus.PASSED else 1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        value_mismatch_count=0 if status == TestStatus.PASSED else 1,
+        mismatches=mismatches or [],
+        status=status,
+        executed_at=datetime(2026, 7, 22, tzinfo=timezone.utc),
+        duration_seconds=0.1,
+    )
+
+
+def test_aggregate_reconciliation_results_rolls_up_pairs() -> None:
+    east_source = FileGroup(key=("east",), files=[_df("e.csv", region="east")])
+    east_target = FileGroup(key=("east",), files=[_df("e.dat", region="east")])
+    west_source = FileGroup(key=("west",), files=[_df("w.csv", region="west")])
+    west_target = FileGroup(key=("west",), files=[_df("w.dat", region="west")])
+    mapping = FileMappingResult(
+        match_on=("region",),
+        pairs=[
+            FilePair(key=("east",), source=east_source, target=east_target),
+            FilePair(key=("west",), source=west_source, target=west_target),
+        ],
+        unmatched_sources=[],
+        unmatched_targets=[],
+    )
+    mismatch = MismatchRecord(
+        key_values={"id": 1}, column_name="value", source_value="charlie",
+        target_value="zulu", mismatch_type="value_diff",
+    )
+    pair_results = [_pair_result(TestStatus.PASSED), _pair_result(TestStatus.FAILED, [mismatch])]
+
+    aggregate = aggregate_reconciliation_results("regional_sales_recon", mapping, pair_results)
+
+    assert aggregate.status == TestStatus.FAILED
+    assert aggregate.source_row_count == 4
+    assert aggregate.mismatch_summary["pairs_total"] == 2
+    assert aggregate.mismatch_summary["pairs_passed"] == 1
+    assert aggregate.mismatch_summary["pairs_failed"] == 1
+    assert aggregate.mismatches[0].key_values["__pair__"] == {"region": "west"}
+    assert aggregate.source_file_name == "2 file(s) across 2 pair(s)"
+
+    pair_summary_by_region = {p["key"]["region"]: p for p in aggregate.mismatch_summary["file_pairs"]}
+    assert pair_summary_by_region["east"]["status"] == "PASSED"
+    assert pair_summary_by_region["west"]["status"] == "FAILED"
+
+
+def test_aggregate_reconciliation_results_rejects_length_mismatch() -> None:
+    mapping = FileMappingResult(match_on=("region",), pairs=[], unmatched_sources=[], unmatched_targets=[])
+
+    with pytest.raises(ValueError, match="one result per mapped pair"):
+        aggregate_reconciliation_results("job", mapping, [_pair_result(TestStatus.PASSED)])

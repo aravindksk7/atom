@@ -11,10 +11,15 @@ for why that triplication existed before this module).
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
+
+from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.runner.state import TestStatus
 
 _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?\}")
 
@@ -246,3 +251,85 @@ def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
     if not root or not pattern:
         raise ValueError(f"file_mapping.{side} requires both 'root' and 'pattern'")
     return FileSourceSpec(kind=kind, root=root, pattern=pattern)
+
+
+def _group_summary(group: FileGroup, match_on: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "key": dict(zip(match_on, group.key)),
+        "files": [f.file_name for f in group.files],
+    }
+
+
+def aggregate_reconciliation_results(
+    job_name: str,
+    mapping: FileMappingResult,
+    pair_results: list[ReconciliationResult],
+) -> ReconciliationResult:
+    """Roll a list of per-pair ``ReconciliationResult``s (one per
+    ``mapping.pairs`` entry, in the same order) up into a single aggregate
+    result, the same shape ``RunExecutor`` already persists as one
+    ``TestResult`` row per job. The per-pair breakdown -- and the unmatched
+    groups from ``mapping`` -- are embedded in ``mismatch_summary`` so no
+    database migration or change to any existing report consumer is needed
+    in this phase.
+    """
+    if len(pair_results) != len(mapping.pairs):
+        raise ValueError(
+            f"aggregate_reconciliation_results requires one result per mapped "
+            f"pair, got {len(pair_results)} results for {len(mapping.pairs)} pairs"
+        )
+
+    all_mismatches: list[MismatchRecord] = []
+    pair_summaries: list[dict[str, Any]] = []
+    pairs_passed = 0
+    for pair, result in zip(mapping.pairs, pair_results):
+        pair_key = dict(zip(mapping.match_on, pair.key))
+        for mismatch in result.mismatches:
+            all_mismatches.append(dataclasses.replace(
+                mismatch,
+                key_values={"__pair__": pair_key, **mismatch.key_values},
+            ))
+        if result.status == TestStatus.PASSED:
+            pairs_passed += 1
+        pair_summaries.append({
+            "key": pair_key,
+            "status": result.status.value,
+            "source_files": [f.file_name for f in pair.source.files],
+            "target_files": [f.file_name for f in pair.target.files],
+            "source_row_count": result.source_row_count,
+            "target_row_count": result.target_row_count,
+            "matched_count": result.matched_count,
+            "missing_in_target_count": result.missing_in_target_count,
+            "missing_in_source_count": result.missing_in_source_count,
+            "value_mismatch_count": result.value_mismatch_count,
+        })
+
+    total_pairs = len(mapping.pairs)
+    total_source_files = sum(len(p.source.files) for p in mapping.pairs)
+    total_target_files = sum(len(p.target.files) for p in mapping.pairs)
+
+    return ReconciliationResult(
+        query_name=job_name,
+        source_env=pair_results[0].source_env if pair_results else "",
+        target_env=pair_results[0].target_env if pair_results else "",
+        source_row_count=sum(r.source_row_count for r in pair_results),
+        target_row_count=sum(r.target_row_count for r in pair_results),
+        matched_count=sum(r.matched_count for r in pair_results),
+        missing_in_target_count=sum(r.missing_in_target_count for r in pair_results),
+        missing_in_source_count=sum(r.missing_in_source_count for r in pair_results),
+        value_mismatch_count=sum(r.value_mismatch_count for r in pair_results),
+        mismatches=all_mismatches,
+        status=TestStatus.PASSED if pairs_passed == total_pairs else TestStatus.FAILED,
+        executed_at=min((r.executed_at for r in pair_results), default=datetime.now(timezone.utc)),
+        duration_seconds=sum(r.duration_seconds for r in pair_results),
+        mismatch_summary={
+            "file_pairs": pair_summaries,
+            "unmatched_sources": [_group_summary(g, mapping.match_on) for g in mapping.unmatched_sources],
+            "unmatched_targets": [_group_summary(g, mapping.match_on) for g in mapping.unmatched_targets],
+            "pairs_total": total_pairs,
+            "pairs_passed": pairs_passed,
+            "pairs_failed": total_pairs - pairs_passed,
+        },
+        source_file_name=f"{total_source_files} file(s) across {total_pairs} pair(s)",
+        target_file_name=f"{total_target_files} file(s) across {total_pairs} pair(s)",
+    )
