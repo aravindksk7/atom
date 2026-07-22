@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+import pandas as pd
+
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.runner.state import TestStatus
 
@@ -417,3 +419,81 @@ def _parse_automated_mapping(raw: Any) -> AutomatedMappingSpec:
     if not signals:
         raise ValueError("file_mapping.automated_mapping.signals must not be empty")
     return AutomatedMappingSpec(similarity_threshold=float(threshold), signals=signals)
+
+
+@dataclass(frozen=True)
+class SimilarityScore:
+    source: DiscoveredFile
+    target: DiscoveredFile
+    score: float
+    signal_scores: dict[str, float]
+
+
+def pair_files_automated(
+    source_files: list[DiscoveredFile],
+    source_frames: dict[str, pd.DataFrame],
+    target_files: list[DiscoveredFile],
+    target_frames: dict[str, pd.DataFrame],
+    automated: AutomatedMappingSpec,
+) -> tuple[FileMappingResult, list[SimilarityScore]]:
+    """Guess source-to-target file pairs by structural similarity instead of
+    shared key tokens. Every source file is scored against every target file
+    using ``automated.signals``; candidates are matched greedily from the
+    highest combined score down, each file used at most once, stopping once
+    the remaining best candidate scores below ``automated.similarity_threshold``.
+
+    Unlike ``pair_files``, this always produces single-file ``FileGroup``s
+    (one file per side per pair) -- guessing which *shards* belong together
+    from structural similarity alone is not attempted in this phase; use
+    ``strategy: "explicit"`` with ``match_on`` for shard collapsing.
+    """
+    candidates: list[SimilarityScore] = []
+    for source_file in source_files:
+        source_df = source_frames[source_file.path]
+        for target_file in target_files:
+            target_df = target_frames[target_file.path]
+            signal_scores = {
+                "filename_tokens": _filename_similarity(source_file.file_name, target_file.file_name),
+                "column_signature": _column_signature_similarity(
+                    list(source_df.columns), list(target_df.columns)
+                ),
+                "row_count_ratio": _row_count_ratio(len(source_df), len(target_df)),
+            }
+            combined = _combined_similarity(signal_scores, automated.signals)
+            candidates.append(SimilarityScore(
+                source=source_file, target=target_file, score=combined, signal_scores=signal_scores,
+            ))
+
+    candidates.sort(key=lambda c: (-c.score, c.source.file_name, c.target.file_name))
+
+    used_sources: set[str] = set()
+    used_targets: set[str] = set()
+    pairs: list[FilePair] = []
+    scores: list[SimilarityScore] = []
+    for candidate in candidates:
+        if candidate.score < automated.similarity_threshold:
+            break
+        if candidate.source.path in used_sources or candidate.target.path in used_targets:
+            continue
+        used_sources.add(candidate.source.path)
+        used_targets.add(candidate.target.path)
+        pairs.append(FilePair(
+            key=(candidate.source.file_name, candidate.target.file_name),
+            source=FileGroup(key=(candidate.source.file_name,), files=[candidate.source]),
+            target=FileGroup(key=(candidate.target.file_name,), files=[candidate.target]),
+        ))
+        scores.append(candidate)
+
+    unmatched_sources = [
+        FileGroup(key=(f.file_name,), files=[f]) for f in source_files if f.path not in used_sources
+    ]
+    unmatched_targets = [
+        FileGroup(key=(f.file_name,), files=[f]) for f in target_files if f.path not in used_targets
+    ]
+
+    return FileMappingResult(
+        match_on=(),
+        pairs=pairs,
+        unmatched_sources=unmatched_sources,
+        unmatched_targets=unmatched_targets,
+    ), scores
