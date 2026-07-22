@@ -38,6 +38,12 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
                 issues.append(ValidationIssue("params", "bo_live reconciliation jobs require a target file"))
             # key_columns is optional -- RunExecutor infers a shared ID column
             # or falls back to positional row matching.
+        elif source_mode == "multi_file":
+            from etl_framework.reconciliation.file_mapping import FileMappingSpec
+            try:
+                FileMappingSpec.from_params(params)
+            except ValueError as exc:
+                issues.append(ValidationIssue("params.file_mapping", str(exc)))
         elif source_mode == "files" or _has_file_source(params, "source") or _has_file_source(params, "target"):
             _validate_file_source(params, "source", issues)
             _validate_file_source(params, "target", issues)
