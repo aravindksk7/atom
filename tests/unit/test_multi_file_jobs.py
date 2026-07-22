@@ -442,3 +442,109 @@ def test_run_reconciliation_job_accepts_segment_columns_override(monkeypatch) ->
     )
 
     assert result.status == TestStatus.PASSED
+
+
+def test_run_executor_multi_file_reconciliation_isolates_one_failing_pair(tmp_path, monkeypatch) -> None:
+    """One pair whose target file is unreadable must not crash the whole
+    job -- the other pair's real result is still computed, and the
+    aggregate status becomes ERROR (not a raised exception)."""
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (source_dir / "sales_data_west_20260101.csv").write_text("id,value\n1,bravo\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    # west's target file is discoverable (it's a real file matching the
+    # pattern, so it still pairs normally) but empty -- pandas raises
+    # EmptyDataError reading it, which is NOT caught by _read_csv_bytes's
+    # narrower `except ParserError` fallback, so it propagates out of this
+    # one pair's closure and is caught by TestRunner instead.
+    (target_dir / "financials_west_20260101.dat").write_text("", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon", job_type="reconciliation", query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=2),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.ERROR
+    assert result.mismatch_summary["pairs_total"] == 2
+    assert result.mismatch_summary["pairs_passed"] == 1
+    assert result.mismatch_summary["pairs_errored"] == 1
+    by_region = {p["key"]["region"]: p for p in result.mismatch_summary["file_pairs"]}
+    assert by_region["east"]["status"] == "PASSED"
+    assert by_region["west"]["status"] == "ERROR"
+    assert by_region["west"]["error"] is not None
+
+
+def test_run_executor_multi_file_reconciliation_runs_pairs_via_test_runner(tmp_path, monkeypatch) -> None:
+    """Sanity check that the per-pair loop now goes through TestRunner:
+    patch TestRunner.run and confirm it's invoked with one case per pair."""
+    from api.services import file_source
+    from etl_framework.runner import test_runner as test_runner_module
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon", job_type="reconciliation", query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=3),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    captured_cases = []
+    original_run = test_runner_module.TestRunner.run
+
+    def _spy_run(self, cases):
+        captured_cases.extend(cases)
+        return original_run(self, cases)
+
+    monkeypatch.setattr(test_runner_module.TestRunner, "run", _spy_run)
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.PASSED
+    assert len(captured_cases) == 1  # one pair in this job

@@ -645,36 +645,69 @@ class RunExecutor:
             if not mapping.pairs:
                 raise ValueError(f"multi_file reconciliation for '{job.name}' matched zero file pairs")
 
+            segment_columns = self._resolve_segment_columns(job)
+
+            def _make_pair_case(pair):
+                def run_pair() -> ReconciliationResult:
+                    source_df = pd.concat(
+                        [read_tabular(path=f.path, file_name=f.file_name) for f in pair.source.files],
+                        ignore_index=True,
+                    )
+                    target_df = pd.concat(
+                        [read_tabular(path=f.path, file_name=f.file_name) for f in pair.target.files],
+                        ignore_index=True,
+                    )
+                    source_df, target_df, resolved_keys = resolve_key_columns(
+                        source_df,
+                        target_df,
+                        job.key_columns or self._settings.key_columns,
+                        job.exclude_columns or [],
+                    )
+                    pair_job = job.model_copy(update={"key_columns": resolved_keys})
+                    source_label = "/".join(f.file_name for f in pair.source.files)
+                    target_label = "/".join(f.file_name for f in pair.target.files)
+                    source_engine = FrameEngine(source_df, source_label)
+                    target_engine = FrameEngine(target_df, target_label)
+                    return self._run_reconciliation_job(
+                        pair_job,
+                        source_engine,
+                        target_engine,
+                        query=FILE_SOURCE_QUERY,
+                        params={},
+                        chunk_size=0,
+                        use_hash_precheck=False,
+                        segment_columns=segment_columns,
+                    )
+                return run_pair
+
+            cases = [(f"pair_{i}", _make_pair_case(pair)) for i, pair in enumerate(mapping.pairs)]
+            states = TestRunner(max_workers=self._settings.max_workers).run(cases)
+            states_by_name = {state.name: state for state in states}
+
             pair_results: list[ReconciliationResult] = []
-            for pair in mapping.pairs:
-                source_df = pd.concat(
-                    [read_tabular(path=f.path, file_name=f.file_name) for f in pair.source.files],
-                    ignore_index=True,
-                )
-                target_df = pd.concat(
-                    [read_tabular(path=f.path, file_name=f.file_name) for f in pair.target.files],
-                    ignore_index=True,
-                )
-                source_df, target_df, resolved_keys = resolve_key_columns(
-                    source_df,
-                    target_df,
-                    job.key_columns or self._settings.key_columns,
-                    job.exclude_columns or [],
-                )
-                pair_job = job.model_copy(update={"key_columns": resolved_keys})
-                source_label = "/".join(f.file_name for f in pair.source.files)
-                target_label = "/".join(f.file_name for f in pair.target.files)
-                source_engine = FrameEngine(source_df, source_label)
-                target_engine = FrameEngine(target_df, target_label)
-                pair_results.append(self._run_reconciliation_job(
-                    pair_job,
-                    source_engine,
-                    target_engine,
-                    query=FILE_SOURCE_QUERY,
-                    params={},
-                    chunk_size=0,
-                    use_hash_precheck=False,
-                ))
+            for i, pair in enumerate(mapping.pairs):
+                state = states_by_name[f"pair_{i}"]
+                if state.result is not None:
+                    pair_results.append(state.result)
+                else:
+                    source_label = "/".join(f.file_name for f in pair.source.files)
+                    target_label = "/".join(f.file_name for f in pair.target.files)
+                    pair_results.append(ReconciliationResult(
+                        query_name=job.name,
+                        source_env=source_label,
+                        target_env=target_label,
+                        source_row_count=0,
+                        target_row_count=0,
+                        matched_count=0,
+                        missing_in_target_count=0,
+                        missing_in_source_count=0,
+                        value_mismatch_count=0,
+                        mismatches=[],
+                        status=state.status,
+                        executed_at=state.completed_at or datetime.now(timezone.utc),
+                        duration_seconds=state.duration_seconds or 0.0,
+                        mismatch_summary={"error": state.error_message},
+                    ))
 
             return aggregate_reconciliation_results(job.name, mapping, pair_results)
         return run_job
