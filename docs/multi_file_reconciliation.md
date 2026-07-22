@@ -83,16 +83,53 @@ is tagged with its originating pair under a reserved `__pair__` key.
 }
 ```
 
-## Current limitations (Phase 1)
+## Automated mapping (no `match_on` needed)
+
+Set `strategy: "automated"` to have the framework guess pairs by structural
+similarity instead of matching on filename tokens:
+
+```json
+{
+  "file_mapping": {
+    "strategy": "automated",
+    "source": {"kind": "local", "root": "/spool/exports", "pattern": "*.csv"},
+    "target": {"kind": "local", "root": "/baseline", "pattern": "*.dat"},
+    "automated_mapping": {
+      "similarity_threshold": 0.7,
+      "signals": ["filename_tokens", "column_signature", "row_count_ratio"]
+    }
+  }
+}
+```
+
+Every source file is scored against every target file using the selected
+signals (filename similarity, column-name overlap, row-count ratio),
+averaged into one score per candidate pair. Pairs are assigned greedily from
+the highest-scoring candidate down, each file used at most once; anything
+left over when no remaining candidate clears `similarity_threshold` is
+reported as unmatched, same as the explicit strategy. Automated matching
+always pairs single files (it does not guess which shards belong together
+across several files sharing a key on one side) — use `strategy: "explicit"`
+with `match_on` for that.
+
+## Lineage manifest
+
+Every multi_file job execution (explicit or automated) writes
+`logs/file_mapping_manifest_{run_id}_{job_name}.json`, recording each pair's
+mapping method and (for automated pairs) its similarity score breakdown, plus
+every unmatched group -- an audit trail for why files were or weren't paired.
+
+## Current limitations (Phase 2)
 
 - `kind: "local"` only — S3 and SFTP sources are on the roadmap.
-- `strategy: "explicit"` only — automated/similarity-based pairing without a
-  `match_on` key is on the roadmap.
+- Automated matching pairs single files only; shard-collapsing (many files
+  on one side sharing a key) is `strategy: "explicit"` only.
 - Pairs are compared sequentially; per-pair parallelism and per-pair failure
   isolation are on the roadmap.
 - No dedicated web UI repeater yet; multi-file jobs are created via the API
   (or a hand-written JSON/YAML payload) until the job editor's file-mapping
-  UI ships.
+  UI ships. The lineage manifest is a JSON file on disk, not yet surfaced in
+  the UI or run report.
 
 See `docs/superpowers/plans/2026-07-22-multi-file-reconciliation-architecture.md`
 §7 for the full phased roadmap.
