@@ -116,3 +116,70 @@ def test_pair_files_with_empty_match_on_collapses_every_file_into_one_group_per_
     assert mapping.pairs[0].key == ()
     assert len(mapping.pairs[0].source.files) == 2
     assert len(mapping.pairs[0].target.files) == 1
+
+
+from etl_framework.reconciliation.file_mapping import FileMappingSpec, FileSourceSpec
+
+
+def test_file_mapping_spec_parses_valid_explicit_config() -> None:
+    params = {
+        "file_mapping": {
+            "strategy": "explicit",
+            "match_on": ["region", "date"],
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}_{date}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}_{date}.dat"},
+        }
+    }
+
+    spec = FileMappingSpec.from_params(params)
+
+    assert spec.match_on == ("region", "date")
+    assert spec.source == FileSourceSpec(kind="local", root="/spool", pattern="sales_{region}_{date}.csv")
+    assert spec.target == FileSourceSpec(kind="local", root="/baseline", pattern="fin_{region}_{date}.dat")
+    assert spec.unmatched_policy == "fail"
+
+
+def test_file_mapping_spec_defaults_match_on_to_empty_tuple() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_data_*.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_data_*.dat"},
+        }
+    })
+
+    assert spec.match_on == ()
+
+
+def test_file_mapping_spec_requires_file_mapping_object() -> None:
+    with pytest.raises(ValueError, match="require a 'file_mapping' object"):
+        FileMappingSpec.from_params({})
+
+
+def test_file_mapping_spec_requires_source_and_target() -> None:
+    with pytest.raises(ValueError, match="file_mapping.source requires"):
+        FileMappingSpec.from_params({
+            "file_mapping": {"target": {"kind": "local", "root": "/baseline", "pattern": "fin.csv"}}
+        })
+
+
+def test_file_mapping_spec_rejects_unknown_unmatched_policy() -> None:
+    with pytest.raises(ValueError, match="unmatched_policy must be"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "match_on": ["region"],
+                "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+                "unmatched_policy": "retry",
+            }
+        })
+
+
+def test_file_mapping_spec_rejects_unsupported_kind() -> None:
+    with pytest.raises(ValueError, match="is not supported yet"):
+        FileMappingSpec.from_params({
+            "file_mapping": {
+                "match_on": ["region"],
+                "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+            }
+        })

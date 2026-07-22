@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?\}")
 
@@ -182,3 +182,67 @@ def pair_files(
         unmatched_sources=unmatched_sources,
         unmatched_targets=unmatched_targets,
     )
+
+
+@dataclass(frozen=True)
+class FileSourceSpec:
+    kind: str
+    root: str
+    pattern: str
+
+
+@dataclass(frozen=True)
+class FileMappingSpec:
+    strategy: str
+    match_on: tuple[str, ...]
+    source: FileSourceSpec
+    target: FileSourceSpec
+    unmatched_policy: str = "fail"
+
+    @classmethod
+    def from_params(cls, params: dict[str, Any]) -> "FileMappingSpec":
+        raw = params.get("file_mapping")
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "multi_file reconciliation jobs require a 'file_mapping' object in params"
+            )
+        strategy = raw.get("strategy", "explicit")
+        if strategy != "explicit":
+            raise ValueError(
+                f"file_mapping.strategy '{strategy}' is not supported yet; "
+                "only 'explicit' is implemented"
+            )
+        match_on = tuple(raw.get("match_on") or [])
+        source = _parse_file_source(raw.get("source"), "source")
+        target = _parse_file_source(raw.get("target"), "target")
+        unmatched_policy = raw.get("unmatched_policy", "fail")
+        if unmatched_policy not in ("fail", "warn", "ignore"):
+            raise ValueError(
+                "file_mapping.unmatched_policy must be 'fail', 'warn', or "
+                f"'ignore', got {unmatched_policy!r}"
+            )
+        return cls(
+            strategy=strategy,
+            match_on=match_on,
+            source=source,
+            target=target,
+            unmatched_policy=unmatched_policy,
+        )
+
+
+def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"file_mapping.{side} requires an object with 'kind', 'root', and 'pattern'"
+        )
+    kind = raw.get("kind", "local")
+    if kind != "local":
+        raise ValueError(
+            f"file_mapping.{side}.kind '{kind}' is not supported yet; "
+            "only 'local' is implemented in this phase"
+        )
+    root = raw.get("root")
+    pattern = raw.get("pattern")
+    if not root or not pattern:
+        raise ValueError(f"file_mapping.{side} requires both 'root' and 'pattern'")
+    return FileSourceSpec(kind=kind, root=root, pattern=pattern)
