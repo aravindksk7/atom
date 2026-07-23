@@ -536,7 +536,7 @@
           <div class="border-t border-slate-200 pt-3">
             <p class="text-xs font-medium text-slate-500 mb-2">Source</p>
             <div class="grid-2">
-              <select x-model="jobModal.mf_source_kind" class="field-input field-select">
+              <select x-model="jobModal.mf_source_kind" class="field-input field-select" data-testid="job-modal-mf-source-kind-select">
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
@@ -547,12 +547,31 @@
                      data-testid="job-modal-mf-source-pattern-input" />
               <input x-model="jobModal.mf_source_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
                      x-show="jobModal.mf_source_kind !== 'local'" />
+              <input x-model="jobModal.mf_source_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
+                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-access-key-input" />
+              <input x-model="jobModal.mf_source_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
+                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-secret-key-input" />
+              <input x-model="jobModal.mf_source_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
+                     x-show="jobModal.mf_source_kind === 's3'" />
+              <input x-model="jobModal.mf_source_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
+                     x-show="jobModal.mf_source_kind === 's3'" />
+              <input x-model="jobModal.mf_source_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
+                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-host-input" />
+              <input x-model="jobModal.mf_source_preview_creds.port" class="field-input" placeholder="Port (default 22)"
+                     x-show="jobModal.mf_source_kind === 'sftp'" />
+              <input x-model="jobModal.mf_source_preview_creds.username" class="field-input" placeholder="Username"
+                     x-show="jobModal.mf_source_kind === 'sftp'" />
+              <input x-model="jobModal.mf_source_preview_creds.password" type="password" class="field-input" placeholder="Password"
+                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-password-input" />
             </div>
+            <p x-show="jobModal.mf_source_kind !== 'local'" class="text-xs text-slate-400 mt-1">
+              Credentials above are used only for Preview Mapping and are never saved with the job.
+            </p>
           </div>
           <div class="border-t border-slate-200 pt-3">
             <p class="text-xs font-medium text-slate-500 mb-2">Target</p>
             <div class="grid-2">
-              <select x-model="jobModal.mf_target_kind" class="field-input field-select">
+              <select x-model="jobModal.mf_target_kind" class="field-input field-select" data-testid="job-modal-mf-target-kind-select">
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
@@ -563,19 +582,36 @@
                      data-testid="job-modal-mf-target-pattern-input" />
               <input x-model="jobModal.mf_target_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
                      x-show="jobModal.mf_target_kind !== 'local'" />
+              <input x-model="jobModal.mf_target_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
+                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-access-key-input" />
+              <input x-model="jobModal.mf_target_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
+                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-secret-key-input" />
+              <input x-model="jobModal.mf_target_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
+                     x-show="jobModal.mf_target_kind === 's3'" />
+              <input x-model="jobModal.mf_target_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
+                     x-show="jobModal.mf_target_kind === 's3'" />
+              <input x-model="jobModal.mf_target_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
+                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-host-input" />
+              <input x-model="jobModal.mf_target_preview_creds.port" class="field-input" placeholder="Port (default 22)"
+                     x-show="jobModal.mf_target_kind === 'sftp'" />
+              <input x-model="jobModal.mf_target_preview_creds.username" class="field-input" placeholder="Username"
+                     x-show="jobModal.mf_target_kind === 'sftp'" />
+              <input x-model="jobModal.mf_target_preview_creds.password" type="password" class="field-input" placeholder="Password"
+                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-password-input" />
             </div>
+            <p x-show="jobModal.mf_target_kind !== 'local'" class="text-xs text-slate-400 mt-1">
+              Credentials above are used only for Preview Mapping and are never saved with the job.
+            </p>
           </div>
           <div class="border-t border-slate-200 pt-3">
             <div class="flex items-center gap-2">
               <button @click="previewFileMapping()"
-                      :disabled="jobModal.mfPreviewLoading || jobModal.mf_source_kind !== 'local' || jobModal.mf_target_kind !== 'local'"
+                      :disabled="jobModal.mfPreviewLoading"
                       class="btn-sm btn-secondary text-xs px-3 py-1 disabled:opacity-40"
                       data-testid="job-modal-mf-preview-btn">
                 <span x-show="!jobModal.mfPreviewLoading">Preview Mapping</span>
                 <span x-show="jobModal.mfPreviewLoading">Loading…</span>
               </button>
-              <span x-show="jobModal.mf_source_kind !== 'local' || jobModal.mf_target_kind !== 'local'"
-                    class="text-xs text-slate-400">Preview only supports local sources.</span>
             </div>
             <p x-show="jobModal.mfPreviewError" x-text="jobModal.mfPreviewError" class="text-xs text-red-600 mt-2"></p>
             <div x-show="jobModal.mfPreviewResult" class="mt-2 text-xs space-y-1" data-testid="job-modal-mf-preview-result">
