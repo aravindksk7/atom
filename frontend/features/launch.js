@@ -170,6 +170,8 @@
         mf_signal_rowcount: true,
         mf_source_kind: 'local', mf_source_root: '', mf_source_pattern: '', mf_source_credentials_ref: '',
         mf_target_kind: 'local', mf_target_root: '', mf_target_pattern: '', mf_target_credentials_ref: '',
+        mf_source_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
+        mf_target_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
         mfPreviewLoading: false,
         mfPreviewResult: null,
         mfPreviewError: '',
@@ -315,6 +317,11 @@
         mf_target_root: job.params?.file_mapping?.target?.root || '',
         mf_target_pattern: job.params?.file_mapping?.target?.pattern || '',
         mf_target_credentials_ref: job.params?.file_mapping?.target?.credentials_ref || '',
+        // Preview-only credentials are never persisted with the job, so
+        // there's nothing in `job.params` to hydrate them from -- always
+        // start blank, same as newJobModal.
+        mf_source_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
+        mf_target_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
         mfPreviewLoading: false,
         mfPreviewResult: null,
         mfPreviewError: '',
@@ -383,14 +390,48 @@
       return config;
     },
 
+    _previewCredsForKind(kind, creds) {
+      const out = {};
+      if (kind === 's3') {
+        if (creds.aws_access_key_id) out.aws_access_key_id = creds.aws_access_key_id;
+        if (creds.aws_secret_access_key) out.aws_secret_access_key = creds.aws_secret_access_key;
+        if (creds.region_name) out.region_name = creds.region_name;
+        if (creds.endpoint_url) out.endpoint_url = creds.endpoint_url;
+      } else if (kind === 'sftp') {
+        if (creds.host) out.host = creds.host;
+        if (creds.port !== '' && creds.port !== null && creds.port !== undefined) {
+          const port = Number(creds.port);
+          if (Number.isFinite(port)) out.port = port;
+        }
+        if (creds.username) out.username = creds.username;
+        if (creds.password) out.password = creds.password;
+      }
+      return out;
+    },
+
     async previewFileMapping() {
       const m = this.jobModal;
       m.mfPreviewLoading = true;
       m.mfPreviewResult = null;
       m.mfPreviewError = '';
       try {
+        // _buildFileMappingConfig(m) returns a fresh object every call (not
+        // a reference into jobModal state), so mutating its credentials_ref
+        // below for this one preview request is safe -- it never touches
+        // the persisted job config the Save button will later write.
+        const fileMapping = this._buildFileMappingConfig(m);
+        const fileSourceCredentials = {};
+        if (m.mf_source_kind !== 'local') {
+          fileMapping.source.credentials_ref = '__preview_source__';
+          fileSourceCredentials.__preview_source__ = this._previewCredsForKind(m.mf_source_kind, m.mf_source_preview_creds);
+        }
+        if (m.mf_target_kind !== 'local') {
+          fileMapping.target.credentials_ref = '__preview_target__';
+          fileSourceCredentials.__preview_target__ = this._previewCredsForKind(m.mf_target_kind, m.mf_target_preview_creds);
+        }
         m.mfPreviewResult = await api('POST', '/api/jobs/preview-file-mapping', {
-          file_mapping: this._buildFileMappingConfig(m),
+          file_mapping: fileMapping,
+          file_source_credentials: fileSourceCredentials,
         });
       } catch (e) {
         m.mfPreviewError = e.message || 'Preview failed';
