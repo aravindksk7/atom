@@ -17,17 +17,14 @@ from api.schemas import (
 )
 from api.dependencies import get_session
 from etl_framework.config.loader import ConfigLoader
-from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, resolve_connection
+from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, SECRET_FIELDS, resolve_connection
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
 from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["configs"])
 
-_SENSITIVE_KEYS = {
-    "db_password", "automic_password", "bo_password",
-    "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
-}
+_SENSITIVE_KEYS = SECRET_FIELDS
 _MASK = "********"
 
 

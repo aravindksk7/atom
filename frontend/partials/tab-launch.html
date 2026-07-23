@@ -1198,7 +1198,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" />
               <span class="font-mono text-xs text-slate-600" x-text="run.run_id"></span>
               <span class="badge text-xs" x-text="run.status"></span>
-              <span class="text-muted text-xs" x-text="run.started_at || ''"></span>
+              <span class="text-muted text-xs" x-text="run.started_at ? fmtDate(run.started_at) : ''"></span>
             </label>
           </template>
         </div>

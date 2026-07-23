@@ -21,6 +21,9 @@ AUTH_TYPE = os.getenv("SAPBO_MOCK_AUTH_TYPE", "secEnterprise")
 CERT_FILE = os.getenv("SAPBO_MOCK_CERT_FILE", "/certs/sapbo-mock.crt")
 KEY_FILE = os.getenv("SAPBO_MOCK_KEY_FILE", "/certs/sapbo-mock.key")
 TOKEN = "mock-sapbo-token"
+# Admin-configured CMC page-size cap, enforced server-side regardless of the
+# `pagesize` a client requests — mirrors on-premises biprws deployments.
+PAGE_CAP = int(os.getenv("SAPBO_MOCK_PAGE_CAP", "10"))
 
 
 DOCUMENTS = [
@@ -38,6 +41,19 @@ REPORTS = {
     ],
 }
 
+# Bulk fixtures for exercising the on-premises CMC page-size cap (PAGE_CAP
+# below) end-to-end: more documents than one page, and one document with
+# more report tabs than one page.
+_BULK_DOC_COUNT = 25
+_BULK_REPORT_COUNT = 25
+for _i in range(_BULK_DOC_COUNT):
+    _doc_id = f"2{_i:03d}"
+    DOCUMENTS.append({"id": _doc_id, "name": f"Bulk Report {_i}", "folder": "/Public Folders/BULK"})
+    REPORTS[_doc_id] = [
+        {"id": f"rpt-{_doc_id}-{_j}", "name": f"Tab {_j}", "reportIndex": _j}
+        for _j in range(_BULK_REPORT_COUNT)
+    ]
+
 DATASETS = {
     ("1001", "rpt-sales"): [
         {"id": 1, "sku": "A100", "amount": 25.50, "status": "SHIPPED"},
@@ -51,6 +67,9 @@ DATASETS = {
     ("1002", "rpt-inventory"): [
         {"id": 10, "sku": "A100", "on_hand": 42},
         {"id": 11, "sku": "B200", "on_hand": 7},
+    ],
+    ("2000", "rpt-2000-0"): [
+        {"id": 1, "sku": "Z900", "amount": 12.00, "status": "OPEN"},
     ],
 }
 
@@ -181,12 +200,15 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
 
         # The real biprws API paginates these collections (client.py's
         # _paginate_biprws_collection keeps requesting `page` until a page
-        # comes back shorter than the previous one or empty). This mock's
-        # datasets fit in a single page, so page 1 returns everything and any
-        # later page returns empty — without this, a client that always
-        # requests the same `pagesize` would see an identically-sized batch
-        # forever and never stop paging.
+        # comes back shorter than the previous one or empty), and some
+        # on-premises deployments admin-cap the page size (CMC setting) below
+        # whatever `pagesize` the client requests. Mirror that here: always
+        # slice to PAGE_CAP regardless of the requested `pagesize`, so a
+        # client that doesn't keep paging past a full-looking first page will
+        # silently lose everything past PAGE_CAP items.
         page = int(parse_qs(parsed.query).get("page", ["1"])[0] or "1")
+        start = (page - 1) * PAGE_CAP
+        end = start + PAGE_CAP
 
         if path == "/biprws/raylight/v1/documents":
             # Real on-premises biprws wraps the collection under a "document"
@@ -195,7 +217,7 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             # below which does collapse a single element to a bare object).
             self._send_json(
                 HTTPStatus.OK,
-                {"documents": {"document": DOCUMENTS if page == 1 else []}},
+                {"documents": {"document": DOCUMENTS[start:end]}},
             )
             return
 
@@ -205,7 +227,7 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if doc_id not in REPORTS:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"document {doc_id} not found"})
                 return
-            reports = REPORTS[doc_id] if page == 1 else []
+            reports = REPORTS[doc_id][start:end]
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -216,7 +238,7 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             return
 
         content_match = re.fullmatch(
-            r"/biprws/raylight/v1/documents/([^/]+)/reports/([^/]+)/content",
+            r"/biprws/raylight/v1/documents/([^/]+)/reports/([^/]+)",
             path,
         )
         if content_match:

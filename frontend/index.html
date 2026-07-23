@@ -2032,7 +2032,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" />
               <span class="font-mono text-xs text-slate-600" x-text="run.run_id"></span>
               <span class="badge text-xs" x-text="run.status"></span>
-              <span class="text-muted text-xs" x-text="run.started_at || ''"></span>
+              <span class="text-muted text-xs" x-text="run.started_at ? fmtDate(run.started_at) : ''"></span>
             </label>
           </template>
         </div>
@@ -3723,7 +3723,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <td><span :class="schedulerStatusClass(row.last_status)" x-text="row.last_status || 'No telemetry'"></span></td>
               <td x-text="row.enabled ? 'Yes' : 'No'"></td>
               <td class="font-mono text-xs" x-text="row.cron_expr"></td>
-              <td x-text="row.next_run_at || 'Not scheduled'"></td>
+              <td x-text="row.next_run_at ? fmtDate(row.next_run_at) : 'Not scheduled'"></td>
               <td x-text="row.last_duration_seconds == null ? 'N/A' : row.last_duration_seconds + 's'"></td>
               <td x-text="row.last_exit_code == null ? 'N/A' : row.last_exit_code"></td>
               <td class="flex gap-1 flex-wrap">
@@ -5754,7 +5754,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <div class="flex items-center gap-3 py-1.5 border-b border-slate-100 text-xs">
                 <span :class="b.resolved_at ? 'text-slate-400' : 'text-rose-600'" class="font-medium w-20 flex-shrink-0" x-text="b.resolved_at ? 'Resolved' : 'Open'"></span>
                 <span class="text-slate-600" x-text="b.breach_type"></span>
-                <span class="text-slate-400 flex-1" x-text="b.opened_at ? new Date(b.opened_at).toLocaleString() : ''"></span>
+                <span class="text-slate-400 flex-1" x-text="b.opened_at ? fmtDate(b.opened_at) : ''"></span>
                 <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
                 <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
               </div>
@@ -5779,7 +5779,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span class="font-medium text-slate-700 w-10" x-text="v.version"></span>
                   <span class="text-slate-400" x-text="v.bump_type"></span>
                   <span class="text-slate-500 flex-1" x-text="v.note || ''"></span>
-                  <span class="text-slate-400" x-text="v.bumped_at ? new Date(v.bumped_at).toLocaleString() : ''"></span>
+                  <span class="text-slate-400" x-text="v.bumped_at ? fmtDate(v.bumped_at) : ''"></span>
                 </div>
               </template>
             </div>
