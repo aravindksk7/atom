@@ -179,10 +179,95 @@ def test_file_mapping_spec_rejects_unsupported_kind() -> None:
         FileMappingSpec.from_params({
             "file_mapping": {
                 "match_on": ["region"],
-                "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv"},
+                "source": {"kind": "ftp", "root": "ftp://bucket/prefix", "pattern": "sales_{region}.csv"},
                 "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
             }
         })
+
+
+def test_file_mapping_spec_accepts_s3_and_sftp_sources() -> None:
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "source": {
+                "kind": "s3",
+                "root": "s3://finance-spool/daily",
+                "pattern": "sales_{region}.csv",
+                "credentials_ref": "aws_finance",
+            },
+            "target": {
+                "kind": "sftp",
+                "root": "/exports/finance",
+                "pattern": "financials_{region}.csv",
+                "credentials_ref": "sftp_finance",
+            },
+            "match_on": ["region"],
+        }
+    })
+
+    assert spec.source.kind == "s3"
+    assert spec.source.credentials_ref == "aws_finance"
+    assert spec.target.kind == "sftp"
+    assert spec.target.credentials_ref == "sftp_finance"
+
+
+def test_discover_s3_files_lists_objects_and_extracts_tokens() -> None:
+    from etl_framework.reconciliation.file_mapping import discover_s3_files
+
+    class FakeS3Client:
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return self
+
+        def paginate(self, **kwargs):
+            assert kwargs == {"Bucket": "finance-spool", "Prefix": "daily/"}
+            return [{"Contents": [
+                {"Key": "daily/sales_east.csv"},
+                {"Key": "daily/sales_west.csv"},
+                {"Key": "daily/readme.txt"},
+            ]}]
+
+    discovered = discover_s3_files(FakeS3Client(), "s3://finance-spool/daily", "sales_{region}.csv")
+
+    assert [(f.path, f.file_name, f.tokens) for f in discovered] == [
+        ("s3://finance-spool/daily/sales_east.csv", "sales_east.csv", {"region": "east"}),
+        ("s3://finance-spool/daily/sales_west.csv", "sales_west.csv", {"region": "west"}),
+    ]
+
+
+def test_discover_s3_files_escapes_reserved_key_characters() -> None:
+    from etl_framework.reconciliation.file_mapping import discover_s3_files
+
+    class FakeS3Client:
+        def get_paginator(self, name):
+            return self
+
+        def paginate(self, **kwargs):
+            return [{"Contents": [{"Key": "daily/sales_east#closing?.csv"}]}]
+
+    discovered = discover_s3_files(FakeS3Client(), "s3://finance-spool/daily", "sales_{region}.csv")
+
+    assert discovered[0].path == "s3://finance-spool/daily/sales_east%23closing%3F.csv"
+    assert discovered[0].tokens == {"region": "east#closing?"}
+
+
+def test_discover_sftp_files_lists_directory_and_extracts_tokens() -> None:
+    from etl_framework.reconciliation.file_mapping import discover_sftp_files
+
+    class FakeSFTPClient:
+        def listdir_attr(self, path):
+            assert path == "/exports/finance"
+            return [
+                type("Attr", (), {"filename": "financials_east.csv", "st_mode": 0o100644})(),
+                type("Attr", (), {"filename": "financials_west.csv", "st_mode": 0o100644})(),
+                type("Attr", (), {"filename": "archive", "st_mode": 0o040755})(),
+            ]
+
+    discovered = discover_sftp_files(FakeSFTPClient(), "/exports/finance", "financials_{region}.csv")
+
+    assert [(f.path, f.file_name, f.tokens) for f in discovered] == [
+        ("/exports/finance/financials_east.csv", "financials_east.csv", {"region": "east"}),
+        ("/exports/finance/financials_west.csv", "financials_west.csv", {"region": "west"}),
+    ]
 
 
 from datetime import datetime, timezone

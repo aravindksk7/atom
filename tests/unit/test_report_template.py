@@ -142,6 +142,33 @@ class TestReportTemplateSmoke:
         assert "PASSED" in html
         assert "raw: FAILED" in html
 
+    def test_multi_file_pair_rollup_rendered(self, tmp_path):
+        suite = _make_suite()
+        result = suite.reconciliation_results[0]
+        result.source_file_name = "2 file(s) across 2 pair(s)"
+        result.target_file_name = "2 file(s) across 2 pair(s)"
+        result.mismatch_summary = {
+            "pairs_total": 2,
+            "pairs_passed": 1,
+            "pairs_failed": 1,
+            "pairs_errored": 0,
+            "file_pairs": [
+                {"key": {"region": "east"}, "status": "PASSED", "source_files": ["sales_east.csv"], "target_files": ["financials_east.csv"], "value_mismatch_count": 0},
+                {"key": {"region": "west"}, "status": "FAILED", "source_files": ["sales_west.csv"], "target_files": ["financials_west.csv"], "value_mismatch_count": 1},
+            ],
+            "unmatched_sources": [{"key": {"region": "north"}, "files": ["sales_north.csv"]}],
+            "unmatched_targets": [],
+        }
+
+        html = _render(suite, tmp_path)
+
+        assert "File pairs" in html
+        assert "region=west" in html
+        assert "sales_west.csv" in html
+        assert "financials_west.csv" in html
+        assert "Unmatched sources" in html
+        assert "sales_north.csv" in html
+
 
 def test_accepted_at_rendered_via_to_local_filter(tmp_path):
     accepted_dt = datetime(2026, 7, 1, 18, 30, 0, tzinfo=timezone.utc)

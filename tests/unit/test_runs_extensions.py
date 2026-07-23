@@ -1,6 +1,8 @@
 """Tests for Module 6: /progress and /results/{id}/mismatches endpoints."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
@@ -459,3 +461,54 @@ def test_drilldown_404_on_unknown_result(client):
         json={"segment_column": "region"},
     )
     assert resp.status_code == 404
+
+
+def test_test_result_out_exposes_multi_file_pairs_first_class():
+    from api.routes.runs import _test_result_out
+
+    result = SimpleNamespace(
+        id=1,
+        query_name="regional_sales_recon",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=0.1,
+        source_row_count=2,
+        target_row_count=2,
+        value_mismatch_count=1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        error_message=None,
+        executed_at=None,
+        source_file_name="2 file(s) across 2 pair(s)",
+        target_file_name="2 file(s) across 2 pair(s)",
+        override_reason=None,
+        override_by=None,
+        override_at=None,
+        sample_rows=None,
+        segment_summary=None,
+        mismatch_summary={
+            "file_pairs": [
+                {
+                    "key": {"region": "west"},
+                    "status": "FAILED",
+                    "error": None,
+                    "source_files": ["sales_west.csv"],
+                    "target_files": ["financials_west.csv"],
+                    "source_row_count": 1,
+                    "target_row_count": 1,
+                    "matched_count": 0,
+                    "missing_in_target_count": 0,
+                    "missing_in_source_count": 0,
+                    "value_mismatch_count": 1,
+                }
+            ],
+            "unmatched_sources": [{"key": {"region": "north"}, "files": ["sales_north.csv"]}],
+            "unmatched_targets": [],
+        },
+    )
+
+    data = _test_result_out(result).model_dump()
+
+    assert data["file_pairs"][0]["key"] == {"region": "west"}
+    assert data["file_pairs"][0]["source_files"] == ["sales_west.csv"]
+    assert data["unmatched_sources"][0]["files"] == ["sales_north.csv"]

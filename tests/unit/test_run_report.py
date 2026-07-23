@@ -73,3 +73,44 @@ def test_missing_config_snapshot_yields_no_file_names():
     snapshot = build_run_report_snapshot(run)
     assert snapshot.file_name_a is None
     assert snapshot.file_name_b is None
+
+
+def test_snapshot_preserves_multi_file_pair_breakdown():
+    result = SimpleNamespace(
+        id=1,
+        query_name="regional_sales_recon",
+        status="FAILED",
+        effective_status="FAILED",
+        duration_seconds=0.5,
+        source_row_count=2,
+        target_row_count=2,
+        value_mismatch_count=1,
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        error_message=None,
+        executed_at=None,
+        source_file_name="2 file(s) across 2 pair(s)",
+        target_file_name="2 file(s) across 2 pair(s)",
+        override_reason=None,
+        override_by=None,
+        override_at=None,
+        sample_rows=None,
+        segment_summary=None,
+        mismatch_summary={
+            "file_pairs": [
+                {"key": {"region": "east"}, "status": "PASSED", "source_files": ["sales_east.csv"], "target_files": ["financials_east.csv"]},
+                {"key": {"region": "west"}, "status": "FAILED", "source_files": ["sales_west.csv"], "target_files": ["financials_west.csv"]},
+            ],
+            "pairs_total": 2,
+            "pairs_passed": 1,
+            "pairs_failed": 1,
+            "pairs_errored": 0,
+        },
+        mismatches=[],
+        schema_diff=None,
+        total_issues=1,
+    )
+    snapshot = build_run_report_snapshot(_run(results=[result]))
+
+    assert snapshot.results[0].file_pairs[1]["key"] == {"region": "west"}
+    assert snapshot.results[0].file_pairs[1]["status"] == "FAILED"

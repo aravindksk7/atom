@@ -16,11 +16,13 @@ import difflib
 import json
 import os
 import re
+import stat
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from urllib.parse import quote, urlparse
 
 import pandas as pd
 
@@ -119,6 +121,63 @@ def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
     return discovered
 
 
+def discover_s3_files(client: Any, root: str, pattern: str) -> list[DiscoveredFile]:
+    """Discover S3 objects directly under ``root`` whose basename matches
+    ``pattern``. ``root`` must be ``s3://bucket/prefix``; callers own client
+    construction and credentials so tests can inject a fake client without
+    requiring boto3.
+    """
+    parsed = urlparse(root)
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise ValueError("S3 file source root must be s3://bucket/prefix")
+    bucket = parsed.netloc
+    prefix = parsed.path.lstrip("/")
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    regex = compile_token_pattern(pattern)
+    discovered: list[DiscoveredFile] = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []) or []:
+            key = str(item.get("Key") or "")
+            if not key or key.endswith("/"):
+                continue
+            relative = key[len(prefix):] if prefix and key.startswith(prefix) else key
+            if "/" in relative:
+                continue
+            file_name = Path(relative).name
+            match = regex.match(file_name)
+            if match is None:
+                continue
+            discovered.append(DiscoveredFile(
+                path=f"s3://{bucket}/{quote(key, safe='/')}",
+                file_name=file_name,
+                tokens=match.groupdict(),
+            ))
+    return sorted(discovered, key=lambda f: f.path)
+
+
+def discover_sftp_files(client: Any, root: str, pattern: str) -> list[DiscoveredFile]:
+    """Discover regular files directly under an SFTP directory. Callers own
+    client construction and credentials so tests can inject a fake client
+    without requiring paramiko.
+    """
+    regex = compile_token_pattern(pattern)
+    root_path = root.rstrip("/") or "/"
+    discovered: list[DiscoveredFile] = []
+    for item in client.listdir_attr(root_path):
+        file_name = str(getattr(item, "filename", ""))
+        mode = getattr(item, "st_mode", 0)
+        if mode and not stat.S_ISREG(mode):
+            continue
+        match = regex.match(file_name)
+        if match is None:
+            continue
+        path = f"{root_path}/{file_name}" if root_path != "/" else f"/{file_name}"
+        discovered.append(DiscoveredFile(path=path, file_name=file_name, tokens=match.groupdict()))
+    return sorted(discovered, key=lambda f: f.path)
+
+
 @dataclass(frozen=True)
 class FileGroup:
     key: tuple[str, ...]
@@ -204,6 +263,7 @@ class FileSourceSpec:
     root: str
     pattern: str
     readiness: "ReadinessSpec | None" = None
+    credentials_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -258,17 +318,24 @@ def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
             f"file_mapping.{side} requires an object with 'kind', 'root', and 'pattern'"
         )
     kind = raw.get("kind", "local")
-    if kind != "local":
+    if kind not in {"local", "s3", "sftp"}:
         raise ValueError(
             f"file_mapping.{side}.kind '{kind}' is not supported yet; "
-            "only 'local' is implemented in this phase"
+            "supported kinds are 'local', 's3', and 'sftp'"
         )
     root = raw.get("root")
     pattern = raw.get("pattern")
     if not root or not pattern:
         raise ValueError(f"file_mapping.{side} requires both 'root' and 'pattern'")
     readiness = _parse_readiness(raw.get("readiness"), side)
-    return FileSourceSpec(kind=kind, root=root, pattern=pattern, readiness=readiness)
+    credentials_ref = raw.get("credentials_ref")
+    return FileSourceSpec(
+        kind=kind,
+        root=root,
+        pattern=pattern,
+        readiness=readiness,
+        credentials_ref=str(credentials_ref) if credentials_ref else None,
+    )
 
 
 def _group_summary(group: FileGroup, match_on: tuple[str, ...]) -> dict[str, Any]:

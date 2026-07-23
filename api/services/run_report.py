@@ -34,6 +34,27 @@ class ReportResult:
     total_issues_override: int | None = None
 
     @property
+    def file_pairs(self) -> list[dict[str, Any]]:
+        if not isinstance(self.mismatch_summary, dict):
+            return []
+        pairs = self.mismatch_summary.get("file_pairs")
+        return pairs if isinstance(pairs, list) else []
+
+    @property
+    def unmatched_sources(self) -> list[dict[str, Any]]:
+        if not isinstance(self.mismatch_summary, dict):
+            return []
+        groups = self.mismatch_summary.get("unmatched_sources")
+        return groups if isinstance(groups, list) else []
+
+    @property
+    def unmatched_targets(self) -> list[dict[str, Any]]:
+        if not isinstance(self.mismatch_summary, dict):
+            return []
+        groups = self.mismatch_summary.get("unmatched_targets")
+        return groups if isinstance(groups, list) else []
+
+    @property
     def total_issues(self) -> int:
         if self.total_issues_override is not None:
             return self.total_issues_override

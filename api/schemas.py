@@ -281,6 +281,25 @@ class ColumnMismatchStatOut(BaseModel):
     match_pct: float | None = None
 
 
+class FilePairSummaryOut(BaseModel):
+    key: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    error: str | None = None
+    source_files: list[str] = Field(default_factory=list)
+    target_files: list[str] = Field(default_factory=list)
+    source_row_count: int = 0
+    target_row_count: int = 0
+    matched_count: int = 0
+    missing_in_target_count: int = 0
+    missing_in_source_count: int = 0
+    value_mismatch_count: int = 0
+
+
+class UnmatchedFileGroupOut(BaseModel):
+    key: dict[str, Any] = Field(default_factory=dict)
+    files: list[str] = Field(default_factory=list)
+
+
 class TestResultOut(BaseModel):
     id: int
     query_name: str
@@ -302,6 +321,9 @@ class TestResultOut(BaseModel):
     sample_rows: list[dict] | None = None
     segment_summary: dict | None = None
     mismatch_summary: dict[str, Any] | None = None
+    file_pairs: list[FilePairSummaryOut] = Field(default_factory=list)
+    unmatched_sources: list[UnmatchedFileGroupOut] = Field(default_factory=list)
+    unmatched_targets: list[UnmatchedFileGroupOut] = Field(default_factory=list)
     column_stats: list[ColumnMismatchStatOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

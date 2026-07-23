@@ -27,6 +27,43 @@ def _failure_message(result) -> str:
     )
 
 
+def _pair_key_text(pair: dict) -> str:
+    key = pair.get("key") if isinstance(pair.get("key"), dict) else {}
+    if not key:
+        return "pair"
+    return ",".join(f"{k}={v}" for k, v in sorted(key.items()))
+
+
+def _pair_rollup_text(result) -> str:
+    summary = getattr(result, "mismatch_summary", None)
+    if not isinstance(summary, dict):
+        return ""
+    pairs = summary.get("file_pairs")
+    if not isinstance(pairs, list) or not pairs:
+        return ""
+    lines = [
+        "pairs: "
+        f"{int(summary.get('pairs_passed') or 0)} passed, "
+        f"{int(summary.get('pairs_failed') or 0)} failed, "
+        f"{int(summary.get('pairs_errored') or 0)} errored"
+    ]
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            continue
+        source_files = ",".join(str(name) for name in pair.get("source_files") or []) or "source"
+        target_files = ",".join(str(name) for name in pair.get("target_files") or []) or "target"
+        counts = (
+            f"value_mismatches={int(pair.get('value_mismatch_count') or 0)} "
+            f"missing_in_target={int(pair.get('missing_in_target_count') or 0)} "
+            f"missing_in_source={int(pair.get('missing_in_source_count') or 0)}"
+        )
+        line = f"{_pair_key_text(pair)} {pair.get('status') or 'UNKNOWN'} {source_files} -> {target_files} {counts}"
+        if pair.get("error"):
+            line += f" error={pair['error']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def render_junit_xml(run) -> str:
     results = list(run.results)
     failures = sum(1 for r in results if r.effective_status == "FAILED")
@@ -65,14 +102,19 @@ def render_junit_xml(run) -> str:
                 "message": message,
                 "type": "ReconciliationFailure",
             })
-            node.text = _sanitize(result.error_message) or message
+            pair_rollup = _pair_rollup_text(result)
+            text = _sanitize(result.error_message) or message
+            if pair_rollup:
+                text = f"{text}\n{pair_rollup}"
+            node.text = _sanitize(text)
         elif status == "ERROR":
             message = _sanitize(result.error_message) or "execution error"
             node = ET.SubElement(case, "error", {
                 "message": message,
                 "type": "ExecutionError",
             })
-            node.text = message
+            pair_rollup = _pair_rollup_text(result)
+            node.text = _sanitize(f"{message}\n{pair_rollup}" if pair_rollup else message)
         elif status == "CANCELLED":
             ET.SubElement(case, "skipped")
 

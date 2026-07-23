@@ -92,6 +92,9 @@ _TREND_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 def _test_result_out(result) -> TestResultOut:
     mismatch_summary = getattr(result, "mismatch_summary", None)
+    file_pairs = mismatch_summary.get("file_pairs", []) if isinstance(mismatch_summary, dict) else []
+    unmatched_sources = mismatch_summary.get("unmatched_sources", []) if isinstance(mismatch_summary, dict) else []
+    unmatched_targets = mismatch_summary.get("unmatched_targets", []) if isinstance(mismatch_summary, dict) else []
     return TestResultOut(
         id=result.id,
         query_name=result.query_name,
@@ -113,6 +116,9 @@ def _test_result_out(result) -> TestResultOut:
         sample_rows=result.sample_rows,
         segment_summary=result.segment_summary,
         mismatch_summary=mismatch_summary,
+        file_pairs=file_pairs if isinstance(file_pairs, list) else [],
+        unmatched_sources=unmatched_sources if isinstance(unmatched_sources, list) else [],
+        unmatched_targets=unmatched_targets if isinstance(unmatched_targets, list) else [],
         column_stats=_column_stats_from_summary(
             mismatch_summary,
             source_row_count=result.source_row_count,

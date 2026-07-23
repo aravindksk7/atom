@@ -342,6 +342,32 @@
               {% if result.source_file_name or result.target_file_name %}
                 <div>Source: {{ result.source_file_name or "N/A" }}</div>
                 <div>Target: {{ result.target_file_name or "N/A" }}</div>
+                {% if result.mismatch_summary and result.mismatch_summary.file_pairs %}
+                <details data-testid="file-pairs-details" style="margin-top:8px; color:var(--soft);">
+                  <summary style="cursor:pointer;color:var(--accent);font-family:var(--font-display);">File pairs</summary>
+                  <div style="margin-top:6px;display:grid;gap:6px;">
+                    {% for pair in result.mismatch_summary.file_pairs %}
+                    <div data-testid="file-pair-row" data-status="{{ pair.status }}" style="border:1px solid var(--line);border-radius:8px;padding:6px;background:rgba(255,255,255,0.03);">
+                      <div><strong>{{ pair.status }}</strong> {% if pair.key %}{% for k, v in pair.key.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+                      <div>Source: {{ pair.source_files | join(', ') }}</div>
+                      <div>Target: {{ pair.target_files | join(', ') }}</div>
+                      <div>Rows: {{ pair.source_row_count or 0 }} / {{ pair.target_row_count or 0 }}; mismatches: {{ pair.value_mismatch_count or 0 }}</div>
+                      {% if pair.error %}<div style="color:#fda4af;">Error: {{ pair.error }}</div>{% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if result.mismatch_summary.unmatched_sources %}
+                    <div data-testid="unmatched-sources"><strong>Unmatched sources:</strong>
+                      {% for group in result.mismatch_summary.unmatched_sources %}{{ group.files | join(', ') }}{% if not loop.last %}; {% endif %}{% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if result.mismatch_summary.unmatched_targets %}
+                    <div data-testid="unmatched-targets"><strong>Unmatched targets:</strong>
+                      {% for group in result.mismatch_summary.unmatched_targets %}{{ group.files | join(', ') }}{% if not loop.last %}; {% endif %}{% endfor %}
+                    </div>
+                    {% endif %}
+                  </div>
+                </details>
+                {% endif %}
               {% else %}
                 <span style="color:var(--muted)">N/A</span>
               {% endif %}

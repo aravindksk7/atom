@@ -93,6 +93,36 @@ def test_error_result_gets_error_node_with_message(db):
     assert "ORA-00942" in error.get("message")
 
 
+def test_multi_file_result_adds_pair_rollup_to_failure_text(db):
+    from api.services.junit_export import render_junit_xml
+
+    run = _make_run(db, results=[
+        dict(
+            query_name="regional_sales_recon",
+            status="FAILED",
+            duration_seconds=0.1,
+            value_mismatch_count=1,
+            mismatch_summary={
+                "pairs_total": 2,
+                "pairs_passed": 1,
+                "pairs_failed": 1,
+                "pairs_errored": 0,
+                "file_pairs": [
+                    {"key": {"region": "east"}, "status": "PASSED", "source_files": ["sales_east.csv"], "target_files": ["financials_east.csv"], "value_mismatch_count": 0},
+                    {"key": {"region": "west"}, "status": "FAILED", "source_files": ["sales_west.csv"], "target_files": ["financials_west.csv"], "value_mismatch_count": 1},
+                ],
+            },
+        ),
+    ])
+
+    suite = _parse(render_junit_xml(run))
+    failure = suite.find("testcase").find("failure")
+    assert failure is not None
+    assert "pairs: 1 passed, 1 failed, 0 errored" in (failure.text or "")
+    assert "region=west" in (failure.text or "")
+    assert "sales_west.csv -> financials_west.csv" in (failure.text or "")
+
+
 def test_overridden_failure_counts_as_pass(db):
     from api.services.junit_export import render_junit_xml
 
