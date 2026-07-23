@@ -4,6 +4,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
+# Credential fields across EnvironmentConfig, ConnectionEntry, and
+# ApiEndpointEntry. Shared by api/routes/configs.py (response masking) and
+# ConfigRepository (encryption at rest) so both stay in sync with one list.
+SECRET_FIELDS = frozenset({
+    "db_password", "automic_password", "bo_password",
+    "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
+})
+
 
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)

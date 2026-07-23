@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import case, insert, or_, cast, String, func
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.query_utils import apply_pagination
 from etl_framework.repository.models import (
@@ -13,32 +14,81 @@ from etl_framework.repository.models import (
 )
 
 
+def _transform_secret_fields(data: dict, transform) -> dict:
+    """Apply `transform` to every credential field (top-level, plus nested
+    per-connection/per-endpoint overrides) in a config_data dict. Used to
+    encrypt on write and decrypt on read at the ConfigRepository boundary, so
+    every existing caller of cfg.config_json keeps seeing plaintext."""
+    from etl_framework.config.models import SECRET_FIELDS
+
+    def _transform_entry(entry: dict) -> dict:
+        return {
+            k: (transform(v) if k in SECRET_FIELDS and isinstance(v, str) and v else v)
+            for k, v in entry.items()
+        }
+
+    result = _transform_entry(data)
+    for group_key in ("connections", "api_endpoints"):
+        group = data.get(group_key)
+        if isinstance(group, dict):
+            result[group_key] = {
+                name: (_transform_entry(entry) if isinstance(entry, dict) else entry)
+                for name, entry in group.items()
+            }
+    return result
+
+
 class ConfigRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def _encrypt(self, config_data: dict) -> dict:
+        from api.services.secret_store import encrypt_secret
+        return _transform_secret_fields(config_data, encrypt_secret)
+
+    def _decrypt(self, cfg: SavedConfig | None) -> SavedConfig | None:
+        if cfg is not None and cfg.config_json:
+            from api.services.secret_store import decrypt_secret
+            decrypted = _transform_secret_fields(cfg.config_json, decrypt_secret)
+            # set_committed_value (not a plain attribute assignment) rebases
+            # SQLAlchemy's dirty-tracking baseline to this decrypted dict
+            # instead of marking it a pending change. A plain `cfg.config_json
+            # = decrypted` would flag the attribute dirty, and the *very next*
+            # query on this session — even an unrelated read — autoflushes by
+            # default, silently overwriting the encrypted DB column with this
+            # decrypted plaintext.
+            set_committed_value(cfg, "config_json", decrypted)
+        return cfg
+
     def create(self, name: str, env_name: str, config_data: dict) -> SavedConfig:
-        cfg = SavedConfig(name=name, env_name=env_name, config_json=config_data)
+        cfg = SavedConfig(name=name, env_name=env_name, config_json=self._encrypt(config_data))
         self._db.add(cfg)
         self._db.commit()
         self._db.refresh(cfg)
-        return cfg
+        return self._decrypt(cfg)
 
     def get(self, config_id: int) -> SavedConfig | None:
-        return self._db.get(SavedConfig, config_id)
+        return self._decrypt(self._db.get(SavedConfig, config_id))
 
     def get_by_name(self, name: str) -> SavedConfig | None:
-        return self._db.query(SavedConfig).filter(SavedConfig.name == name).first()
+        return self._decrypt(self._db.query(SavedConfig).filter(SavedConfig.name == name).first())
 
     def list(self) -> list[SavedConfig]:
-        return self._db.query(SavedConfig).order_by(SavedConfig.name).all()
+        return [
+            self._decrypt(cfg)
+            for cfg in self._db.query(SavedConfig).order_by(SavedConfig.name).all()
+        ]
 
     def update(self, config_id: int, **kwargs) -> SavedConfig | None:
-        cfg = self.get(config_id)
+        # Fetch the raw (still-encrypted) row directly rather than via self.get(),
+        # so that an update touching only name/env_name (no config_data) can't
+        # accidentally commit a previously decrypted-in-place config_json back
+        # over the encrypted column.
+        cfg = self._db.get(SavedConfig, config_id)
         if cfg is None:
             return None
         if "config_data" in kwargs:
-            cfg.config_json = kwargs["config_data"]
+            cfg.config_json = self._encrypt(kwargs["config_data"])
         if "name" in kwargs:
             cfg.name = kwargs["name"]
         if "env_name" in kwargs:
@@ -46,7 +96,7 @@ class ConfigRepository:
         cfg.updated_at = datetime.now(timezone.utc)
         self._db.commit()
         self._db.refresh(cfg)
-        return cfg
+        return self._decrypt(cfg)
 
     def delete(self, config_id: int) -> bool:
         cfg = self.get(config_id)

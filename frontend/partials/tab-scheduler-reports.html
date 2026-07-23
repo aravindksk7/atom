@@ -61,7 +61,7 @@
               <td><span :class="schedulerStatusClass(row.last_status)" x-text="row.last_status || 'No telemetry'"></span></td>
               <td x-text="row.enabled ? 'Yes' : 'No'"></td>
               <td class="font-mono text-xs" x-text="row.cron_expr"></td>
-              <td x-text="row.next_run_at || 'Not scheduled'"></td>
+              <td x-text="row.next_run_at ? fmtDate(row.next_run_at) : 'Not scheduled'"></td>
               <td x-text="row.last_duration_seconds == null ? 'N/A' : row.last_duration_seconds + 's'"></td>
               <td x-text="row.last_exit_code == null ? 'N/A' : row.last_exit_code"></td>
               <td class="flex gap-1 flex-wrap">
