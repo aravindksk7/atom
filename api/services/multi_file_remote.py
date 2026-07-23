@@ -41,17 +41,25 @@ def resolve_file_source_credentials(config_snapshot: dict[str, Any], spec: FileS
 def build_s3_client(config_snapshot: dict[str, Any], spec: FileSourceSpec):
     try:
         import boto3
+        from botocore.config import Config as BotoConfig
     except ImportError as exc:
         raise RuntimeError("boto3 is required for multi_file S3 sources") from exc
     creds = resolve_file_source_credentials(config_snapshot, spec)
-    return boto3.client(
-        "s3",
-        aws_access_key_id=creds.get("aws_access_key_id"),
-        aws_secret_access_key=creds.get("aws_secret_access_key"),
-        aws_session_token=creds.get("aws_session_token"),
-        region_name=creds.get("region_name"),
-        endpoint_url=creds.get("endpoint_url"),
-    )
+    client_kwargs: dict[str, Any] = {
+        "aws_access_key_id": creds.get("aws_access_key_id"),
+        "aws_secret_access_key": creds.get("aws_secret_access_key"),
+        "aws_session_token": creds.get("aws_session_token"),
+        "region_name": creds.get("region_name"),
+        "endpoint_url": creds.get("endpoint_url"),
+    }
+    if creds.get("endpoint_url"):
+        # A custom endpoint_url means a non-AWS, S3-compatible target (MinIO,
+        # on-prem object storage) -- these commonly reject the virtual-hosted-
+        # style bucket addressing boto3 otherwise defaults to whenever a
+        # custom endpoint is set. Real AWS never sets endpoint_url, so this
+        # never affects the existing real-AWS path.
+        client_kwargs["config"] = BotoConfig(s3={"addressing_style": "path"})
+    return boto3.client("s3", **client_kwargs)
 
 
 def build_sftp_client(config_snapshot: dict[str, Any], spec: FileSourceSpec):

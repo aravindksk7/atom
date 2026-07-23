@@ -21,6 +21,10 @@ fastapi>=0.111
 uvicorn[standard]>=0.29
 apscheduler>=3.10,<4.0
 
+# Multi-file reconciliation (S3/SFTP sources)
+boto3>=1.34
+paramiko>=3.4
+
 # Logging
 python-json-logger>=2.0
 

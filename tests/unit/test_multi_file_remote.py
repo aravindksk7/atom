@@ -156,3 +156,66 @@ def test_remote_file_source_session_context_manager_closes_clients(monkeypatch) 
         session.discover(spec)
 
     assert built_clients[0].closed is True
+
+
+def test_build_s3_client_forces_path_style_addressing_for_custom_endpoint(monkeypatch) -> None:
+    """A custom endpoint_url means a non-AWS S3-compatible target (MinIO, on-prem
+    object storage) -- these commonly reject virtual-hosted-style bucket addressing,
+    which boto3 otherwise defaults to whenever endpoint_url is set. Real AWS never
+    sets endpoint_url, so this must not fire for the existing real-AWS path."""
+    import boto3
+    from api.services.multi_file_remote import build_s3_client
+    from etl_framework.reconciliation.file_mapping import FileSourceSpec
+
+    captured_kwargs: dict = {}
+
+    def _capture(service_name, **kwargs):
+        captured_kwargs.update(kwargs)
+        return object()  # build_s3_client only returns this; no real network call happens
+
+    monkeypatch.setattr(boto3, "client", _capture)
+
+    spec = FileSourceSpec(kind="s3", root="s3://bucket/prefix", pattern="*.csv", credentials_ref="minio")
+    config_snapshot = {
+        "file_source_credentials": {
+            "minio": {
+                "aws_access_key_id": "minioadmin",
+                "aws_secret_access_key": "minioadmin",
+                "endpoint_url": "http://127.0.0.1:19000",
+                "region_name": "us-east-1",
+            },
+        },
+    }
+
+    build_s3_client(config_snapshot, spec)
+
+    assert captured_kwargs["endpoint_url"] == "http://127.0.0.1:19000"
+    assert captured_kwargs["config"].s3["addressing_style"] == "path"
+
+
+def test_build_s3_client_does_not_force_path_style_without_custom_endpoint(monkeypatch) -> None:
+    """Real AWS (no endpoint_url set) must keep boto3's default addressing --
+    this is the existing, already-working production path; it must not regress."""
+    import boto3
+    from api.services.multi_file_remote import build_s3_client
+    from etl_framework.reconciliation.file_mapping import FileSourceSpec
+
+    captured_kwargs: dict = {}
+
+    def _capture(service_name, **kwargs):
+        captured_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(boto3, "client", _capture)
+
+    spec = FileSourceSpec(kind="s3", root="s3://bucket/prefix", pattern="*.csv", credentials_ref="aws_prod")
+    config_snapshot = {
+        "file_source_credentials": {
+            "aws_prod": {"aws_access_key_id": "AKIA...", "aws_secret_access_key": "s3cr3t"},
+        },
+    }
+
+    build_s3_client(config_snapshot, spec)
+
+    assert captured_kwargs.get("endpoint_url") is None
+    assert "config" not in captured_kwargs
