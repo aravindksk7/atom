@@ -595,6 +595,12 @@
             : Boolean(m.target_file_path);
           return Boolean(m.bo_report_id && m.bo_page_id && hasTarget);
         }
+        if (m.source_mode === 'multi_file') {
+          // Mirrors the backend's FileMappingSpec.from_params() (api/schemas.py's
+          // validate_reconciliation_contract): source/target each need a root + pattern.
+          // key_columns stays optional here too, same as 'files' mode above.
+          return Boolean(m.mf_source_root && m.mf_source_pattern && m.mf_target_root && m.mf_target_pattern);
+        }
         return Boolean(m.query?.trim() && hasKeys);
       }
       if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
