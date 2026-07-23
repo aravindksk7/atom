@@ -213,6 +213,23 @@
       intro: 'A reconciliation job can compare many files per side instead of one query or file — set Input Source to "Multiple Files" (params.source_mode = "multi_file") and describe how source files pair up with target files.',
       steps: [
         {
+          title: 'Walkthrough: reconcile 10+ files across Source A and Source B and save it as a Job',
+          text: 'End-to-end example for a folder-to-folder compare with more than 10 files per side, saved as a reusable catalog job (not a one-off Compare run). '
+            + '1) Launch -> Job Catalog -> + New Job. Enter a unique Job Name (e.g. sales_region_recon_10plus) and pick Job Type = reconciliation. '
+            + '2) Set Input Source to "Multiple Files" — this reveals the Multi-File panel. '
+            + '3) Choose Strategy: Explicit is best when all 10+ files on both sides follow one filename pattern; pick Automated only if Source A and Source B use unrelated naming. '
+            + '4) Under Source, set kind = local (or s3/sftp for remote spools), Root to the folder holding all Source A files (e.g. /spool/source_a or s3://bucket/source-a/), and Pattern with {token} placeholders matching every filename, e.g. sales_{region}_{date:%Y%m%d}.csv — one pattern matches all 10+ files in the folder, you do not list them individually. '
+            + '5) Repeat under Target for Source B: kind, Root (e.g. /spool/source_b), and Pattern, e.g. financials_{region}_{date:%Y%m%d}.dat. For s3/sftp, fill credentials_ref with the name of a credential set an admin already added to the config — never paste real secrets into the job. '
+            + '6) If using Explicit, set Match On to the token(s) that uniquely identify a pair across both sides, e.g. region, date. Every Source A file and every Source B file sharing those token values becomes one pair; if several files on one side share the same key they are concatenated before comparing, so 10+ files do not force 10+ separate pairs. '
+            + '7) Set Unmatched Policy — with 10+ files, Warn and proceed is usually safer than Fail while you are still validating the pattern, so one bad filename does not abort the whole job. '
+            + '8) Go to the Settings tab and fill Key Columns (comma-separated) with the column(s) that uniquely identify a row within each pair, e.g. order_id — required for every reconciliation job regardless of source mode. '
+            + '9) Click Preview Mapping (local sources only) and confirm the pair count matches what you expect (e.g. "12 pair(s) matched") and check Unmatched sources / Unmatched targets for stragglers — fix the pattern or Match On tokens if the count is off before saving. '
+            + '10) Click Save. The job now appears in the Job Catalog like any other job. '
+            + '11) Back in Job Catalog, check the box next to your new job (filter by tag if you have many jobs), optionally set order with the other jobs selected, then click Run Tests. The UI switches to Monitor and streams per-pair progress; check History afterward for the full per-pair result and the file_mapping_manifest showing exactly how each of the 10+ files was paired.',
+          where: 'Launch -> Job Catalog -> + New Job -> Input Source: Multiple Files',
+          tip: 'For s3/sftp with more than a handful of files, add a readiness block (expected_count, poll_interval_seconds, timeout_seconds) to the source that is still being written to, so discovery waits for all files to land instead of comparing a partial spool.',
+        },
+        {
           title: 'Pair files by filename token (explicit strategy)',
           text: 'Give the source and target a root folder and a pattern with {token} placeholders, e.g. sales_{region}_{date:%Y%m%d}.csv. List the tokens that identify a matching pair under Match On (e.g. region, date). Files sharing the same token values on both sides become one comparison pair; several files sharing a key on one side are concatenated before comparison.',
           where: 'Job editor -> Input Source -> Multiple Files -> Strategy: Explicit',
