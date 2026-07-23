@@ -148,6 +148,75 @@ def validate_job_definition_body(body: dict):
     return {"ok": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
 
 
+@router.post("/preview-file-mapping")
+def preview_file_mapping(body: dict):
+    from etl_framework.reconciliation.file_mapping import (
+        FileMappingSpec,
+        discover_local_files,
+        pair_files,
+        pair_files_automated,
+    )
+    from api.services.file_source import read_tabular, resolve_allowed_path
+
+    try:
+        spec = FileMappingSpec.from_params(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if spec.source.kind != "local" or spec.target.kind != "local":
+        raise HTTPException(
+            status_code=400,
+            detail="Preview only supports 'local' source/target kinds; s3 and sftp jobs can still be saved and run normally.",
+        )
+
+    try:
+        source_root = resolve_allowed_path(spec.source.root)
+        target_root = resolve_allowed_path(spec.target.root)
+        source_files = discover_local_files(source_root, spec.source.pattern)
+        target_files = discover_local_files(target_root, spec.target.pattern)
+
+        if spec.strategy == "automated":
+            source_frames = {f.path: read_tabular(path=f.path, file_name=f.file_name) for f in source_files}
+            target_frames = {f.path: read_tabular(path=f.path, file_name=f.file_name) for f in target_files}
+            mapping, scores = pair_files_automated(
+                source_files, source_frames, target_files, target_frames, spec.automated,
+            )
+            scores_by_pair = {(s.source.path, s.target.path): s for s in scores}
+        else:
+            mapping = pair_files(source_files, target_files, spec.match_on)
+            scores_by_pair = {}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    def _group(group) -> dict:
+        return {"key": dict(zip(mapping.match_on, group.key)), "files": [f.file_name for f in group.files]}
+
+    pairs_out = []
+    for pair in mapping.pairs:
+        pair_key = dict(zip(mapping.match_on, pair.key)) if mapping.match_on else {
+            "source_file": pair.source.files[0].file_name if pair.source.files else None,
+            "target_file": pair.target.files[0].file_name if pair.target.files else None,
+        }
+        score = None
+        if pair.source.files and pair.target.files:
+            score = scores_by_pair.get((pair.source.files[0].path, pair.target.files[0].path))
+        pairs_out.append({
+            "key": pair_key,
+            "source_files": [f.file_name for f in pair.source.files],
+            "target_files": [f.file_name for f in pair.target.files],
+            "similarity_score": score.score if score is not None else None,
+        })
+
+    return {
+        "pairs_total": len(mapping.pairs),
+        "pairs": pairs_out,
+        "unmatched_sources": [_group(g) for g in mapping.unmatched_sources],
+        "unmatched_targets": [_group(g) for g in mapping.unmatched_targets],
+    }
+
+
 @router.post("/import", response_model=list[JobDefinition], status_code=201)
 def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)

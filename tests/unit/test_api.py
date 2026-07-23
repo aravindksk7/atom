@@ -646,6 +646,56 @@ def test_validate_job_definition_endpoint_accepts_valid_job(client):
     assert resp.json() == {"ok": True, "issues": []}
 
 
+def test_preview_file_mapping_local_explicit_returns_pairs_and_unmatched(client, tmp_path, monkeypatch):
+    import api.services.file_source as file_source
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_east.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (source_dir / "sales_north.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    resp = client.post("/api/jobs/preview-file-mapping", json={
+        "file_mapping": {
+            "strategy": "explicit",
+            "match_on": ["region"],
+            "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}.csv"},
+        }
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pairs_total"] == 1
+    assert body["pairs"][0]["key"] == {"region": "east"}
+    assert body["pairs"][0]["source_files"] == ["sales_east.csv"]
+    assert body["pairs"][0]["target_files"] == ["financials_east.csv"]
+    assert len(body["unmatched_sources"]) == 1
+    assert body["unmatched_sources"][0]["files"] == ["sales_north.csv"]
+    assert body["unmatched_targets"] == []
+
+
+def test_preview_file_mapping_rejects_remote_kinds(client):
+    resp = client.post("/api/jobs/preview-file-mapping", json={
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        }
+    })
+    assert resp.status_code == 400
+    assert "local" in resp.json()["detail"].lower()
+
+
+def test_preview_file_mapping_rejects_missing_file_mapping(client):
+    resp = client.post("/api/jobs/preview-file-mapping", json={})
+    assert resp.status_code == 400
+
+
 def test_import_jobs_upserts_definitions(client):
     payload = [
         {
