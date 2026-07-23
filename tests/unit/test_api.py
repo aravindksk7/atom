@@ -679,21 +679,131 @@ def test_preview_file_mapping_local_explicit_returns_pairs_and_unmatched(client,
     assert body["unmatched_targets"] == []
 
 
-def test_preview_file_mapping_rejects_remote_kinds(client):
+def test_preview_file_mapping_rejects_missing_file_mapping(client):
+    resp = client.post("/api/jobs/preview-file-mapping", json={})
+    assert resp.status_code == 422  # file_mapping is required on PreviewFileMappingRequest
+
+
+def test_preview_file_mapping_supports_s3_pairs(client, monkeypatch):
+    class _FakeBody:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class _FakeS3Client:
+        objects = {
+            "source/sales_east.csv": b"id,value\n1,alpha\n",
+            "source/sales_west.csv": b"id,value\n2,beta\n",
+            "target/financials_east.csv": b"id,value\n1,alpha\n",
+            "target/financials_west.csv": b"id,value\n2,BETA\n",
+        }
+
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return self
+
+        def paginate(self, **kwargs):
+            prefix = kwargs["Prefix"]
+            return [{"Contents": [{"Key": key} for key in self.objects if key.startswith(prefix)]}]
+
+        def get_object(self, **kwargs):
+            return {"Body": _FakeBody(self.objects[kwargs["Key"]])}
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda config_snapshot, spec: _FakeS3Client())
+
+    resp = client.post("/api/jobs/preview-file-mapping", json={
+        "file_mapping": {
+            "strategy": "explicit",
+            "match_on": ["region"],
+            "source": {"kind": "s3", "root": "s3://finance/source", "pattern": "sales_{region}.csv", "credentials_ref": "aws_source"},
+            "target": {"kind": "s3", "root": "s3://finance/target", "pattern": "financials_{region}.csv", "credentials_ref": "aws_target"},
+        },
+        "file_source_credentials": {
+            "aws_source": {"aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t"},
+            "aws_target": {"aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t"},
+        },
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pairs_total"] == 2
+    by_region = {p["key"]["region"]: p for p in body["pairs"]}
+    assert by_region["east"]["source_files"] == ["sales_east.csv"]
+    assert by_region["west"]["target_files"] == ["financials_west.csv"]
+
+
+def test_preview_file_mapping_supports_sftp_pairs(client, monkeypatch):
+    class _FakeSFTPFile:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class _FakeSFTPClient:
+        objects = {
+            "/source/sales_east.csv": b"id,value\n1,alpha\n",
+            "/target/financials_east.csv": b"id,value\n1,alpha\n",
+        }
+
+        def listdir_attr(self, path):
+            prefix = path.rstrip("/") + "/"
+            names = sorted(
+                key[len(prefix):] for key in self.objects
+                if key.startswith(prefix) and "/" not in key[len(prefix):]
+            )
+            return [type("Attr", (), {"filename": name, "st_mode": 0o100644})() for name in names]
+
+        def open(self, path, mode):
+            return _FakeSFTPFile(self.objects[path])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda config_snapshot, spec: _FakeSFTPClient())
+
+    resp = client.post("/api/jobs/preview-file-mapping", json={
+        "file_mapping": {
+            "strategy": "explicit",
+            "match_on": ["region"],
+            "source": {"kind": "sftp", "root": "/source", "pattern": "sales_{region}.csv", "credentials_ref": "sftp_source"},
+            "target": {"kind": "sftp", "root": "/target", "pattern": "financials_{region}.csv", "credentials_ref": "sftp_target"},
+        },
+        "file_source_credentials": {
+            "sftp_source": {"host": "sftp.internal", "username": "svc", "password": "secret"},
+            "sftp_target": {"host": "sftp.internal", "username": "svc", "password": "secret"},
+        },
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pairs_total"] == 1
+    assert body["pairs"][0]["key"] == {"region": "east"}
+
+
+def test_preview_file_mapping_surfaces_remote_connection_error_as_400(client, monkeypatch):
+    def _raise(config_snapshot, spec):
+        raise RuntimeError("could not connect")
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _raise)
+
     resp = client.post("/api/jobs/preview-file-mapping", json={
         "file_mapping": {
             "match_on": ["region"],
-            "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv"},
+            "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv", "credentials_ref": "aws_source"},
             "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
-        }
+        },
     })
     assert resp.status_code == 400
-    assert "local" in resp.json()["detail"].lower()
-
-
-def test_preview_file_mapping_rejects_missing_file_mapping(client):
-    resp = client.post("/api/jobs/preview-file-mapping", json={})
-    assert resp.status_code == 400
+    assert "could not connect" in resp.json()["detail"]
 
 
 def test_import_jobs_upserts_definitions(client):

@@ -3,7 +3,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
-from api.schemas import JobDefinition
+from api.schemas import JobDefinition, PreviewFileMappingRequest
 from etl_framework.repository.models import SavedJob
 from etl_framework.repository.repository import JobRepository
 from api.services.audit_service import AuditService
@@ -149,42 +149,30 @@ def validate_job_definition_body(body: dict):
 
 
 @router.post("/preview-file-mapping")
-def preview_file_mapping(body: dict):
-    from etl_framework.reconciliation.file_mapping import (
-        FileMappingSpec,
-        discover_local_files,
-        pair_files,
-        pair_files_automated,
-    )
-    from api.services.file_source import read_tabular, resolve_allowed_path
+def preview_file_mapping(body: PreviewFileMappingRequest):
+    from etl_framework.reconciliation.file_mapping import FileMappingSpec, pair_files, pair_files_automated
+    from api.services.multi_file_remote import RemoteFileSourceSession
 
     try:
-        spec = FileMappingSpec.from_params(body)
+        spec = FileMappingSpec.from_params({"file_mapping": body.file_mapping})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    if spec.source.kind != "local" or spec.target.kind != "local":
-        raise HTTPException(
-            status_code=400,
-            detail="Preview only supports 'local' source/target kinds; s3 and sftp jobs can still be saved and run normally.",
-        )
-
     try:
-        source_root = resolve_allowed_path(spec.source.root)
-        target_root = resolve_allowed_path(spec.target.root)
-        source_files = discover_local_files(source_root, spec.source.pattern)
-        target_files = discover_local_files(target_root, spec.target.pattern)
+        with RemoteFileSourceSession({"file_source_credentials": body.file_source_credentials}) as session:
+            source_files = session.discover(spec.source)
+            target_files = session.discover(spec.target)
 
-        if spec.strategy == "automated":
-            source_frames = {f.path: read_tabular(path=f.path, file_name=f.file_name) for f in source_files}
-            target_frames = {f.path: read_tabular(path=f.path, file_name=f.file_name) for f in target_files}
-            mapping, scores = pair_files_automated(
-                source_files, source_frames, target_files, target_frames, spec.automated,
-            )
-            scores_by_pair = {(s.source.path, s.target.path): s for s in scores}
-        else:
-            mapping = pair_files(source_files, target_files, spec.match_on)
-            scores_by_pair = {}
+            if spec.strategy == "automated":
+                source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
+                target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
+                mapping, scores = pair_files_automated(
+                    source_files, source_frames, target_files, target_frames, spec.automated,
+                )
+                scores_by_pair = {(s.source.path, s.target.path): s for s in scores}
+            else:
+                mapping = pair_files(source_files, target_files, spec.match_on)
+                scores_by_pair = {}
     except HTTPException:
         raise
     except Exception as exc:
