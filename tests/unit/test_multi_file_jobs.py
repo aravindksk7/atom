@@ -245,6 +245,147 @@ def test_run_executor_multi_file_reconciliation_ignore_policy_proceeds_with_unma
     assert result.mismatch_summary["unmatched_sources"][0]["key"] == {"region": "north", "date": "20260101"}
 
 
+def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> None:
+    class FakeBody:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class FakeS3Client:
+        objects = {
+            "source/sales_east.csv": b"id,value\n1,alpha\n",
+            "source/sales_west.csv": b"id,value\n2,beta\n",
+            "target/financials_east.csv": b"id,value\n1,alpha\n",
+            "target/financials_west.csv": b"id,value\n2,BETA\n",
+        }
+
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return self
+
+        def paginate(self, **kwargs):
+            prefix = kwargs["Prefix"]
+            return [{"Contents": [{"Key": key} for key in self.objects if key.startswith(prefix)]}]
+
+        def get_object(self, **kwargs):
+            return {"Body": FakeBody(self.objects[kwargs["Key"]])}
+
+    job = JobDefinition(
+        name="regional_sales_recon",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region"],
+                "source": {"kind": "s3", "root": "s3://finance/source", "pattern": "sales_{region}.csv", "credentials_ref": "aws_source"},
+                "target": {"kind": "s3", "root": "s3://finance/target", "pattern": "financials_{region}.csv", "credentials_ref": "aws_target"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda config_snapshot, spec: FakeS3Client())
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.FAILED
+    assert result.mismatch_summary["pairs_total"] == 2
+    assert result.mismatch_summary["pairs_passed"] == 1
+    by_region = {p["key"]["region"]: p for p in result.mismatch_summary["file_pairs"]}
+    assert by_region["west"]["value_mismatch_count"] == 1
+
+
+def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch) -> None:
+    """Mirrors test_run_executor_multi_file_reconciliation_reads_s3_pairs above --
+    the sftp kind had a discover_sftp_files() unit test but no end-to-end coverage
+    of RunExecutor's own _build_sftp_client/_read_file/_close_remote_client dispatch
+    before this test was added."""
+
+    class FakeSFTPFile:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class FakeSFTPClient:
+        objects = {
+            "/source/sales_east.csv": b"id,value\n1,alpha\n",
+            "/source/sales_west.csv": b"id,value\n2,beta\n",
+            "/target/financials_east.csv": b"id,value\n1,alpha\n",
+            "/target/financials_west.csv": b"id,value\n2,BETA\n",
+        }
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def listdir_attr(self, path):
+            prefix = path.rstrip("/") + "/"
+            names = sorted(
+                key[len(prefix):] for key in self.objects
+                if key.startswith(prefix) and "/" not in key[len(prefix):]
+            )
+            return [type("Attr", (), {"filename": name, "st_mode": 0o100644})() for name in names]
+
+        def open(self, path, mode):
+            return FakeSFTPFile(self.objects[path])
+
+        def close(self):
+            self.closed = True
+
+    job = JobDefinition(
+        name="regional_sales_recon_sftp",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region"],
+                "source": {"kind": "sftp", "root": "/source", "pattern": "sales_{region}.csv", "credentials_ref": "sftp_source"},
+                "target": {"kind": "sftp", "root": "/target", "pattern": "financials_{region}.csv", "credentials_ref": "sftp_target"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda config_snapshot, spec: FakeSFTPClient())
+
+    result = executor._build_case(job)()
+
+    assert result.status == TestStatus.FAILED
+    assert result.mismatch_summary["pairs_total"] == 2
+    assert result.mismatch_summary["pairs_passed"] == 1
+    by_region = {p["key"]["region"]: p for p in result.mismatch_summary["file_pairs"]}
+    assert by_region["west"]["value_mismatch_count"] == 1
+
+
+# Credential resolution (previously RunExecutor._file_source_credentials) now
+# lives in api.services.multi_file_remote.resolve_file_source_credentials,
+# shared with difference_export.py -- see tests/unit/test_multi_file_remote.py
+# for its direct tests.
+
+
 def test_run_executor_multi_file_reconciliation_warn_policy_proceeds_and_logs(tmp_path, monkeypatch, caplog) -> None:
     from api.services import file_source
 

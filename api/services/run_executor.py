@@ -593,48 +593,51 @@ class RunExecutor:
 
     def _build_case_multi_file_reconciliation(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
-            from api.services.file_source import read_tabular, resolve_allowed_path
+            from api.services.multi_file_remote import RemoteFileSourceSession
             from etl_framework.reconciliation.file_mapping import (
                 FileMappingManifestWriter,
                 FileMappingSpec,
                 aggregate_reconciliation_results,
-                discover_local_files,
                 pair_files,
                 pair_files_automated,
                 wait_for_ready_files,
             )
 
             spec = FileMappingSpec.from_params(job.params)
-            source_root = resolve_allowed_path(spec.source.root)
-            target_root = resolve_allowed_path(spec.target.root)
 
-            if spec.source.readiness is not None:
-                source_files = wait_for_ready_files(
-                    lambda: discover_local_files(source_root, spec.source.pattern), spec.source.readiness,
-                )
-            else:
-                source_files = discover_local_files(source_root, spec.source.pattern)
+            # One session for the whole discovery phase: both sides' discovery,
+            # and (for automated strategy) every file read used for similarity
+            # scoring, all happen sequentially here, so one S3/SFTP connection
+            # per (kind, credentials_ref) is reused throughout rather than
+            # opening a fresh one per call.
+            with RemoteFileSourceSession(self._config_snapshot) as discovery_session:
+                if spec.source.readiness is not None:
+                    source_files = wait_for_ready_files(
+                        lambda: discovery_session.discover(spec.source), spec.source.readiness,
+                    )
+                else:
+                    source_files = discovery_session.discover(spec.source)
 
-            if spec.target.readiness is not None:
-                target_files = wait_for_ready_files(
-                    lambda: discover_local_files(target_root, spec.target.pattern), spec.target.readiness,
-                )
-            else:
-                target_files = discover_local_files(target_root, spec.target.pattern)
+                if spec.target.readiness is not None:
+                    target_files = wait_for_ready_files(
+                        lambda: discovery_session.discover(spec.target), spec.target.readiness,
+                    )
+                else:
+                    target_files = discovery_session.discover(spec.target)
 
-            if spec.strategy == "automated":
-                source_frames = {
-                    f.path: read_tabular(path=f.path, file_name=f.file_name) for f in source_files
-                }
-                target_frames = {
-                    f.path: read_tabular(path=f.path, file_name=f.file_name) for f in target_files
-                }
-                mapping, similarity_scores = pair_files_automated(
-                    source_files, source_frames, target_files, target_frames, spec.automated,
-                )
-            else:
-                mapping = pair_files(source_files, target_files, spec.match_on)
-                similarity_scores = None
+                if spec.strategy == "automated":
+                    source_frames = {
+                        f.path: discovery_session.read_file(f, spec.source) for f in source_files
+                    }
+                    target_frames = {
+                        f.path: discovery_session.read_file(f, spec.target) for f in target_files
+                    }
+                    mapping, similarity_scores = pair_files_automated(
+                        source_files, source_frames, target_files, target_frames, spec.automated,
+                    )
+                else:
+                    mapping = pair_files(source_files, target_files, spec.match_on)
+                    similarity_scores = None
 
             FileMappingManifestWriter(
                 f"logs/file_mapping_manifest_{_safe_path_component(self._run_id)}_{_safe_path_component(job.name)}.json"
@@ -662,19 +665,29 @@ class RunExecutor:
 
             def _make_pair_case(pair):
                 def run_pair() -> ReconciliationResult:
-                    source_df = pd.concat(
-                        [read_tabular(path=f.path, file_name=f.file_name) for f in pair.source.files],
-                        ignore_index=True,
-                    )
-                    target_df = pd.concat(
-                        [read_tabular(path=f.path, file_name=f.file_name) for f in pair.target.files],
-                        ignore_index=True,
-                    )
+                    # Each pair gets its own session rather than sharing
+                    # discovery_session's clients across TestRunner's worker
+                    # threads: boto3 clients are documented thread-safe, but
+                    # paramiko's SFTPClient is not, so pairs running
+                    # concurrently must never share one SFTP connection.
+                    # Files within a single pair (e.g. shard-collapsed via
+                    # match_on) still share one connection through this
+                    # session, same as the discovery phase above.
+                    from api.services.multi_file_remote import RemoteFileSourceSession
+                    with RemoteFileSourceSession(self._config_snapshot) as pair_session:
+                        source_df = pd.concat(
+                            [pair_session.read_file(f, spec.source) for f in pair.source.files],
+                            ignore_index=True,
+                        )
+                        target_df = pd.concat(
+                            [pair_session.read_file(f, spec.target) for f in pair.target.files],
+                            ignore_index=True,
+                        )
                     source_df, target_df, resolved_keys = resolve_key_columns(
                         source_df,
                         target_df,
                         job.key_columns or self._settings.key_columns,
-                        job.exclude_columns or [],
+                        job.exclude_columns or self._settings.exclude_columns,
                     )
                     pair_job = job.model_copy(update={"key_columns": resolved_keys})
                     source_label = "/".join(f.file_name for f in pair.source.files)

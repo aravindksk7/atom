@@ -101,6 +101,43 @@ export async function createPassingFileJob(ctx: APIRequestContext, name: string)
   return resp.json();
 }
 
+/**
+ * Creates a multi_file reconciliation job pairing fixtures/data/multi_source/*.csv
+ * against fixtures/data/multi_target/*.csv on filename token {region}, key column
+ * `id`. Deterministic: region=east is byte-identical (PASSED pair), region=west has
+ * a changed `amount` (FAILED pair) — so the job's aggregate status is always FAILED
+ * with mismatch_summary.pairs_total=2, pairs_passed=1, pairs_failed=1. See those
+ * four CSVs under fixtures/data/multi_source and multi_target.
+ */
+export async function createMultiFileJob(ctx: APIRequestContext, name: string) {
+  const resp = await ctx.post('/api/jobs', {
+    data: {
+      name,
+      job_type: 'reconciliation',
+      key_columns: ['id'],
+      params: {
+        source_mode: 'multi_file',
+        file_mapping: {
+          strategy: 'explicit',
+          match_on: ['region'],
+          source: {
+            kind: 'local',
+            root: path.join(FIXTURE_DIR, 'multi_source'),
+            pattern: 'sales_{region}.csv',
+          },
+          target: {
+            kind: 'local',
+            root: path.join(FIXTURE_DIR, 'multi_target'),
+            pattern: 'financials_{region}.csv',
+          },
+        },
+      },
+    },
+  });
+  if (!resp.ok()) throw new Error(`createMultiFileJob(${name}) failed: ${resp.status()} ${await resp.text()}`);
+  return resp.json();
+}
+
 // Intentionally fire-and-forget (unlike the create* helpers above): this runs from
 // afterAll/afterEach cleanup blocks, where throwing on a failed delete would mask
 // the actual test failure that's already being reported. A failed cleanup here

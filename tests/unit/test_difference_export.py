@@ -294,3 +294,253 @@ def test_create_export_job_accepts_html_format(monkeypatch):
         assert data["format"] == "html"
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_recomputed_difference_export_handles_multi_file_jobs(tmp_path, monkeypatch):
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_east.csv").write_text("id,amount,note\n1,10,draft\n", encoding="utf-8")
+    (target_dir / "financials_east.csv").write_text("id,amount,note\n1,11,final\n", encoding="utf-8")
+    (source_dir / "sales_west.csv").write_text("id,amount,note\n2,20,draft\n", encoding="utf-8")
+    (target_dir / "financials_west.csv").write_text("id,amount,note\n2,22,final\n", encoding="utf-8")
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "regional_sales_recon",
+            "description": "",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "source_mode": "multi_file",
+                "file_mapping": {
+                    "strategy": "explicit",
+                    "match_on": ["region"],
+                    "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_{region}.csv"},
+                    "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}.csv"},
+                },
+            },
+            "enabled": True,
+        })
+        run = RunRepository(db).create_run(
+            run_id="run-multi-file-export",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={
+                "compare_request_type": "unknown",
+                "request": {},
+                "job_sequence": ["regional_sales_recon"],
+                "run_settings": {"exclude_columns": ["note"]},
+            },
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+    assert row_count == len(lines) == 2
+    rows = [json.loads(line) for line in lines]
+    pairs = {json.loads(row["key_values"])["__pair__"]["region"] for row in rows}
+    assert pairs == {"east", "west"}
+    assert {row["test_name"] for row in rows} == {"regional_sales_recon"}
+    assert {row["column_name"] for row in rows} == {"amount"}
+
+
+def test_recomputed_difference_export_handles_s3_multi_file_jobs(tmp_path, monkeypatch):
+    from api.services import difference_export as de
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+
+    class FakeBody:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class FakeS3Client:
+        objects = {
+            "source/sales_east.csv": b"id,amount\n1,10\n",
+            "target/financials_east.csv": b"id,amount\n1,11\n",
+        }
+
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return self
+
+        def paginate(self, **kwargs):
+            prefix = kwargs["Prefix"]
+            return [{"Contents": [{"Key": key} for key in self.objects if key.startswith(prefix)]}]
+
+        def get_object(self, **kwargs):
+            return {"Body": FakeBody(self.objects[kwargs["Key"]])}
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda _snapshot, _spec: FakeS3Client())
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "regional_sales_recon",
+            "description": "",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "source_mode": "multi_file",
+                "file_mapping": {
+                    "strategy": "explicit",
+                    "match_on": ["region"],
+                    "source": {"kind": "s3", "root": "s3://finance/source", "pattern": "sales_{region}.csv"},
+                    "target": {"kind": "s3", "root": "s3://finance/target", "pattern": "financials_{region}.csv"},
+                },
+            },
+            "enabled": True,
+        })
+        run = RunRepository(db).create_run(
+            run_id="run-s3-multi-file-export",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "unknown", "request": {}, "job_sequence": ["regional_sales_recon"]},
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").strip().splitlines()]
+    assert row_count == 1
+    assert json.loads(rows[0]["key_values"])["__pair__"] == {"region": "east"}
+    assert rows[0]["column_name"] == "amount"
+
+
+def test_recomputed_difference_export_handles_sftp_multi_file_jobs(tmp_path, monkeypatch):
+    """Mirrors test_recomputed_difference_export_handles_s3_multi_file_jobs above --
+    the sftp kind had no coverage of _write_multi_file_reconciliation_job's own
+    _build_sftp_client/_read_file dispatch before this test was added."""
+    from api.services import difference_export as de
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+
+    class FakeSFTPFile:
+        def __init__(self, raw: bytes) -> None:
+            self._raw = raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def read(self) -> bytes:
+            return self._raw
+
+    class FakeSFTPClient:
+        objects = {
+            "/source/sales_east.csv": b"id,amount\n1,10\n",
+            "/target/financials_east.csv": b"id,amount\n1,11\n",
+        }
+
+        def listdir_attr(self, path):
+            prefix = path.rstrip("/") + "/"
+            names = sorted(
+                key[len(prefix):] for key in self.objects
+                if key.startswith(prefix) and "/" not in key[len(prefix):]
+            )
+            return [type("Attr", (), {"filename": name, "st_mode": 0o100644})() for name in names]
+
+        def open(self, path, mode):
+            return FakeSFTPFile(self.objects[path])
+
+        def close(self):
+            pass
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda _snapshot, _spec: FakeSFTPClient())
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "regional_sales_recon_sftp",
+            "description": "",
+            "tags": [],
+            "job_type": "reconciliation",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None,
+            "target_env": None,
+            "params": {
+                "source_mode": "multi_file",
+                "file_mapping": {
+                    "strategy": "explicit",
+                    "match_on": ["region"],
+                    "source": {"kind": "sftp", "root": "/source", "pattern": "sales_{region}.csv"},
+                    "target": {"kind": "sftp", "root": "/target", "pattern": "financials_{region}.csv"},
+                },
+            },
+            "enabled": True,
+        })
+        run = RunRepository(db).create_run(
+            run_id="run-sftp-multi-file-export",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "unknown", "request": {}, "job_sequence": ["regional_sales_recon_sftp"]},
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").strip().splitlines()]
+    assert row_count == 1
+    assert json.loads(rows[0]["key_values"])["__pair__"] == {"region": "east"}
+    assert rows[0]["column_name"] == "amount"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +29,14 @@ from etl_framework.db.engine import DBEngine
 from etl_framework.reconciliation.compare_utils import (
     normalize_string_columns,
     numeric_delta,
+    resolve_key_columns,
     value_mismatch_mask,
+)
+from etl_framework.reconciliation.file_mapping import (
+    FileMappingSpec,
+    pair_files,
+    pair_files_automated,
+    wait_for_ready_files,
 )
 from etl_framework.reconciliation.normalizer import TypeNormalizer
 from etl_framework.repository.database import SessionLocal
@@ -41,6 +49,8 @@ from etl_framework.repository.models import (
 )
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.utils.serialization import csv_safe, json_safe
+
+logger = logging.getLogger("api.services.difference_export")
 
 
 DIFFERENCE_FIELDS = [
@@ -527,6 +537,9 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         job = executor._job_to_definition(saved)
         if job.params.get("source_mode") == "bo_live":
             continue
+        if job.params.get("source_mode") == "multi_file":
+            _write_multi_file_reconciliation_job(job, settings, writer, snapshot)
+            continue
         src_engine, tgt_engine = executor._build_engines(job)
         df_a = src_engine.execute_query(job.query, job.params)
         df_b = tgt_engine.execute_query(job.query, job.params)
@@ -539,6 +552,96 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
             test_name=job.name,
             writer=writer,
         )
+
+
+def _write_multi_file_reconciliation_job(
+    job,
+    settings: RunSettings,
+    writer: DifferenceWriter,
+    config_snapshot: dict[str, Any] | None = None,
+) -> None:
+    from api.services.multi_file_remote import RemoteFileSourceSession
+
+    spec = FileMappingSpec.from_params(job.params)
+
+    # This function iterates pairs sequentially (no parallelism, unlike
+    # RunExecutor's live-execution path), so a single session can safely be
+    # reused across discovery and every pair's file reads -- one S3/SFTP
+    # connection per (kind, credentials_ref) for this whole job, not one per
+    # file or per pair.
+    with RemoteFileSourceSession(config_snapshot) as session:
+        if spec.source.readiness is not None:
+            source_files = wait_for_ready_files(lambda: session.discover(spec.source), spec.source.readiness)
+        else:
+            source_files = session.discover(spec.source)
+
+        if spec.target.readiness is not None:
+            target_files = wait_for_ready_files(lambda: session.discover(spec.target), spec.target.readiness)
+        else:
+            target_files = session.discover(spec.target)
+
+        if spec.strategy == "automated":
+            source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
+            target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
+            mapping, _ = pair_files_automated(source_files, source_frames, target_files, target_frames, spec.automated)
+        else:
+            mapping = pair_files(source_files, target_files, spec.match_on)
+
+        if mapping.unmatched_sources or mapping.unmatched_targets:
+            if spec.unmatched_policy == "fail":
+                raise ValueError(
+                    f"multi_file reconciliation for '{job.name}' has "
+                    f"{len(mapping.unmatched_sources)} unmatched source group(s) and "
+                    f"{len(mapping.unmatched_targets)} unmatched target group(s)"
+                )
+            if spec.unmatched_policy == "warn":
+                logger.warning(
+                    "multi_file reconciliation for '%s' proceeding with %d unmatched "
+                    "source group(s) and %d unmatched target group(s)",
+                    job.name, len(mapping.unmatched_sources), len(mapping.unmatched_targets),
+                )
+        if not mapping.pairs:
+            raise ValueError(f"multi_file reconciliation for '{job.name}' matched zero file pairs")
+
+        for pair in mapping.pairs:
+            source_df = pd.concat(
+                [session.read_file(f, spec.source) for f in pair.source.files],
+                ignore_index=True,
+            )
+            target_df = pd.concat(
+                [session.read_file(f, spec.target) for f in pair.target.files],
+                ignore_index=True,
+            )
+            source_df, target_df, resolved_keys = resolve_key_columns(
+                source_df,
+                target_df,
+                job.key_columns or settings.key_columns,
+                job.exclude_columns or settings.exclude_columns,
+            )
+            pair_key = dict(zip(mapping.match_on, pair.key)) if mapping.match_on else {
+                "source_file": pair.source.files[0].file_name if pair.source.files else None,
+                "target_file": pair.target.files[0].file_name if pair.target.files else None,
+            }
+            pair_writer = _PairKeyDifferenceWriter(writer, pair_key)
+            _write_tabular_differences(
+                source_df,
+                target_df,
+                key_columns=resolved_keys,
+                exclude_columns=job.exclude_columns or settings.exclude_columns,
+                options=settings,
+                test_name=job.name,
+                writer=pair_writer,
+            )
+
+
+class _PairKeyDifferenceWriter:
+    def __init__(self, writer: DifferenceWriter, pair_key: dict[str, Any]) -> None:
+        self._writer = writer
+        self._pair_key = pair_key
+
+    def write(self, row: dict[str, Any]) -> None:
+        key_values = row.get("key_values") if isinstance(row.get("key_values"), dict) else {}
+        self._writer.write({**row, "key_values": {**key_values, "__pair__": self._pair_key}})
 
 
 def _read_file_path(path: str) -> pd.DataFrame:
