@@ -65,6 +65,28 @@
     fileCompareKeyColumns: '',
     fileCompareExcludeColumns: '',
 
+    mfCompareLabelA: 'Source A',
+    mfCompareLabelB: 'Source B',
+    mfCompareStrategy: 'explicit',
+    mfCompareMatchOnRaw: '',
+    mfCompareUnmatchedPolicy: 'fail',
+    mfCompareSimilarityThreshold: 0.7,
+    mfCompareSignalFilename: true,
+    mfCompareSignalColumns: true,
+    mfCompareSignalRowcount: true,
+    mfCompareSourceRoot: '',
+    mfCompareSourcePattern: '',
+    mfCompareTargetRoot: '',
+    mfCompareTargetPattern: '',
+    mfCompareKeyColumns: '',
+    mfCompareExcludeColumns: '',
+    mfComparePreviewLoading: false,
+    mfComparePreviewResult: null,
+    mfComparePreviewError: '',
+    mfCompareLoading: false,
+    mfCompareResult: null,
+    mfCompareError: '',
+
     sqlConfigA: '',
     sqlConfigB: '',
     sqlConnectionA: null,
@@ -511,6 +533,82 @@
       } catch (e) {
         this.toast('error', 'File compare failed', e.message);
         this.fileCompareLoading = false;
+      }
+    },
+
+    _buildMfCompareFileMapping() {
+      const match_on = this.mfCompareMatchOnRaw.split(',').map(s => s.trim()).filter(Boolean);
+      const config = {
+        strategy: this.mfCompareStrategy,
+        unmatched_policy: this.mfCompareUnmatchedPolicy,
+        source: { kind: 'local', root: this.mfCompareSourceRoot, pattern: this.mfCompareSourcePattern },
+        target: { kind: 'local', root: this.mfCompareTargetRoot, pattern: this.mfCompareTargetPattern },
+      };
+      if (this.mfCompareStrategy === 'explicit') config.match_on = match_on;
+      if (this.mfCompareStrategy === 'automated') {
+        const signals = [];
+        if (this.mfCompareSignalFilename) signals.push('filename_tokens');
+        if (this.mfCompareSignalColumns) signals.push('column_signature');
+        if (this.mfCompareSignalRowcount) signals.push('row_count_ratio');
+        const parsedThreshold = Number(this.mfCompareSimilarityThreshold);
+        config.automated_mapping = {
+          similarity_threshold: Number.isFinite(parsedThreshold) && this.mfCompareSimilarityThreshold !== '' ? parsedThreshold : 0.7,
+          signals,
+        };
+      }
+      return config;
+    },
+
+    async previewMfCompareMapping() {
+      this.mfComparePreviewLoading = true;
+      this.mfComparePreviewResult = null;
+      this.mfComparePreviewError = '';
+      try {
+        this.mfComparePreviewResult = await api('POST', '/api/jobs/preview-file-mapping', {
+          file_mapping: this._buildMfCompareFileMapping(),
+        });
+      } catch (e) {
+        this.mfComparePreviewError = e.message || 'Preview failed';
+      } finally {
+        this.mfComparePreviewLoading = false;
+      }
+    },
+
+    async runMultiFileCompare() {
+      this.mfCompareLoading = true;
+      this.mfCompareResult = null;
+      this.mfCompareError = '';
+      try {
+        const payload = {
+          label_a: this.mfCompareLabelA || 'Source A',
+          label_b: this.mfCompareLabelB || 'Source B',
+          file_mapping: this._buildMfCompareFileMapping(),
+        };
+        if (this.mfCompareKeyColumns.trim()) {
+          payload.key_columns = this.mfCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (this.mfCompareExcludeColumns.trim()) {
+          payload.exclude_columns = this.mfCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
+        }
+        const run = await api('POST', '/api/compare/multi-file', payload);
+        const poll = setInterval(async () => {
+          try {
+            const st = await api('GET', `/api/runs/${run.run_id}/status`);
+            if (this.isTerminalStatus(st.status)) {
+              clearInterval(poll);
+              this.mfCompareResult = await api('GET', `/api/runs/${run.run_id}`);
+              this.mfCompareLoading = false;
+              await this.loadRuns();
+            }
+          } catch (e) {
+            clearInterval(poll);
+            this.mfCompareLoading = false;
+          }
+        }, 3000);
+      } catch (e) {
+        this.mfCompareError = e.message || 'Multi-file compare failed';
+        this.toast('error', 'Multi-file compare failed', e.message);
+        this.mfCompareLoading = false;
       }
     },
 
