@@ -469,3 +469,34 @@ def test_load_in_chunks_falls_back_when_chunk_size_zero():
 
     mock_engine.execute_query.assert_called_once_with("SELECT * FROM t")
     assert len(result) == 2
+
+
+def test_compare_multi_file_endpoint_creates_run(client, monkeypatch):
+    import api.routes.compare as compare_module
+    monkeypatch.setattr(compare_module, "_run_multi_file_bg", lambda *a, **kw: None)
+
+    resp = client.post("/api/compare/multi-file", json={
+        "key_columns": ["id"],
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        },
+    })
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["run_id"]
+
+
+def test_compare_multi_file_endpoint_rejects_remote_kinds_synchronously(client, monkeypatch):
+    import api.routes.compare as compare_module
+    monkeypatch.setattr(compare_module, "_run_multi_file_bg", lambda *a, **kw: None)
+
+    resp = client.post("/api/compare/multi-file", json={
+        "file_mapping": {
+            "match_on": ["region"],
+            "source": {"kind": "s3", "root": "s3://bucket/prefix", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+        },
+    })
+    assert resp.status_code == 400

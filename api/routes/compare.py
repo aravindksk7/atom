@@ -16,6 +16,7 @@ from api.schemas import (
     DualEnvLaunchRequest,
     MismatchDiffOut,
     MismatchDiffRequest,
+    MultiFileCompareRequest,
     PairSummaryOut,
     ReconFileCompareRequest,
     RunStatusOut,
@@ -113,6 +114,24 @@ def _run_recon_file_bg(req: ReconFileCompareRequest, run_id: str) -> None:
         svc.run_recon_file_compare(req, run_id)
     except Exception:
         logger.exception("Recon-file comparison background task failed for run_id=%s", run_id)
+    finally:
+        set_run_id("")
+        db.close()
+
+
+def _run_multi_file_bg(req: MultiFileCompareRequest, run_id: str) -> None:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
+    db = SessionLocal()
+    try:
+        from api.services.compare_service import CompareService
+        from etl_framework.repository.repository import ConfigRepository
+        svc = CompareService(db, ConfigRepository(db))
+        svc.run_multi_file_compare(req, run_id)
+    except Exception:
+        logger.exception("Multi-file comparison background task failed for run_id=%s", run_id)
     finally:
         set_run_id("")
         db.close()
@@ -359,6 +378,50 @@ def compare_recon_file(
         {"run_type": "recon_file", "label_a": body.label_a, "label_b": body.label_b},
     )
     background_tasks.add_task(_run_recon_file_bg, compare_body, run_id)
+    run = repo.get_run(run_id)
+    return _status_out(run)
+
+
+@router.post("/multi-file", response_model=RunStatusOut, status_code=202)
+def compare_multi_file(
+    body: MultiFileCompareRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RunStatusOut:
+    from etl_framework.reconciliation.file_mapping import FileMappingSpec
+
+    try:
+        spec = FileMappingSpec.from_params({"file_mapping": body.file_mapping})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if spec.source.kind != "local" or spec.target.kind != "local":
+        raise HTTPException(
+            status_code=400,
+            detail="Ad-hoc multi-file compare only supports 'local' source/target kinds.",
+        )
+
+    run_id = str(uuid.uuid4())
+    snapshot = {
+        "compare_request_type": "multi_file",
+        "request": body.model_dump(mode="json"),
+    }
+    repo = RunRepository(db)
+    repo.create_run(
+        run_id=run_id,
+        source_env=body.label_a,
+        target_env=body.label_b,
+        config_snapshot=snapshot,
+        run_type="multi_file",
+    )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {"run_type": "multi_file", "label_a": body.label_a, "label_b": body.label_b},
+    )
+    background_tasks.add_task(_run_multi_file_bg, body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
 
