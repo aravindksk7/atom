@@ -698,6 +698,10 @@ class CompareService:
                 total_tests=1, passed=passed, failed=failed,
             )
         except Exception as exc:
+            # Unlike run_sql_comparison/run_bo_comparison, this does NOT
+            # re-raise after recording the error: it's called directly (no
+            # surrounding try/except) by both the background task and by
+            # tests that assert on the persisted ERROR TestResult afterward.
             logger.exception("Multi-file comparison failed for run %s", run_id)
             self._add_error_result(run_id, req.label_a or "multi_file_compare", exc)
             self._repo.update_run_status(
