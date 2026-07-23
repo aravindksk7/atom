@@ -146,10 +146,10 @@ export async function deleteJob(ctx: APIRequestContext, name: string) {
   await ctx.delete(`/api/jobs/${encodeURIComponent(name)}`);
 }
 
-export async function triggerRun(ctx: APIRequestContext, jobNames: string[]) {
-  const resp = await ctx.post('/api/runs', {
-    data: { source_env: 'dev', target_env: 'dev', job_names: jobNames },
-  });
+export async function triggerRun(ctx: APIRequestContext, jobNames: string[], configId?: number) {
+  const data: Record<string, unknown> = { source_env: 'dev', target_env: 'dev', job_names: jobNames };
+  if (configId !== undefined) data.config_id = configId;
+  const resp = await ctx.post('/api/runs', { data });
   if (!resp.ok()) throw new Error(`triggerRun failed: ${resp.status()} ${await resp.text()}`);
   return resp.json(); // { run_id, status }
 }
