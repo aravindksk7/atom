@@ -1187,6 +1187,7 @@
             <option value="sql">SQL Query</option>
             <option value="files">Files</option>
             <option value="bo_live">Live BO Report</option>
+            <option value="multi_file" x-show="jobModal.job_type === 'reconciliation'">Multiple Files</option>
           </select>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -1321,6 +1322,111 @@
             <div>
               <label class="field-label">Target Label</label>
               <input x-model="jobModal.target_file_label" class="field-input" placeholder="Prod snapshot" />
+            </div>
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'multi_file'"
+             class="border border-slate-200 rounded-lg p-3 space-y-3">
+          <div class="grid-2">
+            <div>
+              <label class="field-label">Strategy</label>
+              <select x-model="jobModal.mf_strategy" class="field-input field-select" data-testid="job-modal-mf-strategy-select">
+                <option value="explicit">Explicit (match on tokens)</option>
+                <option value="automated">Automated (guess by similarity)</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Unmatched Policy</label>
+              <select x-model="jobModal.mf_unmatched_policy" class="field-input field-select">
+                <option value="fail">Fail job</option>
+                <option value="warn">Warn and proceed</option>
+                <option value="ignore">Ignore silently</option>
+              </select>
+            </div>
+          </div>
+          <div x-show="jobModal.mf_strategy === 'explicit'">
+            <label class="field-label">Match On (comma-separated tokens)</label>
+            <input x-model="jobModal.mf_match_on_raw" class="field-input" placeholder="region, date"
+                   data-testid="job-modal-mf-match-on-input" />
+          </div>
+          <div x-show="jobModal.mf_strategy === 'automated'" class="grid-2">
+            <div>
+              <label class="field-label">Similarity Threshold</label>
+              <input x-model="jobModal.mf_similarity_threshold" type="number" min="0" max="1" step="0.05"
+                     class="field-input" placeholder="0.7" />
+            </div>
+            <div class="flex items-end gap-3">
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.mf_signal_filename" class="rounded" /> filename
+              </label>
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.mf_signal_columns" class="rounded" /> columns
+              </label>
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.mf_signal_rowcount" class="rounded" /> row count
+              </label>
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <p class="text-xs font-medium text-slate-500 mb-2">Source</p>
+            <div class="grid-2">
+              <select x-model="jobModal.mf_source_kind" class="field-input field-select">
+                <option value="local">local</option>
+                <option value="s3">s3</option>
+                <option value="sftp">sftp</option>
+              </select>
+              <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix"
+                     data-testid="job-modal-mf-source-root-input" />
+              <input x-model="jobModal.mf_source_pattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
+                     data-testid="job-modal-mf-source-pattern-input" />
+              <input x-model="jobModal.mf_source_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
+                     x-show="jobModal.mf_source_kind !== 'local'" />
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <p class="text-xs font-medium text-slate-500 mb-2">Target</p>
+            <div class="grid-2">
+              <select x-model="jobModal.mf_target_kind" class="field-input field-select">
+                <option value="local">local</option>
+                <option value="s3">s3</option>
+                <option value="sftp">sftp</option>
+              </select>
+              <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix"
+                     data-testid="job-modal-mf-target-root-input" />
+              <input x-model="jobModal.mf_target_pattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
+                     data-testid="job-modal-mf-target-pattern-input" />
+              <input x-model="jobModal.mf_target_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
+                     x-show="jobModal.mf_target_kind !== 'local'" />
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <div class="flex items-center gap-2">
+              <button @click="previewFileMapping()"
+                      :disabled="jobModal.mfPreviewLoading || jobModal.mf_source_kind !== 'local' || jobModal.mf_target_kind !== 'local'"
+                      class="btn-sm btn-secondary text-xs px-3 py-1 disabled:opacity-40"
+                      data-testid="job-modal-mf-preview-btn">
+                <span x-show="!jobModal.mfPreviewLoading">Preview Mapping</span>
+                <span x-show="jobModal.mfPreviewLoading">Loading…</span>
+              </button>
+              <span x-show="jobModal.mf_source_kind !== 'local' || jobModal.mf_target_kind !== 'local'"
+                    class="text-xs text-slate-400">Preview only supports local sources.</span>
+            </div>
+            <p x-show="jobModal.mfPreviewError" x-text="jobModal.mfPreviewError" class="text-xs text-red-600 mt-2"></p>
+            <div x-show="jobModal.mfPreviewResult" class="mt-2 text-xs space-y-1" data-testid="job-modal-mf-preview-result">
+              <p x-text="`${jobModal.mfPreviewResult?.pairs_total ?? 0} pair(s) matched`"></p>
+              <template x-for="(pair, idx) in (jobModal.mfPreviewResult?.pairs || [])" :key="idx">
+                <div class="border border-slate-200 rounded p-2" data-testid="job-modal-mf-preview-pair">
+                  <span x-text="Object.entries(pair.key || {}).map(([k,v]) => `${k}=${v}`).join(', ')"></span>
+                  — <span x-text="(pair.source_files || []).join(', ')"></span>
+                  → <span x-text="(pair.target_files || []).join(', ')"></span>
+                </div>
+              </template>
+              <p x-show="(jobModal.mfPreviewResult?.unmatched_sources || []).length"
+                 x-text="'Unmatched sources: ' + jobModal.mfPreviewResult.unmatched_sources.map(g => (g.files||[]).join(', ')).join('; ')"
+                 class="text-amber-600"></p>
+              <p x-show="(jobModal.mfPreviewResult?.unmatched_targets || []).length"
+                 x-text="'Unmatched targets: ' + jobModal.mfPreviewResult.unmatched_targets.map(g => (g.files||[]).join(', ')).join('; ')"
+                 class="text-amber-600"></p>
             </div>
           </div>
         </div>
