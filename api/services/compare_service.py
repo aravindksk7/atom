@@ -12,7 +12,7 @@ from api.schemas import (
     BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest,
     ColumnStatsRequest, ColumnStatsOut, ColumnStatsDiffOut,
     MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
-    AdvancedCompareOptions,
+    AdvancedCompareOptions, MultiFileCompareRequest,
 )
 from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
@@ -601,6 +601,110 @@ class CompareService:
                 detail="Cannot parse reconciliation report — not a framework-generated report",
             )
         return results
+
+    # ------------------------------------------------------------------
+    # Multi-file reconciliation (ad-hoc)
+    # ------------------------------------------------------------------
+
+    def run_multi_file_compare(self, req: MultiFileCompareRequest, run_id: str) -> None:
+        """Ad-hoc multi-file reconciliation: discover, pair, reconcile every
+        pair sequentially, then persist ONE aggregate TestResult -- the same
+        result shape RunExecutor's saved-job multi_file path already
+        produces, so the Reports-tab rendering (Phase 4) works unchanged.
+        """
+        from etl_framework.reconciliation.compare_utils import resolve_key_columns
+        from etl_framework.reconciliation.file_mapping import (
+            FileMappingSpec,
+            aggregate_reconciliation_results,
+            pair_files,
+            pair_files_automated,
+        )
+        from api.services.multi_file_remote import RemoteFileSourceSession
+
+        try:
+            self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
+
+            spec = FileMappingSpec.from_params({"file_mapping": req.file_mapping})
+            if spec.source.kind != "local" or spec.target.kind != "local":
+                raise ValueError(
+                    "Ad-hoc multi-file compare only supports 'local' source/target kinds; "
+                    "save a job instead for s3/sftp sources."
+                )
+
+            with RemoteFileSourceSession({}) as session:
+                source_files = session.discover(spec.source)
+                target_files = session.discover(spec.target)
+
+                if spec.strategy == "automated":
+                    source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
+                    target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
+                    mapping, _ = pair_files_automated(
+                        source_files, source_frames, target_files, target_frames, spec.automated,
+                    )
+                else:
+                    mapping = pair_files(source_files, target_files, spec.match_on)
+
+                if mapping.unmatched_sources or mapping.unmatched_targets:
+                    # NOTE: parenthesize the OR before the AND -- `a or b and c`
+                    # evaluates as `a or (b and c)` in Python, which would raise
+                    # on ANY unmatched source regardless of policy. Keep this as
+                    # two separate ifs (as below), not one combined expression.
+                    if spec.unmatched_policy == "fail":
+                        raise ValueError(
+                            f"multi-file compare has {len(mapping.unmatched_sources)} unmatched source "
+                            f"group(s) and {len(mapping.unmatched_targets)} unmatched target group(s)"
+                        )
+                    if spec.unmatched_policy == "warn":
+                        logger.warning(
+                            "multi-file compare for run '%s' proceeding with %d unmatched source "
+                            "group(s) and %d unmatched target group(s)",
+                            run_id, len(mapping.unmatched_sources), len(mapping.unmatched_targets),
+                        )
+                if not mapping.pairs:
+                    raise ValueError("multi-file compare matched zero file pairs")
+
+                pair_results = []
+                for pair in mapping.pairs:
+                    source_df = pd.concat(
+                        [session.read_file(f, spec.source) for f in pair.source.files], ignore_index=True,
+                    )
+                    target_df = pd.concat(
+                        [session.read_file(f, spec.target) for f in pair.target.files], ignore_index=True,
+                    )
+                    source_df, target_df, resolved_keys = resolve_key_columns(
+                        source_df, target_df, req.key_columns or [], req.exclude_columns or [],
+                    )
+                    engine_a = FrameEngine(source_df, req.label_a)
+                    engine_b = FrameEngine(target_df, req.label_b)
+                    reconciler = _build_engine(
+                        engine_a, engine_b,
+                        key_columns=resolved_keys,
+                        exclude_columns=req.exclude_columns or [],
+                        mismatch_row_limit=_compare_mismatch_row_limit(req.advanced),
+                        adv=req.advanced,
+                    )
+                    pair_results.append(reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "multi_file_compare"))
+
+            result = aggregate_reconciliation_results(req.label_a or "multi_file_compare", mapping, pair_results)
+            tr = self._repo.add_test_result(run_id, result)
+            if result.mismatches:
+                self._repo.add_mismatch_details(tr.id, result.mismatches)
+            MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
+            passed = 1 if result.status == TestStatus.PASSED else 0
+            failed = 0 if passed else 1
+            self._repo.update_run_status(
+                run_id, "PASSED" if passed else "FAILED",
+                completed_at=datetime.now(timezone.utc),
+                total_tests=1, passed=passed, failed=failed,
+            )
+        except Exception as exc:
+            logger.exception("Multi-file comparison failed for run %s", run_id)
+            self._add_error_result(run_id, req.label_a or "multi_file_compare", exc)
+            self._repo.update_run_status(
+                run_id, "ERROR",
+                completed_at=datetime.now(timezone.utc),
+                total_tests=1, error=1,
+            )
 
     # ------------------------------------------------------------------
     # Column Stats comparison
