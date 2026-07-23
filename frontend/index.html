@@ -3936,6 +3936,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <button data-testid="compare-subtab-sql" @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
     <button data-testid="compare-subtab-colstats" @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
     <button data-testid="compare-subtab-mmdiff" @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
+    <button data-testid="compare-subtab-multifile" @click="compareSubTab = 'multi_file'" :class="compareSubTab === 'multi_file' ? 'sub-tab active' : 'sub-tab'">Multi-File</button>
   </div>
 
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
@@ -5200,6 +5201,140 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </template>
       </div>
     </template>
+  </div>
+
+  <div x-show="compareSubTab === 'multi_file'" class="space-y-4">
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Label A</label>
+        <input x-model="mfCompareLabelA" class="field-input" placeholder="Source A" />
+      </div>
+      <div>
+        <label class="field-label">Label B</label>
+        <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" />
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Strategy</label>
+        <select x-model="mfCompareStrategy" class="field-input field-select" data-testid="compare-mf-strategy-select">
+          <option value="explicit">Explicit (match on tokens)</option>
+          <option value="automated">Automated (guess by similarity)</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Unmatched Policy</label>
+        <select x-model="mfCompareUnmatchedPolicy" class="field-input field-select">
+          <option value="fail">Fail</option>
+          <option value="warn">Warn and proceed</option>
+          <option value="ignore">Ignore silently</option>
+        </select>
+      </div>
+    </div>
+    <div x-show="mfCompareStrategy === 'explicit'">
+      <label class="field-label">Match On (comma-separated tokens)</label>
+      <input x-model="mfCompareMatchOnRaw" class="field-input" placeholder="region, date"
+             data-testid="compare-mf-match-on-input" />
+    </div>
+    <div x-show="mfCompareStrategy === 'automated'" class="grid-2">
+      <div>
+        <label class="field-label">Similarity Threshold</label>
+        <input x-model="mfCompareSimilarityThreshold" type="number" min="0" max="1" step="0.05" class="field-input" placeholder="0.7" />
+      </div>
+      <div class="flex items-end gap-3">
+        <label class="flex items-center gap-1 text-xs">
+          <input type="checkbox" x-model="mfCompareSignalFilename" class="rounded" /> filename
+        </label>
+        <label class="flex items-center gap-1 text-xs">
+          <input type="checkbox" x-model="mfCompareSignalColumns" class="rounded" /> columns
+        </label>
+        <label class="flex items-center gap-1 text-xs">
+          <input type="checkbox" x-model="mfCompareSignalRowcount" class="rounded" /> row count
+        </label>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Key Columns (comma-separated)</label>
+        <input x-model="mfCompareKeyColumns" class="field-input" placeholder="id" data-testid="compare-mf-key-columns-input" />
+      </div>
+      <div>
+        <label class="field-label">Exclude Columns (comma-separated)</label>
+        <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" />
+      </div>
+    </div>
+    <div class="border-t border-slate-200 pt-3">
+      <p class="text-xs font-medium text-slate-500 mb-2">Source (local only)</p>
+      <div class="grid-2">
+        <input x-model="mfCompareSourceRoot" class="field-input" placeholder="/spool/exports"
+               data-testid="compare-mf-source-root-input" />
+        <input x-model="mfCompareSourcePattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
+               data-testid="compare-mf-source-pattern-input" />
+      </div>
+    </div>
+    <div class="border-t border-slate-200 pt-3">
+      <p class="text-xs font-medium text-slate-500 mb-2">Target (local only)</p>
+      <div class="grid-2">
+        <input x-model="mfCompareTargetRoot" class="field-input" placeholder="/exports/finance"
+               data-testid="compare-mf-target-root-input" />
+        <input x-model="mfCompareTargetPattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
+               data-testid="compare-mf-target-pattern-input" />
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="previewMfCompareMapping()"
+              :disabled="mfComparePreviewLoading"
+              class="btn-secondary btn-sm text-xs px-3 py-1 disabled:opacity-40"
+              data-testid="compare-mf-preview-btn">
+        <span x-show="!mfComparePreviewLoading">Preview Mapping</span>
+        <span x-show="mfComparePreviewLoading">Loading…</span>
+      </button>
+      <button @click="runMultiFileCompare()"
+              :disabled="mfCompareLoading"
+              class="btn-primary btn-sm text-xs px-3 py-1 disabled:opacity-40"
+              data-testid="compare-mf-run-btn">
+        <span x-show="!mfCompareLoading">Run Comparison</span>
+        <span x-show="mfCompareLoading">Running…</span>
+      </button>
+    </div>
+    <p x-show="mfComparePreviewError" x-text="mfComparePreviewError" class="text-xs text-red-600"></p>
+    <div x-show="mfComparePreviewResult" class="text-xs space-y-1" data-testid="compare-mf-preview-result">
+      <p x-text="`${mfComparePreviewResult?.pairs_total ?? 0} pair(s) matched`"></p>
+      <template x-for="(pair, idx) in (mfComparePreviewResult?.pairs || [])" :key="idx">
+        <div class="border border-slate-200 rounded p-2" data-testid="compare-mf-preview-pair">
+          <span x-text="Object.entries(pair.key || {}).map(([k,v]) => `${k}=${v}`).join(', ')"></span>
+          — <span x-text="(pair.source_files || []).join(', ')"></span>
+          → <span x-text="(pair.target_files || []).join(', ')"></span>
+        </div>
+      </template>
+    </div>
+
+    <div x-show="mfCompareError" class="text-sm text-red-600" x-text="mfCompareError"></div>
+    <div x-show="mfCompareResult" data-testid="compare-mf-results" class="border border-slate-200 rounded-lg p-4 space-y-3">
+      <div class="flex items-center gap-3">
+        <span class="font-medium">Results</span>
+        <span class="chip" :class="mfCompareResult?.status === 'PASSED' ? 'chip-success' : 'chip-danger'"
+              x-text="mfCompareResult?.status"></span>
+      </div>
+      <template x-if="mfCompareResult?.results?.[0]">
+        <div class="text-xs space-y-2">
+          <p x-text="`${mfCompareResult.results[0].mismatch_summary?.pairs_passed ?? 0} of ${mfCompareResult.results[0].mismatch_summary?.pairs_total ?? 0} pair(s) passed`"></p>
+          <template x-for="(pair, idx) in (mfCompareResult.results[0].file_pairs || [])" :key="idx">
+            <div class="border border-slate-200 rounded p-2" data-testid="compare-mf-result-pair" :data-status="pair.status">
+              <div><strong x-text="pair.status"></strong> <span x-text="Object.entries(pair.key || {}).map(([k,v]) => `${k}=${v}`).join(', ')"></span></div>
+              <div>Source: <span x-text="(pair.source_files || []).join(', ')"></span></div>
+              <div>Target: <span x-text="(pair.target_files || []).join(', ')"></span></div>
+              <div>Rows: <span x-text="pair.source_row_count ?? 0"></span> / <span x-text="pair.target_row_count ?? 0"></span>; mismatches: <span x-text="pair.value_mismatch_count ?? 0"></span></div>
+              <div x-show="pair.error" class="text-red-600" x-text="'Error: ' + pair.error"></div>
+            </div>
+          </template>
+          <div x-show="(mfCompareResult.results[0].unmatched_sources || []).length" class="text-amber-600"
+               x-text="'Unmatched sources: ' + mfCompareResult.results[0].unmatched_sources.map(g => (g.files||[]).join(', ')).join('; ')"></div>
+          <div x-show="(mfCompareResult.results[0].unmatched_targets || []).length" class="text-amber-600"
+               x-text="'Unmatched targets: ' + mfCompareResult.results[0].unmatched_targets.map(g => (g.files||[]).join(', ')).join('; ')"></div>
+        </div>
+      </template>
+    </div>
   </div>
 
 </div>
