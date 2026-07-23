@@ -157,18 +157,53 @@ clear error once `timeout_seconds` elapses — so the job doesn't race a
 partial spool and compare against files that haven't all landed yet.
 `poll_interval_seconds` defaults to 5, `timeout_seconds` to 300.
 
-## Current limitations (Phase 3)
+## Remote sources (S3 and SFTP)
 
-- `kind: "local"` only — S3 and SFTP sources are on the roadmap.
+`kind: "s3"` and `kind: "sftp"` are supported alongside `"local"` for both
+`source` and `target`. Add `credentials_ref` to look up credentials from
+`config_snapshot["file_source_credentials"][credentials_ref]` at run time
+(an admin-configured mapping, not stored in the job itself):
+
+```json
+{
+  "source": {
+    "kind": "s3",
+    "root": "s3://finance-spool/daily",
+    "pattern": "sales_{region}_{date:%Y%m%d}.csv",
+    "credentials_ref": "aws_finance"
+  }
+}
+```
+
+One client per `(kind, credentials_ref)` is reused for the whole job
+(discovery and every file read), not reopened per file.
+
+## Job editor UI
+
+The job editor (Launch tab → New/Edit Job → Input Source → "Multiple
+Files") supports creating and editing `multi_file` jobs directly — strategy,
+`match_on`, automated-mapping threshold/signals, unmatched policy, and
+source/target kind + root + pattern + credentials_ref. A **Preview Mapping**
+button runs real discovery + pairing against `local` sources (not S3/SFTP —
+see limitations below) and shows the resulting pairs and unmatched groups
+before you save the job, via `POST /api/jobs/preview-file-mapping`.
+
+## Current limitations (Phase 6)
+
+- The Preview Mapping button and its backing endpoint only support
+  `kind: "local"` source/target — previewing S3/SFTP would need credentials
+  resolved before a job exists to attach a `config_snapshot` to, which is an
+  open design question, not yet answered.
 - Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't
   a supported multi_file source kind yet (a separate, later-phase item), so
   it has no readiness support here either.
 - Automated matching pairs single files only; shard-collapsing (many files
   on one side sharing a key) is `strategy: "explicit"` only.
-- No dedicated web UI repeater yet; multi-file jobs are created via the API
-  (or a hand-written JSON/YAML payload) until the job editor's file-mapping
-  UI ships. The lineage manifest is a JSON file on disk, not yet surfaced in
-  the UI or run report.
+- The Compare tab's ad-hoc (no-saved-job) comparison flows don't support
+  multi_file — only saved jobs do, via the job editor described above. A
+  saved multi_file job's results are viewable in the Reports tab (the HTML
+  report's "File pairs" section) and via the run's API response
+  (`file_pairs`/`unmatched_sources`/`unmatched_targets` on each result).
 
 See `docs/superpowers/plans/2026-07-22-multi-file-reconciliation-architecture.md`
 §7 for the full phased roadmap.
