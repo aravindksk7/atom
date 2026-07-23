@@ -1703,13 +1703,25 @@ Discovery polls that side every `poll_interval_seconds` until at least `expected
 }
 ```
 
-**Job editor UI:** Launch tab → New/Edit Job → Input Source → **Multiple Files** supports creating and editing `multi_file` jobs directly — strategy, `match_on`, automated-mapping threshold/signals, unmatched policy, and source/target kind + root + pattern + `credentials_ref`. A **Preview Mapping** button runs real discovery + pairing against `local` sources (not S3/SFTP — see limitations below) and shows the resulting pairs and unmatched groups before you save the job, via `POST /api/jobs/preview-file-mapping`.
+**Job editor UI:** Launch tab → New/Edit Job → Input Source → **Multiple Files** supports creating and editing `multi_file` jobs directly — strategy, `match_on`, automated-mapping threshold/signals, unmatched policy, and source/target kind + root + pattern + `credentials_ref`.
+
+Step by step:
+
+1. Set **Input Source** to **Multiple Files**.
+2. Pick a **Strategy**: `explicit` (match on filename tokens) or `automated` (guess by structural similarity).
+3. For `explicit`, fill in **Match On** tokens (e.g. `region, date`). For `automated`, set the **Similarity Threshold** and toggle which signals to score (`filename`, `columns`, `row count`).
+4. Set **Unmatched Policy** (`fail` / `warn` / `ignore`).
+5. For **Source** and **Target**, pick a **Kind** (`local`, `s3`, or `sftp`), then fill in **Root** and **Pattern**. For `s3`/`sftp`, also set **`credentials_ref`** — the name the *saved job* will look up at real run time in `config_snapshot["file_source_credentials"][credentials_ref]` (see [Remote sources](#multi-file-reconciliation) above; this is admin-configured separately, not entered here).
+6. Click **Preview Mapping** to run real discovery + pairing and see the resulting pairs and unmatched groups before saving — this works for `local`, `s3`, and `sftp` sources. For `s3`/`sftp`, extra **preview-only credential fields** appear (AWS access key/secret/region/endpoint for s3; host/port/username/password for sftp) — fill those in to let the preview call actually connect. These preview credentials are sent inline for that one call only and are **never saved** with the job; they are separate from the `credentials_ref` typed in step 5, which is what the saved job uses for its own real execution later.
+7. Save the job once the preview looks right (or skip preview and save directly if you already trust the mapping).
 
 For running a one-off multi-file comparison without saving a job first, see [Multi-File Compare](#multi-file-compare) in the Compare tab.
 
 **Current limitations:**
 
-- Preview Mapping (job editor and Compare tab) only supports `kind: "local"` source/target — previewing/ad-hoc-comparing S3/SFTP would need credentials resolved before a job exists to attach a `config_snapshot` to.
+- The Compare tab's Multi-File sub-tab (ad-hoc, no saved job) is still `kind: "local"`-only for both preview and running — the job editor's Preview Mapping supports `s3`/`sftp` (via inline, non-persisted credentials, see step 6 above), but ad-hoc *running* a comparison against remote sources remains unsupported, and the Compare tab's form has no kind selector at all.
+- There's no admin UI yet for populating a saved job's real `config_snapshot["file_source_credentials"]` — attach it to a Saved Config's JSON directly via `/api/configs`.
+- No SSH-key auth for SFTP (preview or real execution) — username/password only.
 - Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't a supported multi_file source kind yet.
 - Automated matching pairs single files only; shard-collapsing (many files on one side sharing a key) is `strategy: "explicit"` only.
 
@@ -2085,7 +2097,7 @@ Run a one-off, multi-file reconciliation (see [Multi-File Reconciliation](#multi
 
 **How it works:**
 
-- **Preview Mapping** calls the same `POST /api/jobs/preview-file-mapping` endpoint the job editor's Preview Mapping button uses — same discovery/pairing logic, same `local`-only restriction, no job needs to exist first.
+- **Preview Mapping** calls the same `POST /api/jobs/preview-file-mapping` endpoint the job editor's Preview Mapping button uses — same discovery/pairing logic, no job needs to exist first. The endpoint itself also supports `s3`/`sftp` (job editor only, via inline credentials), but this Compare-tab form is `local`-only by design — it has no kind selector.
 - **Run Comparison** calls `POST /api/compare/multi-file`, which creates a real `TestRun` row and runs the comparison in a background task, exactly like the `bo`/`sql`/`recon-file` ad-hoc flows above (not a stateless preview — a persisted run you can revisit later in History). Every matched pair is reconciled **sequentially** (not through the parallel path saved `multi_file` jobs use), then rolled up into one aggregate `TestResult` with the same `mismatch_summary` shape a saved multi_file job produces.
 - The result view renders the per-pair breakdown (status, row counts, mismatch counts, errors) and any unmatched source/target groups directly in the Compare tab.
 

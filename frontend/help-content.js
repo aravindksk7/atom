@@ -110,9 +110,9 @@
         },
         {
           title: 'Compare many files per side (multi-file reconciliation)',
-          text: 'For a reconciliation job, set Input Source to "Multiple Files" instead of a single query or file. Pick a strategy (explicit match-on tokens like region/date, or automated similarity-based guessing), set the unmatched-file policy, and fill in source/target kind + root + pattern. Click Preview Mapping to see the resulting pairs and unmatched groups before saving.',
+          text: 'For a reconciliation job, set Input Source to "Multiple Files" instead of a single query or file. Pick a strategy (explicit match-on tokens like region/date, or automated similarity-based guessing), set the unmatched-file policy, and fill in source/target kind (local, s3, or sftp) + root + pattern + credentials_ref (s3/sftp only -- the name the saved job looks up at real run time). Click Preview Mapping to see the resulting pairs and unmatched groups before saving.',
           where: 'Job editor -> Input Source -> Multiple Files',
-          tip: 'See the Multi-File Reconciliation section below for pairing rules, automated matching, remote (S3/SFTP) sources, readiness polling, and the lineage manifest.',
+          tip: 'Preview Mapping works for local, s3, and sftp sources. For s3/sftp, extra one-time preview credential fields appear (access key/secret/region for s3; host/port/username/password for sftp) -- these are sent only for that preview call and are never saved with the job, unlike credentials_ref above which the saved job resolves for real. See the Multi-File Reconciliation section below for pairing rules, automated matching, readiness polling, and the lineage manifest.',
         },
         {
           title: 'Add dependencies',
