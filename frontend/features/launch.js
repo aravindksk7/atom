@@ -369,8 +369,12 @@
         if (m.mf_signal_filename) signals.push('filename_tokens');
         if (m.mf_signal_columns) signals.push('column_signature');
         if (m.mf_signal_rowcount) signals.push('row_count_ratio');
+        const parsedThreshold = Number(m.mf_similarity_threshold);
         config.automated_mapping = {
-          similarity_threshold: Number(m.mf_similarity_threshold) || 0.7,
+          // Number(...) || 0.7 would silently turn an explicit 0 into 0.7
+          // (JS falsy coercion) even though the backend allows 0.0 as a
+          // valid (if degenerate, "match everything") threshold.
+          similarity_threshold: Number.isFinite(parsedThreshold) && m.mf_similarity_threshold !== '' ? parsedThreshold : 0.7,
           signals,
         };
       }
