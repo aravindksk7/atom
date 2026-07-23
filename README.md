@@ -3033,13 +3033,17 @@ docker compose -f docker-compose.integration.yml down -v
 
 The `sapbo` service is a local HTTPS mock of the SAP BO RESTful Web Services endpoints used by this project. It is not a SAP BusinessObjects distribution. Use `https://127.0.0.1:18443` with username `administrator`, password `Password1`, and SSL verification disabled for the mock's self-signed certificate.
 
+`docker-compose.integration.yml` also has `minio` (S3-compatible object storage, for live multi-file S3 coverage — API at `http://127.0.0.1:19000`, credentials `minioadmin`/`minioadmin`) and `sftp` (`atmoz/sftp`, for live multi-file SFTP coverage — `127.0.0.1:12222`, user `e2euser`/password `e2epass`, chrooted to `/upload`) services, covered by the same `E2E_LIVE_BACKENDS=1` flag and `up -d --wait` / `down -v` lifecycle as `sqlserver`/`sapbo` above — see `tests/e2e/17b-multi-file-live-remote.spec.ts` below.
+
 ### End-to-end (Playwright) tests
 
 ```powershell
 npx playwright test                      # full UI suite against a throwaway DB, file/upload-mode compare coverage only
-$env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server paths (requires Docker + ODBC Driver 17 for SQL Server)
+$env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server / S3 (MinIO) / SFTP paths (requires Docker + ODBC Driver 17 for SQL Server; boto3/paramiko installed via requirements.txt)
 npx playwright show-report               # view the last HTML report
 ```
+
+`tests/e2e/17b-multi-file-live-remote.spec.ts` (gated behind `E2E_LIVE_BACKENDS=1`, same convention as `05-adapters.spec.ts`) creates a real `multi_file` job through the job editor UI with one side pointed at the live `minio`/`sftp` container, runs **Preview Mapping** against it for real (Phase 8's preview-only credential fields), saves the job, then triggers a real run — resolving `credentials_ref` against a `SavedConfig`'s `config_data.file_source_credentials` (the same mechanism a real production S3/SFTP job uses) — and asserts the run reaches the same deterministic `FAILED` (region=east passes, region=west doesn't) outcome every other multi-file test in this repo relies on.
 
 Run property-based tests (requires `hypothesis`):
 

@@ -230,7 +230,24 @@ columns, unmatched policy) and run it directly:
   Preview Mapping (see limitations below) — this is a synchronous 400 from
   the route, before any `TestRun` row is created.
 
-## Current limitations (Phase 8)
+## Live Docker test coverage (Phase 9)
+
+`tests/e2e/17b-multi-file-live-remote.spec.ts` (gated behind `E2E_LIVE_BACKENDS=1`)
+exercises real S3 and real SFTP end-to-end — not hand-rolled fake clients
+(the unit-test level) or `page.route()` network mocks (most other e2e
+coverage) — using `docker-compose.integration.yml`'s `minio` and `sftp`
+services. It creates a real `multi_file` job through the job editor UI with
+one side pointed at the live container, runs Preview Mapping for real, saves
+the job, and triggers a real run resolving `credentials_ref` against a
+`SavedConfig`'s `config_data.file_source_credentials` — the same mechanism a
+production S3/SFTP job would use. See `README.md`'s "End-to-end (Playwright)
+tests" section for how to run it. This also caught and fixed a real,
+previously-undetected gap: `boto3`/`paramiko` were used by this feature's
+code but not declared in `requirements.txt` (now fixed), because every prior
+test for these code paths monkeypatched the client-builder functions
+themselves and never exercised the real imports.
+
+## Current limitations (Phase 9)
 
 - The Compare tab's Multi-File sub-tab (ad-hoc, no saved job) is still
   `kind: "local"`-only for both preview AND running a comparison — the job
