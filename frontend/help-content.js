@@ -281,6 +281,83 @@
       ],
     },
     {
+      id: 'api-reference',
+      title: 'REST API Reference (All Functionality)',
+      intro: 'Every screen in this app is a thin client over the same REST API — anything you can click, you can automate. All endpoints are under /api, require Authorization: Bearer <token> (get one from the auth modal or POST /api/tokens), and return JSON. Use this section to drive functionality directly with curl/httpx/Postman, or to build CI/CD automation that does not go through the atom CLI.',
+      steps: [
+        {
+          title: 'Authenticate every request',
+          text: 'Create a token from the UI auth modal (first token is always admin) or, once you hold an admin token, POST /api/tokens {"name": "...", "is_admin": false, "expires_at": "..."} to mint scoped tokens for services/pipelines. Send it as Authorization: Bearer <token> on every call. Verify a token with GET /api/auth/verify, list/rotate/revoke with GET/PATCH/DELETE /api/tokens/{id} and POST /api/tokens/{id}/rotate (admin only), and check GET /api/auth/setup-status if you need to know whether the database has any admin token yet.',
+          where: 'API -> /api/auth/*, /api/tokens/*',
+          warn: 'Store tokens as CI secret variables, never in job definitions, pipeline YAML, or source control.',
+        },
+        {
+          title: 'Manage environment configs',
+          text: 'List with GET /api/configs, create with POST /api/configs, read/update/delete a single one with GET/PUT/DELETE /api/configs/{id}. POST /api/configs/validate dry-checks a payload before saving. POST /api/configs/import-yaml creates many named environments from one YAML block in a single call — handy for seeding dev/qa/prod configs from a pipeline. GET /api/configs/{id}/schema introspects live DB schema, and POST /api/configs/{id}/preview-query runs a query against that config and returns sample rows.',
+          where: 'API -> /api/configs',
+        },
+        {
+          title: 'Manage the job catalog',
+          text: 'List with GET /api/jobs, create with POST /api/jobs, update with PUT /api/jobs/{name}, delete with DELETE /api/jobs/{name}. POST /api/jobs/validate (or /api/jobs/{name}/validate for a saved one) dry-runs an EXPLAIN against both sides without fetching data. POST /api/jobs/preview-file-mapping runs real multi-file discovery/pairing for local sources and returns pairs/unmatched groups — the same call the job editor\'s Preview Mapping button makes. POST /api/jobs/import bulk-creates many jobs from one array, which is the fastest way to promote a reviewed set of job definitions between environments.',
+          where: 'API -> /api/jobs',
+          tip: 'Treat job JSON like application code: keep it in a repo, review changes in PRs, and use /api/jobs/import or PUT /api/jobs/{name} to apply it — never hand-edit jobs only in the UI for anything you want reproducible.',
+        },
+        {
+          title: 'Launch and poll a run directly',
+          text: 'POST /api/runs with {"source_env", "target_env", "job_names": [...], "config_id": <id>, "run_settings": {...}} starts a run and returns {run_id, status}. Poll GET /api/runs/{run_id}/status until status is a terminal value (PASSED/FAILED/CANCELLED/ERROR), or GET /api/runs/{run_id}/progress for percent_complete and the currently running job. GET /api/runs/{run_id}/stream gives the same live feed the Monitor tab uses (SSE). POST /api/runs/{run_id}/cancel requests cooperative cancellation.',
+          where: 'API -> POST /api/runs, GET /api/runs/{run_id}/status',
+          tip: 'This is the lowest-level way to launch — most pipelines should instead launch a saved Job Selection (next step) so the same reviewed job_sequence + run_settings run everywhere.',
+        },
+        {
+          title: 'Group jobs into a reusable Job Selection and launch it',
+          text: 'POST /api/selections {"name", "job_sequence": [...], "run_settings": {...}} saves a named, versioned bundle of jobs and settings. POST /api/selections/{id}/launch {"source_env", "target_env"} runs the saved selection as-is — this is what the atom CLI and the Schedules feature both call under the hood. GET /api/selections/{id} returns the current definition, GET /api/selections/{id}/versions/{n} returns a prior version, and GET /api/selections/{id}/runs lists every run launched from it, so you can audit exactly what a pipeline has executed over time.',
+          where: 'API -> /api/selections',
+        },
+        {
+          title: 'Automate recurring execution',
+          text: 'POST /api/schedules {"name", "cron_expr", "selection_id", "source_env", "target_env", "enabled"} creates a cron-driven run. PUT/DELETE /api/schedules/{id} update or remove it, and POST /api/schedules/{id}/run-now fires it immediately outside its cron time (useful for an on-demand CI trigger that should reuse a schedule\'s exact config). GET /api/schedules/stats reports scheduler health and recent outcomes for monitoring/alerting integrations.',
+          where: 'API -> /api/schedules',
+        },
+        {
+          title: 'Get a promotion verdict for pipeline gating',
+          text: 'POST /api/gates/{job_name}/evaluate returns PROMOTE only when that job\'s latest run PASSED and no open Data Contract breach exists for it, otherwise HOLD with reason(s). Call this as the final step of a deploy pipeline before promoting a change that the job protects.',
+          where: 'API -> POST /api/gates/{job_name}/evaluate',
+        },
+        {
+          title: 'Pull results, mismatches, and reports for a completed run',
+          text: 'GET /api/runs/{run_id} (full detail) or GET /api/runs/{run_id}/results/{result_id}/mismatches (row-level mismatches) for programmatic triage. GET /api/runs/{run_id}/junit returns JUnit XML for CI test reporters, GET /api/runs/{run_id}/report streams the generated HTML report, and GET /api/runs/{run_id}/markdown-summary is a plain-text summary good for PR comments or chat notifications. GET /api/runs/{run_id}/badge and /api/runs/latest/badge return SVG status badges you can embed in a README.',
+          where: 'API -> /api/runs/{run_id}/*',
+        },
+        {
+          title: 'Run ad-hoc comparisons without a saved job',
+          text: 'POST /api/compare/sql, /api/compare/dual-env, /api/compare/bo-report, /api/compare/recon-file, and /api/compare/multi-file each launch a real, revisitable run the same way their Compare-tab card does, without a catalog entry. GET /api/compare/pairs and /api/compare/pairs/{pair_id} inspect multi-file pair results. Use these from a script for a quick one-off check; use a saved job (above) for anything you intend to run repeatedly or gate on.',
+          where: 'API -> /api/compare/*',
+        },
+        {
+          title: 'Automate adapter discovery and catalog import',
+          text: 'POST /api/adapters/sap-bo/test and /api/adapters/rest-api/test check connectivity. GET /api/adapters/sap-bo/documents and /api/adapters/automic/search discover available reports/jobs. POST /api/adapters/jobs/from-bo-report, /api/adapters/jobs/from-automic, and /api/adapters/jobs/from-automic/bulk create catalog jobs directly from a discovered report or job, so an onboarding script can populate the catalog without hand-typing IDs.',
+          where: 'API -> /api/adapters/*',
+        },
+        {
+          title: 'Manage data contracts, DQ rules-as-code, and observability data',
+          text: 'Contracts: GET/POST /api/contracts and GET/PUT/DELETE /api/contracts/{name}, plus GET /api/contracts/{name}/status and /breaches for CI checks. Rules-as-code: POST /api/expectations/export and /api/expectations/sync round-trip a job\'s DQ rules through version-controlled YAML. Observability: GET /api/coverage, /api/coverage/flaky, /api/audit, /api/logs, GET /api/jobs/{job}/schema-history, and GET /api/jobs/{job}/profile all return the same data their History-tab sub-tabs render, for dashboards or scripted health checks.',
+          where: 'API -> /api/contracts, /api/expectations, /api/coverage, /api/audit, /api/logs, /api/jobs/{job}/schema-history, /api/jobs/{job}/profile',
+        },
+        {
+          title: 'Wire a CI/CD pipeline directly to the API (no CLI)',
+          text: 'Minimal bash pattern: '
+            + '1) TOKEN and API_URL from CI secrets. '
+            + '2) RUN=$(curl -s -X POST "$API_URL/api/selections/$SELECTION_ID/launch" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d \'{"source_env":"dev","target_env":"qa"}\') and extract run_id with jq. '
+            + '3) Poll: until [ "$(curl -s "$API_URL/api/runs/$RUN_ID/status" -H "Authorization: Bearer $TOKEN" | jq -r .status)" != "RUNNING" ]; do sleep 10; done. '
+            + '4) Fetch curl -s "$API_URL/api/runs/$RUN_ID/junit" -H "Authorization: Bearer $TOKEN" -o atom-junit.xml and publish it as your CI test-report artifact. '
+            + '5) Fail the stage unless status is PASSED (or call POST /api/gates/{job}/evaluate for contract-aware gating instead of a raw status check).',
+          where: 'Pipeline stage -> curl/httpx against /api/selections/*/launch, /api/runs/*/status, /api/runs/*/junit',
+          tip: 'Prefer the atom CLI (see CLI & CI/CD below) over hand-rolling this — it already implements auth retries, polling, timeouts, and CI-context tagging (commit SHA, pipeline URL, ref). Reach for raw API calls when you need a request the CLI does not expose yet, or you are integrating from a non-shell environment.',
+          warn: 'Never hard-code tokens, DB passwords, or BO/Automic credentials in pipeline YAML — read them from your CI\'s secret store at run time.',
+        },
+      ],
+    },
+    {
       id: 'cli-cicd',
       title: 'CLI & CI/CD',
       intro: 'Use the HTTP-only atom CLI to launch saved Job Selections from any CI system, wait for completion, gate the pipeline with exit codes, and collect JUnit/JSON/HTML artifacts.',
