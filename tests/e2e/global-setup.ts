@@ -17,7 +17,55 @@ export default async function globalSetup(_config: FullConfig) {
       timeout: 180_000,
     });
     seedSqlServer();
+    seedMinio();
   }
+}
+
+function seedMinio() {
+  // MinIO has no bind-mount equivalent of the SFTP service's static seed
+  // directory -- objects must be PUT over the S3 API, so a real seed step is
+  // unavoidable here. The retry loop below is this service's actual
+  // readiness gate (the minio service itself has no Docker healthcheck --
+  // see docker-compose.integration.yml's comment on why: the official image
+  // is distroless, no shell/curl to run a CMD healthcheck with).
+  const fixturesDir = path.join(REPO_ROOT, 'tests', 'e2e', 'fixtures', 'data', 'multi_source').replace(/\\/g, '/');
+  const script = `
+import time
+import boto3
+from pathlib import Path
+
+client = boto3.client(
+    "s3",
+    endpoint_url="http://127.0.0.1:19000",
+    aws_access_key_id="minioadmin",
+    aws_secret_access_key="minioadmin",
+    region_name="us-east-1",
+)
+
+for attempt in range(30):
+    try:
+        client.list_buckets()
+        break
+    except Exception:
+        time.sleep(1)
+else:
+    raise RuntimeError("MinIO did not become ready within 30s")
+
+bucket = "atom-e2e"
+existing = {b["Name"] for b in client.list_buckets().get("Buckets", [])}
+if bucket not in existing:
+    client.create_bucket(Bucket=bucket)
+
+fixtures_dir = Path(${JSON.stringify(fixturesDir)})
+for f in sorted(fixtures_dir.glob("*.csv")):
+    client.upload_file(str(f), bucket, f"source/{f.name}")
+print("seeded")
+`;
+  const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
+  if (result.status !== 0) {
+    throw new Error(`MinIO seed failed:\n${result.stdout}\n${result.stderr}`);
+  }
+  console.log('[global-setup] MinIO seeded:', result.stdout.trim());
 }
 
 function seedSqlServer() {
