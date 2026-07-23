@@ -109,6 +109,12 @@
           tip: 'For reconciliation the minimum is a query and one or more key_columns that uniquely identify a row.',
         },
         {
+          title: 'Compare many files per side (multi-file reconciliation)',
+          text: 'For a reconciliation job, set Input Source to "Multiple Files" instead of a single query or file. Pick a strategy (explicit match-on tokens like region/date, or automated similarity-based guessing), set the unmatched-file policy, and fill in source/target kind + root + pattern. Click Preview Mapping to see the resulting pairs and unmatched groups before saving.',
+          where: 'Job editor -> Input Source -> Multiple Files',
+          tip: 'See the Multi-File Reconciliation section below for pairing rules, automated matching, remote (S3/SFTP) sources, readiness polling, and the lineage manifest.',
+        },
+        {
           title: 'Add dependencies',
           text: 'Set Depends On to one or more job names that must pass first. The executor resolves order with a topological sort and auto-skips a job when an upstream fails.',
           where: 'Job editor -> Depends On',
@@ -198,6 +204,62 @@
           text: 'In CI/CD, prefer the HTTP-only atom CLI: store ATOM_API_URL and ATOM_API_TOKEN as secrets, run atom run against a saved Job Selection, publish --junit-out as a test artifact, and let exit codes gate promotion. Use python -m etl_framework.runner.cli --gate-run <run_id> only for legacy jobs that can access the same app database/storage.',
           where: 'Pipeline stage -> atom run / atom report',
           warn: 'Do not hard-code tokens, DB passwords, BO/Automic credentials, or pipeline-only secrets in job definitions or pipeline YAML.',
+        },
+      ],
+    },
+    {
+      id: 'multi-file',
+      title: 'Multi-File Reconciliation',
+      intro: 'A reconciliation job can compare many files per side instead of one query or file — set Input Source to "Multiple Files" (params.source_mode = "multi_file") and describe how source files pair up with target files.',
+      steps: [
+        {
+          title: 'Pair files by filename token (explicit strategy)',
+          text: 'Give the source and target a root folder and a pattern with {token} placeholders, e.g. sales_{region}_{date:%Y%m%d}.csv. List the tokens that identify a matching pair under Match On (e.g. region, date). Files sharing the same token values on both sides become one comparison pair; several files sharing a key on one side are concatenated before comparison.',
+          where: 'Job editor -> Input Source -> Multiple Files -> Strategy: Explicit',
+          tip: 'A token like {date:%Y%m%d} constrains the captured value to 8 digits. Give a token an explicit format spec if its value can contain "_" or "." (e.g. north_america), otherwise it stops capturing too early.',
+        },
+        {
+          title: 'Or let the framework guess pairs (automated strategy)',
+          text: 'Switch Strategy to Automated when files do not share a clean naming convention. Set a Similarity Threshold (0-1, default 0.7) and pick which signals to weigh: filename similarity, column-name overlap, and row-count ratio. Every source file is scored against every target file and pairs are assigned greedily from the highest score down, each file used once.',
+          where: 'Job editor / Compare -> Multi-File -> Strategy: Automated',
+          warn: 'Automated matching only pairs single files — it does not collapse several shards sharing a key on one side. Use Explicit + Match On for that case.',
+        },
+        {
+          title: 'Decide what happens to unmatched files',
+          text: 'Set Unmatched Policy to Fail (default — aborts the job), Warn and proceed (logs it, keeps going), or Ignore silently. Whatever you pick, every unmatched group is still recorded in the result\'s mismatch_summary so you can see what was skipped.',
+          where: 'Job editor -> Input Source -> Multiple Files -> Unmatched Policy',
+        },
+        {
+          title: 'Read from S3 or SFTP instead of local disk',
+          text: 'Set a side\'s kind to s3 or sftp and give it a credentials_ref naming an admin-configured credential set (resolved from config_snapshot at run time, never stored on the job itself). One client per (kind, credentials_ref) is reused for the whole job.',
+          where: 'Job editor -> Input Source -> Multiple Files -> source/target kind',
+          warn: 'Preview Mapping (job editor and Compare tab) only supports local sources — S3/SFTP jobs must be saved and run for real to see their pairing result.',
+        },
+        {
+          title: 'Wait for a live spool to finish writing',
+          text: 'For a local root a live process is still writing into, add a readiness block (expected_count, poll_interval_seconds, timeout_seconds) to that side\'s source spec. Discovery polls until enough files land, or fails the job with a clear error once the timeout elapses — so you never compare against a partial spool.',
+          where: 'Job editor -> Input Source -> Multiple Files -> readiness',
+          tip: 'Defaults: poll_interval_seconds = 5, timeout_seconds = 300. Readiness only applies to local sources.',
+        },
+        {
+          title: 'Preview the mapping before saving',
+          text: 'Click Preview Mapping to run real discovery and pairing against local sources and see the resulting pairs and unmatched groups before you commit to saving the job.',
+          where: 'Job editor -> Input Source -> Multiple Files -> Preview Mapping',
+        },
+        {
+          title: 'Understand parallel execution and failure isolation',
+          text: 'When the job runs, all pairs execute concurrently using the run\'s max_workers setting. If one pair\'s files fail to read or compare, that pair becomes an ERROR entry in the result instead of crashing the whole job — every other pair still completes and reports normally. The overall job status becomes ERROR if any pair errored.',
+          where: 'Monitor / History -> multi_file job result',
+        },
+        {
+          title: 'Check the lineage manifest for why files were (or weren\'t) paired',
+          text: 'Every multi_file run writes logs/file_mapping_manifest_{run_id}_{job_name}.json with each pair\'s mapping method and, for automated pairs, its similarity score breakdown, plus every unmatched group — use this as your audit trail when a pairing looks wrong.',
+          where: 'logs/file_mapping_manifest_*.json',
+        },
+        {
+          title: 'Run a one-off multi-file compare with no saved job',
+          text: 'You don\'t need to save a job to try this out. Open Compare -> Multi-File, configure the same strategy/match-on/unmatched-policy fields, Preview Mapping, then Run Comparison to get a real, revisitable run without creating a catalog entry first.',
+          where: 'Compare -> Multi-File',
         },
       ],
     },
@@ -395,6 +457,12 @@
           title: 'Compare reconciliation files',
           text: 'On the Recon File Compare card, compare two stored runs or an HTML report against a production HTML report.',
           where: 'Compare -> Recon File Compare',
+        },
+        {
+          title: 'Run an ad-hoc multi-file compare',
+          text: 'On the Multi-File card, configure a source/target file mapping (strategy, match-on tokens or automated-mapping signals, key/exclude columns, unmatched policy) and click Preview Mapping to see pairs before running. Click Run Comparison to reconcile every matched pair and store it as a real run — no saved job needed. Only local source/target paths are supported (not S3/SFTP).',
+          where: 'Compare -> Multi-File',
+          tip: 'Pairs run sequentially here (not in parallel like a saved multi_file job) — fine for a handful of ad-hoc files.',
         },
         {
           title: 'Run a SQL direct compare',
@@ -598,6 +666,14 @@
         {
           title: 'Use keyboard shortcuts',
           text: 'Ctrl/Cmd+S saves (job modal or compare template). Enter launches (jobs) or runs the active compare. Escape closes any open modal or the field help popup.',
+        },
+        {
+          title: 'Timestamps look wrong across the UI',
+          text: 'All timestamps (including the scheduler grid\'s next-run time, the Compare tab\'s run picker, and contract breach/version history) are now converted through the app timezone set in Config, not shown as raw UTC or the browser\'s local time. If a time still looks off, check the configured app timezone rather than your OS clock.',
+        },
+        {
+          title: 'Config secrets are encrypted at rest',
+          text: 'db_password, bo_password, automic_password, and REST API endpoint secrets (api_key, bearer_token, basic_password) are encrypted in the stored config JSON. This is transparent — no action needed, and the API/UI still mask these fields on read the same way as before.',
         },
       ],
     },

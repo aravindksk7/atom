@@ -40,6 +40,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - [Creating And Managing Jobs](#creating-and-managing-jobs)
   - [Job Design, Scheduling, And Automation](#job-design-scheduling-and-automation)
   - [Job Types Reference](#job-types-reference)
+  - [Multi-File Reconciliation](#multi-file-reconciliation)
   - [Run Settings Reference](#run-settings-reference)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
   - [Global Logs Tab](#global-logs-tab)
@@ -47,6 +48,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - [BO Report Compare](#bo-report-compare)
   - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
   - [Recon File Compare](#recon-file-compare)
+  - [Multi-File Compare](#multi-file-compare)
 - [Data Contracts](#data-contracts)
 - [Write-Audit-Publish Gate](#write-audit-publish-gate)
 - [Rules-As-Code & Schema Compatibility](#rules-as-code--schema-compatibility)
@@ -117,6 +119,10 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **CI gate exit codes** — `python -m etl_framework.runner.cli --gate-run <run_id>` queries the run's status without needing `--config`/`--source-env`/`--target-env`, returning exit code `0` (passed), `1` (failed), `2` (cancelled), `3` (error), or `4` (not found) so CI pipelines can gate on the result.
 - **Shadow run profile** — set `run_settings.run_profile` to `"shadow"` (default `"full"`) to reconcile a `shadow_sample_frac` sample (default `0.02`) of rows instead of the full dataset, wrapping the comparison backend in `SamplingBackend` for cheap, fast per-PR checks.
 - **Rules-as-code** — export job DQ rules to versioned YAML suites in `expectations/`, review them in PRs, and sync them back with `POST /api/expectations/sync`. Schema snapshot diffs now include a `compatibility` verdict (`full` / `non_breaking` / `risky` / `breaking`).
+- **Multi-file reconciliation** — a `reconciliation` job can compare many files per side (`params.source_mode: "multi_file"`) instead of one query/file: pair files by filename token (`match_on`) or let the framework guess pairs by structural similarity (`strategy: "automated"`), read from local disk, S3, or SFTP, poll for a live spool to finish writing, and run every matched pair in parallel with per-pair failure isolation. See [Multi-File Reconciliation](#multi-file-reconciliation).
+- **Ad-hoc multi-file compare** — the Compare tab's **Multi-File** sub-tab runs the same file-pairing/reconciliation logic as a one-off comparison, no saved job required — `POST /api/compare/multi-file` (local sources only). See [Multi-File Compare](#multi-file-compare).
+- **Encrypted config secrets at rest** — `db_password`, `bo_password`, `automic_password`, and REST API endpoint secrets (`api_key`, `bearer_token`, `basic_password`) are encrypted in the config's stored JSON using the same Fernet key as webhook signing (`WEBHOOK_ENCRYPTION_KEY`); encryption/decryption is transparent to every existing API/UI consumer.
+- **App-timezone-aware timestamps everywhere** — every timestamp shown in the UI (including the scheduler grid's next-run time, the Compare tab's run picker, and contract breach/version history) is converted through the DB-configured app timezone instead of showing raw UTC or the browser's local time.
 
 ## Architecture
 
@@ -1330,6 +1336,8 @@ Example file-backed job:
 }
 ```
 
+Set `params.source_mode` to `multi_file` (with a `params.file_mapping` block) instead of `files` when the comparison needs to pair up *several* files per side — e.g. one file per region, or sharded exports that must be concatenated before comparison. See [Multi-File Reconciliation](#multi-file-reconciliation) for the full reference.
+
 ---
 
 #### `bo_report`
@@ -1589,6 +1597,121 @@ Reconciles two REST API endpoints against each other, row-by-row, the same way `
 4. **`target_api_endpoint` is optional.** A job with only `source_api_endpoint` set saves fine and runs with status `SKIPPED` (no comparison performed) — useful for wiring up the source side first and adding the target once it's ready. Set `target_api_endpoint` later (edit the job) to turn on real reconciliation on the next run.
 
 See [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) for how to define the endpoints an `api_reconciliation` job references.
+
+---
+
+### Multi-File Reconciliation
+
+A `reconciliation` job normally compares one query or one file per side. Set `params.source_mode` to `"multi_file"` and add a `params.file_mapping` block to compare **many** files per side instead — e.g. one export file per region/date, or several sharded files that should be concatenated before comparison. The full quick reference lives in [docs/multi_file_reconciliation.md](docs/multi_file_reconciliation.md); this section covers the same ground.
+
+**Minimal example (explicit token matching):**
+
+```json
+{
+  "name": "regional_sales_recon",
+  "job_type": "reconciliation",
+  "key_columns": ["id"],
+  "params": {
+    "source_mode": "multi_file",
+    "file_mapping": {
+      "match_on": ["region", "date"],
+      "source": {
+        "kind": "local",
+        "root": "/spool/bo_exports",
+        "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"
+      },
+      "target": {
+        "kind": "local",
+        "root": "/exports/finance/sales",
+        "pattern": "financials_{region}_{date:%Y%m%d}.dat"
+      },
+      "unmatched_policy": "fail"
+    }
+  }
+}
+```
+
+**How pairing works:**
+
+- Every `{token}` in a `pattern` becomes a named capture group; `{date:%Y%m%d}` additionally constrains it to 8 digits. A no-spec token (`{region}`) captures any run of characters up to the next `_`, `.`, `/`, or `\` — give a token an explicit spec if its value can itself contain `_` or `.` (e.g. `north_america`).
+- Files are grouped per side by the tuple of `match_on` token values. A key present on both sides becomes one comparison pair; several files sharing a key on one side (e.g. sharded exports) are concatenated into a single dataset for that side. Multiple files on *both* sides sharing a key (many-to-many) works the same way.
+- `match_on` can be omitted for jobs that only need dynamic file discovery, not pairing — every matched file on a side collapses into one group.
+- `unmatched_policy` controls what happens when a key exists on only one side: `fail` (default) aborts the job, `warn` proceeds and logs it, `ignore` proceeds silently. Unmatched groups are always recorded in `mismatch_summary` regardless of policy.
+
+**Automated mapping (no `match_on` needed):**
+
+Set `"strategy": "automated"` to have the framework guess pairs by structural similarity instead of matching on filename tokens:
+
+```json
+{
+  "file_mapping": {
+    "strategy": "automated",
+    "source": { "kind": "local", "root": "/spool/exports", "pattern": "*.csv" },
+    "target": { "kind": "local", "root": "/baseline", "pattern": "*.dat" },
+    "automated_mapping": {
+      "similarity_threshold": 0.7,
+      "signals": ["filename_tokens", "column_signature", "row_count_ratio"]
+    }
+  }
+}
+```
+
+Every source file is scored against every target file using the selected signals (filename similarity, column-name overlap, row-count ratio) averaged into one score per candidate pair. Pairs are assigned greedily from the highest-scoring candidate down, each file used at most once; anything left over when no remaining candidate clears `similarity_threshold` is reported as unmatched. Automated matching always pairs single files — it does not guess which shards belong together across several files sharing a key on one side (use `strategy: "explicit"` with `match_on` for that).
+
+**Remote sources (S3 and SFTP):** `kind: "s3"` and `kind: "sftp"` are supported alongside `"local"` for `source` and `target`. Add `credentials_ref` to look up credentials from `config_snapshot["file_source_credentials"][credentials_ref]` at run time (an admin-configured mapping, not stored in the job itself):
+
+```json
+{ "source": { "kind": "s3", "root": "s3://finance-spool/daily", "pattern": "sales_{region}_{date:%Y%m%d}.csv", "credentials_ref": "aws_finance" } }
+```
+
+One client per `(kind, credentials_ref)` is reused for the whole job (discovery and every file read), not reopened per file.
+
+**Readiness (waiting for a live spool to finish writing):** for a local root a live process is still writing into, add a `readiness` block to either side's source spec:
+
+```json
+{
+  "source": {
+    "kind": "local",
+    "root": "/spool/live_exports",
+    "pattern": "sales_data_{region}_{date:%Y%m%d}.csv",
+    "readiness": { "expected_count": 6, "poll_interval_seconds": 5, "timeout_seconds": 300 }
+  }
+}
+```
+
+Discovery polls that side every `poll_interval_seconds` until at least `expected_count` files match the pattern, or fails the whole job with a clear error once `timeout_seconds` elapses (defaults: 5s / 300s) — so the job doesn't race a partial spool. Readiness only applies to `kind: "local"` sources.
+
+**Parallel execution and failure isolation:** pairs within one job run concurrently, using the run's `max_workers` setting (same setting used elsewhere for job-level parallelism, default 4). If one pair's files can't be read or compared, that pair becomes an `ERROR`-status entry in `mismatch_summary["file_pairs"]` (with the failure under `"error"`) instead of crashing the whole job — every other pair is still computed and reported. The aggregate job status becomes `ERROR` whenever at least one pair errored.
+
+**Lineage manifest:** every multi_file job execution (explicit or automated) writes `logs/file_mapping_manifest_{run_id}_{job_name}.json`, recording each pair's mapping method and (for automated pairs) its similarity score breakdown, plus every unmatched group — an audit trail for why files were or weren't paired.
+
+**Supported file formats:** both sides are read through the framework's tabular reader: `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.json`, `.xml`, and `.dat` (parsed as delimited text, sniffing comma/tab/semicolon/pipe).
+
+**Result shape:** the job produces one aggregate `TestResult`, same as any other reconciliation job — no schema change. Top-level counts are sums across all pairs, status is `PASSED` only if every pair passed, and each mismatch row is tagged with its originating pair under a reserved `__pair__` key. `mismatch_summary` carries the per-pair breakdown:
+
+```json
+{
+  "pairs_total": 2,
+  "pairs_passed": 1,
+  "pairs_failed": 1,
+  "file_pairs": [
+    {"key": {"region": "east", "date": "20260101"}, "status": "PASSED", "source_files": ["..."], "target_files": ["..."], "value_mismatch_count": 0},
+    {"key": {"region": "west", "date": "20260101"}, "status": "FAILED", "source_files": ["..."], "target_files": ["..."], "value_mismatch_count": 1}
+  ],
+  "unmatched_sources": [],
+  "unmatched_targets": []
+}
+```
+
+**Job editor UI:** Launch tab → New/Edit Job → Input Source → **Multiple Files** supports creating and editing `multi_file` jobs directly — strategy, `match_on`, automated-mapping threshold/signals, unmatched policy, and source/target kind + root + pattern + `credentials_ref`. A **Preview Mapping** button runs real discovery + pairing against `local` sources (not S3/SFTP — see limitations below) and shows the resulting pairs and unmatched groups before you save the job, via `POST /api/jobs/preview-file-mapping`.
+
+For running a one-off multi-file comparison without saving a job first, see [Multi-File Compare](#multi-file-compare) in the Compare tab.
+
+**Current limitations:**
+
+- Preview Mapping (job editor and Compare tab) only supports `kind: "local"` source/target — previewing/ad-hoc-comparing S3/SFTP would need credentials resolved before a job exists to attach a `config_snapshot` to.
+- Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't a supported multi_file source kind yet.
+- Automated matching pairs single files only; shard-collapsing (many files on one side sharing a key) is `strategy: "explicit"` only.
 
 ---
 
@@ -1941,6 +2064,48 @@ $body = @{
   label_b            = "Production Extract"
 } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/recon-file" -Body $body -ContentType "application/json" -Headers $h
+```
+
+---
+
+### Multi-File Compare
+
+Run a one-off, multi-file reconciliation (see [Multi-File Reconciliation](#multi-file-reconciliation)) without creating a saved job first. Use this to sanity-check a file-pairing strategy or run a single ad-hoc comparison across several files per side.
+
+**Steps (UI):**
+
+1. Open the **Compare** tab and select **Multi-File**.
+2. Optionally set **Label A** / **Label B** — display names shown in the result view.
+3. Pick a **Strategy**: `Explicit (match on tokens)` or `Automated (guess by similarity)`.
+4. For `explicit`, enter **Match On** tokens (comma-separated, e.g. `region, date`). For `automated`, set the **Similarity Threshold** (0–1) and toggle which signals to use (`filename`, `columns`, `row count`).
+5. Set **Unmatched Policy** (`Fail` / `Warn and proceed` / `Ignore silently`), and optional **Key Columns** / **Exclude Columns**.
+6. Fill in **Source** and **Target** root + pattern (`local` only — see limitations below).
+7. Click **Preview Mapping** to see the resulting pairs and unmatched groups before running anything.
+8. Click **Run Comparison** to execute it for real.
+
+**How it works:**
+
+- **Preview Mapping** calls the same `POST /api/jobs/preview-file-mapping` endpoint the job editor's Preview Mapping button uses — same discovery/pairing logic, same `local`-only restriction, no job needs to exist first.
+- **Run Comparison** calls `POST /api/compare/multi-file`, which creates a real `TestRun` row and runs the comparison in a background task, exactly like the `bo`/`sql`/`recon-file` ad-hoc flows above (not a stateless preview — a persisted run you can revisit later in History). Every matched pair is reconciled **sequentially** (not through the parallel path saved `multi_file` jobs use), then rolled up into one aggregate `TestResult` with the same `mismatch_summary` shape a saved multi_file job produces.
+- The result view renders the per-pair breakdown (status, row counts, mismatch counts, errors) and any unmatched source/target groups directly in the Compare tab.
+
+**Limitations:** only `kind: "local"` source/target is supported (a synchronous `400` from the route before any `TestRun` row is created); pairs run sequentially, not in parallel; and the Compare tab's Save/Load Template feature does not yet capture Multi-File sub-tab fields (a pre-existing gap shared with the `sql`/`recon`/`colstats`/`mmdiff` sub-tabs).
+
+**API:**
+
+```powershell
+$body = @{
+  label_a      = "Regional Exports"
+  label_b      = "Finance Baseline"
+  key_columns  = @("id")
+  file_mapping = @{
+    match_on = @("region", "date")
+    source   = @{ kind = "local"; root = "/spool/exports"; pattern = "sales_{region}_{date:%Y%m%d}.csv" }
+    target   = @{ kind = "local"; root = "/baseline/finance"; pattern = "financials_{region}_{date:%Y%m%d}.dat" }
+    unmatched_policy = "warn"
+  }
+} | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/multi-file" -Body $body -ContentType "application/json" -Headers $h
 ```
 
 ---
