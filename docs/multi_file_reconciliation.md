@@ -188,22 +188,52 @@ button runs real discovery + pairing against `local` sources (not S3/SFTP —
 see limitations below) and shows the resulting pairs and unmatched groups
 before you save the job, via `POST /api/jobs/preview-file-mapping`.
 
-## Current limitations (Phase 6)
+## Compare tab ad-hoc multi-file comparison (Phase 7)
 
-- The Preview Mapping button and its backing endpoint only support
-  `kind: "local"` source/target — previewing S3/SFTP would need credentials
-  resolved before a job exists to attach a `config_snapshot` to, which is an
-  open design question, not yet answered.
+You don't need a saved job to run a one-off multi-file reconciliation.
+The Compare tab's **Multi-File** sub-tab lets you configure a source/target
+file mapping (strategy, `match_on` or automated-mapping signals, key/exclude
+columns, unmatched policy) and run it directly:
+
+- **Preview Mapping** reuses the same `POST /api/jobs/preview-file-mapping`
+  endpoint the job editor uses — same discovery/pairing logic, same
+  `local`-only restriction, no job needs to exist first.
+- **Run Comparison** calls `POST /api/compare/multi-file`, which creates a
+  real `TestRun` row and runs the comparison in a background task, exactly
+  like the existing `bo`/`sql`/`recon-file` ad-hoc flows do (not a stateless
+  preview — a persisted run you can revisit later). Every matched pair is
+  reconciled **sequentially** (not through the parallel `TestRunner` saved
+  jobs use — see "Parallel execution" above), then rolled up into one
+  aggregate `TestResult`, the same `mismatch_summary` shape a saved
+  multi_file job produces.
+- The result view renders the per-pair breakdown (status, row counts,
+  mismatch counts, errors) and any unmatched source/target groups, right in
+  the Compare tab — no need to switch to the Reports tab.
+- Only `kind: "local"` source/target is supported, same restriction as
+  Preview Mapping (see limitations below) — this is a synchronous 400 from
+  the route, before any `TestRun` row is created.
+
+## Current limitations (Phase 7)
+
+- The Preview Mapping button and its backing endpoint (used by both the job
+  editor and the Compare tab) only support `kind: "local"` source/target —
+  previewing/ad-hoc-comparing S3/SFTP would need credentials resolved before
+  a job exists to attach a `config_snapshot` to, which is an open design
+  question, not yet answered.
 - Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't
   a supported multi_file source kind yet (a separate, later-phase item), so
-  it has no readiness support here either.
+  it has no readiness support here either. The Compare tab's ad-hoc flow
+  doesn't expose readiness configuration at all (a one-off comparison has no
+  reason to wait for files that don't exist yet).
 - Automated matching pairs single files only; shard-collapsing (many files
   on one side sharing a key) is `strategy: "explicit"` only.
-- The Compare tab's ad-hoc (no-saved-job) comparison flows don't support
-  multi_file — only saved jobs do, via the job editor described above. A
-  saved multi_file job's results are viewable in the Reports tab (the HTML
-  report's "File pairs" section) and via the run's API response
-  (`file_pairs`/`unmatched_sources`/`unmatched_targets` on each result).
+- The Compare tab's ad-hoc multi-file flow runs pairs **sequentially**, not
+  in parallel like a saved job's `RunExecutor` path — simplicity over
+  throughput, since ad-hoc comparisons are typically a handful of files.
+- The Compare tab's "Save/Load Template" feature only captures/restores BO
+  sub-tab fields regardless of which sub-tab is active — a pre-existing gap
+  affecting `sql`/`recon`/`colstats`/`mmdiff` sub-tabs too, not something
+  specific to (or fixed by) the new Multi-File sub-tab.
 
 See `docs/superpowers/plans/2026-07-22-multi-file-reconciliation-architecture.md`
 §7 for the full phased roadmap.
