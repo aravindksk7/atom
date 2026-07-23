@@ -830,6 +830,24 @@ class MultiFileCompareRequest(BaseModel):
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
 
+class PreviewFileMappingRequest(BaseModel):
+    """Body for POST /api/jobs/preview-file-mapping. ``file_mapping`` is the
+    same config shape used inside a saved multi_file job's
+    ``params.file_mapping`` (see FileMappingSpec.from_params). Local sources
+    need nothing else; s3/sftp sources need ``credentials_ref`` set on the
+    relevant side AND a matching entry in ``file_source_credentials`` --
+    there's no saved job yet at preview time to resolve a persisted
+    credentials_ref against (see
+    ``config_snapshot["file_source_credentials"]`` for the saved-job
+    equivalent, ``api/services/multi_file_remote.py``'s
+    ``resolve_file_source_credentials``), so the caller supplies raw
+    credentials inline instead, keyed the same way. These credentials are
+    used for this one preview call only -- never persisted anywhere.
+    """
+    file_mapping: dict[str, Any] = Field(...)
+    file_source_credentials: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class SQLCompareRequest(BaseModel):
     config_id_a: int
     config_id_b: int
