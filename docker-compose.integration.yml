@@ -37,3 +37,31 @@ services:
       timeout: 3s
       retries: 30
       start_period: 20s
+
+  minio:
+    image: minio/minio:latest
+    container_name: atom-minio-integration
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    ports:
+      - "19000:9000"
+    # No healthcheck: the official image is distroless (no shell/curl to run a
+    # CMD healthcheck with). global-setup.ts's seedMinio() (a later task) does
+    # its own retry-with-backoff wait for the API to accept requests before
+    # seeding.
+
+  sftp:
+    image: atmoz/sftp:latest
+    container_name: atom-sftp-integration
+    volumes:
+      - ./tests/e2e/fixtures/data/sftp_seed/target:/home/e2euser/upload
+    command: ["e2euser:e2epass:1001:::upload"]
+    ports:
+      - "12222:22"
+    # No healthcheck: this minimal Alpine image has no bash (so no /dev/tcp
+    # trick) and no netcat. The new live e2e spec's own paramiko connection
+    # attempt (a later task) retries, which is a sufficient readiness gate
+    # here -- unlike MinIO, there's no seed *script* to gate a real readiness
+    # check on for this service.
