@@ -178,15 +178,29 @@ partial spool and compare against files that haven't all landed yet.
 One client per `(kind, credentials_ref)` is reused for the whole job
 (discovery and every file read), not reopened per file.
 
+**Preview Mapping against s3/sftp (Phase 8):** the job editor's Preview
+Mapping button now works for `s3`/`sftp` sources too, not just `local`. Since
+there's no saved job yet at preview time to resolve a persisted
+`credentials_ref` against a real `config_snapshot`, the request instead
+carries an inline `file_source_credentials` field — the same shape as
+`config_snapshot["file_source_credentials"]`, but supplied directly in the
+`POST /api/jobs/preview-file-mapping` body for that one call only. These
+preview-time credentials are never saved anywhere: not to the job, not to
+any config. The job's own persisted `credentials_ref` (used for the job's
+real, saved-config-backed execution) is untouched by this.
+
 ## Job editor UI
 
 The job editor (Launch tab → New/Edit Job → Input Source → "Multiple
 Files") supports creating and editing `multi_file` jobs directly — strategy,
 `match_on`, automated-mapping threshold/signals, unmatched policy, and
 source/target kind + root + pattern + credentials_ref. A **Preview Mapping**
-button runs real discovery + pairing against `local` sources (not S3/SFTP —
-see limitations below) and shows the resulting pairs and unmatched groups
-before you save the job, via `POST /api/jobs/preview-file-mapping`.
+button runs real discovery + pairing before you save the job, via
+`POST /api/jobs/preview-file-mapping`. For `s3`/`sftp` sources, additional
+preview-only credential fields appear (AWS access key/secret/region/endpoint
+for s3; host/port/username/password for sftp) — these are sent inline for
+the preview call and are never persisted with the job (see "Preview Mapping
+against s3/sftp" above).
 
 ## Compare tab ad-hoc multi-file comparison (Phase 7)
 
@@ -196,8 +210,11 @@ file mapping (strategy, `match_on` or automated-mapping signals, key/exclude
 columns, unmatched policy) and run it directly:
 
 - **Preview Mapping** reuses the same `POST /api/jobs/preview-file-mapping`
-  endpoint the job editor uses — same discovery/pairing logic, same
-  `local`-only restriction, no job needs to exist first.
+  endpoint the job editor uses — same discovery/pairing logic, no job needs
+  to exist first. The Compare tab's own Multi-File sub-tab form is
+  `local`-only by deliberate choice (it has no kind selector at all), even
+  though the endpoint itself now also supports `s3`/`sftp` for the job
+  editor (Phase 8) — see limitations below.
 - **Run Comparison** calls `POST /api/compare/multi-file`, which creates a
   real `TestRun` row and runs the comparison in a background task, exactly
   like the existing `bo`/`sql`/`recon-file` ad-hoc flows do (not a stateless
@@ -213,13 +230,23 @@ columns, unmatched policy) and run it directly:
   Preview Mapping (see limitations below) — this is a synchronous 400 from
   the route, before any `TestRun` row is created.
 
-## Current limitations (Phase 7)
+## Current limitations (Phase 8)
 
-- The Preview Mapping button and its backing endpoint (used by both the job
-  editor and the Compare tab) only support `kind: "local"` source/target —
-  previewing/ad-hoc-comparing S3/SFTP would need credentials resolved before
-  a job exists to attach a `config_snapshot` to, which is an open design
-  question, not yet answered.
+- The Compare tab's Multi-File sub-tab (ad-hoc, no saved job) is still
+  `kind: "local"`-only for both preview AND running a comparison — the job
+  editor's Preview Mapping button supports `s3`/`sftp` now (Phase 8, via
+  inline `file_source_credentials`), but ad-hoc *running* a comparison
+  against remote sources is a separate, still-unsolved question (see Phase
+  7's scope decisions) and the Compare tab's form has no kind selector to
+  even attempt it.
+- There's no admin UI for populating a saved job's real
+  `config_snapshot["file_source_credentials"]` — an operator has to attach
+  it to a `SavedConfig`'s JSON directly via `/api/configs`. Preview's inline
+  credentials (Phase 8) sidestep this for previewing, but don't fix it for
+  actually running a saved s3/sftp job.
+- No SSH-key auth for SFTP, in preview or real execution — only
+  username/password (`build_sftp_client` only ever does
+  `transport.connect(username=..., password=...)`).
 - Readiness polling only applies to `kind: "local"` sources; `bo_live` isn't
   a supported multi_file source kind yet (a separate, later-phase item), so
   it has no readiness support here either. The Compare tab's ad-hoc flow
