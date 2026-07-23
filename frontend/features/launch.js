@@ -161,6 +161,18 @@
         previewLoading: false,
         previewResult: null,
         previewError: '',
+        mf_strategy: 'explicit',
+        mf_match_on_raw: '',
+        mf_unmatched_policy: 'fail',
+        mf_similarity_threshold: 0.7,
+        mf_signal_filename: true,
+        mf_signal_columns: true,
+        mf_signal_rowcount: true,
+        mf_source_kind: 'local', mf_source_root: '', mf_source_pattern: '', mf_source_credentials_ref: '',
+        mf_target_kind: 'local', mf_target_root: '', mf_target_pattern: '', mf_target_credentials_ref: '',
+        mfPreviewLoading: false,
+        mfPreviewResult: null,
+        mfPreviewError: '',
       };
       this.jobModalEditing = false;
       this.validateJobResult = null;
@@ -288,6 +300,24 @@
         previewLoading: false,
         previewResult: null,
         previewError: '',
+        mf_strategy: job.params?.file_mapping?.strategy || 'explicit',
+        mf_match_on_raw: (job.params?.file_mapping?.match_on || []).join(', '),
+        mf_unmatched_policy: job.params?.file_mapping?.unmatched_policy || 'fail',
+        mf_similarity_threshold: job.params?.file_mapping?.automated_mapping?.similarity_threshold ?? 0.7,
+        mf_signal_filename: (job.params?.file_mapping?.automated_mapping?.signals || ['filename_tokens', 'column_signature', 'row_count_ratio']).includes('filename_tokens'),
+        mf_signal_columns: (job.params?.file_mapping?.automated_mapping?.signals || ['filename_tokens', 'column_signature', 'row_count_ratio']).includes('column_signature'),
+        mf_signal_rowcount: (job.params?.file_mapping?.automated_mapping?.signals || ['filename_tokens', 'column_signature', 'row_count_ratio']).includes('row_count_ratio'),
+        mf_source_kind: job.params?.file_mapping?.source?.kind || 'local',
+        mf_source_root: job.params?.file_mapping?.source?.root || '',
+        mf_source_pattern: job.params?.file_mapping?.source?.pattern || '',
+        mf_source_credentials_ref: job.params?.file_mapping?.source?.credentials_ref || '',
+        mf_target_kind: job.params?.file_mapping?.target?.kind || 'local',
+        mf_target_root: job.params?.file_mapping?.target?.root || '',
+        mf_target_pattern: job.params?.file_mapping?.target?.pattern || '',
+        mf_target_credentials_ref: job.params?.file_mapping?.target?.credentials_ref || '',
+        mfPreviewLoading: false,
+        mfPreviewResult: null,
+        mfPreviewError: '',
       };
       this.jobModalEditing = true;
       this.validateJobResult = null;
@@ -322,6 +352,46 @@
         this.jobModal.previewError = e.message || 'Network error';
       } finally {
         this.jobModal.previewLoading = false;
+      }
+    },
+
+    _buildFileMappingConfig(m) {
+      const match_on = m.mf_match_on_raw.split(',').map(s => s.trim()).filter(Boolean);
+      const config = {
+        strategy: m.mf_strategy,
+        unmatched_policy: m.mf_unmatched_policy,
+        source: { kind: m.mf_source_kind, root: m.mf_source_root, pattern: m.mf_source_pattern },
+        target: { kind: m.mf_target_kind, root: m.mf_target_root, pattern: m.mf_target_pattern },
+      };
+      if (m.mf_strategy === 'explicit') config.match_on = match_on;
+      if (m.mf_strategy === 'automated') {
+        const signals = [];
+        if (m.mf_signal_filename) signals.push('filename_tokens');
+        if (m.mf_signal_columns) signals.push('column_signature');
+        if (m.mf_signal_rowcount) signals.push('row_count_ratio');
+        config.automated_mapping = {
+          similarity_threshold: Number(m.mf_similarity_threshold) || 0.7,
+          signals,
+        };
+      }
+      if (m.mf_source_kind !== 'local' && m.mf_source_credentials_ref) config.source.credentials_ref = m.mf_source_credentials_ref;
+      if (m.mf_target_kind !== 'local' && m.mf_target_credentials_ref) config.target.credentials_ref = m.mf_target_credentials_ref;
+      return config;
+    },
+
+    async previewFileMapping() {
+      const m = this.jobModal;
+      m.mfPreviewLoading = true;
+      m.mfPreviewResult = null;
+      m.mfPreviewError = '';
+      try {
+        m.mfPreviewResult = await api('POST', '/api/jobs/preview-file-mapping', {
+          file_mapping: this._buildFileMappingConfig(m),
+        });
+      } catch (e) {
+        m.mfPreviewError = e.message || 'Preview failed';
+      } finally {
+        m.mfPreviewLoading = false;
       }
     },
 
@@ -380,6 +450,11 @@
           if (m.target_file_path) params.target_file_path = m.target_file_path;
           if (m.target_file_label) params.target_file_label = m.target_file_label;
         }
+      }
+      const usesMultiFile = m.job_type === 'reconciliation' && m.source_mode === 'multi_file';
+      if (usesMultiFile) {
+        params.source_mode = 'multi_file';
+        params.file_mapping = this._buildFileMappingConfig(m);
       }
       const usesBoLive = m.job_type === 'reconciliation' && m.source_mode === 'bo_live';
       if (usesBoLive) {
@@ -448,7 +523,7 @@
       return {
         name: m.name, description: m.description,
         job_type: m.job_type,
-        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource && !usesBoLive ? m.query : '',
+        query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource && !usesBoLive && !usesMultiFile ? m.query : '',
         key_columns: keyColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
