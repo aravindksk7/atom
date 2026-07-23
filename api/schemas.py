@@ -814,6 +814,22 @@ class ReconFileCompareRequest(BaseModel):
         return self
 
 
+class MultiFileCompareRequest(BaseModel):
+    """Ad-hoc (no saved job) multi-file reconciliation, run once from the
+    Compare tab. ``file_mapping`` is the same config shape a saved
+    ``multi_file`` job's ``params.file_mapping`` uses (see
+    ``etl_framework.reconciliation.file_mapping.FileMappingSpec.from_params``),
+    but this phase only supports ``kind: "local"`` on both sides -- see the
+    Phase 7 plan doc for why.
+    """
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+    key_columns: list[str] | None = None
+    exclude_columns: list[str] = Field(default_factory=list)
+    file_mapping: dict[str, Any] = Field(...)
+    advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
+
+
 class SQLCompareRequest(BaseModel):
     config_id_a: int
     config_id_b: int
