@@ -128,3 +128,58 @@ class DSRestClient:
                 response_body="trigger response missing 'id'",
             )
         return run_id
+
+    def _normalise_job_status(self, raw_status: str) -> TestStatus:
+        mapped = self.STATUS_MAP.get(raw_status.upper())
+        if mapped is None:
+            logger.warning(
+                "Unrecognized SAP DS job status %r, treating as still running", raw_status,
+            )
+            return TestStatus.RUNNING
+        return mapped
+
+    def get_job_status(self, run_id: str, repository: str | None = None) -> TestStatus:
+        """GET {repository}/status/{run_id} -- fetch the current status of a
+        triggered batch job run and map it to TestStatus. Non-terminal DS
+        states (Running/Pending/Queued) and any unrecognized status string
+        both map to TestStatus.RUNNING, so callers keep polling instead of
+        mis-reading an unknown state as done."""
+        if not self._token:
+            self.login()
+        repo = repository or self._default_repository
+        if not repo:
+            raise ValueError(
+                "ds_job requires a repository: set 'ds_repository' in the environment config "
+                "or 'repository' in the job's params",
+            )
+        url = f"{self._base_url}{self.STATUS_ENDPOINT.format(repository=repo, run_id=run_id)}"
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise DSAPIError(
+                job_name=run_id, http_status=response.status_code, response_body=response.text,
+            )
+        return self._normalise_job_status(str(response.json().get("status", "")))
+
+    def wait_for_completion(
+        self, run_id: str, repository: str | None = None,
+        timeout_s: float = 600, poll_interval_s: float = 5,
+    ) -> TestStatus:
+        """Poll get_job_status until it returns a terminal status
+        (PASSED/FAILED) or timeout_s elapses. Raises TimeoutError if the run
+        never reaches a terminal status in time -- callers treat that as a
+        run error, not a job failure."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            status = self.get_job_status(run_id, repository=repository)
+            if status != TestStatus.RUNNING:
+                return status
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"SAP DS job run '{run_id}' did not complete within {timeout_s}s",
+                )
+            time.sleep(poll_interval_s)

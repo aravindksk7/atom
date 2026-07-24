@@ -199,3 +199,99 @@ def test_trigger_job_raises_value_error_when_no_repository_available(env_config)
     client._token = "tok"
     with pytest.raises(ValueError, match="repository"):
         client.trigger_job("DS_NIGHTLY_LOAD")
+
+
+# ---------------------------------------------------------------------------
+# get_job_status / wait_for_completion
+# ---------------------------------------------------------------------------
+
+from etl_framework.runner.state import TestStatus
+
+
+@pytest.mark.parametrize("raw_status,expected", [
+    ("Completed", TestStatus.PASSED),
+    ("completed", TestStatus.PASSED),
+    ("Success", TestStatus.PASSED),
+    ("Error", TestStatus.FAILED),
+    ("Failed", TestStatus.FAILED),
+    ("Cancelled", TestStatus.FAILED),
+    ("Running", TestStatus.RUNNING),
+    ("Pending", TestStatus.RUNNING),
+    ("Queued", TestStatus.RUNNING),
+])
+def test_get_job_status_maps_known_statuses(authenticated_client, raw_status, expected):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "run-42", "status": raw_status}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
+        status = authenticated_client.get_job_status("run-42")
+
+    assert status == expected
+    called_url = mock_get.call_args[0][0]
+    assert called_url == "http://ds.example.com/BatchJob/DS_REPO/status/run-42"
+
+
+def test_get_job_status_uses_repository_override(authenticated_client):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "run-42", "status": "Completed"}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
+        authenticated_client.get_job_status("run-42", repository="OTHER_REPO")
+
+    called_url = mock_get.call_args[0][0]
+    assert called_url == "http://ds.example.com/BatchJob/OTHER_REPO/status/run-42"
+
+
+def test_get_job_status_treats_unrecognized_status_as_running(authenticated_client, caplog):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "run-42", "status": "SomeNewDSStatus"}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with caplog.at_level("WARNING"):
+            status = authenticated_client.get_job_status("run-42")
+
+    assert status == TestStatus.RUNNING
+    assert "SomeNewDSStatus" in caplog.text
+
+
+def test_get_job_status_raises_ds_api_error_on_http_failure(authenticated_client):
+    from etl_framework.exceptions import DSAPIError
+
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "server error"
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with pytest.raises(DSAPIError):
+            authenticated_client.get_job_status("run-42")
+
+
+def test_wait_for_completion_returns_immediately_on_success(authenticated_client):
+    with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
+        status = authenticated_client.wait_for_completion("run-42", timeout_s=5, poll_interval_s=0.01)
+
+    assert status == TestStatus.PASSED
+    mock_get.assert_called_once_with("run-42", repository=None)
+
+
+def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
+    with patch.object(
+        authenticated_client, "get_job_status",
+        side_effect=[TestStatus.RUNNING, TestStatus.RUNNING, TestStatus.PASSED],
+    ) as mock_get:
+        status = authenticated_client.wait_for_completion("run-42", timeout_s=5, poll_interval_s=0.01)
+
+    assert status == TestStatus.PASSED
+    assert mock_get.call_count == 3
+
+
+def test_wait_for_completion_raises_timeout_error_when_never_terminal(authenticated_client):
+    with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.RUNNING):
+        with pytest.raises(TimeoutError, match="run-42"):
+            authenticated_client.wait_for_completion("run-42", timeout_s=0.05, poll_interval_s=0.01)
+
+
+def test_wait_for_completion_passes_repository_override_through(authenticated_client):
+    with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
+        authenticated_client.wait_for_completion("run-42", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01)
+
+    mock_get.assert_called_once_with("run-42", repository="OTHER_REPO")
