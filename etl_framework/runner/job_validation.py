@@ -80,6 +80,9 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
     elif job_type == "automic_job":
         if not params.get("job_name") and not params.get("run_id"):
             issues.append(ValidationIssue("params", "automic_job jobs require job_name or run_id"))
+    elif job_type == "bo_job":
+        if not params.get("object_id"):
+            issues.append(ValidationIssue("params.object_id", "bo_job jobs require object_id"))
     elif job_type == "dbt_artifact":
         if not params.get("run_results_path"):
             issues.append(ValidationIssue("params.run_results_path", "dbt_artifact jobs require run_results_path"))
