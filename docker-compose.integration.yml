@@ -20,6 +20,27 @@ services:
       timeout: 3s
       retries: 20
 
+  sapds:
+    build:
+      context: ./docker/sapds-mock
+    image: atom-sapds-mock:latest
+    container_name: atom-sapds-integration
+    environment:
+      SAPDS_MOCK_USER: "administrator"
+      SAPDS_MOCK_PASSWORD: "Password1"
+    ports:
+      - "18444:8444"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import ssl, urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen('https://127.0.0.1:8444/health', timeout=2, context=ctx).read()
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: atom-sqlserver-integration
