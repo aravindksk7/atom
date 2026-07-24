@@ -213,14 +213,25 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
             batch_ids = [str(item.get("id", "")) for item in batch]
             if batch and batch_ids == previous_batch_ids:
+                logger.debug(
+                    "SAP BO pagination stopped at page %d for %s: server re-served an identical "
+                    "%d-item batch (likely ignores the `page` param on this deployment)",
+                    page, url, len(batch),
+                )
                 break
             raw.extend(batch)
             if not batch or (previous_batch_size is not None and len(batch) < previous_batch_size):
+                logger.debug(
+                    "SAP BO pagination stopped at page %d for %s: batch size %d (previous %s), total so far %d",
+                    page, url, len(batch), previous_batch_size, len(raw),
+                )
                 break
             previous_batch_size = len(batch)
             previous_batch_ids = batch_ids
             page += 1
-        return _dedupe_by_id(raw)
+        result = _dedupe_by_id(raw)
+        logger.debug("SAP BO pagination for %s: %d page(s), %d item(s) after dedupe", url, page, len(result))
+        return result
 
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""

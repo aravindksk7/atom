@@ -16,6 +16,7 @@
     boDocs: [],
     expandedBODocs: [],
     boReports: {},         // doc.id → list of reports
+    boFilterQuery: '',
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showBOJobModal: false,
@@ -73,6 +74,7 @@
       this.boDocs = [];
       this.expandedBODocs = [];
       this.boReports = {};
+      this.boFilterQuery = '';
       try {
         this.boDocs = await api('GET', `/api/adapters/sap-bo/documents?config_id=${this.boConfigId}`);
         this.toast('success', `${this.boDocs.length} documents loaded`);
@@ -81,6 +83,43 @@
       } finally {
         this.boLoading = false;
       }
+    },
+
+    // Search-within for the (potentially large) document/report tree: pure
+    // client-side filter over what's already loaded. Reports are fetched
+    // lazily per-document (toggleBODoc), so a query only matches reports for
+    // documents that have already been expanded at least once.
+    _boTextMatches(text, query) {
+      return String(text || '').toLowerCase().includes(query);
+    },
+
+    boDocMatchesQuery(doc) {
+      const q = this.boFilterQuery.trim().toLowerCase();
+      if (!q) return true;
+      return this._boTextMatches(doc.name, q) || this._boTextMatches(doc.folder, q) || this._boTextMatches(doc.id, q);
+    },
+
+    boDocHasMatchingReport(doc) {
+      const q = this.boFilterQuery.trim().toLowerCase();
+      if (!q) return false;
+      const reports = this.boReports[doc.id];
+      if (!reports) return false;
+      return reports.some(r => this._boTextMatches(r.name, q) || this._boTextMatches(r.id, q));
+    },
+
+    get filteredBODocs() {
+      if (!this.boFilterQuery.trim()) return this.boDocs;
+      return this.boDocs.filter(doc => this.boDocMatchesQuery(doc) || this.boDocHasMatchingReport(doc));
+    },
+
+    boFilteredReports(doc) {
+      const all = this.boReports[doc.id] || [];
+      const q = this.boFilterQuery.trim().toLowerCase();
+      // Once the user matched this document by its own name/folder/id, show
+      // all its reports so they can keep browsing. Otherwise they must have
+      // matched via a report name, so narrow down to just those reports.
+      if (!q || this.boDocMatchesQuery(doc)) return all;
+      return all.filter(r => this._boTextMatches(r.name, q) || this._boTextMatches(r.id, q));
     },
 
     async toggleBODoc(doc) {
