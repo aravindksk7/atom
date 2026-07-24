@@ -21,7 +21,6 @@ TOKEN = "mock-sapds-token"
 # Each entry's outcome is reached after JOB_POLLS_TO_TERMINAL polls of
 # GET /BatchJob/{repository}/status/{run_id} -- first poll(s) return "Running"
 # to exercise the client's poll loop, not just its terminal-status parsing.
-REPOSITORY = "DS_REPO"
 SCHEDULABLE_JOBS = {
     "DS_NIGHTLY_LOAD": "Completed",
     "DS_BAD_LOAD": "Error",
