@@ -37,6 +37,11 @@ def client(monkeypatch):
             "job_type": "bo_report", "query": "", "key_columns": ["region"],
             "exclude_columns": [], "params": {"report_id": "R1"}, "enabled": True,
         })
+        JobRepository(db).create({
+            "name": "bo_job_trigger", "description": "", "tags": [],
+            "job_type": "bo_job", "query": "", "key_columns": [],
+            "exclude_columns": [], "params": {"object_id": "3001"}, "enabled": True,
+        })
 
     return TestClient(app, headers={"Authorization": f"Bearer {raw}"})
 
@@ -103,6 +108,12 @@ def test_launch_creates_run_with_selection_fields(client):
 
 def test_launch_single_env_job_type_succeeds_without_target(client):
     created = _create_selection(client, name="bo-only", jobs=["bo_job"])
+    resp = client.post(f"/api/selections/{created['id']}/launch", json={"source_env": "dev"})
+    assert resp.status_code == 202
+
+
+def test_launch_bo_job_job_type_succeeds_without_target(client):
+    created = _create_selection(client, name="bo-job-only", jobs=["bo_job_trigger"])
     resp = client.post(f"/api/selections/{created['id']}/launch", json={"source_env": "dev"})
     assert resp.status_code == 202
 
