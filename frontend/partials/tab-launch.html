@@ -339,6 +339,7 @@
             <option value="reconciliation">reconciliation</option>
             <option value="bo_report">bo_report</option>
             <option value="bo_job">bo_job</option>
+            <option value="ds_job">ds_job</option>
             <option value="automic_job">automic_job</option>
             <option value="dbt_artifact">dbt_artifact</option>
             <option value="freshness">freshness</option>
@@ -659,6 +660,28 @@
           <div>
             <label class="field-label">Timeout (seconds)</label>
             <input x-model="jobModal.bo_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" />
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'ds_job'" class="grid-2">
+          <div>
+            <label class="field-label">DS Job Name</label>
+            <input x-model="jobModal.ds_job_name" class="field-input" placeholder="DS_NIGHTLY_LOAD" data-testid="job-modal-ds-job-name-input" />
+          </div>
+          <div>
+            <label class="field-label">Repository (optional, falls back to config)</label>
+            <input x-model="jobModal.ds_job_repository" class="field-input" placeholder="DS_REPO" />
+          </div>
+          <div>
+            <label class="field-label">Job Params (JSON, optional)</label>
+            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' />
+          </div>
+          <div>
+            <label class="field-label">Poll Interval (seconds)</label>
+            <input x-model="jobModal.ds_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" />
+          </div>
+          <div>
+            <label class="field-label">Timeout (seconds)</label>
+            <input x-model="jobModal.ds_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'api_reconciliation'" class="grid-2">
