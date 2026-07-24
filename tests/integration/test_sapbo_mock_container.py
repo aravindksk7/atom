@@ -135,5 +135,6 @@ def test_schedule_unknown_object_raises_bo_api_error():
     client = BORestClient(_env())
     client.authenticate()
 
-    with pytest.raises(BOAPIError):
+    with pytest.raises(BOAPIError) as exc_info:
         client.schedule_object("does-not-exist")
+    assert exc_info.value.http_status == 404
