@@ -158,11 +158,15 @@ feature, tracked but not designed here.
 - Unit — `RunExecutor._build_case_bo_job`: mock `BORestClient`, assert
   Success/Failed/timeout each map to the correct `TestStatus`, and that
   `use_live_connections=False` raises before touching the client.
-- E2E: extend the existing SAP BO Playwright coverage (referenced in recent
-  commits `e8eb057`/`75ccf0d`) with a case that creates a `bo_job`, chains a
-  dependent `bo_report` job after it via `depends_on`, and launches the
-  sequence — asserting the `bo_job` step completes before the `bo_report`
-  step starts.
+- E2E: extend the existing SAP BO Playwright coverage
+  (`tests/e2e/08a-compare-bo-report.spec.ts`) with a case that creates a
+  `bo_job`, chains a dependent `bo_report` job after it via `depends_on`,
+  and launches the sequence -- asserting the `bo_job` step completes before
+  the `bo_report` step starts. (Superseded in practice by the integration
+  test added against the SAP BO mock server, which exercises the same
+  schedule-and-wait behavior without needing browser automation; add the
+  Playwright case only if UI-level coverage of the job modal's `bo_job`
+  fields is also desired.)
 
 ## Out of scope
 
