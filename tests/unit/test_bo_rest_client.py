@@ -601,3 +601,79 @@ def test_schedule_object_raises_bo_api_error_when_response_has_no_id(authenticat
     with patch.object(authenticated_client._session, "post", return_value=mock_response):
         with pytest.raises(BOAPIError):
             authenticated_client.schedule_object("3001")
+
+
+# ---------------------------------------------------------------------------
+# get_schedule_status / wait_for_completion
+# ---------------------------------------------------------------------------
+
+from etl_framework.runner.state import TestStatus
+
+
+@pytest.mark.parametrize("raw_status,expected", [
+    ("Success", TestStatus.PASSED),
+    ("success", TestStatus.PASSED),
+    ("Failed", TestStatus.FAILED),
+    ("Running", TestStatus.RUNNING),
+    ("Pending", TestStatus.RUNNING),
+    ("Recurring", TestStatus.RUNNING),
+    ("Paused", TestStatus.RUNNING),
+])
+def test_get_schedule_status_maps_known_statuses(authenticated_client, raw_status, expected):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "inst-42", "status": raw_status}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
+        status = authenticated_client.get_schedule_status("inst-42")
+
+    assert status == expected
+    called_url = mock_get.call_args[0][0]
+    assert called_url == "http://bo.example.com/biprws/infostore/inst-42"
+
+
+def test_get_schedule_status_treats_unrecognized_status_as_running(authenticated_client, caplog):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "inst-42", "status": "SomeNewBOEStatus"}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with caplog.at_level("WARNING"):
+            status = authenticated_client.get_schedule_status("inst-42")
+
+    assert status == TestStatus.RUNNING
+    assert "SomeNewBOEStatus" in caplog.text
+
+
+def test_get_schedule_status_raises_bo_api_error_on_http_failure(authenticated_client):
+    from etl_framework.exceptions import BOAPIError
+
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "server error"
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with pytest.raises(BOAPIError):
+            authenticated_client.get_schedule_status("inst-42")
+
+
+def test_wait_for_completion_returns_immediately_on_success(authenticated_client):
+    with patch.object(authenticated_client, "get_schedule_status", return_value=TestStatus.PASSED) as mock_get:
+        status = authenticated_client.wait_for_completion("inst-42", timeout_s=5, poll_interval_s=0.01)
+
+    assert status == TestStatus.PASSED
+    mock_get.assert_called_once_with("inst-42")
+
+
+def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
+    with patch.object(
+        authenticated_client, "get_schedule_status",
+        side_effect=[TestStatus.RUNNING, TestStatus.RUNNING, TestStatus.PASSED],
+    ) as mock_get:
+        status = authenticated_client.wait_for_completion("inst-42", timeout_s=5, poll_interval_s=0.01)
+
+    assert status == TestStatus.PASSED
+    assert mock_get.call_count == 3
+
+
+def test_wait_for_completion_raises_timeout_error_when_never_terminal(authenticated_client):
+    with patch.object(authenticated_client, "get_schedule_status", return_value=TestStatus.RUNNING):
+        with pytest.raises(TimeoutError, match="inst-42"):
+            authenticated_client.wait_for_completion("inst-42", timeout_s=0.05, poll_interval_s=0.01)

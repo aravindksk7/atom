@@ -1,9 +1,11 @@
 import logging
+import time
 import requests
 import pandas as pd
 from urllib.parse import urlparse
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
+from etl_framework.runner.state import TestStatus
 
 logger = logging.getLogger("etl_framework.sap_bo.client")
 
@@ -60,6 +62,15 @@ class BORestClient:
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
     SCHEDULE_ENDPOINT = "/biprws/infostore/{object_id}/schedules"
     INSTANCE_ENDPOINT = "/biprws/infostore/{instance_id}"
+
+    STATUS_MAP: dict[str, TestStatus] = {
+        "SUCCESS": TestStatus.PASSED,
+        "FAILED": TestStatus.FAILED,
+        "RUNNING": TestStatus.RUNNING,
+        "PENDING": TestStatus.RUNNING,
+        "RECURRING": TestStatus.RUNNING,
+        "PAUSED": TestStatus.RUNNING,
+    }
 
     def __init__(self, env_config: EnvironmentConfig):
         self._base_url = env_config.bo_url.rstrip("/")
@@ -323,6 +334,54 @@ class BORestClient:
                 response_body="schedule response missing 'id'",
             )
         return instance_id
+
+    def _normalise_schedule_status(self, raw_status: str) -> TestStatus:
+        mapped = self.STATUS_MAP.get(raw_status.upper())
+        if mapped is None:
+            logger.warning(
+                "Unrecognized SAP BO schedule status %r, treating as still running", raw_status,
+            )
+            return TestStatus.RUNNING
+        return mapped
+
+    def get_schedule_status(self, instance_id: str) -> TestStatus:
+        """GET /biprws/infostore/{instance_id} — fetch the current status of
+        a scheduled instance and map it to TestStatus. Non-terminal BOE
+        states (Running/Pending/Recurring/Paused) and any unrecognized
+        status string both map to TestStatus.RUNNING, so callers keep
+        polling instead of mis-reading an unknown state as done."""
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}{self.INSTANCE_ENDPOINT.format(instance_id=instance_id)}"
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=instance_id, http_status=response.status_code, response_body=response.text,
+            )
+        return self._normalise_schedule_status(str(response.json().get("status", "")))
+
+    def wait_for_completion(
+        self, instance_id: str, timeout_s: float = 600, poll_interval_s: float = 5,
+    ) -> TestStatus:
+        """Poll get_schedule_status until it returns a terminal status
+        (PASSED/FAILED) or timeout_s elapses. Raises TimeoutError if the
+        instance never reaches a terminal status in time -- callers treat
+        that as a run error, not a job failure."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            status = self.get_schedule_status(instance_id)
+            if status != TestStatus.RUNNING:
+                return status
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"SAP BO schedule instance '{instance_id}' did not complete within {timeout_s}s",
+                )
+            time.sleep(poll_interval_s)
 
     def logout(self) -> None:
         if self._token and self._owns_token:
