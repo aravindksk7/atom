@@ -275,6 +275,10 @@
         bo_report_id: job.params?.report_id || '',
         bo_page_id: job.params?.bo_report_id || '',
         bo_format: job.params?.format || 'xlsx',
+        // Fields with colliding param keys (e.g. 'job_name' shared by automic_job/ds_job,
+        // 'poll_interval_s'/'timeout_s' shared by bo_job/ds_job) must guard on job.job_type
+        // to prevent one type's saved value silently leaking into another type's hidden field
+        // if the user switches Job Type dropdown mid-edit without saving.
         automic_job_name: job.job_type === 'automic_job' ? (job.params?.job_name || '') : '',
         automic_run_id: job.params?.run_id || '',
         bo_job_object_id: job.params?.object_id || '',
