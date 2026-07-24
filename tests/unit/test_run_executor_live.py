@@ -364,3 +364,200 @@ def test_automic_job_uses_run_id_lookup_when_run_id_param():
         executor.execute()
 
     MockAC.return_value.get_status_by_run_id.assert_called_once_with("RUN_42")
+
+
+# ---------------------------------------------------------------------------
+# bo_job dispatch
+# ---------------------------------------------------------------------------
+
+def test_bo_job_returns_passed_on_success():
+    db = _session()
+    RunRepository(db).create_run("r-boj", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj", ["refresh_sales"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.schedule_object.return_value = "inst-1"
+        inst.wait_for_completion.return_value = TestStatus.PASSED
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-boj")
+    assert run.results[0].status == TestStatus.PASSED.value
+    inst.schedule_object.assert_called_once_with("3001", None)
+    inst.wait_for_completion.assert_called_once_with("inst-1", timeout_s=600, poll_interval_s=5)
+    inst.logout.assert_called_once()
+
+
+def test_bo_job_returns_failed_when_boe_reports_failure():
+    db = _session()
+    RunRepository(db).create_run("r-boj-fail", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj-fail", ["refresh_sales"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.schedule_object.return_value = "inst-2"
+        inst.wait_for_completion.return_value = TestStatus.FAILED
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-boj-fail")
+    assert run.results[0].status == TestStatus.FAILED.value
+
+
+def test_bo_job_returns_error_on_timeout():
+    db = _session()
+    RunRepository(db).create_run("r-boj-timeout", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001", "timeout_s": 1, "poll_interval_s": 1},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj-timeout", ["refresh_sales"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.schedule_object.return_value = "inst-3"
+        inst.wait_for_completion.side_effect = TimeoutError("did not complete")
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-boj-timeout")
+    assert run.results[0].status == TestStatus.ERROR.value
+    inst.wait_for_completion.assert_called_once_with("inst-3", timeout_s=1, poll_interval_s=1)
+
+
+def test_bo_job_passes_schedule_params_through():
+    db = _session()
+    RunRepository(db).create_run("r-boj-params", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001", "schedule_params": {"prompt_values": {"region": "EMEA"}}},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj-params", ["refresh_sales"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.schedule_object.return_value = "inst-4"
+        inst.wait_for_completion.return_value = TestStatus.PASSED
+        executor.execute()
+
+    inst.schedule_object.assert_called_once_with("3001", {"prompt_values": {"region": "EMEA"}})
+
+
+def test_bo_job_fails_fast_when_live_connections_disabled():
+    db = _session()
+    RunRepository(db).create_run("r-boj-nolive", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj-nolive", ["refresh_sales"],
+        RunSettings(use_live_connections=False, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        executor.execute()
+        MockBO.assert_not_called()
+
+    run = RunRepository(db).get_run("r-boj-nolive")
+    assert run.results[0].status == TestStatus.ERROR.value
+
+
+def test_bo_job_chains_after_dependency_via_depends_on():
+    db = _session()
+    RunRepository(db).create_run("r-boj-chain", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "refresh_sales", "description": "", "tags": [],
+        "job_type": "bo_job", "query": "", "key_columns": [], "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"object_id": "3001"}, "enabled": True,
+    })
+    JobRepository(db).create({
+        "name": "validate_sales", "description": "", "tags": [],
+        "job_type": "bo_report", "query": "", "key_columns": [], "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "report_id": "1001", "bo_report_id": "rpt-sales", "format": "csv",
+            "depends_on": ["refresh_sales"],
+        },
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-boj-chain", ["refresh_sales", "validate_sales"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.schedule_object.return_value = "inst-5"
+        inst.wait_for_completion.return_value = TestStatus.PASSED
+        inst.download_report.return_value = b"id,sku\n1,A100\n"
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-boj-chain")
+    assert [r.query_name for r in run.results] == ["refresh_sales", "validate_sales"]
+    assert all(r.status == TestStatus.PASSED.value for r in run.results)
