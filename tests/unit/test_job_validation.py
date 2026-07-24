@@ -121,3 +121,21 @@ def test_bo_job_requires_object_id():
         "params": {},
     })
     assert any(issue.field == "params.object_id" for issue in issues)
+
+
+def test_ds_job_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "nightly_load",
+        "job_type": "ds_job",
+        "params": {"job_name": "DS_NIGHTLY_LOAD"},
+    })
+    assert issues == []
+
+
+def test_ds_job_requires_job_name():
+    issues = validate_job_definition({
+        "name": "nightly_load",
+        "job_type": "ds_job",
+        "params": {},
+    })
+    assert any(issue.field == "params.job_name" for issue in issues)
