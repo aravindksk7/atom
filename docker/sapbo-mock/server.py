@@ -73,6 +73,20 @@ DATASETS = {
     ],
 }
 
+# Objects that can be scheduled via POST /biprws/infostore/{id}/schedules.
+# Each entry's outcome is reached after SCHEDULE_POLLS_TO_TERMINAL polls of
+# GET /biprws/infostore/{instance_id} -- first poll(s) return "Running" to
+# exercise the client's poll loop, not just its terminal-status parsing.
+SCHEDULABLE_OBJECTS = {
+    "3001": "Success",
+    "3002": "Failed",
+}
+SCHEDULE_POLLS_TO_TERMINAL = 2
+
+# instance_id -> {"object_id": str, "polls_seen": int}
+_SCHEDULE_INSTANCES: dict[str, dict] = {}
+_next_instance_id = [0]
+
 
 def _collapse_single(items: list) -> list | dict:
     """Mirror SAP BO biprws: a one-element collection serializes as a bare
@@ -260,6 +274,21 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
                 self._send_bytes(HTTPStatus.OK, _csv_bytes(rows), "text/csv")
             return
 
+        instance_match = re.fullmatch(r"/biprws/infostore/([^/]+)", path)
+        if instance_match:
+            instance_id = instance_match.group(1)
+            instance = _SCHEDULE_INSTANCES.get(instance_id)
+            if instance is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"instance {instance_id} not found"})
+                return
+            instance["polls_seen"] += 1
+            if instance["polls_seen"] < SCHEDULE_POLLS_TO_TERMINAL:
+                self._send_json(HTTPStatus.OK, {"id": instance_id, "status": "Running"})
+            else:
+                terminal_status = SCHEDULABLE_OBJECTS[instance["object_id"]]
+                self._send_json(HTTPStatus.OK, {"id": instance_id, "status": terminal_status})
+            return
+
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:
@@ -290,6 +319,20 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
 
         if path == "/biprws/logoff":
             self._send_json(HTTPStatus.OK, {"success": True})
+            return
+
+        schedule_match = re.fullmatch(r"/biprws/infostore/([^/]+)/schedules", path)
+        if schedule_match:
+            if not self._require_token():
+                return
+            object_id = schedule_match.group(1)
+            if object_id not in SCHEDULABLE_OBJECTS:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"object {object_id} not found"})
+                return
+            _next_instance_id[0] += 1
+            instance_id = f"inst-{_next_instance_id[0]}"
+            _SCHEDULE_INSTANCES[instance_id] = {"object_id": object_id, "polls_seen": 0}
+            self._send_json(HTTPStatus.OK, {"id": instance_id})
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})

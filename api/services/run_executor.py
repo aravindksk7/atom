@@ -462,6 +462,12 @@ class RunExecutor:
             return self._build_case_bo_report(job)
         if job.job_type == "automic_job" and self._settings.use_live_connections:
             return self._build_case_automic(job)
+        if job.job_type == "bo_job":
+            if not self._settings.use_live_connections:
+                def run_job() -> ReconciliationResult:
+                    raise ValueError("bo_job jobs require live connections to be enabled")
+                return run_job
+            return self._build_case_bo_job(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
         if job.job_type == "reconciliation" and job.params.get("source_mode") == "multi_file":
@@ -1249,6 +1255,43 @@ class RunExecutor:
                 executed_at=datetime.now(timezone.utc),
                 duration_seconds=time.monotonic() - t0,
                 sample_rows=sample_rows,
+            )
+        return run_job
+
+    def _build_case_bo_job(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            t0 = time.monotonic()
+            creds = self._config_snapshot.get("bo_credentials", {})
+            env = EnvironmentConfig(name=creds.get("name", "bo"), **{
+                k: v for k, v in creds.items() if k != "name"
+            })
+            client = BORestClient(env)
+            client.authenticate()
+            try:
+                instance_id = client.schedule_object(
+                    job.params["object_id"], job.params.get("schedule_params"),
+                )
+                status = client.wait_for_completion(
+                    instance_id,
+                    timeout_s=job.params.get("timeout_s", 600),
+                    poll_interval_s=job.params.get("poll_interval_s", 5),
+                )
+            finally:
+                client.logout()
+            return ReconciliationResult(
+                query_name=job.name,
+                source_env=self._source_env,
+                target_env=self._target_env,
+                source_row_count=0,
+                target_row_count=0,
+                matched_count=0,
+                missing_in_target_count=0,
+                missing_in_source_count=0,
+                value_mismatch_count=0,
+                mismatches=[],
+                status=status,
+                executed_at=datetime.now(timezone.utc),
+                duration_seconds=time.monotonic() - t0,
             )
         return run_job
 

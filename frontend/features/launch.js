@@ -141,6 +141,8 @@
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
         automic_job_name: '', automic_run_id: '',
+        bo_job_object_id: '', bo_job_schedule_params_raw: '',
+        bo_job_poll_interval_s: '', bo_job_timeout_s: '',
         api_source_endpoint: '', api_target_endpoint: '',
         dbt_manifest_path: '', dbt_run_results_path: '',
         pass_min_row_count: '',
@@ -273,6 +275,10 @@
         bo_format: job.params?.format || 'xlsx',
         automic_job_name: job.params?.job_name || '',
         automic_run_id: job.params?.run_id || '',
+        bo_job_object_id: job.params?.object_id || '',
+        bo_job_schedule_params_raw: job.params?.schedule_params ? JSON.stringify(job.params.schedule_params) : '',
+        bo_job_poll_interval_s: job.params?.poll_interval_s ?? '',
+        bo_job_timeout_s: job.params?.timeout_s ?? '',
         api_source_endpoint: job.params?.source_api_endpoint || '',
         api_target_endpoint: job.params?.target_api_endpoint || '',
         dbt_manifest_path: job.params?.manifest_path || '',
@@ -519,6 +525,18 @@
         if (m.automic_job_name) params.job_name = m.automic_job_name;
         if (m.automic_run_id) params.run_id = m.automic_run_id;
       }
+      if (m.job_type === 'bo_job') {
+        params.object_id = m.bo_job_object_id;
+        if (m.bo_job_schedule_params_raw) {
+          try {
+            params.schedule_params = JSON.parse(m.bo_job_schedule_params_raw);
+          } catch (e) {
+            throw new Error('Schedule Params must be valid JSON');
+          }
+        }
+        if (m.bo_job_poll_interval_s !== '') params.poll_interval_s = Number(m.bo_job_poll_interval_s) || 5;
+        if (m.bo_job_timeout_s !== '') params.timeout_s = Number(m.bo_job_timeout_s) || 600;
+      }
       if (m.job_type === 'api_reconciliation') {
         params.source_api_endpoint = m.api_source_endpoint;
         if (m.api_target_endpoint) params.target_api_endpoint = m.api_target_endpoint;
@@ -649,6 +667,7 @@
         return Boolean(m.query?.trim() && hasKeys);
       }
       if (m.job_type === 'bo_report') return Boolean(m.bo_report_id && m.bo_page_id);
+      if (m.job_type === 'bo_job') return Boolean(m.bo_job_object_id);
       if (m.job_type === 'automic_job') return Boolean(m.automic_job_name || m.automic_run_id);
       if (m.job_type === 'api_reconciliation') {
         return Boolean(

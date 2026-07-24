@@ -8,6 +8,7 @@ import requests
 import urllib3
 
 from etl_framework.config.models import EnvironmentConfig
+from etl_framework.runner.state import TestStatus
 from etl_framework.sap_bo.client import BORestClient
 
 
@@ -105,3 +106,35 @@ def test_sapbo_mock_rejects_mismatched_auth_type():
     with pytest.raises(BOAPIError) as exc_info:
         client.authenticate()
     assert exc_info.value.http_status == 401
+
+
+def test_schedule_and_wait_for_completion_success():
+    _wait_for_sapbo()
+    client = BORestClient(_env())
+    client.authenticate()
+
+    instance_id = client.schedule_object("3001")
+    status = client.wait_for_completion(instance_id, timeout_s=5, poll_interval_s=0.1)
+    assert status == TestStatus.PASSED
+
+
+def test_schedule_and_wait_for_completion_failure():
+    _wait_for_sapbo()
+    client = BORestClient(_env())
+    client.authenticate()
+
+    instance_id = client.schedule_object("3002")
+    status = client.wait_for_completion(instance_id, timeout_s=5, poll_interval_s=0.1)
+    assert status == TestStatus.FAILED
+
+
+def test_schedule_unknown_object_raises_bo_api_error():
+    from etl_framework.exceptions import BOAPIError
+
+    _wait_for_sapbo()
+    client = BORestClient(_env())
+    client.authenticate()
+
+    with pytest.raises(BOAPIError) as exc_info:
+        client.schedule_object("does-not-exist")
+    assert exc_info.value.http_status == 404

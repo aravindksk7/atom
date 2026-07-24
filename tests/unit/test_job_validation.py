@@ -103,3 +103,21 @@ def test_bo_live_reconciliation_requires_target_file():
 def test_api_reconciliation_requires_endpoint_and_keys():
     issues = validate_job_definition({"name": "api", "job_type": "api_reconciliation", "params": {}, "key_columns": []})
     assert {issue.field for issue in issues} == {"params.source_api_endpoint", "key_columns"}
+
+
+def test_bo_job_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "refresh_sales",
+        "job_type": "bo_job",
+        "params": {"object_id": "3001"},
+    })
+    assert issues == []
+
+
+def test_bo_job_requires_object_id():
+    issues = validate_job_definition({
+        "name": "refresh_sales",
+        "job_type": "bo_job",
+        "params": {},
+    })
+    assert any(issue.field == "params.object_id" for issue in issues)

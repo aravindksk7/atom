@@ -447,6 +447,7 @@ class JobDefinition(BaseModel):
     job_type: Literal[
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
+        "bo_job",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -472,6 +473,9 @@ class JobDefinition(BaseModel):
         elif self.job_type == "automic_job":
             if not self.params.get("job_name") and not self.params.get("run_id"):
                 raise ValueError("automic_job jobs require 'job_name' or 'run_id' in params")
+        elif self.job_type == "bo_job":
+            if not self.params.get("object_id"):
+                raise ValueError("bo_job jobs require 'object_id' in params")
         elif self.job_type == "dbt_artifact":
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
