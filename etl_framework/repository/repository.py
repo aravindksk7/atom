@@ -388,6 +388,7 @@ class RunRepository:
             sample_rows=result.sample_rows,
             segment_summary=result.segment_summary,
             mismatch_summary=result.mismatch_summary,
+            schema_diff=result.schema_diff,
         )
         self._db.add(tr)
         self._db.commit()

@@ -153,6 +153,27 @@ def test_run_add_test_result(db):
     assert len(test_result.mismatches) == 1
 
 
+def test_run_add_test_result_persists_schema_diff(db):
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    repo = RunRepository(db)
+    repo.create_run(run_id="run-005", source_env="nonprod", target_env="prod")
+    recon_result = ReconciliationResult(
+        query_name="security_market_data", source_env="nonprod", target_env="prod",
+        source_row_count=10, target_row_count=10,
+        matched_count=10, missing_in_target_count=0, missing_in_source_count=0,
+        value_mismatch_count=0,
+        mismatches=[],
+        status=TestStatus.FAILED,
+        executed_at=datetime.now(timezone.utc),
+        duration_seconds=0.5,
+        schema_diff={"missing_in_target": ["Total Short Sold"], "extra_in_target": []},
+    )
+    test_result = repo.add_test_result("run-005", recon_result)
+    db.refresh(test_result)
+    assert test_result.schema_diff == {"missing_in_target": ["Total Short Sold"], "extra_in_target": []}
+
+
 def test_list_mismatches_prioritizes_missing_rows(db):
     from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
     from etl_framework.runner.state import TestStatus

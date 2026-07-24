@@ -152,6 +152,7 @@ class TestResult(Base):
     sample_rows = Column(JSON, nullable=True)
     segment_summary = Column(JSON, nullable=True)
     mismatch_summary = Column(JSON, nullable=True)
+    schema_diff = Column(JSON, nullable=True)
 
     # Override fields for marking test outcomes as passing even when they fail
     override_status = Column(String(20), nullable=True)
@@ -175,10 +176,6 @@ class TestResult(Base):
     def effective_status(self) -> str:
         """Return the override status if set, otherwise the computed status."""
         return self.override_status if self.override_status is not None else self.status
-
-    @property
-    def schema_diff(self):
-        return None
 
 
 class MismatchDetail(Base):

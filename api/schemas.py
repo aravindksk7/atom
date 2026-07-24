@@ -321,6 +321,7 @@ class TestResultOut(BaseModel):
     sample_rows: list[dict] | None = None
     segment_summary: dict | None = None
     mismatch_summary: dict[str, Any] | None = None
+    schema_diff: dict[str, Any] | None = None
     file_pairs: list[FilePairSummaryOut] = Field(default_factory=list)
     unmatched_sources: list[UnmatchedFileGroupOut] = Field(default_factory=list)
     unmatched_targets: list[UnmatchedFileGroupOut] = Field(default_factory=list)

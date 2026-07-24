@@ -70,6 +70,7 @@ def _ensure_compare_columns(bind) -> None:
         ensure_column(conn, "test_results", "sample_rows", "ALTER TABLE test_results ADD COLUMN sample_rows JSON")
         ensure_column(conn, "test_results", "segment_summary", "ALTER TABLE test_results ADD COLUMN segment_summary JSON")
         ensure_column(conn, "test_results", "mismatch_summary", "ALTER TABLE test_results ADD COLUMN mismatch_summary JSON")
+        ensure_column(conn, "test_results", "schema_diff", "ALTER TABLE test_results ADD COLUMN schema_diff JSON")
         ensure_column(conn, "mismatch_details", "delta", "ALTER TABLE mismatch_details ADD COLUMN delta FLOAT")
         ensure_column(conn, "mismatch_details", "relative_delta", "ALTER TABLE mismatch_details ADD COLUMN relative_delta FLOAT")
 
