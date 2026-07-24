@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 # ApiEndpointEntry. Shared by api/routes/configs.py (response masking) and
 # ConfigRepository (encryption at rest) so both stay in sync with one list.
 SECRET_FIELDS = frozenset({
-    "db_password", "automic_password", "bo_password",
+    "db_password", "automic_password", "bo_password", "ds_password",
     "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
 })
 
@@ -40,6 +40,13 @@ class EnvironmentConfig(BaseModel):
     bo_timeout: int = 60
     bo_proxy_url: str = ""
     bo_verify_ssl: bool = True
+    ds_url: str = ""
+    ds_user: str = ""
+    ds_password: str = ""
+    ds_repository: str = ""
+    ds_timeout: int = 60
+    ds_proxy_url: str = ""
+    ds_verify_ssl: bool = True
 
     @field_validator("db_port")
     @classmethod
@@ -72,6 +79,13 @@ class EnvironmentConfig(BaseModel):
     @field_validator("bo_timeout")
     @classmethod
     def validate_bo_timeout(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"must be > 0, got {v}")
+        return v
+
+    @field_validator("ds_timeout")
+    @classmethod
+    def validate_ds_timeout(cls, v: int) -> int:
         if v <= 0:
             raise ValueError(f"must be > 0, got {v}")
         return v
