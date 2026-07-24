@@ -58,6 +58,14 @@ class BOAPIError(ETLFrameworkError):
         super().__init__(f"SAP BO API error {http_status} for report '{report_id}'")
 
 
+class DSAPIError(ETLFrameworkError):
+    def __init__(self, job_name: str, http_status: int, response_body: str) -> None:
+        self.job_name = job_name
+        self.http_status = http_status
+        self.response_body = response_body
+        super().__init__(f"SAP DS API error {http_status} for job '{job_name}'")
+
+
 class ReportOutputError(ETLFrameworkError):
     def __init__(self, target_path: str, original_os_error: Exception) -> None:
         self.target_path = target_path
