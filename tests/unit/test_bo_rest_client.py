@@ -536,3 +536,68 @@ def test_download_report_http_error_raises(authenticated_client):
     with patch.object(authenticated_client._session, "get", return_value=mock_response):
         with pytest.raises(BOAPIError):
             authenticated_client.download_report("101", "1", "pdf")
+
+
+# ---------------------------------------------------------------------------
+# schedule_object
+# ---------------------------------------------------------------------------
+
+def test_schedule_object_posts_to_infostore_schedules_endpoint(authenticated_client):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "inst-42"}
+    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
+        instance_id = authenticated_client.schedule_object("3001")
+
+    assert instance_id == "inst-42"
+    called_url = mock_post.call_args[0][0]
+    assert called_url == "http://bo.example.com/biprws/infostore/3001/schedules"
+
+
+def test_schedule_object_sends_schedule_params_as_json_body(authenticated_client):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "inst-42"}
+    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
+        authenticated_client.schedule_object("3001", {"prompt_values": {"region": "EMEA"}})
+
+    assert mock_post.call_args[1]["json"] == {"prompt_values": {"region": "EMEA"}}
+
+
+def test_schedule_object_authenticates_first_if_no_token(env_config):
+    from etl_framework.sap_bo.client import BORestClient
+
+    client = BORestClient(env_config)
+    auth_response = MagicMock()
+    auth_response.status_code = 200
+    auth_response.headers = {"X-SAP-LogonToken": "tok"}
+    schedule_response = MagicMock()
+    schedule_response.status_code = 200
+    schedule_response.json.return_value = {"id": "inst-1"}
+    with patch.object(client._session, "post", side_effect=[auth_response, schedule_response]):
+        instance_id = client.schedule_object("3001")
+
+    assert instance_id == "inst-1"
+    assert client.logon_token == "tok"
+
+
+def test_schedule_object_raises_bo_api_error_on_http_failure(authenticated_client):
+    from etl_framework.exceptions import BOAPIError
+
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.text = "object not found"
+    with patch.object(authenticated_client._session, "post", return_value=mock_response):
+        with pytest.raises(BOAPIError):
+            authenticated_client.schedule_object("does-not-exist")
+
+
+def test_schedule_object_raises_bo_api_error_when_response_has_no_id(authenticated_client):
+    from etl_framework.exceptions import BOAPIError
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {}
+    with patch.object(authenticated_client._session, "post", return_value=mock_response):
+        with pytest.raises(BOAPIError):
+            authenticated_client.schedule_object("3001")

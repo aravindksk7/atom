@@ -58,6 +58,8 @@ def _dedupe_by_id(items: list[dict]) -> list[dict]:
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
+    SCHEDULE_ENDPOINT = "/biprws/infostore/{object_id}/schedules"
+    INSTANCE_ENDPOINT = "/biprws/infostore/{instance_id}"
 
     def __init__(self, env_config: EnvironmentConfig):
         self._base_url = env_config.bo_url.rstrip("/")
@@ -288,6 +290,39 @@ class BORestClient:
                 response_body=response.text,
             )
         return response.content
+
+    def schedule_object(self, object_id: str, schedule_params: dict | None = None) -> str:
+        """POST /biprws/infostore/{object_id}/schedules — schedule any BOE
+        InfoStore object (WebI document, Crystal Report, or Publication) to
+        run now. `schedule_params` is passed through as the JSON body for
+        object-specific run parameters (e.g. prompt values). Returns the new
+        schedule instance id.
+
+        Response shape is best-effort pending verification against a live
+        biprws server: assumes {"id": "<instance_id>"}, matching every other
+        biprws entity this client parses (list_documents/list_reports).
+        """
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}{self.SCHEDULE_ENDPOINT.format(object_id=object_id)}"
+        response = self._session.post(
+            url,
+            json=schedule_params or {},
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=object_id, http_status=response.status_code, response_body=response.text,
+            )
+        instance_id = str(response.json().get("id", ""))
+        if not instance_id:
+            raise BOAPIError(
+                report_id=object_id, http_status=response.status_code,
+                response_body="schedule response missing 'id'",
+            )
+        return instance_id
 
     def logout(self) -> None:
         if self._token and self._owns_token:
