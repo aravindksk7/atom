@@ -1172,6 +1172,7 @@
           <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select">
             <option value="reconciliation">reconciliation</option>
             <option value="bo_report">bo_report</option>
+            <option value="bo_job">bo_job</option>
             <option value="automic_job">automic_job</option>
             <option value="dbt_artifact">dbt_artifact</option>
             <option value="freshness">freshness</option>
@@ -1474,6 +1475,24 @@
           <div>
             <label class="field-label">Automic Run ID</label>
             <input x-model="jobModal.automic_run_id" class="field-input" placeholder="RUN_42" />
+          </div>
+        </div>
+        <div x-show="jobModal.job_type === 'bo_job'" class="grid-2">
+          <div>
+            <label class="field-label">BO Object ID (CUID)</label>
+            <input x-model="jobModal.bo_job_object_id" class="field-input" placeholder="3001" data-testid="job-modal-bo-job-object-id-input" />
+          </div>
+          <div>
+            <label class="field-label">Schedule Params (JSON, optional)</label>
+            <input x-model="jobModal.bo_job_schedule_params_raw" class="field-input font-mono text-xs" placeholder='{"prompt_values": {"region": "EMEA"}}' />
+          </div>
+          <div>
+            <label class="field-label">Poll Interval (seconds)</label>
+            <input x-model="jobModal.bo_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" />
+          </div>
+          <div>
+            <label class="field-label">Timeout (seconds)</label>
+            <input x-model="jobModal.bo_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'api_reconciliation'" class="grid-2">
