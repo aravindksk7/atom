@@ -21,6 +21,7 @@ from etl_framework.config.models import EnvironmentConfig
 from etl_framework.db.engine import DBEngine
 from etl_framework.automic.client import AutomicClient
 from etl_framework.sap_bo.client import BORestClient
+from etl_framework.sap_ds.client import DSRestClient
 from etl_framework.reconciliation.backends.pandas_backend import PandasBackend
 from etl_framework.reconciliation.backends.polars_backend import PolarsBackend
 from etl_framework.reconciliation.compare_utils import resolve_key_columns
@@ -468,6 +469,12 @@ class RunExecutor:
                     raise ValueError("bo_job jobs require live connections to be enabled")
                 return run_job
             return self._build_case_bo_job(job)
+        if job.job_type == "ds_job":
+            if not self._settings.use_live_connections:
+                def run_job() -> ReconciliationResult:
+                    raise ValueError("ds_job jobs require live connections to be enabled")
+                return run_job
+            return self._build_case_ds_job(job)
         if job.job_type == "api_reconciliation" and self._settings.use_live_connections:
             return self._build_case_api_reconciliation(job)
         if job.job_type == "reconciliation" and job.params.get("source_mode") == "multi_file":
@@ -1273,6 +1280,46 @@ class RunExecutor:
                 )
                 status = client.wait_for_completion(
                     instance_id,
+                    timeout_s=job.params.get("timeout_s", 600),
+                    poll_interval_s=job.params.get("poll_interval_s", 5),
+                )
+            finally:
+                client.logout()
+            return ReconciliationResult(
+                query_name=job.name,
+                source_env=self._source_env,
+                target_env=self._target_env,
+                source_row_count=0,
+                target_row_count=0,
+                matched_count=0,
+                missing_in_target_count=0,
+                missing_in_source_count=0,
+                value_mismatch_count=0,
+                mismatches=[],
+                status=status,
+                executed_at=datetime.now(timezone.utc),
+                duration_seconds=time.monotonic() - t0,
+            )
+        return run_job
+
+    def _build_case_ds_job(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            t0 = time.monotonic()
+            creds = self._config_snapshot.get("ds_credentials", {})
+            env = EnvironmentConfig(name=creds.get("name", "ds"), **{
+                k: v for k, v in creds.items() if k != "name"
+            })
+            client = DSRestClient(env)
+            client.login()
+            try:
+                run_id = client.trigger_job(
+                    job.params["job_name"],
+                    job.params.get("repository"),
+                    job.params.get("job_params"),
+                )
+                status = client.wait_for_completion(
+                    run_id,
+                    repository=job.params.get("repository"),
                     timeout_s=job.params.get("timeout_s", 600),
                     poll_interval_s=job.params.get("poll_interval_s", 5),
                 )

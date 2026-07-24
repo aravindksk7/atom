@@ -58,6 +58,15 @@ _LIVE_SNAPSHOT = {
         "automic_user": "admin",
         "automic_password": "pass",
     },
+    "ds_credentials": {
+        "name": "ds",
+        "db_host": "ds-host",
+        "db_password": "ds-secret",
+        "ds_url": "http://ds-server",
+        "ds_user": "admin",
+        "ds_password": "ds-secret",
+        "ds_repository": "DS_REPO",
+    },
 }
 
 
@@ -560,4 +569,210 @@ def test_bo_job_chains_after_dependency_via_depends_on():
 
     run = RunRepository(db).get_run("r-boj-chain")
     assert [r.query_name for r in run.results] == ["refresh_sales", "validate_sales"]
+    assert all(r.status == TestStatus.PASSED.value for r in run.results)
+
+
+# ---------------------------------------------------------------------------
+# ds_job dispatch
+# ---------------------------------------------------------------------------
+
+def test_ds_job_returns_passed_on_success():
+    db = _session()
+    RunRepository(db).create_run("r-dsj", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load",
+        "description": "",
+        "tags": [],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "DS_NIGHTLY_LOAD"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj", ["nightly_load"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS:
+        inst = MockDS.return_value
+        inst.trigger_job.return_value = "run-1"
+        inst.wait_for_completion.return_value = TestStatus.PASSED
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-dsj")
+    assert run.results[0].status == TestStatus.PASSED.value
+    inst.trigger_job.assert_called_once_with("DS_NIGHTLY_LOAD", None, None)
+    inst.wait_for_completion.assert_called_once_with("run-1", repository=None, timeout_s=600, poll_interval_s=5)
+    inst.logout.assert_called_once()
+
+
+def test_ds_job_returns_failed_when_ds_reports_failure():
+    db = _session()
+    RunRepository(db).create_run("r-dsj-fail", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load",
+        "description": "",
+        "tags": [],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "DS_NIGHTLY_LOAD"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj-fail", ["nightly_load"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS:
+        inst = MockDS.return_value
+        inst.trigger_job.return_value = "run-2"
+        inst.wait_for_completion.return_value = TestStatus.FAILED
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-dsj-fail")
+    assert run.results[0].status == TestStatus.FAILED.value
+
+
+def test_ds_job_returns_error_on_timeout():
+    db = _session()
+    RunRepository(db).create_run("r-dsj-timeout", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load",
+        "description": "",
+        "tags": [],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "DS_NIGHTLY_LOAD", "timeout_s": 1, "poll_interval_s": 1},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj-timeout", ["nightly_load"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS:
+        inst = MockDS.return_value
+        inst.trigger_job.return_value = "run-3"
+        inst.wait_for_completion.side_effect = TimeoutError("did not complete")
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-dsj-timeout")
+    assert run.results[0].status == TestStatus.ERROR.value
+    inst.wait_for_completion.assert_called_once_with("run-3", repository=None, timeout_s=1, poll_interval_s=1)
+
+
+def test_ds_job_passes_repository_and_job_params_through():
+    db = _session()
+    RunRepository(db).create_run("r-dsj-params", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load",
+        "description": "",
+        "tags": [],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "job_name": "DS_NIGHTLY_LOAD",
+            "repository": "OTHER_REPO",
+            "job_params": {"$G_RUN_DATE": "2026-07-24"},
+        },
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj-params", ["nightly_load"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS:
+        inst = MockDS.return_value
+        inst.trigger_job.return_value = "run-4"
+        inst.wait_for_completion.return_value = TestStatus.PASSED
+        executor.execute()
+
+    inst.trigger_job.assert_called_once_with(
+        "DS_NIGHTLY_LOAD", "OTHER_REPO", {"$G_RUN_DATE": "2026-07-24"},
+    )
+    inst.wait_for_completion.assert_called_once_with(
+        "run-4", repository="OTHER_REPO", timeout_s=600, poll_interval_s=5,
+    )
+
+
+def test_ds_job_fails_fast_when_live_connections_disabled():
+    db = _session()
+    RunRepository(db).create_run("r-dsj-nolive", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load",
+        "description": "",
+        "tags": [],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "DS_NIGHTLY_LOAD"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj-nolive", ["nightly_load"],
+        RunSettings(use_live_connections=False, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS:
+        executor.execute()
+        MockDS.assert_not_called()
+
+    run = RunRepository(db).get_run("r-dsj-nolive")
+    assert run.results[0].status == TestStatus.ERROR.value
+
+
+def test_ds_job_chains_after_dependency_via_depends_on():
+    db = _session()
+    RunRepository(db).create_run("r-dsj-chain", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_load", "description": "", "tags": [],
+        "job_type": "ds_job", "query": "", "key_columns": [], "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "DS_NIGHTLY_LOAD"}, "enabled": True,
+    })
+    JobRepository(db).create({
+        "name": "check_automic", "description": "", "tags": [],
+        "job_type": "automic_job", "query": "", "key_columns": [], "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "ETL_NIGHTLY", "depends_on": ["nightly_load"]},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-dsj-chain", ["nightly_load", "check_automic"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.DSRestClient") as MockDS, \
+         patch("api.services.run_executor.AutomicClient") as MockAC:
+        ds_inst = MockDS.return_value
+        ds_inst.trigger_job.return_value = "run-5"
+        ds_inst.wait_for_completion.return_value = TestStatus.PASSED
+        ac_status = MagicMock()
+        ac_status.status = TestStatus.PASSED
+        MockAC.return_value.get_status_by_job_name.return_value = ac_status
+        executor.execute()
+
+    run = RunRepository(db).get_run("r-dsj-chain")
+    assert [r.query_name for r in run.results] == ["nightly_load", "check_automic"]
     assert all(r.status == TestStatus.PASSED.value for r in run.results)

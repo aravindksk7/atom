@@ -277,6 +277,8 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
         snapshot["bo_credentials"] = {"name": "bo", **cfg_data}
     if "automic_credentials" not in snapshot:
         snapshot["automic_credentials"] = {"name": "automic", **cfg_data}
+    if "ds_credentials" not in snapshot:
+        snapshot["ds_credentials"] = {"name": "ds", **cfg_data}
     return snapshot
 
 

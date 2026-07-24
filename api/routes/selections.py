@@ -24,7 +24,7 @@ router = APIRouter(tags=["selections"])
 
 # Job types whose execution only touches one environment (per the approved
 # design spec); everything else needs a target_env to compare against.
-_SINGLE_ENV_JOB_TYPES = {"bo_report", "freshness", "profile", "automic_job", "dbt_artifact", "schema_snapshot", "bo_job"}
+_SINGLE_ENV_JOB_TYPES = {"bo_report", "freshness", "profile", "automic_job", "dbt_artifact", "schema_snapshot", "bo_job", "ds_job"}
 
 
 def _selection_out(selection) -> JobSelectionOut:

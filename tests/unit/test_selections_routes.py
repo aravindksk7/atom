@@ -42,6 +42,11 @@ def client(monkeypatch):
             "job_type": "bo_job", "query": "", "key_columns": [],
             "exclude_columns": [], "params": {"object_id": "3001"}, "enabled": True,
         })
+        JobRepository(db).create({
+            "name": "ds_job_trigger", "description": "", "tags": [],
+            "job_type": "ds_job", "query": "", "key_columns": [],
+            "exclude_columns": [], "params": {"job_name": "DS_NIGHTLY_LOAD"}, "enabled": True,
+        })
 
     return TestClient(app, headers={"Authorization": f"Bearer {raw}"})
 
@@ -114,6 +119,12 @@ def test_launch_single_env_job_type_succeeds_without_target(client):
 
 def test_launch_bo_job_job_type_succeeds_without_target(client):
     created = _create_selection(client, name="bo-job-only", jobs=["bo_job_trigger"])
+    resp = client.post(f"/api/selections/{created['id']}/launch", json={"source_env": "dev"})
+    assert resp.status_code == 202
+
+
+def test_launch_ds_job_job_type_succeeds_without_target(client):
+    created = _create_selection(client, name="ds-job-only", jobs=["ds_job_trigger"])
     resp = client.post(f"/api/selections/{created['id']}/launch", json={"source_env": "dev"})
     assert resp.status_code == 202
 
