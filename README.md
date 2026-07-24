@@ -1002,6 +1002,8 @@ Use the same saved job definition everywhere: the UI, REST API, schedules, exter
    - `reconciliation`: query or file inputs plus `key_columns`.
    - `api_reconciliation`: saved REST endpoints plus `key_columns`.
    - `bo_report`: SAP BO document/report parameters.
+   - `bo_job`: SAP BO object CUID to schedule and wait on (trigger-only, no comparison).
+   - `ds_job`: SAP DS batch job name to trigger and wait on (trigger-only, no comparison).
    - `automic_job`: Automic job name or run id.
    - `dbt_artifact`, `freshness`, `profile`, `schema_snapshot`, or `cross_job_assertion`: fill the type-specific `params`.
 3. Add optional DQ rules, dependencies, excluded columns, pass conditions, and tags.
@@ -1368,6 +1370,69 @@ Monitors a SAP BusinessObjects WebIntelligence report execution status. When `us
 **Adding BO jobs from the Adapters tab:**
 
 The **Adapters → SAP BO** section lets you browse documents, expand report tabs, and click **Add to Catalog** to create a `bo_report` job without manually entering IDs.
+
+---
+
+#### `bo_job`
+
+Triggers a SAP BusinessObjects InfoStore object (WebI document, Crystal Report, or Publication) to run now, and waits for it to reach a terminal status. Unlike `bo_report` (which downloads and compares report data), `bo_job` is trigger-and-wait only — it does no data comparison. Chain a `bo_report` (or a `bo_live` reconciliation job) after it via `depends_on` to validate the refreshed data once the trigger completes.
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `object_id` | The BOE InfoStore object CUID to schedule |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `schedule_params` | — | JSON object passed through as the schedule's run parameters (e.g. prompt values) |
+| `poll_interval_s` | `5` | Seconds between status polls |
+| `timeout_s` | `600` | Seconds to wait before giving up and marking the run `ERROR` |
+
+**How it works (live mode):**
+
+1. The executor authenticates to the BO REST API (`bo_url`, `bo_user`, `bo_password` from the saved config) and schedules the object to run.
+2. It polls the schedule instance's status every `poll_interval_s` seconds.
+3. `Success` maps to `PASSED`; `Failed` maps to `FAILED`; still running past `timeout_s` produces `ERROR` rather than a false pass/fail.
+4. Requires **Use Live Connections** enabled — otherwise the job fails fast with a clear error instead of silently no-op'ing.
+
+**Job editor fields:** BO Object ID (CUID), Schedule Params (JSON, optional), Poll Interval (seconds), Timeout (seconds).
+
+---
+
+#### `ds_job`
+
+Triggers a SAP Data Services (BODS) batch job by name and waits for it to reach a terminal status, via the SAP DS Administrator/Management Console API. Same trigger-and-wait shape as `bo_job` — no data comparison; chain a validation job after it via `depends_on` if you need to check the loaded data.
+
+**Required params:**
+
+| Param | Description |
+|---|---|
+| `job_name` | The SAP DS batch job name to trigger |
+
+**Optional params:**
+
+| Param | Default | Description |
+|---|---|---|
+| `repository` | saved config's `ds_repository` | Overrides which SAP DS repository the job lives in |
+| `job_params` | — | JSON object passed through as job substitution/global variables |
+| `poll_interval_s` | `5` | Seconds between status polls |
+| `timeout_s` | `600` | Seconds to wait before giving up and marking the run `ERROR` |
+
+**How it works (live mode):**
+
+1. The executor logs into the SAP DS Administrator API (`ds_url`, `ds_user`, `ds_password` from the saved config) and triggers the named batch job in the resolved repository (the job's own `repository` param, falling back to the config's `ds_repository`).
+2. It polls the run's status every `poll_interval_s` seconds.
+3. `Completed`/`Success` maps to `PASSED`; `Error`/`Failed`/`Cancelled` maps to `FAILED`; still running past `timeout_s` produces `ERROR`.
+4. Requires **Use Live Connections** enabled — otherwise the job fails fast rather than silently no-op'ing.
+
+**Job editor fields:** DS Job Name, Repository (optional, falls back to config), Job Params (JSON, optional), Poll Interval (seconds), Timeout (seconds).
+
+> SAP DS's Administrator REST API is less standardized across versions than SAP BO's `biprws`; the endpoint shapes this integration uses are best-effort and worth verifying against your own SAP DS instance before relying on it in production.
+
+**SAP DS connection setup:** add `ds_url`, `ds_user`, `ds_password`, `ds_repository`, and optionally `ds_timeout` / `ds_proxy_url` / `ds_verify_ssl` to a saved config under **Config → SAP DS** — the same section pattern as the existing SAP BO fields.
 
 ---
 

@@ -41,18 +41,18 @@
     {
       id: 'config',
       title: 'Configuration',
-      intro: 'Config stores reusable environment connection details (SQL Server, SAP BO, Automic) plus API tokens and webhook notifications. Without a config, runs use safe simulation data.',
+      intro: 'Config stores reusable environment connection details (SQL Server, SAP BO, SAP DS, Automic) plus API tokens and webhook notifications. Without a config, runs use safe simulation data.',
       steps: [
         {
           title: 'Open the Config tab',
-          text: 'The Configuration Editor lists all saved environment configs. Each config bundles host, database, BO, and Automic settings under one name.',
+          text: 'The Configuration Editor lists all saved environment configs. Each config bundles host, database, BO, DS, and Automic settings under one name.',
           where: 'Tabs -> Config',
         },
         {
           title: 'Create a new config',
-          text: 'Click + New Config. Enter a Name and Env Name (e.g. "dev-sql" / "dev"), then fill db_host, db_port, db_name, db_user, db_password, db_driver. Add bo_url/bo_user/bo_password and automic_url/automic_user/automic_password as needed.',
+          text: 'Click + New Config. Enter a Name and Env Name (e.g. "dev-sql" / "dev"), then fill db_host, db_port, db_name, db_user, db_password, db_driver. Add bo_url/bo_user/bo_password, ds_url/ds_user/ds_password/ds_repository, and automic_url/automic_user/automic_password as needed.',
           where: 'Config -> + New Config',
-          tip: 'bo_auth_type must be secWinAD (not secEnterprise) for Active Directory-only SAP BO accounts, or you get HTTP 401.',
+          tip: 'bo_auth_type must be secWinAD (not secEnterprise) for Active Directory-only SAP BO accounts, or you get HTTP 401. ds_repository scopes which SAP DS repository ds_job triggers run against by default -- override per-job with the Repository field if a job lives elsewhere.',
         },
         {
           title: 'Add named connections',
@@ -104,7 +104,7 @@
         },
         {
           title: 'Choose the right job type',
-          text: 'reconciliation compares two SQL queries/files row-by-row; bo_report monitors a SAP BO report; automic_job checks an Automic job run; api_reconciliation reconciles two REST endpoints; dbt_artifact maps dbt tests; freshness, profile, schema_snapshot, and cross_job_assertion cover freshness, column profiling, schema drift, and cross-job metric checks.',
+          text: 'reconciliation compares two SQL queries/files row-by-row; bo_report monitors a SAP BO report; bo_job triggers a SAP BO object (WebI/Crystal/Publication) and waits for it to finish, no comparison; ds_job triggers a SAP Data Services batch job and waits for it to finish, no comparison; automic_job checks an Automic job run; api_reconciliation reconciles two REST endpoints; dbt_artifact maps dbt tests; freshness, profile, schema_snapshot, and cross_job_assertion cover freshness, column profiling, schema drift, and cross-job metric checks.',
           where: 'Job editor -> Job Type',
           tip: 'For reconciliation the minimum is a query and one or more key_columns that uniquely identify a row.',
         },
