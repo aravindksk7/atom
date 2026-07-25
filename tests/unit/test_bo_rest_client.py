@@ -293,7 +293,10 @@ def test_list_documents_stops_when_server_ignores_page_param(authenticated_clien
     and re-serve page 1's content on every request. A same-size batch is
     normally treated as "keep going" (see the page-cap test above), so
     without a repeat check this would loop until _MAX_PAGES re-appending the
-    same rows -- inflating the count without adding real documents."""
+    same rows -- inflating the count without adding real documents. Once the
+    repeat is detected, one Range-header probe (see the recovery test below)
+    is attempted before giving up; when that probe also re-serves the same
+    content, the client stops with just the one real page."""
     same_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
     resp = MagicMock()
     resp.status_code = 200
@@ -301,7 +304,34 @@ def test_list_documents_stops_when_server_ignores_page_param(authenticated_clien
     with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get:
         docs = authenticated_client.list_documents()
     assert len(docs) == 10
-    assert mock_get.call_count == 2
+    assert mock_get.call_count == 3
+    assert mock_get.call_args_list[2][1]["headers"]["Range"] == "elements=10-209"
+
+
+def test_list_documents_recovers_via_range_header_when_page_param_ignored(authenticated_client):
+    """When a deployment ignores `page` (previous test), some biprws gateways
+    still honor the documented `Range: elements=N-M` header even though they
+    silently ignore/cache the `page`/`pagesize` query params (e.g. a reverse
+    proxy caching GETs by path only). Once the repeat is detected, the client
+    should retry via Range and recover the real remaining documents instead
+    of silently truncating the browse to just the first page."""
+    page1 = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    page1_repeat = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    range_page1 = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10, 20)]
+    range_page2: list[dict] = []
+    responses = []
+    for docs_batch in (page1, page1_repeat, range_page1, range_page2):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": docs_batch}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses) as mock_get:
+        docs = authenticated_client.list_documents()
+    assert [d["id"] for d in docs] == [str(i) for i in range(20)]
+    assert mock_get.call_count == 4
+    assert mock_get.call_args_list[2][1]["headers"]["Range"] == "elements=10-209"
+    assert mock_get.call_args_list[3][1]["headers"]["Range"] == "elements=20-219"
+    assert "params" not in mock_get.call_args_list[2][1] or mock_get.call_args_list[2][1]["params"] is None
 
 
 def test_list_documents_dedupes_overlapping_pages(authenticated_client):

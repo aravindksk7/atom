@@ -196,12 +196,17 @@ class BORestClient:
         collection is exhausted.
 
         Some on-prem deployments go further and ignore the `page` param
-        entirely, re-serving page 1's content forever. A batch whose ids
-        exactly match the previous batch's ids is that case, not "more of
-        the same page size" — stop instead of looping to `_MAX_PAGES`. As a
-        second line of defense (e.g. overlapping-but-not-identical pages),
-        entries are de-duplicated by id after paging finishes; entries
-        without an id can't be told apart this way and are left as-is.
+        entirely, re-serving page 1's content forever (often a reverse
+        proxy/gateway in front of the BOE server caching or mishandling the
+        query string). A batch whose ids exactly match the previous batch's
+        ids is that case, not "more of the same page size" — instead of
+        looping to `_MAX_PAGES`, switch to `Range`-header pagination (see
+        `_paginate_biprws_range_continuation`), SAP's other documented
+        pagination mechanism for these endpoints, which a query-string-blind
+        gateway is less likely to also break. As a second line of defense
+        (e.g. overlapping-but-not-identical pages), entries are de-duplicated
+        by id after paging finishes; entries without an id can't be told
+        apart this way and are left as-is.
         """
         raw: list[dict] = []
         page = 1
@@ -226,11 +231,22 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
             batch_ids = [str(item.get("id", "")) for item in batch]
             if batch and batch_ids == previous_batch_ids:
-                logger.debug(
+                logger.warning(
                     "SAP BO pagination stopped at page %d for %s: server re-served an identical "
-                    "%d-item batch (likely ignores the `page` param on this deployment)",
+                    "%d-item batch (likely ignores the `page` param on this deployment) -- "
+                    "retrying via Range-header pagination",
                     page, url, len(batch),
                 )
+                extra = self._paginate_biprws_range_continuation(
+                    url, plural_key, singular_key, *fallback_keys,
+                    start_offset=len(raw), seed_ids=batch_ids,
+                )
+                if extra:
+                    logger.warning(
+                        "SAP BO Range-header pagination recovered %d additional item(s) for %s "
+                        "past the page-param repeat", len(extra), url,
+                    )
+                    raw.extend(extra)
                 break
             raw.extend(batch)
             if not batch or (previous_batch_size is not None and len(batch) < previous_batch_size):
@@ -245,6 +261,63 @@ class BORestClient:
         result = _dedupe_by_id(raw)
         logger.debug("SAP BO pagination for %s: %d page(s), %d item(s) after dedupe", url, page, len(result))
         return result
+
+    def _paginate_biprws_range_continuation(
+        self,
+        url: str,
+        plural_key: str,
+        singular_key: str,
+        *fallback_keys: str,
+        start_offset: int,
+        seed_ids: list[str],
+    ) -> list[dict]:
+        """Continue past a page a biprws deployment re-serves for every
+        `page` value by switching to the `Range: elements=N-M` header --
+        SAP's documented alternative pagination mechanism for these
+        collection endpoints. Some on-prem gateways/proxies key their
+        (possibly query-string-blind) caching, or a broken `page` handler,
+        off the query string specifically; a header-based request can
+        succeed where `page`/`pagesize` silently keeps returning the same
+        content.
+
+        Seeding `previous_batch_ids` with the caller's already-known-repeated
+        `seed_ids` (rather than starting from None) means a deployment that
+        ignores Range too is detected after a single extra probe request,
+        instead of needing two Range calls to notice the repeat itself.
+
+        Soft-fails (returns whatever was collected, possibly empty) rather
+        than raising: if Range isn't supported either, the caller already has
+        real data from the page-param pass and should keep it rather than
+        erroring out the whole browse.
+        """
+        collected: list[dict] = []
+        start = start_offset
+        previous_batch_ids = seed_ids
+        page_count = 0
+        while page_count < self._MAX_PAGES:
+            end = start + self._PAGE_REQUEST_SIZE - 1
+            response = self._session.get(
+                url,
+                headers={"Accept": "application/json", "Range": f"elements={start}-{end}"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            if response.status_code >= 400:
+                logger.warning(
+                    "SAP BO Range-header pagination unsupported for %s (HTTP %d) -- "
+                    "keeping only the page-param data collected so far",
+                    url, response.status_code,
+                )
+                break
+            batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
+            batch_ids = [str(item.get("id", "")) for item in batch]
+            if not batch or batch_ids == previous_batch_ids:
+                break
+            collected.extend(batch)
+            previous_batch_ids = batch_ids
+            start += len(batch)
+            page_count += 1
+        return collected
 
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""
