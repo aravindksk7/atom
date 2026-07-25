@@ -11,6 +11,7 @@ SECRET_FIELDS = frozenset({
     "db_password", "automic_password", "bo_password", "ds_password",
     "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
     "secret_access_key", "session_token",
+    "aws_secret_access_key", "aws_session_token",
 })
 
 
@@ -48,6 +49,12 @@ class EnvironmentConfig(BaseModel):
     ds_timeout: int = 60
     ds_proxy_url: str = ""
     ds_verify_ssl: bool = True
+    aws_region: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_session_token: str = ""
+    aws_endpoint_url: str = ""
+    aws_verify_ssl: bool = True
 
     @field_validator("db_port")
     @classmethod
