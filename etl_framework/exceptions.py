@@ -117,3 +117,41 @@ class APIRequestError(ETLFrameworkError):
         self.message = message
         status_part = f" (status {http_status})" if http_status is not None else ""
         super().__init__(f"API request to '{url}' failed{status_part}: {message}")
+
+
+class AWSError(ETLFrameworkError):
+    """Base for all AWS-related framework errors."""
+
+
+class S3ObjectNotFoundError(AWSError):
+    def __init__(self, bucket: str, key: str) -> None:
+        self.bucket = bucket
+        self.key = key
+        super().__init__(f"S3 object not found: s3://{bucket}/{key}")
+
+
+class S3SelectError(AWSError):
+    def __init__(self, bucket: str, key: str, original_error: Exception) -> None:
+        self.bucket = bucket
+        self.key = key
+        self.original_error = original_error
+        super().__init__(
+            f"S3 Select failed for s3://{bucket}/{key}: {original_error}"
+        )
+
+
+class UnsupportedFormatError(AWSError):
+    def __init__(self, fmt: str) -> None:
+        self.fmt = fmt
+        super().__init__(f"Unsupported file format: {fmt!r}")
+
+
+class FileFormatValidationError(AWSError):
+    def __init__(self, bucket: str, key: str, fmt: str, original_error: Exception) -> None:
+        self.bucket = bucket
+        self.key = key
+        self.fmt = fmt
+        self.original_error = original_error
+        super().__init__(
+            f"File s3://{bucket}/{key} is not valid {fmt}: {original_error}"
+        )

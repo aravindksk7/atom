@@ -123,6 +123,39 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **Ad-hoc multi-file compare** — the Compare tab's **Multi-File** sub-tab runs the same file-pairing/reconciliation logic as a one-off comparison, no saved job required — `POST /api/compare/multi-file` (local sources only). See [Multi-File Compare](#multi-file-compare).
 - **Encrypted config secrets at rest** — `db_password`, `bo_password`, `automic_password`, and REST API endpoint secrets (`api_key`, `bearer_token`, `basic_password`) are encrypted in the config's stored JSON using the same Fernet key as webhook signing (`WEBHOOK_ENCRYPTION_KEY`); encryption/decryption is transparent to every existing API/UI consumer.
 - **App-timezone-aware timestamps everywhere** — every timestamp shown in the UI (including the scheduler grid's next-run time, the Compare tab's run picker, and contract breach/version history) is converted through the DB-configured app timezone instead of showing raw UTC or the browser's local time.
+- **AWS S3 storage & schema validation** — read object metadata, count rows across CSV/JSON/Parquet/ORC (S3 Select for row/text formats, pyarrow footer for columnar), discover Hive-style partition schemes, and validate file format with optional schema assertion. See [AWS Data Platform Testing](#aws-data-platform-testing).
+
+## AWS Data Platform Testing
+
+Native helpers for testing data on AWS. Credentials come from `AWSConfig`
+(explicit keys or the default boto3 credential chain); unit tests run offline
+against `moto`, and an opt-in live smoke test is gated behind `ATOM_AWS_LIVE=1`.
+
+### AWS S3 (`etl_framework/aws_s3`)
+
+```python
+from etl_framework.aws.config import AWSConfig
+from etl_framework.aws.session import AWSSession
+from etl_framework.aws_s3.client import S3Client
+from etl_framework.aws_s3.metadata import read_object_metadata
+from etl_framework.aws_s3.row_count import RowCounter
+from etl_framework.aws_s3.partitions import discover_partitions
+from etl_framework.aws_s3.formats import validate_format
+import pyarrow.fs as pafs
+
+session = AWSSession(AWSConfig(region="us-east-1"))
+client = S3Client(session)
+
+meta = read_object_metadata(client, "my-bucket", "data/part-0.parquet")
+
+fs = pafs.S3FileSystem(region="us-east-1")
+count = RowCounter(client, fs=fs).count("my-bucket", "data/part-0.parquet", "parquet")
+
+scheme = discover_partitions(client, "my-bucket", "table/")
+
+validate_format(client, "my-bucket", "data/part-0.parquet", "parquet",
+                expected_schema={"id": "int64", "name": "string"})
+```
 
 ## Architecture
 

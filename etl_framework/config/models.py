@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 SECRET_FIELDS = frozenset({
     "db_password", "automic_password", "bo_password", "ds_password",
     "api_key", "bearer_token", "basic_password", "sap_bo_logon_token",
+    "secret_access_key", "session_token",
 })
 
 
