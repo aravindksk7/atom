@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,7 @@ from api.schemas import (
     AutomicJobCreateRequest,
     AutomicLookupRequest,
     BODocOut,
+    BODocRanOnOut,
     BOAuthSessionOut,
     BOJobCreateRequest,
     BOLogoffRequest,
@@ -127,6 +130,16 @@ def list_bo_documents(
     service: AdapterService = Depends(get_adapter_service),
 ):
     return service.list_bo_documents(config_id, _sap_bo_auth_from_request(request))
+
+
+@router.get("/sap-bo/documents/ran-on", response_model=BODocRanOnOut)
+def list_bo_document_ids_with_runs_on(
+    config_id: int,
+    date: date,
+    request: Request,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.list_bo_document_ids_with_runs_on(config_id, date, _sap_bo_auth_from_request(request))
 
 
 @router.get("/sap-bo/documents/{doc_id}/reports", response_model=list[BOReportOut])

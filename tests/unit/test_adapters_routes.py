@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.schemas import (
-    AdapterTestOut, BODocOut, BOAuthSessionOut, BOReportOut,
+    AdapterTestOut, BODocOut, BODocRanOnOut, BOAuthSessionOut, BOReportOut,
     AutomicJobStatusOut, JobDefinition,
 )
 from etl_framework.repository.database import Base
@@ -157,6 +157,34 @@ def test_list_bo_documents_passes_x_sap_logontoken(client, mock_adapter_service)
     auth_ctx = mock_adapter_service.list_bo_documents.call_args.args[1]
     assert auth_ctx.scheme == "x-sap-logontoken"
     assert auth_ctx.token == "existing-token"
+
+
+def test_list_bo_document_ids_with_runs_on_returns_result(client, mock_adapter_service):
+    mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
+        document_ids=["500", "501"], supported=True,
+    )
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    assert resp.status_code == 200
+    assert resp.json() == {"document_ids": ["500", "501"], "supported": True}
+    from datetime import date
+    mock_adapter_service.list_bo_document_ids_with_runs_on.assert_called_once()
+    args, kwargs = mock_adapter_service.list_bo_document_ids_with_runs_on.call_args
+    assert args[0] == 1
+    assert args[1] == date(2026, 7, 20)
+
+
+def test_list_bo_document_ids_with_runs_on_reports_unsupported(client, mock_adapter_service):
+    mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
+        document_ids=[], supported=False,
+    )
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    assert resp.status_code == 200
+    assert resp.json() == {"document_ids": [], "supported": False}
+
+
+def test_list_bo_document_ids_with_runs_on_rejects_malformed_date(client):
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=not-a-date")
+    assert resp.status_code == 422
 
 
 def test_list_bo_reports_for_document(client):
