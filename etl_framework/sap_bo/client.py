@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import date, timedelta
 import requests
 import pandas as pd
 from urllib.parse import urlparse
@@ -440,6 +441,85 @@ class BORestClient:
                 "folder": str(d.get("SI_ANCESTOR", d.get("folder", ""))),
             })
         return results
+
+    def list_document_ids_with_runs_on(self, day: date) -> list[str] | None:
+        """Keyset-paginated CeQL query for the distinct set of WebI document
+        ids that had at least one run ("instance") on `day`. Powers the
+        Adapters tab's run-date filter (see the 2026-07-25 design spec).
+
+        An instance's `SI_PARENTID` is the CMS id of the document it belongs
+        to (an instance's parent in the CMS hierarchy is the report that
+        owns it). Collects distinct `SI_PARENTID` values across all pages,
+        keeping first-seen order.
+
+        Returns None (not an empty list) when the *first* query fails --
+        same "unsupported vs. zero results" distinction as
+        `_list_documents_via_cms_query` -- so the caller can tell the two
+        apart. A failure on a later page keeps whatever distinct ids were
+        already collected instead of discarding them.
+        """
+        url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
+        day_start = f"@{day.year}.{day.month:02d}.{day.day:02d}.00.00.00"
+        next_day = day + timedelta(days=1)
+        day_end = f"@{next_day.year}.{next_day.month:02d}.{next_day.day:02d}.00.00.00"
+        date_clause = f"SI_INSTANCE=1 AND SI_STARTTIME >= {day_start} AND SI_STARTTIME < {day_end}"
+
+        document_ids: list[str] = []
+        seen: set[str] = set()
+        last_id: int | None = None
+        page_count = 0
+        while page_count < self._MAX_PAGES:
+            where = date_clause if last_id is None else f"{date_clause} AND SI_ID > {last_id}"
+            query = (
+                f"SELECT TOP {self._PAGE_REQUEST_SIZE} SI_ID, SI_PARENTID "
+                f"FROM CI_INFOOBJECTS WHERE {where} ORDER BY SI_ID"
+            )
+            response = self._session.post(
+                url,
+                json={"query": query},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-cache, no-store",
+                    "Pragma": "no-cache",
+                },
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            if response.status_code >= 400:
+                if page_count == 0:
+                    logger.warning(
+                        "SAP BO CMS query endpoint unavailable for run-date filtering (HTTP %d)",
+                        response.status_code,
+                    )
+                    return None
+                logger.warning(
+                    "SAP BO CMS query for run-date filtering failed past SI_ID %d (HTTP %d) -- "
+                    "keeping the %d document id(s) already collected",
+                    last_id, response.status_code, len(document_ids),
+                )
+                break
+            batch = _unwrap_collection(response.json(), "documents", "document", "entries")
+            if not batch:
+                break
+            for entry in batch:
+                parent_id = str(entry.get("SI_PARENTID", ""))
+                if parent_id and parent_id not in seen:
+                    seen.add(parent_id)
+                    document_ids.append(parent_id)
+            try:
+                last_id = max(int(entry.get("SI_ID", 0)) for entry in batch)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "SAP BO CMS query for run-date filtering returned a non-numeric SI_ID -- "
+                    "stopping keyset pagination with %d document id(s) collected",
+                    len(document_ids),
+                )
+                break
+            if len(batch) < self._PAGE_REQUEST_SIZE:
+                break
+            page_count += 1
+        return document_ids
 
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""

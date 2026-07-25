@@ -1,6 +1,8 @@
 """Tests for BORestClient SAP BO REST API methods."""
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 import pandas as pd
@@ -525,6 +527,80 @@ def test_list_documents_does_not_query_cms_when_pagination_succeeds_normally(aut
         docs = authenticated_client.list_documents()
     assert len(docs) == page_size + 1
     mock_post.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# list_document_ids_with_runs_on
+# ---------------------------------------------------------------------------
+
+def test_list_document_ids_with_runs_on_returns_distinct_parent_ids(authenticated_client):
+    """Powers the Adapters tab's run-date filter: find every instance
+    (a scheduled/saved run) that started on the given day and return the
+    distinct set of documents (SI_PARENTID) those instances belong to."""
+    batch = [
+        {"SI_ID": "1", "SI_PARENTID": "500"},
+        {"SI_ID": "2", "SI_PARENTID": "501"},
+        {"SI_ID": "3", "SI_PARENTID": "500"},  # same document ran twice that day
+    ]
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"documents": batch}
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    assert ids == ["500", "501"]
+    query = mock_post.call_args[1]["json"]["query"]
+    assert "SI_INSTANCE=1" in query
+    assert "SI_STARTTIME >= @2026.07.20.00.00.00" in query
+    assert "SI_STARTTIME < @2026.07.21.00.00.00" in query
+    assert "SI_ID >" not in query
+
+
+def test_list_document_ids_with_runs_on_pages_via_keyset(authenticated_client):
+    """Same keyset-pagination shape as _list_documents_via_cms_query: a busy
+    day's instance count can exceed one CeQL default batch."""
+    batch1 = [{"SI_ID": str(i), "SI_PARENTID": f"doc{i}"} for i in range(1, 201)]
+    batch2 = [{"SI_ID": str(i), "SI_PARENTID": f"doc{i}"} for i in range(201, 210)]
+    responses = []
+    for batch in (batch1, batch2):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": batch}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "post", side_effect=responses) as mock_post:
+        ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    assert len(ids) == 209
+    assert mock_post.call_count == 2
+    second_query = mock_post.call_args_list[1][1]["json"]["query"]
+    assert "SI_ID > 200" in second_query
+
+
+def test_list_document_ids_with_runs_on_returns_none_when_endpoint_unavailable(authenticated_client):
+    """First-call failure means the CMS query endpoint itself isn't
+    available -- distinct from "zero documents ran that day" (an empty
+    list), so the caller (the service layer) can tell them apart and report
+    `supported: false` instead of an empty result."""
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.text = "not found"
+    with patch.object(authenticated_client._session, "post", return_value=resp):
+        ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    assert ids is None
+
+
+def test_list_document_ids_with_runs_on_keeps_partial_data_on_later_failure(authenticated_client):
+    """A failure on a later page (the endpoint clearly works -- we already
+    got real data from it) keeps what was already collected instead of
+    discarding it or returning None."""
+    batch1 = [{"SI_ID": str(i), "SI_PARENTID": f"doc{i}"} for i in range(1, 201)]
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.json.return_value = {"documents": batch1}
+    fail_resp = MagicMock()
+    fail_resp.status_code = 503
+    fail_resp.text = "service unavailable"
+    with patch.object(authenticated_client._session, "post", side_effect=[ok_resp, fail_resp]):
+        ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    assert len(ids) == 200
 
 
 def test_list_documents_dedupes_overlapping_pages(authenticated_client):
