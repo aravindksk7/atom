@@ -65,8 +65,11 @@
             <p class="text-xs text-rose-600 mt-1">Run-date filtering isn't available against this SAP BO server.</p>
           </template>
         </div>
-        <template x-if="boFilterQuery.trim() && filteredBODocs.length === 0">
-          <div class="text-muted text-sm px-3 py-2">No documents or loaded reports match "<span x-text="boFilterQuery"></span>"</div>
+        <template x-if="(boFilterQuery.trim() || boRanOnDocIds) && filteredBODocs.length === 0">
+          <div class="text-muted text-sm px-3 py-2">
+            <span x-show="boFilterQuery.trim()">No documents or loaded reports match "<span x-text="boFilterQuery"></span>"</span>
+            <span x-show="!boFilterQuery.trim() && boRanOnDocIds">No documents ran on <span x-text="boRanOnDate"></span></span>
+          </div>
         </template>
         <div class="space-y-1">
           <template x-for="(doc, boDocIdx) in filteredBODocs" :key="doc.id ? 'doc-' + doc.id : 'doc-idx-' + boDocIdx">
