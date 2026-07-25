@@ -215,7 +215,11 @@ class BORestClient:
         while page <= self._MAX_PAGES:
             response = self._session.get(
                 url,
-                headers={"Accept": "application/json"},
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache, no-store",
+                    "Pragma": "no-cache",
+                },
                 params={"page": page, "pagesize": self._PAGE_REQUEST_SIZE},
                 timeout=self._timeout,
                 verify=self._verify_ssl,
@@ -298,7 +302,12 @@ class BORestClient:
             end = start + self._PAGE_REQUEST_SIZE - 1
             response = self._session.get(
                 url,
-                headers={"Accept": "application/json", "Range": f"elements={start}-{end}"},
+                headers={
+                    "Accept": "application/json",
+                    "Range": f"elements={start}-{end}",
+                    "Cache-Control": "no-cache, no-store",
+                    "Pragma": "no-cache",
+                },
                 timeout=self._timeout,
                 verify=self._verify_ssl,
             )
@@ -312,6 +321,13 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), plural_key, singular_key, *fallback_keys)
             batch_ids = [str(item.get("id", "")) for item in batch]
             if not batch or batch_ids == previous_batch_ids:
+                logger.warning(
+                    "SAP BO Range-header pagination for %s did not return new data past offset "
+                    "%d (got %s item(s), %s) -- the deployment likely ignores Range too (e.g. an "
+                    "intermediary cache/gateway keying purely on URL path), or genuinely has no "
+                    "more data; keeping only the page-param data collected so far",
+                    url, start, len(batch), "identical to the previous batch" if batch else "empty",
+                )
                 break
             collected.extend(batch)
             previous_batch_ids = batch_ids

@@ -334,6 +334,51 @@ def test_list_documents_recovers_via_range_header_when_page_param_ignored(authen
     assert "params" not in mock_get.call_args_list[2][1] or mock_get.call_args_list[2][1]["params"] is None
 
 
+def test_list_documents_sends_no_cache_headers_on_every_request(authenticated_client):
+    """A reverse proxy/gateway sitting in front of an on-prem biprws server can
+    cache GET responses keyed only on the URL path, blind to both the `page`
+    query param and the `Range` header -- serving the identical cached page-1
+    body no matter what pagination mechanism the client tries (this is exactly
+    what happened live: the Range-header retry re-served the same 10 items).
+    Sending `Cache-Control`/`Pragma: no-cache` asks any RFC 7234-compliant
+    intermediary to revalidate/bypass its cache instead of serving stale
+    content, on both the page-param and the Range-header requests."""
+    page1 = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    empty_page = []
+    responses = []
+    for docs_batch in (page1, empty_page):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": docs_batch}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses) as mock_get:
+        authenticated_client.list_documents()
+    for call in mock_get.call_args_list:
+        headers = call[1]["headers"]
+        assert headers["Cache-Control"] == "no-cache, no-store"
+        assert headers["Pragma"] == "no-cache"
+
+
+def test_list_documents_logs_when_range_header_recovers_nothing(authenticated_client, caplog):
+    """The Range-header retry (see the recovery test above) silently returned
+    an empty `collected` list with no log line explaining why in production --
+    exactly the gap that made the live on-prem failure (server re-serves the
+    same 10 items via Range too) indistinguishable from "the fix isn't
+    deployed" from the log alone. Both the empty-batch and identical-batch
+    soft-fail branches of the Range continuation must log a warning."""
+    same_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"documents": same_page}
+    with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+        with patch.object(authenticated_client._session, "get", return_value=resp):
+            authenticated_client.list_documents()
+    assert any(
+        "range-header pagination" in rec.message.lower() and "did not return" in rec.message.lower()
+        for rec in caplog.records
+    )
+
+
 def test_list_documents_dedupes_overlapping_pages(authenticated_client):
     """Defensive net for pages that overlap without being fully identical
     (e.g. an off-by-one server cursor) -- duplicate ids across pages should
