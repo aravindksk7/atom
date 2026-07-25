@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.repository.models import SavedConfig
@@ -152,6 +152,44 @@ def test_list_bo_documents_empty(service):
         MockClient.return_value.list_documents.return_value = []
         docs = service.list_bo_documents(config_id=1)
     assert docs == []
+
+
+# ---------------------------------------------------------------------------
+# list_bo_document_ids_with_runs_on
+# ---------------------------------------------------------------------------
+
+def test_list_bo_document_ids_with_runs_on_returns_supported_result(service):
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.list_document_ids_with_runs_on.return_value = ["500", "501"]
+        result = service.list_bo_document_ids_with_runs_on(config_id=1, day=date(2026, 7, 20))
+    assert result.supported is True
+    assert result.document_ids == ["500", "501"]
+    MockClient.return_value.list_document_ids_with_runs_on.assert_called_once_with(date(2026, 7, 20))
+
+
+def test_list_bo_document_ids_with_runs_on_reports_unsupported_when_client_returns_none(service):
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.list_document_ids_with_runs_on.return_value = None
+        result = service.list_bo_document_ids_with_runs_on(config_id=1, day=date(2026, 7, 20))
+    assert result.supported is False
+    assert result.document_ids == []
+
+
+def test_list_bo_document_ids_with_runs_on_404_config_raises(service, mock_config_repo):
+    mock_config_repo.get.return_value = None
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        service.list_bo_document_ids_with_runs_on(config_id=99, day=date(2026, 7, 20))
+    assert exc_info.value.status_code == 404
+
+
+def test_list_bo_document_ids_with_runs_on_wraps_errors_as_502(service):
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.list_document_ids_with_runs_on.side_effect = Exception("boom")
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            service.list_bo_document_ids_with_runs_on(config_id=1, day=date(2026, 7, 20))
+    assert exc_info.value.status_code == 502
 
 
 # ---------------------------------------------------------------------------

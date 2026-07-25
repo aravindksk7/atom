@@ -612,6 +612,11 @@ class BOReportOut(BaseModel):
     report_index: int = 0
 
 
+class BODocRanOnOut(BaseModel):
+    document_ids: list[str]
+    supported: bool = True
+
+
 class AdapterTestOut(BaseModel):
     ok: bool
     message: str

@@ -4,11 +4,12 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from datetime import date
 
 from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
-from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BOReportOut
+from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
@@ -240,6 +241,27 @@ class AdapterService:
             finally:
                 client.logout()
         return [BODocOut(id=d["id"], name=d["name"], folder=d.get("folder", "")) for d in raw]
+
+    def list_bo_document_ids_with_runs_on(
+        self,
+        config_id: int,
+        day: date,
+        auth: SAPBOAuthContext | None = None,
+    ) -> BODocRanOnOut:
+        env = self._get_env_config(config_id)
+        with _bo_lock:
+            client = self._client_for_auth(env, auth)
+            try:
+                self._authenticate_if_needed(client, auth)
+                document_ids = client.list_document_ids_with_runs_on(day)
+            except Exception as exc:
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
+            finally:
+                client.logout()
+        if document_ids is None:
+            return BODocRanOnOut(document_ids=[], supported=False)
+        return BODocRanOnOut(document_ids=document_ids, supported=True)
 
     def list_bo_reports(
         self,
