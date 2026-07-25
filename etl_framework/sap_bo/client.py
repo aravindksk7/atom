@@ -184,8 +184,17 @@ class BORestClient:
         *fallback_keys: str,
         error_report_id: str | None = None,
         not_found_report_id: str | None = None,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], bool]:
         """Page through a biprws collection endpoint.
+
+        Returns `(items, stuck)`. `stuck` is True only when the page-param
+        repeat quirk fired *and* the Range-header retry also came back empty/
+        repeated -- i.e. both known pagination mechanisms are confirmed
+        defeated (by an intermediary cache/gateway, or a server that just
+        doesn't support either past its admin-configured page cap). Callers
+        that have a non-paginated last resort (list_documents' CMS query) use
+        this to decide whether it's worth trying; callers without one
+        (list_reports) can ignore it.
 
         biprws paginates these collections and the page size is
         admin-configured in CMC (observed defaulting to as few as 10). Some
@@ -212,6 +221,7 @@ class BORestClient:
         page = 1
         previous_batch_size: int | None = None
         previous_batch_ids: list[str] | None = None
+        stuck = False
         while page <= self._MAX_PAGES:
             response = self._session.get(
                 url,
@@ -251,6 +261,8 @@ class BORestClient:
                         "past the page-param repeat", len(extra), url,
                     )
                     raw.extend(extra)
+                else:
+                    stuck = True
                 break
             raw.extend(batch)
             if not batch or (previous_batch_size is not None and len(batch) < previous_batch_size):
@@ -264,7 +276,7 @@ class BORestClient:
             page += 1
         result = _dedupe_by_id(raw)
         logger.debug("SAP BO pagination for %s: %d page(s), %d item(s) after dedupe", url, page, len(result))
-        return result
+        return result, stuck
 
     def _paginate_biprws_range_continuation(
         self,
@@ -335,12 +347,70 @@ class BORestClient:
             page_count += 1
         return collected
 
+    CMS_QUERY_ENDPOINT = "/biprws/v1/cmsquery"
+
+    def _list_documents_via_cms_query(self) -> list[dict] | None:
+        """Non-paginated last resort for listing WebI documents: a single
+        `POST /biprws/v1/cmsquery` CeQL query returns the full result set in
+        one response, with no page/Range mechanism for an intermediary cache
+        or gateway to silently defeat (see `_paginate_biprws_collection`'s
+        docstring for the live failure -- page param AND Range header AND
+        no-cache headers all re-served the same 10 items -- this works
+        around).
+
+        Returns None (not an empty list) when the endpoint itself isn't
+        available/supported (older BOE version, disabled at the CMC level,
+        etc.), so the caller can tell "unsupported" apart from "zero
+        documents" and fall back to whatever the paginated attempt collected.
+
+        No equivalent exists for `list_reports`: WebI report tabs are part of
+        a document's internal structure, not CI_INFOOBJECTS rows queryable
+        via CeQL.
+        """
+        url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
+        query = "SELECT SI_ID, SI_NAME, SI_ANCESTOR FROM CI_INFOOBJECTS WHERE SI_KIND='Webi' ORDER BY SI_ID"
+        response = self._session.post(
+            url,
+            json={"query": query},
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache, no-store",
+                "Pragma": "no-cache",
+            },
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            logger.warning(
+                "SAP BO CMS query endpoint unavailable for document listing (HTTP %d) -- "
+                "keeping only the paginated /raylight/v1/documents result",
+                response.status_code,
+            )
+            return None
+        raw = _unwrap_collection(response.json(), "documents", "document", "entries")
+        results = []
+        for d in raw:
+            doc_id = str(d.get("SI_ID", d.get("id", "")))
+            if not doc_id:
+                logger.warning("SAP BO CMS query document entry missing SI_ID/id, raw entry: %r", d)
+            results.append({
+                "id": doc_id,
+                "name": d.get("SI_NAME", d.get("name", "")),
+                "folder": str(d.get("SI_ANCESTOR", d.get("folder", ""))),
+            })
+        return results
+
     def list_documents(self) -> list[dict]:
         """GET /biprws/raylight/v1/documents — list all WebI documents."""
         if not self._token:
             self.authenticate()
         url = f"{self._base_url}/biprws/raylight/v1/documents"
-        raw = self._paginate_biprws_collection(url, "documents", "document", "entries")
+        raw, stuck = self._paginate_biprws_collection(url, "documents", "document", "entries")
+        if stuck:
+            cms_results = self._list_documents_via_cms_query()
+            if cms_results is not None:
+                return cms_results
         results = []
         for d in raw:
             doc_id = str(d.get("id", ""))
@@ -358,7 +428,7 @@ class BORestClient:
         if not self._token:
             self.authenticate()
         url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports"
-        raw = self._paginate_biprws_collection(
+        raw, _stuck = self._paginate_biprws_collection(
             url, "reports", "report",
             error_report_id=doc_id, not_found_report_id=doc_id,
         )

@@ -301,7 +301,11 @@ def test_list_documents_stops_when_server_ignores_page_param(authenticated_clien
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = {"documents": same_page}
-    with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get:
+    post_resp = MagicMock()
+    post_resp.status_code = 404
+    post_resp.text = "not found"
+    with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get, \
+         patch.object(authenticated_client._session, "post", return_value=post_resp):
         docs = authenticated_client.list_documents()
     assert len(docs) == 10
     assert mock_get.call_count == 3
@@ -370,13 +374,91 @@ def test_list_documents_logs_when_range_header_recovers_nothing(authenticated_cl
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = {"documents": same_page}
+    post_resp = MagicMock()
+    post_resp.status_code = 404
+    post_resp.text = "not found"
     with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
-        with patch.object(authenticated_client._session, "get", return_value=resp):
+        with patch.object(authenticated_client._session, "get", return_value=resp), \
+             patch.object(authenticated_client._session, "post", return_value=post_resp):
             authenticated_client.list_documents()
     assert any(
         "range-header pagination" in rec.message.lower() and "did not return" in rec.message.lower()
         for rec in caplog.records
     )
+
+
+def test_list_documents_falls_back_to_cms_query_when_range_also_stuck(authenticated_client):
+    """Live escalation: even the Range-header retry re-served the identical
+    10-item batch (an intermediary that's blind to page param, Range header,
+    and no-cache headers alike -- or the server genuinely doesn't support
+    Range pagination on this endpoint). As a non-paginated last resort, query
+    the CMS directly via CeQL (`POST /biprws/v1/cmsquery`): a single request/
+    response with no page/Range mechanism for anything in front of biprws to
+    silently defeat. Only used when the paginated approach is confirmed stuck
+    (not on every call), and only for documents -- WebI report tabs aren't
+    CMS InfoObjects, so this has no reports equivalent."""
+    same_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = {"documents": same_page}
+
+    cms_entries = [
+        {"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(37)
+    ]
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+    post_resp.json.return_value = {"documents": cms_entries}
+
+    with patch.object(authenticated_client._session, "get", return_value=get_resp), \
+         patch.object(authenticated_client._session, "post", return_value=post_resp) as mock_post:
+        docs = authenticated_client.list_documents()
+
+    assert len(docs) == 37
+    assert docs[0] == {"id": "0", "name": "Doc 0", "folder": "42"}
+    assert mock_post.call_count == 1
+    call_kwargs = mock_post.call_args[1]
+    assert "cmsquery" in mock_post.call_args[0][0]
+    assert "SELECT" in call_kwargs["json"]["query"].upper()
+
+
+def test_list_documents_keeps_raylight_result_when_cms_query_unavailable(authenticated_client):
+    """If the CMS query endpoint itself 404s/errors (older BOE version, or
+    disabled), the browse must not fail -- fall back to whatever the
+    page-param/Range-header attempts already collected rather than losing
+    that real (if incomplete) data."""
+    same_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = {"documents": same_page}
+    post_resp = MagicMock()
+    post_resp.status_code = 404
+    post_resp.text = "not found"
+
+    with patch.object(authenticated_client._session, "get", return_value=get_resp), \
+         patch.object(authenticated_client._session, "post", return_value=post_resp):
+        docs = authenticated_client.list_documents()
+
+    assert len(docs) == 10
+
+
+def test_list_documents_does_not_query_cms_when_pagination_succeeds_normally(authenticated_client):
+    """The CMS-query fallback is a targeted last resort for the confirmed-stuck
+    case, not a call made on every browse -- a normal, healthy paginated fetch
+    must not touch the CMS query endpoint at all."""
+    page_size = 200
+    first_page = [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(page_size)]
+    second_page = [{"id": "200", "name": "Doc 200", "folder": ""}]
+    responses = []
+    for page_docs in (first_page, second_page):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": page_docs}
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "get", side_effect=responses), \
+         patch.object(authenticated_client._session, "post") as mock_post:
+        docs = authenticated_client.list_documents()
+    assert len(docs) == page_size + 1
+    mock_post.assert_not_called()
 
 
 def test_list_documents_dedupes_overlapping_pages(authenticated_client):
