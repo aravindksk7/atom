@@ -7,6 +7,7 @@ import os
 import re
 import ssl
 import zipfile
+from datetime import date
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,16 +44,46 @@ REPORTS = {
 
 # Bulk fixtures for exercising the on-premises CMC page-size cap (PAGE_CAP
 # below) end-to-end: more documents than one page, and one document with
-# more report tabs than one page.
-_BULK_DOC_COUNT = 25
+# more report tabs than one page. Large enough (1200+) to also exercise
+# BORestClient's CMS-query keyset pagination (_PAGE_REQUEST_SIZE=200) for
+# the run-date filter, which has no raylight-collection equivalent and
+# always goes through POST /biprws/v1/cmsquery regardless of document count.
+_BULK_DOC_COUNT = int(os.getenv("SAPBO_MOCK_BULK_DOC_COUNT", "1200"))
 _BULK_REPORT_COUNT = 25
 for _i in range(_BULK_DOC_COUNT):
-    _doc_id = f"2{_i:03d}"
+    _doc_id = f"2{_i:04d}"
     DOCUMENTS.append({"id": _doc_id, "name": f"Bulk Report {_i}", "folder": "/Public Folders/BULK"})
     REPORTS[_doc_id] = [
         {"id": f"rpt-{_doc_id}-{_j}", "name": f"Tab {_j}", "reportIndex": _j}
         for _j in range(_BULK_REPORT_COUNT)
     ]
+
+# Instances ("runs") of documents, used only by the CMS query endpoint
+# (POST /biprws/v1/cmsquery) to power the run-date filter -- a WebI document
+# has no run history of its own; each run is a separate CMS object whose
+# SI_PARENTID points back to the document that owns it.
+#
+# The first 250 bulk documents ran on CMS_QUERY_TEST_DATE -- more than one
+# CeQL page's worth at BORestClient._PAGE_REQUEST_SIZE=200, so filtering by
+# that date must keyset-paginate across at least 2 CMS query calls to
+# collect them all. The next 250 ran on a different day (must NOT appear
+# when filtering by CMS_QUERY_TEST_DATE). The remaining bulk documents
+# never ran at all (also must not appear).
+CMS_QUERY_TEST_DATE = date(2026, 7, 20)
+CMS_QUERY_OTHER_DATE = date(2026, 7, 21)
+INSTANCES: list[dict] = []
+_next_instance_sid = [90000]
+
+
+def _add_instance(parent_id: str, on_date: date) -> None:
+    _next_instance_sid[0] += 1
+    INSTANCES.append({"SI_ID": _next_instance_sid[0], "SI_PARENTID": parent_id, "SI_STARTTIME": on_date})
+
+
+for _i in range(250):
+    _add_instance(f"2{_i:04d}", CMS_QUERY_TEST_DATE)
+for _i in range(250, 500):
+    _add_instance(f"2{_i:04d}", CMS_QUERY_OTHER_DATE)
 
 DATASETS = {
     ("1001", "rpt-sales"): [
@@ -99,6 +130,24 @@ def _rows_for_doc(doc_id: str) -> list[dict]:
     if not reports:
         return []
     return DATASETS.get((doc_id, reports[0]["id"]), [])
+
+
+# --- Minimal CeQL recognizer for POST /biprws/v1/cmsquery -----------------
+# Not a general CeQL parser -- just enough regex extraction to recognize the
+# two query shapes BORestClient actually sends (see etl_framework/sap_bo/
+# client.py's _list_documents_via_cms_query and list_document_ids_with_runs_on):
+# a keyset-paginated "SELECT TOP N ... WHERE SI_KIND='Webi' [AND SI_ID > X]"
+# document listing, and the same shape with an added SI_INSTANCE=1 +
+# SI_STARTTIME range clause for the run-date filter.
+_CEQL_TOP_RE = re.compile(r"SELECT TOP (\d+)")
+_CEQL_CURSOR_RE = re.compile(r"SI_ID > (\d+)")
+_CEQL_DATE_RANGE_RE = re.compile(r"SI_STARTTIME >= @([\d.]+) AND SI_STARTTIME < @([\d.]+)")
+
+
+def _parse_ceql_date_literal(literal: str) -> date:
+    """Parse a CeQL `@yyyy.MM.dd.HH.mm.ss` date literal's date portion."""
+    year, month, day = (int(part) for part in literal.split(".")[:3])
+    return date(year, month, day)
 
 
 def _csv_bytes(rows: list[dict]) -> bytes:
@@ -319,6 +368,65 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
 
         if path == "/biprws/logoff":
             self._send_json(HTTPStatus.OK, {"success": True})
+            return
+
+        if path == "/biprws/v1/cmsquery":
+            if not self._require_token():
+                return
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(length) if length else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
+                return
+            query = payload.get("query", "")
+            top_match = _CEQL_TOP_RE.search(query)
+            top = int(top_match.group(1)) if top_match else 200
+            cursor_match = _CEQL_CURSOR_RE.search(query)
+            cursor = int(cursor_match.group(1)) if cursor_match else None
+
+            if "SI_INSTANCE=1" in query:
+                date_match = _CEQL_DATE_RANGE_RE.search(query)
+                if not date_match:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing SI_STARTTIME range"})
+                    return
+                range_start = _parse_ceql_date_literal(date_match.group(1))
+                range_end = _parse_ceql_date_literal(date_match.group(2))
+                matching = sorted(
+                    (
+                        inst for inst in INSTANCES
+                        if range_start <= inst["SI_STARTTIME"] < range_end
+                        and (cursor is None or inst["SI_ID"] > cursor)
+                    ),
+                    key=lambda inst: inst["SI_ID"],
+                )
+                page = matching[:top]
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"documents": {"document": [
+                        {"SI_ID": str(inst["SI_ID"]), "SI_PARENTID": inst["SI_PARENTID"]}
+                        for inst in page
+                    ]}},
+                )
+                return
+
+            if "SI_KIND='Webi'" in query:
+                matching = sorted(
+                    (doc for doc in DOCUMENTS if cursor is None or int(doc["id"]) > cursor),
+                    key=lambda doc: int(doc["id"]),
+                )
+                page = matching[:top]
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"documents": {"document": [
+                        {"SI_ID": doc["id"], "SI_NAME": doc["name"], "SI_ANCESTOR": doc["folder"]}
+                        for doc in page
+                    ]}},
+                )
+                return
+
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"unsupported CeQL query: {query!r}"})
             return
 
         schedule_match = re.fullmatch(r"/biprws/infostore/([^/]+)/schedules", path)
