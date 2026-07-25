@@ -17,6 +17,9 @@
     expandedBODocs: [],
     boReports: {},         // doc.id → list of reports
     boFilterQuery: '',
+    boRanOnDate: '',
+    boRanOnDocIds: null,   // Set<string> | null — null means no date filter active
+    boRanOnSupported: true,
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showBOJobModal: false,
@@ -75,6 +78,9 @@
       this.expandedBODocs = [];
       this.boReports = {};
       this.boFilterQuery = '';
+      this.boRanOnDate = '';
+      this.boRanOnDocIds = null;
+      this.boRanOnSupported = true;
       try {
         this.boDocs = await api('GET', `/api/adapters/sap-bo/documents?config_id=${this.boConfigId}`);
         this.toast('success', `${this.boDocs.length} documents loaded`);
@@ -82,6 +88,24 @@
         this.toast('error', 'Load failed', e.message);
       } finally {
         this.boLoading = false;
+      }
+    },
+
+    async loadBORanOnDocIds() {
+      if (!this.boRanOnDate) {
+        this.boRanOnDocIds = null;
+        this.boRanOnSupported = true;
+        return;
+      }
+      if (!this.boConfigId) return;
+      try {
+        const result = await api('GET',
+          `/api/adapters/sap-bo/documents/ran-on?config_id=${this.boConfigId}&run_date=${this.boRanOnDate}`);
+        this.boRanOnSupported = result.supported;
+        this.boRanOnDocIds = new Set(result.document_ids);
+      } catch (e) {
+        this.toast('error', 'Run-date filter failed', e.message);
+        this.boRanOnDocIds = null;
       }
     },
 
@@ -108,8 +132,11 @@
     },
 
     get filteredBODocs() {
-      if (!this.boFilterQuery.trim()) return this.boDocs;
-      return this.boDocs.filter(doc => this.boDocMatchesQuery(doc) || this.boDocHasMatchingReport(doc));
+      const dateFiltered = this.boRanOnDocIds
+        ? this.boDocs.filter(doc => this.boRanOnDocIds.has(doc.id))
+        : this.boDocs;
+      if (!this.boFilterQuery.trim()) return dateFiltered;
+      return dateFiltered.filter(doc => this.boDocMatchesQuery(doc) || this.boDocHasMatchingReport(doc));
     },
 
     boFilteredReports(doc) {

@@ -57,6 +57,14 @@
                  data-testid="bo-doc-search-input" />
           <p class="text-xs text-muted mt-1">Matches document name/folder/id, and report names once a document has been expanded.</p>
         </div>
+        <div class="mb-3">
+          <label class="field-label">Ran on date</label>
+          <input type="date" x-model="boRanOnDate" @change="loadBORanOnDocIds()" class="field-input"
+                 data-testid="bo-doc-ran-on-input" />
+          <template x-if="boRanOnDate && !boRanOnSupported">
+            <p class="text-xs text-rose-600 mt-1">Run-date filtering isn't available against this SAP BO server.</p>
+          </template>
+        </div>
         <template x-if="boFilterQuery.trim() && filteredBODocs.length === 0">
           <div class="text-muted text-sm px-3 py-2">No documents or loaded reports match "<span x-text="boFilterQuery"></span>"</div>
         </template>
