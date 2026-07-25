@@ -641,10 +641,15 @@ to:
         const result = await api('GET',
           `/api/adapters/sap-bo/documents/ran-on?config_id=${this.boConfigId}&run_date=${this.boRanOnDate}`);
         this.boRanOnSupported = result.supported;
-        this.boRanOnDocIds = new Set(result.document_ids);
+        // new Set([]) is truthy in JS regardless of contents -- only assign a
+        // real filter set when the server actually supports the query, or
+        // an unsupported response silently filters every document out
+        // instead of falling back to "show everything, note it's unsupported".
+        this.boRanOnDocIds = result.supported ? new Set(result.document_ids) : null;
       } catch (e) {
         this.toast('error', 'Run-date filter failed', e.message);
         this.boRanOnDocIds = null;
+        this.boRanOnSupported = true;
       }
     },
 ```
