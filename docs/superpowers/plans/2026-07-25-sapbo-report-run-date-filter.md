@@ -4,7 +4,7 @@
 
 **Goal:** Let a user filter the Adapters tab's SAP BO document list down to documents that ran on a specific day, composable with the existing text search.
 
-**Architecture:** A new `BORestClient` method keyset-paginates a CeQL query against `/biprws/v1/cmsquery` for instances (`SI_INSTANCE=1`) whose `SI_STARTTIME` falls in the selected day, collecting the distinct `SI_PARENTID` (owning document) values. A new service method and route expose this as `GET /api/adapters/sap-bo/documents/ran-on?config_id=X&date=YYYY-MM-DD`. The frontend adds a date input next to the existing search box, ANDing the returned document-id set into the existing `filteredBODocs` computed list.
+**Architecture:** A new `BORestClient` method keyset-paginates a CeQL query against `/biprws/v1/cmsquery` for instances (`SI_INSTANCE=1`) whose `SI_STARTTIME` falls in the selected day, collecting the distinct `SI_PARENTID` (owning document) values. A new service method and route expose this as `GET /api/adapters/sap-bo/documents/ran-on?config_id=X&run_date=YYYY-MM-DD`. The frontend adds a date input next to the existing search box, ANDing the returned document-id set into the existing `filteredBODocs` computed list.
 
 **Tech Stack:** Python (FastAPI, Pydantic, requests), Alpine.js frontend, pytest.
 
@@ -430,7 +430,7 @@ def test_list_bo_document_ids_with_runs_on_returns_result(client, mock_adapter_s
     mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
         document_ids=["500", "501"], supported=True,
     )
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=2026-07-20")
     assert resp.status_code == 200
     assert resp.json() == {"document_ids": ["500", "501"], "supported": True}
     from datetime import date
@@ -444,13 +444,13 @@ def test_list_bo_document_ids_with_runs_on_reports_unsupported(client, mock_adap
     mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
         document_ids=[], supported=False,
     )
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=2026-07-20")
     assert resp.status_code == 200
     assert resp.json() == {"document_ids": [], "supported": False}
 
 
 def test_list_bo_document_ids_with_runs_on_rejects_malformed_date(client):
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=not-a-date")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=not-a-date")
     assert resp.status_code == 422
 ```
 
@@ -532,11 +532,11 @@ and add this new route right after it:
 @router.get("/sap-bo/documents/ran-on", response_model=BODocRanOnOut)
 def list_bo_document_ids_with_runs_on(
     config_id: int,
-    date: date,
+    run_date: date,
     request: Request,
     service: AdapterService = Depends(get_adapter_service),
 ):
-    return service.list_bo_document_ids_with_runs_on(config_id, date, _sap_bo_auth_from_request(request))
+    return service.list_bo_document_ids_with_runs_on(config_id, run_date, _sap_bo_auth_from_request(request))
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -639,7 +639,7 @@ to:
       if (!this.boConfigId) return;
       try {
         const result = await api('GET',
-          `/api/adapters/sap-bo/documents/ran-on?config_id=${this.boConfigId}&date=${this.boRanOnDate}`);
+          `/api/adapters/sap-bo/documents/ran-on?config_id=${this.boConfigId}&run_date=${this.boRanOnDate}`);
         this.boRanOnSupported = result.supported;
         this.boRanOnDocIds = new Set(result.document_ids);
       } catch (e) {

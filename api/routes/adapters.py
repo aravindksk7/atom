@@ -135,11 +135,11 @@ def list_bo_documents(
 @router.get("/sap-bo/documents/ran-on", response_model=BODocRanOnOut)
 def list_bo_document_ids_with_runs_on(
     config_id: int,
-    date: date,
+    run_date: date,
     request: Request,
     service: AdapterService = Depends(get_adapter_service),
 ):
-    return service.list_bo_document_ids_with_runs_on(config_id, date, _sap_bo_auth_from_request(request))
+    return service.list_bo_document_ids_with_runs_on(config_id, run_date, _sap_bo_auth_from_request(request))
 
 
 @router.get("/sap-bo/documents/{doc_id}/reports", response_model=list[BOReportOut])

@@ -163,7 +163,7 @@ def test_list_bo_document_ids_with_runs_on_returns_result(client, mock_adapter_s
     mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
         document_ids=["500", "501"], supported=True,
     )
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=2026-07-20")
     assert resp.status_code == 200
     assert resp.json() == {"document_ids": ["500", "501"], "supported": True}
     from datetime import date
@@ -177,13 +177,13 @@ def test_list_bo_document_ids_with_runs_on_reports_unsupported(client, mock_adap
     mock_adapter_service.list_bo_document_ids_with_runs_on.return_value = BODocRanOnOut(
         document_ids=[], supported=False,
     )
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=2026-07-20")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=2026-07-20")
     assert resp.status_code == 200
     assert resp.json() == {"document_ids": [], "supported": False}
 
 
 def test_list_bo_document_ids_with_runs_on_rejects_malformed_date(client):
-    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&date=not-a-date")
+    resp = client.get("/api/adapters/sap-bo/documents/ran-on?config_id=1&run_date=not-a-date")
     assert resp.status_code == 422
 
 
