@@ -350,47 +350,87 @@ class BORestClient:
     CMS_QUERY_ENDPOINT = "/biprws/v1/cmsquery"
 
     def _list_documents_via_cms_query(self) -> list[dict] | None:
-        """Non-paginated last resort for listing WebI documents: a single
-        `POST /biprws/v1/cmsquery` CeQL query returns the full result set in
-        one response, with no page/Range mechanism for an intermediary cache
-        or gateway to silently defeat (see `_paginate_biprws_collection`'s
-        docstring for the live failure -- page param AND Range header AND
-        no-cache headers all re-served the same 10 items -- this works
-        around).
+        """Non-paginated-transport last resort for listing WebI documents:
+        `POST /biprws/v1/cmsquery` CeQL queries, keyset-paginated via
+        `TOP N ... WHERE SI_ID > :last_seen_id` rather than a page number or
+        Range header -- nothing for an intermediary cache/gateway to defeat,
+        since proxies don't cache POST bodies and each request's body is
+        different by construction (see `_paginate_biprws_collection`'s
+        docstring for the live failure this whole CMS-query path works
+        around: page param AND Range header AND no-cache headers all
+        re-served the same 10 items).
 
-        Returns None (not an empty list) when the endpoint itself isn't
-        available/supported (older BOE version, disabled at the CMC level,
-        etc.), so the caller can tell "unsupported" apart from "zero
-        documents" and fall back to whatever the paginated attempt collected.
+        Live evidence this keyset approach itself was necessary: the CMS
+        query endpoint pages too -- an initial version issuing one
+        unbounded query got exactly one batch back (matching CeQL's
+        server-side default result cap when no TOP/keyset bound is given),
+        not the real (much larger) total.
 
-        No equivalent exists for `list_reports`: WebI report tabs are part of
-        a document's internal structure, not CI_INFOOBJECTS rows queryable
-        via CeQL.
+        Returns None (not an empty list) when the *first* query fails --
+        the endpoint itself isn't available/supported (older BOE version,
+        disabled at the CMC level, etc.) -- so the caller can tell
+        "unsupported" apart from "zero documents" and fall back to whatever
+        the paginated attempt collected. A failure on a *later* page keeps
+        whatever was already collected instead: the endpoint clearly works,
+        so that's real (if incomplete) data worth keeping.
+
+        No equivalent exists for `list_reports`: WebI report tabs are part
+        of a document's internal structure, not CI_INFOOBJECTS rows
+        queryable via CeQL.
         """
         url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
-        query = "SELECT SI_ID, SI_NAME, SI_ANCESTOR FROM CI_INFOOBJECTS WHERE SI_KIND='Webi' ORDER BY SI_ID"
-        response = self._session.post(
-            url,
-            json={"query": query},
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Cache-Control": "no-cache, no-store",
-                "Pragma": "no-cache",
-            },
-            timeout=self._timeout,
-            verify=self._verify_ssl,
-        )
-        if response.status_code >= 400:
-            logger.warning(
-                "SAP BO CMS query endpoint unavailable for document listing (HTTP %d) -- "
-                "keeping only the paginated /raylight/v1/documents result",
-                response.status_code,
+        collected: list[dict] = []
+        last_id: int | None = None
+        page_count = 0
+        while page_count < self._MAX_PAGES:
+            where = "SI_KIND='Webi'" if last_id is None else f"SI_KIND='Webi' AND SI_ID > {last_id}"
+            query = (
+                f"SELECT TOP {self._PAGE_REQUEST_SIZE} SI_ID, SI_NAME, SI_ANCESTOR "
+                f"FROM CI_INFOOBJECTS WHERE {where} ORDER BY SI_ID"
             )
-            return None
-        raw = _unwrap_collection(response.json(), "documents", "document", "entries")
+            response = self._session.post(
+                url,
+                json={"query": query},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-cache, no-store",
+                    "Pragma": "no-cache",
+                },
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            if response.status_code >= 400:
+                if page_count == 0:
+                    logger.warning(
+                        "SAP BO CMS query endpoint unavailable for document listing (HTTP %d) -- "
+                        "keeping only the paginated /raylight/v1/documents result",
+                        response.status_code,
+                    )
+                    return None
+                logger.warning(
+                    "SAP BO CMS query failed past SI_ID %d (HTTP %d) -- keeping the %d "
+                    "document(s) already collected via CMS query",
+                    last_id, response.status_code, len(collected),
+                )
+                break
+            batch = _unwrap_collection(response.json(), "documents", "document", "entries")
+            if not batch:
+                break
+            collected.extend(batch)
+            try:
+                last_id = max(int(d.get("SI_ID", 0)) for d in batch)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "SAP BO CMS query returned a non-numeric SI_ID -- stopping keyset "
+                    "pagination with the %d document(s) collected so far", len(collected),
+                )
+                break
+            if len(batch) < self._PAGE_REQUEST_SIZE:
+                break
+            page_count += 1
         results = []
-        for d in raw:
+        for d in collected:
             doc_id = str(d.get("SI_ID", d.get("id", "")))
             if not doc_id:
                 logger.warning("SAP BO CMS query document entry missing SI_ID/id, raw entry: %r", d)

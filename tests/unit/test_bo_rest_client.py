@@ -441,6 +441,72 @@ def test_list_documents_keeps_raylight_result_when_cms_query_unavailable(authent
     assert len(docs) == 10
 
 
+def test_list_documents_cms_query_pages_past_its_own_default_result_cap(authenticated_client):
+    """Live evidence: after the CMS-query fallback shipped, the on-prem
+    deployment returned exactly one un-paginated batch (matching CeQL's
+    server-side default result cap when no TOP/keyset bound is given) instead
+    of the real 5000+ documents -- the CMS query endpoint pages too, just via
+    its own mechanism, not query-string page/pagesize. Use `TOP N` plus a
+    keyset `WHERE SI_ID > :last_seen_id` cursor, driven by rewriting the CeQL
+    query body each request (not a page number or header), so nothing in
+    front of biprws can defeat it: proxies don't cache POST bodies, and a
+    strictly-increasing WHERE clause can't get stuck re-serving the same
+    content the way `page`/`Range` did."""
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = {"documents": [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]}
+
+    batch1 = [{"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(1, 201)]
+    batch2 = [{"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(201, 401)]
+    batch3 = [{"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(401, 451)]
+    post_responses = []
+    for batch in (batch1, batch2, batch3):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"documents": batch}
+        post_responses.append(resp)
+
+    with patch.object(authenticated_client._session, "get", return_value=get_resp), \
+         patch.object(authenticated_client._session, "post", side_effect=post_responses) as mock_post:
+        docs = authenticated_client.list_documents()
+
+    assert len(docs) == 450
+    assert [d["id"] for d in docs] == [str(i) for i in range(1, 451)]
+    assert mock_post.call_count == 3
+    first_query = mock_post.call_args_list[0][1]["json"]["query"]
+    second_query = mock_post.call_args_list[1][1]["json"]["query"]
+    third_query = mock_post.call_args_list[2][1]["json"]["query"]
+    assert "SI_ID >" not in first_query
+    assert "SI_ID > 200" in second_query
+    assert "SI_ID > 400" in third_query
+
+
+def test_list_documents_cms_query_keeps_partial_data_when_a_later_page_fails(authenticated_client):
+    """A failure on the *first* CMS query call means the endpoint is
+    unsupported (return None, fall back to raylight's result -- see the
+    unavailable test above). A failure on a *later* page during keyset
+    pagination is different: the endpoint works, we already have real data
+    from it, and should keep that partial result rather than discarding it
+    or falling back to the (smaller) raylight result."""
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = {"documents": [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]}
+
+    batch1 = [{"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(1, 201)]
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.json.return_value = {"documents": batch1}
+    fail_resp = MagicMock()
+    fail_resp.status_code = 503
+    fail_resp.text = "service unavailable"
+
+    with patch.object(authenticated_client._session, "get", return_value=get_resp), \
+         patch.object(authenticated_client._session, "post", side_effect=[ok_resp, fail_resp]):
+        docs = authenticated_client.list_documents()
+
+    assert len(docs) == 200
+
+
 def test_list_documents_does_not_query_cms_when_pagination_succeeds_normally(authenticated_client):
     """The CMS-query fallback is a targeted last resort for the confirmed-stuck
     case, not a call made on every browse -- a normal, healthy paginated fetch
