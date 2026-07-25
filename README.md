@@ -2475,32 +2475,6 @@ print(result.summary)          # {'new': 3, 'resolved': 7, 'persistent': 12}
 print(result.has_regressions)  # True
 ```
 
-### AWS S3 (`etl_framework/aws_s3`)
-
-```python
-from etl_framework.aws.config import AWSConfig
-from etl_framework.aws.session import AWSSession
-from etl_framework.aws_s3.client import S3Client
-from etl_framework.aws_s3.metadata import read_object_metadata
-from etl_framework.aws_s3.row_count import RowCounter
-from etl_framework.aws_s3.partitions import discover_partitions
-from etl_framework.aws_s3.formats import validate_format
-import pyarrow.fs as pafs
-
-session = AWSSession(AWSConfig(region="us-east-1"))
-client = S3Client(session)
-
-meta = read_object_metadata(client, "my-bucket", "data/part-0.parquet")
-
-fs = pafs.S3FileSystem(region="us-east-1")
-count = RowCounter(client, fs=fs).count("my-bucket", "data/part-0.parquet", "parquet")
-
-scheme = discover_partitions(client, "my-bucket", "table/")
-
-validate_format(client, "my-bucket", "data/part-0.parquet", "parquet",
-                expected_schema={"id": "int64", "name": "string"})
-```
-
 ## Data Contracts
 
 Data Contracts are a governance layer that links a named contract to a source ETL job and enforces ownership, SLA, and breach notifications automatically.

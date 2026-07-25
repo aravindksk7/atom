@@ -25,9 +25,14 @@ def discover_partitions(
 ) -> PartitionScheme:
     """Discover a Hive-style partition scheme under ``prefix``.
 
-    Objects with no ``key=value`` segments are ignored. When ``fmt`` and
-    ``row_counter`` are supplied, per-partition row counts are attached.
+    Objects with no ``key=value`` segments are ignored. Per-partition row
+    counts are attached only when ``fmt`` and ``row_counter`` are supplied
+    together; passing exactly one of them is a usage error (raises ValueError),
+    not a silent no-op.
     """
+    if (fmt is None) != (row_counter is None):
+        raise ValueError("fmt and row_counter must be provided together")
+
     columns: list[str] = []
     # leaf partition (tuple of pairs) -> object keys under it
     leaves: dict[tuple[tuple[str, str], ...], list[str]] = {}

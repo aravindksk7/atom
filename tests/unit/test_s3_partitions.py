@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -7,6 +9,7 @@ from moto import mock_aws
 from etl_framework.aws.config import AWSConfig
 from etl_framework.aws.session import AWSSession
 from etl_framework.aws_s3.client import S3Client
+from etl_framework.aws_s3.models import RowCountResult
 from etl_framework.aws_s3.partitions import discover_partitions
 
 
@@ -45,3 +48,20 @@ def test_ignores_non_hive_keys(s3_client):
     s3_client._s3.put_object(Bucket="lake", Key="t/_SUCCESS", Body=b"")
     scheme = discover_partitions(s3_client, "lake", "t/")
     assert scheme.columns == ["dt", "region"]
+
+
+def test_attaches_summed_row_counts_per_partition(s3_client):
+    # each object reports 10 rows; the 2-object leaf partition sums to 20.
+    counter = MagicMock()
+    counter.count.side_effect = lambda bucket, key, fmt: RowCountResult(
+        bucket=bucket, key=key, fmt=fmt, row_count=10, engine="pyarrow_footer"
+    )
+    scheme = discover_partitions(s3_client, "lake", "t/", fmt="parquet", row_counter=counter)
+    by_values = {tuple(e.values.items()): e.row_count for e in scheme.entries}
+    assert by_values[(("dt", "2026-01-01"), ("region", "us"))] == 20
+    assert by_values[(("dt", "2026-01-01"), ("region", "eu"))] == 10
+
+
+def test_fmt_without_row_counter_raises(s3_client):
+    with pytest.raises(ValueError, match="together"):
+        discover_partitions(s3_client, "lake", "t/", fmt="parquet")
