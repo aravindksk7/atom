@@ -102,10 +102,11 @@
         const result = await api('GET',
           `/api/adapters/sap-bo/documents/ran-on?config_id=${this.boConfigId}&run_date=${this.boRanOnDate}`);
         this.boRanOnSupported = result.supported;
-        this.boRanOnDocIds = new Set(result.document_ids);
+        this.boRanOnDocIds = result.supported ? new Set(result.document_ids) : null;
       } catch (e) {
         this.toast('error', 'Run-date filter failed', e.message);
         this.boRanOnDocIds = null;
+        this.boRanOnSupported = true;
       }
     },
 
