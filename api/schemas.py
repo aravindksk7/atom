@@ -1022,3 +1022,72 @@ class BulkMismatchDecisionOut(BaseModel):
     matched_count: int = 0
     decided_count: int = 0
     result_status_updated: bool = False
+
+
+S3FileFormat = Literal["csv", "json", "parquet", "orc"]
+
+
+class S3MetadataRequest(BaseModel):
+    config_id: int
+    bucket: str
+    key: str
+
+
+class S3RowCountRequest(BaseModel):
+    config_id: int
+    bucket: str
+    key: str
+    fmt: S3FileFormat
+
+
+class S3PartitionsRequest(BaseModel):
+    config_id: int
+    bucket: str
+    prefix: str
+
+
+class S3ValidateFormatRequest(BaseModel):
+    config_id: int
+    bucket: str
+    key: str
+    fmt: S3FileFormat
+    expected_schema: dict[str, str] | None = None
+
+
+class ObjectMetadataOut(BaseModel):
+    bucket: str
+    key: str
+    size_bytes: int
+    last_modified: datetime
+    etag: str
+    storage_class: str
+    content_type: str
+
+
+class RowCountOut(BaseModel):
+    bucket: str
+    key: str
+    fmt: S3FileFormat
+    row_count: int
+    engine: Literal["s3_select", "pyarrow_footer"]
+
+
+class PartitionEntryOut(BaseModel):
+    values: dict[str, str]
+    object_count: int
+    row_count: int | None = None
+
+
+class PartitionSchemeOut(BaseModel):
+    columns: list[str]
+    entries: list[PartitionEntryOut]
+
+
+class FormatValidationOut(BaseModel):
+    bucket: str
+    key: str
+    fmt: S3FileFormat
+    parsed: bool
+    schema_ok: bool | None = None
+    missing_columns: list[str] = Field(default_factory=list)
+    extra_columns: list[str] = Field(default_factory=list)
