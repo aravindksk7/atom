@@ -16,7 +16,7 @@
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
-      // Which AWS service sub-panel is active. Glue/Athena/Airflow are
+      // Which AWS service sub-panel is active. Athena/Airflow are
       // placeholders until their backends land.
       awsService: 's3',
       awsConfigId: '',
@@ -37,6 +37,16 @@
       // come from the error's `.detail`; null for other errors, so
       // downstream templates should tolerate them being absent.
       awsError: null,
+      awsGlueSourceDatabase: '',
+      awsGlueSourceTable: '',
+      awsGlueTargetDatabase: '',
+      awsGlueTargetTable: '',
+      awsGlueCompareLocation: true,
+      awsGlueCompareFormats: true,
+      awsGlueComparePartitions: true,
+      awsGlueResult: null,
+      awsGlueError: null,
+      awsGlueJobName: '',
 
       _awsReset() {
         this.awsResult = null;
@@ -164,6 +174,44 @@
         if (expectedColumns.length) params.expected_columns = expectedColumns;
         if (this.awsMinPartitions !== '') params.min_partitions = Number(this.awsMinPartitions);
         await this._awsCreateJob('s3_partition_check', params);
+      },
+
+      _awsGlueParams() {
+        return {
+          config_id: Number(this.awsConfigId),
+          source_database: this.awsGlueSourceDatabase,
+          source_table: this.awsGlueSourceTable,
+          target_database: this.awsGlueTargetDatabase,
+          target_table: this.awsGlueTargetTable,
+          compare_location: !!this.awsGlueCompareLocation,
+          compare_formats: !!this.awsGlueCompareFormats,
+          compare_partitions: !!this.awsGlueComparePartitions,
+        };
+      },
+
+      async awsGlueCompareTables() {
+        this.awsGlueError = null;
+        this.awsGlueResult = null;
+        try {
+          this.awsGlueResult = await api('POST', '/api/aws/glue/compare-tables', this._awsGlueParams());
+        } catch (e) {
+          this.awsGlueError = e.message;
+          this.toast('error', 'Glue compare failed', e.message);
+        }
+      },
+
+      async awsCreateGlueCatalogCompareJob() {
+        this.awsGlueError = null;
+        const name = (this.awsGlueJobName || ['glue', this.awsGlueSourceDatabase, this.awsGlueSourceTable, this.awsGlueTargetDatabase, this.awsGlueTargetTable].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'aws_glue_catalog_compare', params: this._awsGlueParams(), key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Glue job created', name);
+          this.awsGlueJobName = '';
+        } catch (e) {
+          this.awsGlueError = e.message;
+          this.toast('error', 'Glue job creation failed', e.message);
+        }
       },
     };
   };

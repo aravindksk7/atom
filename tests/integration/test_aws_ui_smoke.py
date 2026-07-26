@@ -50,3 +50,13 @@ def test_aws_tab_contains_s3_job_creation_controls():
     assert "data-testid=\"aws-min-rows-input\"" in html
     assert "data-testid=\"aws-expected-columns-input\"" in html
     assert "Type mismatches:" in html
+
+
+def test_aws_tab_contains_glue_catalog_controls():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert "data-testid=\"aws-service-glue\"" in html
+    assert "disabled title=\"Coming soon\" class=\"sub-tab\">Athena" in html
+    assert "disabled title=\"Coming soon\" class=\"sub-tab\">Airflow" in html
+    assert "data-testid=\"aws-glue-source-database-input\"" in html
+    assert "data-testid=\"aws-glue-compare-btn\"" in html
+    assert "data-testid=\"aws-glue-create-job-btn\"" in html
