@@ -60,3 +60,13 @@ def test_validate_format_drift_raises(svc_and_bucket):
     with pytest.raises(SchemaValidationError):
         svc.validate_format(1, bucket, "a/1.csv", "csv",
                             expected_schema={"id": "int", "missing": "int"})
+
+
+def test_missing_config_id_raises_404():
+    from fastapi import HTTPException
+    repo = MagicMock()
+    repo.get.return_value = None
+    svc = AwsS3Service(repo)
+    with pytest.raises(HTTPException) as exc:
+        svc.metadata(999, "b", "k")
+    assert exc.value.status_code == 404

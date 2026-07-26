@@ -7,13 +7,11 @@
   // HTTP convention: uses the module-level `api(method, path, body)` helper
   // defined in app.js (same one adapters.js/compare.js/etc. call directly,
   // not via `this.`). It attaches the bearer token, returns the parsed JSON
-  // body on success, and on a non-2xx response throws an Error whose
-  // `.message` is already reduced to a display string (via app.js's
-  // apiErrorMessage — it prefers `detail.message` when the FastAPI `detail`
-  // is an object). That means structured fields the aws_s3 routes attach to
-  // `detail` (`missing_in_target` / `extra_in_target` for schema-validation
-  // errors) are not preserved on the thrown Error — only the flattened
-  // message is. See awsError below.
+  // body on success, and on a non-2xx response throws an Error carrying both
+  // `.message` (a flattened display string via app.js's apiErrorMessage) and
+  // `.detail` (the raw FastAPI `detail`). The aws_s3 routes put
+  // `missing_in_target` / `extra_in_target` on `detail` for schema-validation
+  // errors; `_awsPost` reads them off `e.detail` into awsError. See below.
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
@@ -28,10 +26,9 @@
       awsExpectedSchemaRaw: '',   // JSON text, optional
       awsLoading: false,
       awsResult: null,            // { kind, data }
-      // { message, missing?, extra? } — missing/extra are populated only if
-      // the caught error happens to carry them (it currently won't, given
-      // api()'s error-flattening; see note above), so downstream templates
-      // should tolerate them being absent.
+      // { message, missing?, extra? } — missing/extra come from the error's
+      // `.detail` (schema-validation drift); null for other errors, so
+      // downstream templates should tolerate them being absent.
       awsError: null,
 
       _awsReset() {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pyarrow.fs as pafs
+from fastapi import HTTPException
 
 from api.schemas import (
     FormatValidationOut,
@@ -30,6 +31,8 @@ class AwsS3Service:
 
     def _env(self, config_id: int) -> EnvironmentConfig:
         cfg = self._config_repo.get(config_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="Config not found")
         return EnvironmentConfig(name=cfg.env_name, **cfg.config_json)
 
     def _client(self, config_id: int) -> S3Client:
