@@ -95,7 +95,7 @@ test.describe('02 launch/jobs', () => {
     await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
 
     await authedPage.locator('input.field-input[placeholder="101"]').fill('9001');
-    await authedPage.locator('input.field-input[placeholder="1"]').fill('2');
+    await authedPage.locator('input.field-input[x-model="jobModal.bo_page_id"]').fill('2');
 
     await authedPage.locator('[data-testid="job-modal-bo-live-target-mode-upload"]').click();
     await authedPage.locator('[data-testid="job-modal-bo-live-target-upload-input"]')
