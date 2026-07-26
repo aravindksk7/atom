@@ -16,6 +16,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
+from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
 from api.services.frame_engine import FrameEngine
 from etl_framework.aws_s3.formats import validate_format
@@ -461,6 +462,8 @@ class RunExecutor:
             return self._build_case_s3_format_validation(job)
         if job.job_type == "s3_partition_check":
             return self._build_case_s3_partition_check(job)
+        if job.job_type == "aws_glue_catalog_compare":
+            return self._build_case_aws_glue_catalog_compare(job)
         if job.job_type == "freshness":
             return self._build_case_freshness(job)
         if job.job_type == "schema_snapshot":
@@ -1088,6 +1091,59 @@ class RunExecutor:
         if p.get("min_partitions") not in (None, "") and len(entries) < int(p["min_partitions"]):
             mismatches.append(MismatchRecord({"job": job.name}, "partition_count", int(p["min_partitions"]), len(entries), "partition_count_below_min"))
         return self._s3_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+
+    # -- AWS Glue Jobs -------------------------------------------------------
+
+    def _build_case_aws_glue_catalog_compare(self, job: JobDefinition):
+        def run_glue_catalog_compare() -> ReconciliationResult:
+            return self._execute_aws_glue_catalog_compare(job)
+        return run_glue_catalog_compare
+
+    def _execute_aws_glue_catalog_compare(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        metrics: dict[str, Any] = {
+            "config_id": p.get("config_id") or p.get("config"),
+            "source_database": p.get("source_database"),
+            "source_table": p.get("source_table"),
+            "target_database": p.get("target_database"),
+            "target_table": p.get("target_table"),
+        }
+        try:
+            compared = AwsGlueService(ConfigRepository(self._db)).compare_tables(
+                self._s3_config_id(job),
+                p.get("source_database"),
+                p.get("source_table"),
+                p.get("target_database"),
+                p.get("target_table"),
+                compare_location=p.get("compare_location", True),
+                compare_formats=p.get("compare_formats", True),
+                compare_partitions=p.get("compare_partitions", True),
+            )
+        except Exception as exc:
+            return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=0, target_row_count=0, matched_count=0, missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1, mismatches=[MismatchRecord({"job": job.name}, "glue", "ok", str(exc), "glue_error")], status=TestStatus.ERROR, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": {**metrics, "error": str(exc)}, "by_type": {"glue_error": 1}})
+
+        source_cols = compared.source.get("columns", [])
+        target_cols = compared.target.get("columns", [])
+        diff = compared.diff
+        metrics.update({"match": compared.match, "source_column_count": len(source_cols), "target_column_count": len(target_cols), "source_partition_key_count": len(compared.source.get("partition_keys", [])), "target_partition_key_count": len(compared.target.get("partition_keys", []))})
+        mismatches: list[MismatchRecord] = []
+        for col in diff.get("missing_columns") or []:
+            mismatches.append(MismatchRecord({"job": job.name}, col, "present", "missing", "missing_columns"))
+        for col in diff.get("extra_columns") or []:
+            mismatches.append(MismatchRecord({"job": job.name}, col, "absent", "present", "extra_columns"))
+        for item in diff.get("type_mismatches") or []:
+            mismatches.append(MismatchRecord({"job": job.name}, item["column"], item["expected_type"], item["actual_type"], "type_mismatch"))
+        for item in diff.get("partition_key_mismatches") or []:
+            mismatches.append(MismatchRecord({"job": job.name}, "partition_keys", item.get("source"), item.get("target"), "partition_key_mismatch"))
+        if diff.get("location_mismatch"):
+            item = diff["location_mismatch"]
+            mismatches.append(MismatchRecord({"job": job.name}, "location", item.get("source"), item.get("target"), "location_mismatch"))
+        if diff.get("format_mismatch"):
+            mismatches.append(MismatchRecord({"job": job.name}, "formats", "source", "target", "format_mismatch"))
+        by_type = {m.mismatch_type: sum(1 for x in mismatches if x.mismatch_type == m.mismatch_type) for m in mismatches}
+        return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=len(source_cols), target_row_count=len(target_cols), matched_count=0 if mismatches else 1, missing_in_target_count=len(diff.get("missing_columns") or []), missing_in_source_count=len(diff.get("extra_columns") or []), value_mismatch_count=len(mismatches), mismatches=mismatches, status=TestStatus.FAILED if mismatches else TestStatus.PASSED, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": metrics, "by_type": by_type, "catalog_diff": diff})
 
     # -- Freshness -----------------------------------------------------------
 
