@@ -13,6 +13,16 @@
     <button type="button" data-testid="aws-service-airflow" disabled title="Coming soon" class="sub-tab">Airflow</button>
   </div>
 
+  <div class="card mb-4">
+    <label class="field-label">Config</label>
+    <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
+      <option value="">— Select —</option>
+      <template x-for="cfg in configs" :key="cfg.id">
+        <option :value="cfg.id" x-text="cfg.name"></option>
+      </template>
+    </select>
+  </div>
+
   <div x-show="awsService === 's3'">
     <div class="card mb-4">
       <div class="flex items-center justify-between mb-3">
@@ -21,15 +31,6 @@
       </div>
 
       <div class="grid-2 mb-3">
-        <div>
-          <label class="field-label">Config</label>
-          <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
-            <option value="">— Select —</option>
-            <template x-for="cfg in configs" :key="cfg.id">
-              <option :value="cfg.id" x-text="cfg.name"></option>
-            </template>
-          </select>
-        </div>
         <div>
           <label class="field-label">Format</label>
           <select x-model="awsFmt" class="field-input field-select" data-testid="aws-fmt-select">
