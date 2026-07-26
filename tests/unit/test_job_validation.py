@@ -219,3 +219,8 @@ def test_aws_athena_query_requires_query_output_and_valid_options():
     issues = validate_job_definition({"name": "athena_orders", "job_type": "aws_athena_query", "params": {"config_id": 1, "query": "", "output_location": "", "min_rows": 10, "max_rows_assert": 1, "expected_status": "DONE", "metric_assertions": []}})
     fields = {issue.field for issue in issues}
     assert fields == {"params.query", "params.output_location", "params.min_rows", "params.expected_status", "params.metric_assertions"}
+
+
+def test_aws_athena_query_requires_positive_max_attempts():
+    issues = validate_job_definition({"name": "athena_orders", "job_type": "aws_athena_query", "params": {"config_id": 1, "database": "curated", "query": "select 1", "output_location": "s3://out/", "max_attempts": 0}})
+    assert any(issue.field == "params.max_attempts" for issue in issues)

@@ -60,6 +60,20 @@ def _non_negative_int(params: dict[str, Any], field: str, issues: list[Validatio
     return value
 
 
+def _positive_int(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> int | None:
+    if field not in params or params.get(field) in (None, ""):
+        return None
+    try:
+        value = int(params[field])
+    except (TypeError, ValueError):
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a positive integer"))
+        return None
+    if value <= 0:
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a positive integer"))
+        return None
+    return value
+
+
 def _validate_s3_common(params: dict[str, Any], issues: list[ValidationIssue], fields: tuple[str, ...]) -> None:
     if not _has_config_ref(params):
         issues.append(ValidationIssue("params.config_id", "S3 jobs require 'config_id' or 'config' in params"))
@@ -119,7 +133,7 @@ def _validate_aws_athena_query(params: dict[str, Any], issues: list[ValidationIs
     min_rows = _non_negative_int(params, "min_rows", issues)
     max_rows_assert = _non_negative_int(params, "max_rows_assert", issues)
     _non_negative_int(params, "max_rows", issues)
-    _non_negative_int(params, "max_attempts", issues)
+    _positive_int(params, "max_attempts", issues)
     if "poll_interval_seconds" in params:
         try:
             if float(params["poll_interval_seconds"]) < 0:
