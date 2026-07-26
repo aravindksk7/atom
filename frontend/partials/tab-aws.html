@@ -1,0 +1,139 @@
+<div x-show="currentView === 'aws'" x-cloak>
+  <div class="section-header">
+    <div>
+      <div class="section-title">AWS</div>
+      <div class="section-sub">Ad-hoc checks against AWS services — S3 object metadata, row counts, partitions, and format validation</div>
+    </div>
+  </div>
+
+  <div class="compare-subtabs mb-4">
+    <button type="button" data-testid="aws-service-s3" @click="awsService='s3'" :class="awsService === 's3' ? 'sub-tab active' : 'sub-tab'">S3</button>
+    <button type="button" data-testid="aws-service-glue" disabled title="Coming soon" class="sub-tab">Glue</button>
+    <button type="button" data-testid="aws-service-athena" disabled title="Coming soon" class="sub-tab">Athena</button>
+    <button type="button" data-testid="aws-service-airflow" disabled title="Coming soon" class="sub-tab">Airflow</button>
+  </div>
+
+  <div x-show="awsService === 's3'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">Amazon S3</div>
+        <span class="badge badge-purple">Object Checks</span>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Config</label>
+          <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
+            <option value="">— Select —</option>
+            <template x-for="cfg in configs" :key="cfg.id">
+              <option :value="cfg.id" x-text="cfg.name"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Format</label>
+          <select x-model="awsFmt" class="field-input field-select" data-testid="aws-fmt-select">
+            <option value="csv">csv</option>
+            <option value="json">json</option>
+            <option value="parquet">parquet</option>
+            <option value="orc">orc</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Bucket</label>
+          <input x-model="awsBucket" class="field-input" placeholder="my-bucket" data-testid="aws-bucket-input" />
+        </div>
+        <div>
+          <label class="field-label">Key</label>
+          <input x-model="awsKey" class="field-input" placeholder="data/part-0.parquet" data-testid="aws-key-input" />
+        </div>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Prefix</label>
+          <input x-model="awsPrefix" class="field-input" placeholder="table/" data-testid="aws-prefix-input" />
+        </div>
+        <div>
+          <label class="field-label">Expected Schema (JSON, optional)</label>
+          <input x-model="awsExpectedSchemaRaw" class="field-input" placeholder='{"id":"int64"}' data-testid="aws-expected-schema-input" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button @click="awsRunMetadata()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-primary" data-testid="aws-run-metadata-btn">Metadata</button>
+        <button @click="awsRunRowCount()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-primary" data-testid="aws-run-row-count-btn">Row Count</button>
+        <button @click="awsRunPartitions()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsPrefix" class="btn-primary" data-testid="aws-run-partitions-btn">Partitions</button>
+        <button @click="awsRunValidateFormat()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-primary" data-testid="aws-run-validate-format-btn">Validate Format</button>
+      </div>
+
+      <div x-show="awsLoading" class="text-muted" data-testid="aws-loading">Running…</div>
+
+      <template x-if="awsError">
+        <div class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" x-show="awsError" data-testid="aws-error">
+          <span x-text="awsError && awsError.message"></span>
+          <div x-show="awsError && awsError.missing" class="mt-1">Missing: <span x-text="awsError && (awsError.missing || []).join(', ')"></span></div>
+          <div x-show="awsError && awsError.extra" class="mt-1">Extra: <span x-text="awsError && (awsError.extra || []).join(', ')"></span></div>
+        </div>
+      </template>
+
+      <div x-show="awsResult" data-testid="aws-result">
+        <template x-if="awsResult && awsResult.kind === 'metadata'">
+          <div class="overflow-x-auto">
+            <table class="results-table text-sm">
+              <tbody>
+                <tr><th>Size (bytes)</th><td x-text="awsResult.data.size_bytes"></td></tr>
+                <tr><th>Content type</th><td x-text="awsResult.data.content_type"></td></tr>
+                <tr><th>Storage class</th><td x-text="awsResult.data.storage_class"></td></tr>
+                <tr><th>ETag</th><td x-text="awsResult.data.etag"></td></tr>
+                <tr><th>Last modified</th><td x-text="awsResult.data.last_modified"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <template x-if="awsResult && awsResult.kind === 'row_count'">
+          <div class="flex items-center gap-2 text-sm">
+            <span>Rows: <strong x-text="awsResult.data.row_count"></strong></span>
+            <span class="badge badge-blue" x-text="awsResult.data.engine"></span>
+          </div>
+        </template>
+
+        <template x-if="awsResult && awsResult.kind === 'partitions'">
+          <div class="overflow-x-auto">
+            <table class="results-table text-xs">
+              <thead>
+                <tr>
+                  <template x-for="col in awsResult.data.columns" :key="col">
+                    <th x-text="col"></th>
+                  </template>
+                  <th>objects</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(e, awsPartIdx) in awsResult.data.entries" :key="awsPartIdx">
+                  <tr>
+                    <template x-for="col in awsResult.data.columns" :key="col">
+                      <td x-text="e.values[col]"></td>
+                    </template>
+                    <td x-text="e.object_count"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <template x-if="awsResult && awsResult.kind === 'validate_format'">
+          <div class="flex items-center gap-2 text-sm">
+            <span>Parsed: <strong x-text="awsResult.data.parsed"></strong></span>
+            <span>Schema OK: <strong x-text="awsResult.data.schema_ok"></strong></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
