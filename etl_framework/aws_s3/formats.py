@@ -15,6 +15,41 @@ from etl_framework.exceptions import (
 )
 
 
+_TYPE_ALIASES = {
+    "integer": "int64",
+    "long": "int64",
+    "double": "float64",
+    "str": "string",
+    "boolean": "bool",
+}
+
+
+def normalize_schema_type(type_name: str) -> str:
+    normalized = "".join(str(type_name).strip().lower().split())
+    return _TYPE_ALIASES.get(normalized, normalized)
+
+
+def compare_expected_schema(expected: dict[str, str], actual: dict[str, str]) -> dict[str, object]:
+    expected_names = {str(name) for name in expected}
+    actual_names = {str(name) for name in actual}
+    common = sorted(expected_names & actual_names)
+    type_mismatches: list[dict[str, str]] = []
+    for column in common:
+        expected_type = normalize_schema_type(expected[column])
+        actual_type = normalize_schema_type(actual[column])
+        if expected_type != actual_type:
+            type_mismatches.append({
+                "column": column,
+                "expected_type": expected_type,
+                "actual_type": actual_type,
+            })
+    return {
+        "missing_in_target": sorted(expected_names - actual_names),
+        "extra_in_target": sorted(actual_names - expected_names),
+        "type_mismatches": type_mismatches,
+    }
+
+
 def _actual_schema(fmt: str, data: bytes) -> dict[str, str]:
     """Return {column: type_string} for the object's inferred schema."""
     buf = io.BytesIO(data)
@@ -62,7 +97,7 @@ def validate_format(
     """Confirm an object parses as ``fmt``; optionally assert its schema.
 
     Parse failure -> FileFormatValidationError.
-    Schema drift  -> SchemaValidationError (missing/extra columns).
+    Schema drift  -> SchemaValidationError (missing/extra/type mismatches).
     """
     if fmt not in {"csv", "json", "parquet", "orc"}:
         raise UnsupportedFormatError(fmt)
@@ -79,13 +114,16 @@ def validate_format(
         return FormatValidationResult(bucket=bucket, key=key, fmt=fmt, parsed=True)
 
     actual = _actual_schema(fmt, data)
-    missing = sorted(set(expected_schema) - set(actual))
-    extra = sorted(set(actual) - set(expected_schema))
-    if missing or extra:
+    comparison = compare_expected_schema(expected_schema, actual)
+    missing = comparison["missing_in_target"]
+    extra = comparison["extra_in_target"]
+    type_mismatches = comparison["type_mismatches"]
+    if missing or extra or type_mismatches:
         raise SchemaValidationError(
             query_name=f"s3://{bucket}/{key}",
             missing_in_target=missing,
             extra_in_target=extra,
+            type_mismatches=type_mismatches,
         )
     return FormatValidationResult(
         bucket=bucket, key=key, fmt=fmt, parsed=True, schema_ok=True,
