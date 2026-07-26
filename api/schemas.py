@@ -1099,6 +1099,36 @@ class GlueCatalogCompareRequest(BaseModel):
     compare_partitions: bool = True
 
 
+class AthenaStartQueryRequest(BaseModel):
+    config_id: int
+    database: str | None = None
+    query: str
+    output_location: str
+    workgroup: str | None = None
+
+
+class AthenaQueryStatusRequest(BaseModel):
+    config_id: int
+    query_execution_id: str
+
+
+class AthenaQueryResultsRequest(BaseModel):
+    config_id: int
+    query_execution_id: str
+    max_rows: int = 100
+
+
+class AthenaRunQueryRequest(BaseModel):
+    config_id: int
+    database: str | None = None
+    query: str
+    output_location: str
+    workgroup: str | None = None
+    poll_interval_seconds: float = 1.0
+    max_attempts: int = 60
+    max_rows: int = 100
+
+
 class ObjectMetadataOut(BaseModel):
     bucket: str
     key: str
