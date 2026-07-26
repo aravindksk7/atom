@@ -1,7 +1,8 @@
 (function (global) {
   'use strict';
   // AWS feature slice (AWS tab: ad-hoc S3 checks — metadata, row count,
-  // partition discovery, format validation). Merged into the Alpine
+  // partition discovery, format validation — plus Glue Catalog compare).
+  // Merged into the Alpine
   // component via the FEATURE_SLICES reduce in app.js.
   //
   // HTTP convention: uses the module-level `api(method, path, body)` helper
@@ -16,7 +17,7 @@
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
-      // Which AWS service sub-panel is active. Glue/Athena/Airflow are
+      // Which AWS service sub-panel is active. Athena/Airflow are
       // placeholders until their backends land.
       awsService: 's3',
       awsConfigId: '',
@@ -37,6 +38,17 @@
       // come from the error's `.detail`; null for other errors, so
       // downstream templates should tolerate them being absent.
       awsError: null,
+      awsGlueSourceDatabase: '',
+      awsGlueSourceTable: '',
+      awsGlueTargetDatabase: '',
+      awsGlueTargetTable: '',
+      awsGlueCompareLocation: true,
+      awsGlueCompareFormats: true,
+      awsGlueComparePartitions: true,
+      awsGlueResult: null,
+      awsGlueError: null,
+      awsGlueLoading: false,
+      awsGlueJobName: '',
 
       _awsReset() {
         this.awsResult = null;
@@ -164,6 +176,67 @@
         if (expectedColumns.length) params.expected_columns = expectedColumns;
         if (this.awsMinPartitions !== '') params.min_partitions = Number(this.awsMinPartitions);
         await this._awsCreateJob('s3_partition_check', params);
+      },
+
+      _awsGlueParams() {
+        return {
+          config_id: Number(this.awsConfigId),
+          source_database: this.awsGlueSourceDatabase,
+          source_table: this.awsGlueSourceTable,
+          target_database: this.awsGlueTargetDatabase,
+          target_table: this.awsGlueTargetTable,
+          compare_location: !!this.awsGlueCompareLocation,
+          compare_formats: !!this.awsGlueCompareFormats,
+          compare_partitions: !!this.awsGlueComparePartitions,
+        };
+      },
+
+      _awsGlueRequiredFieldError() {
+        if (!this.awsConfigId) return 'Select an AWS config before comparing Glue Catalog tables.';
+        if (!this.awsGlueSourceDatabase) return 'Enter a source database before comparing Glue Catalog tables.';
+        if (!this.awsGlueSourceTable) return 'Enter a source table before comparing Glue Catalog tables.';
+        if (!this.awsGlueTargetDatabase) return 'Enter a target database before comparing Glue Catalog tables.';
+        if (!this.awsGlueTargetTable) return 'Enter a target table before comparing Glue Catalog tables.';
+        return null;
+      },
+
+      async awsGlueCompareTables() {
+        this.awsGlueError = null;
+        this.awsGlueResult = null;
+        const missingFieldError = this._awsGlueRequiredFieldError();
+        if (missingFieldError) {
+          this.awsGlueError = missingFieldError;
+          return;
+        }
+        try {
+          this.awsGlueResult = await api('POST', '/api/aws/glue/compare-tables', this._awsGlueParams());
+        } catch (e) {
+          this.awsGlueError = e.message;
+          this.toast('error', 'Glue compare failed', e.message);
+        }
+      },
+
+      async awsCreateGlueCatalogCompareJob() {
+        if (this.awsGlueLoading) return;
+        this.awsGlueError = null;
+        const missingFieldError = this._awsGlueRequiredFieldError();
+        if (missingFieldError) {
+          this.awsGlueError = missingFieldError;
+          return;
+        }
+        const name = (this.awsGlueJobName || ['glue', this.awsGlueSourceDatabase, this.awsGlueSourceTable, this.awsGlueTargetDatabase, this.awsGlueTargetTable].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        this.awsGlueLoading = true;
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'aws_glue_catalog_compare', params: this._awsGlueParams(), key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Glue job created', name);
+          this.awsGlueJobName = '';
+        } catch (e) {
+          this.awsGlueError = e.message;
+          this.toast('error', 'Glue job creation failed', e.message);
+        } finally {
+          this.awsGlueLoading = false;
+        }
       },
     };
   };

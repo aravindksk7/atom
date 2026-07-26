@@ -194,3 +194,17 @@ def test_job_definition_accepts_s3_job_types():
             params={"config_id": 1, "bucket": "b", "key": "k", "prefix": "p", "fmt": "csv"},
         )
         assert job.job_type == job_type
+
+
+def test_aws_glue_catalog_compare_valid_job_has_no_issues():
+    issues = validate_job_definition({"name": "glue_orders", "job_type": "aws_glue_catalog_compare", "params": {"config_id": 1, "source_database": "raw", "source_table": "orders", "target_database": "curated", "target_table": "orders"}})
+    assert issues == []
+
+
+def test_aws_glue_catalog_compare_requires_catalog_fields():
+    issues = validate_job_definition({"name": "glue_orders", "job_type": "aws_glue_catalog_compare", "params": {"config_id": 1, "source_database": "", "source_table": "", "target_database": "", "target_table": "", "compare_location": "yes"}})
+    fields = {issue.field for issue in issues}
+    assert fields == {"params.source_database", "params.source_table", "params.target_database", "params.target_table", "params.compare_location"}
+    messages = {issue.field: issue.message for issue in issues}
+    assert messages["params.source_database"] == "aws_glue_catalog_compare jobs require 'source_database' in params"
+    assert messages["params.source_table"] == "aws_glue_catalog_compare jobs require 'source_table' in params"

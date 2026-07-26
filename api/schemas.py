@@ -448,6 +448,7 @@ class JobDefinition(BaseModel):
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
+        "aws_glue_catalog_compare",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -491,6 +492,12 @@ class JobDefinition(BaseModel):
             for field in ("bucket", "prefix"):
                 if not self.params.get(field):
                     raise ValueError(f"s3_partition_check jobs require '{field}' in params")
+        elif self.job_type == "aws_glue_catalog_compare":
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError("aws_glue_catalog_compare jobs require 'config_id' or 'config' in params")
+            for field in ("source_database", "source_table", "target_database", "target_table"):
+                if not self.params.get(field):
+                    raise ValueError(f"aws_glue_catalog_compare jobs require '{field}' in params")
         elif self.job_type == "dbt_artifact":
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
@@ -1066,6 +1073,32 @@ class S3ValidateFormatRequest(BaseModel):
     expected_schema: dict[str, str] | None = None
 
 
+class GlueConfigRequest(BaseModel):
+    config_id: int
+
+
+class GlueTablesRequest(BaseModel):
+    config_id: int
+    database: str
+
+
+class GlueTableRequest(BaseModel):
+    config_id: int
+    database: str
+    table: str
+
+
+class GlueCatalogCompareRequest(BaseModel):
+    config_id: int
+    source_database: str
+    source_table: str
+    target_database: str
+    target_table: str
+    compare_location: bool = True
+    compare_formats: bool = True
+    compare_partitions: bool = True
+
+
 class ObjectMetadataOut(BaseModel):
     bucket: str
     key: str
@@ -1103,3 +1136,30 @@ class FormatValidationOut(BaseModel):
     schema_ok: bool | None = None
     missing_columns: list[str] = Field(default_factory=list)
     extra_columns: list[str] = Field(default_factory=list)
+
+
+class GlueDatabasesOut(BaseModel):
+    databases: list[str]
+
+
+class GlueTablesOut(BaseModel):
+    database: str
+    tables: list[str]
+
+
+class GlueTableOut(BaseModel):
+    database: str
+    table: str
+    columns: list[dict[str, str]]
+    partition_keys: list[dict[str, str]]
+    location: str | None = None
+    input_format: str | None = None
+    output_format: str | None = None
+    table_type: str | None = None
+
+
+class GlueCatalogCompareOut(BaseModel):
+    match: bool
+    source: dict[str, Any]
+    target: dict[str, Any]
+    diff: dict[str, Any]

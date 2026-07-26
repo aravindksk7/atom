@@ -3615,9 +3615,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <div class="compare-subtabs mb-4">
     <button type="button" data-testid="aws-service-s3" @click="awsService='s3'" :class="awsService === 's3' ? 'sub-tab active' : 'sub-tab'">S3</button>
-    <button type="button" data-testid="aws-service-glue" disabled title="Coming soon" class="sub-tab">Glue</button>
+    <button type="button" data-testid="aws-service-glue" @click="awsService='glue'" :class="awsService === 'glue' ? 'sub-tab active' : 'sub-tab'">Glue</button>
     <button type="button" data-testid="aws-service-athena" disabled title="Coming soon" class="sub-tab">Athena</button>
     <button type="button" data-testid="aws-service-airflow" disabled title="Coming soon" class="sub-tab">Airflow</button>
+  </div>
+
+  <div class="card mb-4">
+    <label class="field-label">Config</label>
+    <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
+      <option value="">— Select —</option>
+      <template x-for="cfg in configs" :key="cfg.id">
+        <option :value="cfg.id" x-text="cfg.name"></option>
+      </template>
+    </select>
   </div>
 
   <div x-show="awsService === 's3'">
@@ -3628,15 +3638,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
 
       <div class="grid-2 mb-3">
-        <div>
-          <label class="field-label">Config</label>
-          <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
-            <option value="">— Select —</option>
-            <template x-for="cfg in configs" :key="cfg.id">
-              <option :value="cfg.id" x-text="cfg.name"></option>
-            </template>
-          </select>
-        </div>
         <div>
           <label class="field-label">Format</label>
           <select x-model="awsFmt" class="field-input field-select" data-testid="aws-fmt-select">
@@ -3780,6 +3781,48 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="flex items-center gap-2 text-sm">
             <span>Parsed: <strong x-text="awsResult.data.parsed"></strong></span>
             <span>Schema OK: <strong x-text="awsResult.data.schema_ok"></strong></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="awsService === 'glue'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">AWS Glue Catalog</div>
+        <span class="badge badge-blue">Catalog Compare</span>
+      </div>
+      <div class="grid-2 mb-3">
+        <div><label class="field-label">Source Database</label><input x-model="awsGlueSourceDatabase" class="field-input" data-testid="aws-glue-source-database-input" /></div>
+        <div><label class="field-label">Source Table</label><input x-model="awsGlueSourceTable" class="field-input" data-testid="aws-glue-source-table-input" /></div>
+      </div>
+      <div class="grid-2 mb-3">
+        <div><label class="field-label">Target Database</label><input x-model="awsGlueTargetDatabase" class="field-input" data-testid="aws-glue-target-database-input" /></div>
+        <div><label class="field-label">Target Table</label><input x-model="awsGlueTargetTable" class="field-input" data-testid="aws-glue-target-table-input" /></div>
+      </div>
+      <div class="flex gap-4 text-sm mb-3">
+        <label><input type="checkbox" x-model="awsGlueCompareLocation" data-testid="aws-glue-compare-location-checkbox" /> Compare location</label>
+        <label><input type="checkbox" x-model="awsGlueCompareFormats" data-testid="aws-glue-compare-formats-checkbox" /> Compare formats</label>
+        <label><input type="checkbox" x-model="awsGlueComparePartitions" data-testid="aws-glue-compare-partitions-checkbox" /> Compare partitions</label>
+      </div>
+      <div class="grid-2 mb-3">
+        <div><label class="field-label">Job Name (optional)</label><input x-model="awsGlueJobName" class="field-input" data-testid="aws-glue-job-name-input" /></div>
+      </div>
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button @click="awsGlueCompareTables()" :disabled="awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-primary" data-testid="aws-glue-compare-btn">Compare Glue Catalog Tables</button>
+        <button @click="awsCreateGlueCatalogCompareJob()" :disabled="awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-secondary" data-testid="aws-glue-create-job-btn">Create Glue Catalog Compare Job</button>
+      </div>
+      <div x-show="awsGlueError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" data-testid="aws-glue-error" x-text="awsGlueError"></div>
+      <div x-show="awsGlueResult" data-testid="aws-glue-result" class="text-sm">
+        <div>Match: <strong x-text="awsGlueResult && awsGlueResult.match"></strong></div>
+        <template x-if="awsGlueResult && awsGlueResult.diff">
+          <div class="mt-2 space-y-1">
+            <div>Missing columns: <span x-text="(awsGlueResult.diff.missing_columns || []).join(', ')"></span></div>
+            <div>Extra columns: <span x-text="(awsGlueResult.diff.extra_columns || []).join(', ')"></span></div>
+            <div>Type mismatches: <span x-text="(awsGlueResult.diff.type_mismatches || []).map(m => m.column + ': ' + m.expected_type + ' -> ' + m.actual_type).join(', ')"></span></div>
+            <div x-show="awsGlueResult.diff.location_mismatch">Location mismatch</div>
+            <div x-show="awsGlueResult.diff.format_mismatch">Format mismatch</div>
           </div>
         </template>
       </div>

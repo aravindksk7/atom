@@ -41,6 +41,11 @@ def _require_non_empty(params: dict[str, Any], field: str, issues: list[Validati
         issues.append(ValidationIssue(f"params.{field}", f"S3 jobs require '{field}' in params"))
 
 
+def _require_glue_non_empty(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> None:
+    if not params.get(field):
+        issues.append(ValidationIssue(f"params.{field}", f"aws_glue_catalog_compare jobs require '{field}' in params"))
+
+
 def _non_negative_int(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> int | None:
     if field not in params or params.get(field) in (None, ""):
         return None
@@ -95,6 +100,16 @@ def _validate_s3_partition_check(params: dict[str, Any], issues: list[Validation
             issues.append(ValidationIssue("params.expected_columns", "expected_columns must be a non-empty list of strings"))
 
 
+def _validate_glue_catalog_compare(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    if not _has_config_ref(params):
+        issues.append(ValidationIssue("params.config_id", "aws_glue_catalog_compare jobs require 'config_id' or 'config' in params"))
+    for field in ("source_database", "source_table", "target_database", "target_table"):
+        _require_glue_non_empty(params, field, issues)
+    for field in ("compare_location", "compare_formats", "compare_partitions"):
+        if field in params and not isinstance(params.get(field), bool):
+            issues.append(ValidationIssue(f"params.{field}", f"{field} must be a boolean"))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     job_type = _job_type(job)
@@ -105,6 +120,8 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_s3_format_validation(params, issues)
     elif job_type == "s3_partition_check":
         _validate_s3_partition_check(params, issues)
+    elif job_type == "aws_glue_catalog_compare":
+        _validate_glue_catalog_compare(params, issues)
     query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 
