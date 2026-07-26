@@ -96,7 +96,7 @@ def compare_glue_tables(
     }
     if compare_partitions and source["partition_keys"] != target["partition_keys"]:
         diff["partition_key_mismatches"] = [{"source": source["partition_keys"], "target": target["partition_keys"]}]
-    if compare_location and source.get("location") and target.get("location") and source.get("location") != target.get("location"):
+    if compare_location and source.get("location") != target.get("location"):
         diff["location_mismatch"] = {"source": source.get("location"), "target": target.get("location")}
     fmt = {
         "input_format": (source.get("input_format"), target.get("input_format")),
@@ -119,11 +119,19 @@ class AwsGlueService:
         return self._runtime.client(config_id, self._glue_client_override)
 
     def list_databases(self, config_id: int) -> GlueDatabasesResponse:
-        data = self._client(config_id).get_databases()
+        client = self._client(config_id)
+        if hasattr(client, "get_paginator"):
+            pages = client.get_paginator("get_databases").paginate()
+            return GlueDatabasesResponse(databases=[d["Name"] for page in pages for d in page.get("DatabaseList", [])])
+        data = client.get_databases()
         return GlueDatabasesResponse(databases=[d["Name"] for d in data.get("DatabaseList", [])])
 
     def list_tables(self, config_id: int, database: str) -> GlueTablesResponse:
-        data = self._client(config_id).get_tables(DatabaseName=database)
+        client = self._client(config_id)
+        if hasattr(client, "get_paginator"):
+            pages = client.get_paginator("get_tables").paginate(DatabaseName=database)
+            return GlueTablesResponse(database=database, tables=[t["Name"] for page in pages for t in page.get("TableList", [])])
+        data = client.get_tables(DatabaseName=database)
         return GlueTablesResponse(database=database, tables=[t["Name"] for t in data.get("TableList", [])])
 
     def describe_table(self, config_id: int, database: str, table: str) -> GlueTableResponse:

@@ -48,6 +48,29 @@ class FakeGlueClient:
         return {"Table": self.tables[(DatabaseName, Name)]}
 
 
+class FakePaginator:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def paginate(self, **kwargs):
+        return self.pages
+
+
+class FakePaginatedGlueClient(FakeGlueClient):
+    def get_paginator(self, operation_name: str):
+        if operation_name == "get_databases":
+            return FakePaginator([
+                {"DatabaseList": [{"Name": "raw"}]},
+                {"DatabaseList": [{"Name": "curated"}]},
+            ])
+        if operation_name == "get_tables":
+            return FakePaginator([
+                {"TableList": [{"Name": "orders"}]},
+                {"TableList": [{"Name": "customers"}]},
+            ])
+        raise ValueError(operation_name)
+
+
 @pytest.fixture
 def config_repo():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -75,6 +98,22 @@ def test_compare_glue_tables_reports_catalog_drift():
     assert result["diff"]["format_mismatch"]
 
 
+def test_compare_glue_tables_reports_missing_location_mismatch():
+    source = normalize_glue_table(FakeGlueClient().tables[("raw", "orders")], "raw")
+    target = {**source, "location": None}
+    result = compare_glue_tables(source, target)
+    assert result["match"] is False
+    assert result["diff"]["location_mismatch"] == {"source": "s3://lake/raw/orders/", "target": None}
+
+
+def test_compare_glue_tables_reports_incompatible_shared_column_types():
+    source = {"columns": [{"name": "id", "type": "int64"}], "partition_keys": []}
+    target = {"columns": [{"name": "id", "type": "string"}], "partition_keys": []}
+    result = compare_glue_tables(source, target, compare_location=False, compare_formats=False)
+    assert result["match"] is False
+    assert result["diff"]["type_mismatches"] == [{"column": "id", "expected_type": "int64", "actual_type": "string"}]
+
+
 def test_glue_service_lists_and_compares_tables(config_repo):
     cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
     service = AwsGlueService(config_repo)
@@ -86,6 +125,14 @@ def test_glue_service_lists_and_compares_tables(config_repo):
     compared = service.compare_tables(cfg.id, "raw", "orders", "curated", "orders")
     assert compared.match is False
     assert compared.diff["missing_columns"] == ["amount"]
+
+
+def test_glue_service_lists_with_paginators(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    service._glue_client_override = FakePaginatedGlueClient()
+    assert service.list_databases(cfg.id).databases == ["raw", "curated"]
+    assert service.list_tables(cfg.id, "raw").tables == ["orders", "customers"]
 
 
 def test_glue_runtime_missing_config_maps_to_404(config_repo):
