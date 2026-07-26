@@ -1,4 +1,5 @@
 // tests/e2e/18-aws-s3-tab-live.spec.ts
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { authedContext, createConfig, deleteConfig, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
 
@@ -43,7 +44,7 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
     }
   });
 
-  async function openAwsTab(page: any) {
+  async function openAwsTab(page: Page) {
     await page.goto('/');
     await page.getByRole('button', { name: 'AWS' }).click();
     await expect(page.locator('[data-testid="aws-service-s3"]')).toBeVisible();
@@ -66,7 +67,9 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
     await expect(authedPage.locator('[data-testid="aws-result"]')).toContainText('s3_select');
 
     await authedPage.locator('[data-testid="aws-run-partitions-btn"]').click();
-    await expect(authedPage.locator('[data-testid="aws-result"], [data-testid="aws-error"]')).toBeVisible({ timeout: 20_000 });
+    await expect(authedPage.locator('[data-testid="aws-error"]')).toBeHidden({ timeout: 20_000 });
+    await expect(authedPage.locator('[data-testid="aws-result"] table.results-table')).toBeVisible({ timeout: 20_000 });
+    await expect(authedPage.locator('[data-testid="aws-result"]')).toContainText('objects');
 
     await authedPage.locator('[data-testid="aws-expected-schema-input"]').fill('{"id":"string","sku":"string","amount":"string"}');
     await authedPage.locator('[data-testid="aws-run-validate-format-btn"]').click();
@@ -126,15 +129,15 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
     try {
       const rowRun = await triggerRun(ctx, [rowJob], configId);
       const rowStatus = await waitForTerminal(ctx, rowRun.run_id, 60_000);
-      expect(rowStatus.status).not.toBe('ERROR');
+      expect(rowStatus.status).toBe('PASSED');
 
       const formatRun = await triggerRun(ctx, [formatJob], configId);
       const formatStatus = await waitForTerminal(ctx, formatRun.run_id, 60_000);
-      expect(formatStatus.status).not.toBe('ERROR');
+      expect(formatStatus.status).toBe('PASSED');
 
       const partitionRun = await triggerRun(ctx, [partitionJob], configId);
       const partitionStatus = await waitForTerminal(ctx, partitionRun.run_id, 60_000);
-      expect(['PASSED', 'FAILED', 'SLOW', 'COMPLETED']).toContain(partitionStatus.status);
+      expect(partitionStatus.status).toBe('PASSED');
     } finally {
       await ctx.dispose();
     }
