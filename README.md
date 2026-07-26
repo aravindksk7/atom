@@ -165,6 +165,9 @@ Add AWS credentials to a saved config (`aws_region`, `aws_access_key_id`,
 runs ad-hoc S3 checks against a selected config: object metadata, row counts,
 Hive-style partition discovery, and format validation. The same operations are
 available at `POST /api/aws/s3/{metadata,row-count,partitions,validate-format}`.
+The S3 panel can also create tracked row-count, format-validation, and
+partition-check jobs so the same checks flow through run history, scheduling,
+DQ gates, and reports.
 
 ## Architecture
 
