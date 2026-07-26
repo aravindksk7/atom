@@ -24,6 +24,12 @@
       awsPrefix: '',
       awsFmt: 'csv',
       awsExpectedSchemaRaw: '',   // JSON text, optional
+      awsJobName: '',
+      awsMinRows: '',
+      awsMaxRows: '',
+      awsExpectedColumnsRaw: '',
+      awsMinPartitions: '',
+      awsJobError: null,
       awsLoading: false,
       awsResult: null,            // { kind, data }
       // { message, missing?, extra? } — missing/extra come from the error's
@@ -97,6 +103,65 @@
           key: this.awsKey, fmt: this.awsFmt, expected_schema: expected,
         });
         if (d) this.awsResult = { kind: 'validate_format', data: d };
+      },
+
+      _awsDefaultJobName(kind) {
+        const base = [kind, this.awsBucket, this.awsKey || this.awsPrefix]
+          .filter(Boolean).join('_').replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        return base || kind;
+      },
+
+      _awsJobParams(common) {
+        return Object.assign({ config_id: Number(this.awsConfigId), bucket: this.awsBucket }, common);
+      },
+
+      async _awsCreateJob(kind, params) {
+        this.awsJobError = null;
+        const name = (this.awsJobName || this._awsDefaultJobName(kind)).trim();
+        try {
+          await api('POST', '/api/jobs', {
+            name,
+            job_type: kind,
+            params,
+            key_columns: [],
+          });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'S3 job created', name);
+          this.awsJobName = '';
+        } catch (e) {
+          this.awsJobError = e.message;
+          this.toast('error', 'S3 job creation failed', e.message);
+        }
+      },
+
+      async awsCreateRowCountJob() {
+        const params = this._awsJobParams({ key: this.awsKey, fmt: this.awsFmt });
+        if (this.awsMinRows !== '') params.min_rows = Number(this.awsMinRows);
+        if (this.awsMaxRows !== '') params.max_rows = Number(this.awsMaxRows);
+        await this._awsCreateJob('s3_row_count', params);
+      },
+
+      async awsCreateFormatValidationJob() {
+        let expected = null;
+        if (this.awsExpectedSchemaRaw.trim()) {
+          try {
+            expected = JSON.parse(this.awsExpectedSchemaRaw);
+          } catch (e) {
+            this.awsJobError = 'expected_schema must be valid JSON';
+            return;
+          }
+        }
+        const params = this._awsJobParams({ key: this.awsKey, fmt: this.awsFmt });
+        if (expected) params.expected_schema = expected;
+        await this._awsCreateJob('s3_format_validation', params);
+      },
+
+      async awsCreatePartitionCheckJob() {
+        const params = this._awsJobParams({ prefix: this.awsPrefix });
+        const expectedColumns = this.awsExpectedColumnsRaw.split(',').map(s => s.trim()).filter(Boolean);
+        if (expectedColumns.length) params.expected_columns = expectedColumns;
+        if (this.awsMinPartitions !== '') params.min_partitions = Number(this.awsMinPartitions);
+        await this._awsCreateJob('s3_partition_check', params);
       },
     };
   };

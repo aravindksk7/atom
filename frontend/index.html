@@ -3670,6 +3670,42 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
       </div>
 
+      <div class="card mb-3">
+        <div class="font-semibold text-slate-700 mb-2">Create tracked S3 job</div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label class="field-label">Job Name (optional)</label>
+            <input x-model="awsJobName" class="field-input" placeholder="auto-generated from S3 path" data-testid="aws-job-name-input" />
+          </div>
+          <div>
+            <label class="field-label">Expected Partition Columns</label>
+            <input x-model="awsExpectedColumnsRaw" class="field-input" placeholder="dt, region" data-testid="aws-expected-columns-input" />
+          </div>
+        </div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label class="field-label">Min Rows</label>
+            <input x-model="awsMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-min-rows-input" />
+          </div>
+          <div>
+            <label class="field-label">Max Rows</label>
+            <input x-model="awsMaxRows" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-max-rows-input" />
+          </div>
+        </div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label class="field-label">Min Partitions</label>
+            <input x-model="awsMinPartitions" type="number" min="0" class="field-input" placeholder="1" data-testid="aws-min-partitions-input" />
+          </div>
+        </div>
+        <div class="flex gap-2 flex-wrap mb-2">
+          <button @click="awsCreateRowCountJob()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-secondary" data-testid="aws-create-row-count-job-btn">Create Row Count Job</button>
+          <button @click="awsCreateFormatValidationJob()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-secondary" data-testid="aws-create-format-validation-job-btn">Create Format Validation Job</button>
+          <button @click="awsCreatePartitionCheckJob()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsPrefix" class="btn-secondary" data-testid="aws-create-partition-check-job-btn">Create Partition Check Job</button>
+        </div>
+        <div x-show="awsJobError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm" data-testid="aws-job-error" x-text="awsJobError"></div>
+      </div>
+
       <div class="flex gap-2 flex-wrap mb-3">
         <button @click="awsRunMetadata()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-primary" data-testid="aws-run-metadata-btn">Metadata</button>
         <button @click="awsRunRowCount()" :disabled="awsLoading || !awsConfigId || !awsBucket || !awsKey" class="btn-primary" data-testid="aws-run-row-count-btn">Row Count</button>
