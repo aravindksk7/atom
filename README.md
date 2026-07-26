@@ -3148,7 +3148,7 @@ The `sapbo` service is a local HTTPS mock of the SAP BO RESTful Web Services end
 ### End-to-end (Playwright) tests
 
 ```powershell
-npx playwright test                      # full UI suite against a throwaway DB, file/upload-mode compare coverage only
+npx playwright test                      # full UI suite against a throwaway DB, including mocked AWS Glue UI coverage without E2E_LIVE_BACKENDS
 $env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server / S3 (MinIO) / SFTP paths (requires Docker + ODBC Driver 17 for SQL Server; boto3/paramiko installed via requirements.txt)
 npx playwright show-report               # view the last HTML report
 ```

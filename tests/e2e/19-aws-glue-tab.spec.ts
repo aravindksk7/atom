@@ -10,6 +10,18 @@ test.describe('19 AWS Glue tab', () => {
       });
     });
     await authedPage.route('**/api/aws/glue/compare-tables', async (route) => {
+      const request = route.request();
+      expect(request.method()).toBe('POST');
+      expect(request.postDataJSON()).toMatchObject({
+        config_id: 7,
+        source_database: 'raw',
+        source_table: 'orders',
+        target_database: 'curated',
+        target_table: 'orders',
+        compare_location: true,
+        compare_formats: true,
+        compare_partitions: true,
+      });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -38,7 +50,11 @@ test.describe('19 AWS Glue tab', () => {
           body: JSON.stringify({ id: 1, name: jobBody.name }),
         });
       } else {
-        await route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        });
       }
     });
 
