@@ -45,10 +45,11 @@
         try {
           return await api('POST', '/api/aws/s3/' + path, payload);
         } catch (e) {
+          const detail = e.detail || {};
           this.awsError = {
             message: e.message,
-            missing: e.missing_in_target || null,
-            extra: e.extra_in_target || null,
+            missing: detail.missing_in_target || null,
+            extra: detail.extra_in_target || null,
           };
           this.toast('error', 'AWS S3 check failed', e.message);
           return null;

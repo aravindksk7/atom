@@ -61,6 +61,7 @@ async function api(method, path, body) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
     const error = new Error(apiErrorMessage(err.detail ?? err, resp.statusText));
     error.status = resp.status;
+    error.detail = err.detail ?? err;
     throw error;
   }
   return resp.json();
@@ -146,6 +147,8 @@ function _appRaw() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>' },
       { id: 'adapters', label: 'Adapters', group: 'setup',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M6 8h12l-1 5a5 5 0 0 1-10 0L6 8z"></path><path d="M10 19v3M14 19v3"></path></svg>' },
+      { id: 'aws', label: 'AWS', group: 'setup',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15a4 4 0 0 0 4 4h9a5 5 0 0 0 1-9.9A6 6 0 0 0 5 9a4 4 0 0 0-2 6z"></path></svg>' },
       { id: 'contracts', label: 'Contracts', group: 'setup',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 15l2 2 4-4"></path></svg>' },
       { id: 'jobs',     label: 'Launch', group: 'execution',
@@ -1202,7 +1205,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}
