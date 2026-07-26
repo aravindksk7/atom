@@ -55,7 +55,7 @@ def test_aws_tab_contains_s3_job_creation_controls():
 def test_aws_tab_contains_glue_catalog_controls():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     assert "data-testid=\"aws-service-glue\"" in html
-    assert "data-testid=\"aws-service-athena\" disabled title=\"Coming soon\" class=\"sub-tab\">Athena" in html
+    assert "data-testid=\"aws-service-athena\"" in html
     assert "data-testid=\"aws-service-airflow\" disabled title=\"Coming soon\" class=\"sub-tab\">Airflow" in html
     assert "data-testid=\"aws-glue-source-database-input\"" in html
     assert "data-testid=\"aws-glue-source-table-input\"" in html
@@ -70,3 +70,31 @@ def test_aws_tab_contains_glue_catalog_controls():
     assert "data-testid=\"aws-glue-error\"" in html
     assert "data-testid=\"aws-glue-result\"" in html
     assert ":disabled=\"awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable\"" in html
+
+
+def test_aws_tab_contains_athena_query_controls():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert "data-testid=\"aws-service-athena\"" in html
+    assert "data-testid=\"aws-service-airflow\" disabled title=\"Coming soon\" class=\"sub-tab\">Airflow" in html
+    assert "data-testid=\"aws-athena-database-input\"" in html
+    assert "data-testid=\"aws-athena-workgroup-input\"" in html
+    assert "data-testid=\"aws-athena-query-input\"" in html
+    assert "data-testid=\"aws-athena-output-location-input\"" in html
+    assert "data-testid=\"aws-athena-max-rows-input\"" in html
+    assert "data-testid=\"aws-athena-job-name-input\"" in html
+    assert "data-testid=\"aws-athena-min-rows-input\"" in html
+    assert "data-testid=\"aws-athena-max-rows-assert-input\"" in html
+    assert "data-testid=\"aws-athena-run-query-btn\"" in html
+    assert "data-testid=\"aws-athena-create-job-btn\"" in html
+    assert "data-testid=\"aws-athena-loading\"" in html
+    assert "data-testid=\"aws-athena-error\"" in html
+    assert "data-testid=\"aws-athena-result\"" in html
+    assert "awsAthenaResult.status.state" in html
+    assert "awsAthenaResult.results.rows" in html
+    assert "awsAthenaResult.dq_metrics" in html
+    assert "Status:" in html
+    assert "Rows:" in html
+    assert "Execution ms:" in html
+    assert "JSON.stringify(awsAthenaResult.dq_metrics, null, 2)" in html
+    assert "JSON.stringify(awsAthenaResult.results.rows.slice(0, 10), null, 2)" in html
+    assert ":disabled=\"awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation\"" in html

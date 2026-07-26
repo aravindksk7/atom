@@ -60,6 +60,20 @@ def _non_negative_int(params: dict[str, Any], field: str, issues: list[Validatio
     return value
 
 
+def _positive_int(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> int | None:
+    if field not in params or params.get(field) in (None, ""):
+        return None
+    try:
+        value = int(params[field])
+    except (TypeError, ValueError):
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a positive integer"))
+        return None
+    if value <= 0:
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a positive integer"))
+        return None
+    return value
+
+
 def _validate_s3_common(params: dict[str, Any], issues: list[ValidationIssue], fields: tuple[str, ...]) -> None:
     if not _has_config_ref(params):
         issues.append(ValidationIssue("params.config_id", "S3 jobs require 'config_id' or 'config' in params"))
@@ -110,6 +124,30 @@ def _validate_glue_catalog_compare(params: dict[str, Any], issues: list[Validati
             issues.append(ValidationIssue(f"params.{field}", f"{field} must be a boolean"))
 
 
+def _validate_aws_athena_query(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    if not _has_config_ref(params):
+        issues.append(ValidationIssue("params.config_id", "Athena jobs require 'config_id' or 'config' in params"))
+    for field in ("query", "output_location"):
+        if not params.get(field):
+            issues.append(ValidationIssue(f"params.{field}", f"Athena jobs require '{field}' in params"))
+    min_rows = _non_negative_int(params, "min_rows", issues)
+    max_rows_assert = _non_negative_int(params, "max_rows_assert", issues)
+    _non_negative_int(params, "max_rows", issues)
+    _positive_int(params, "max_attempts", issues)
+    if "poll_interval_seconds" in params:
+        try:
+            if float(params["poll_interval_seconds"]) < 0:
+                issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be non-negative"))
+        except (TypeError, ValueError):
+            issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be non-negative"))
+    if min_rows is not None and max_rows_assert is not None and min_rows > max_rows_assert:
+        issues.append(ValidationIssue("params.min_rows", "min_rows must be less than or equal to max_rows_assert"))
+    if params.get("expected_status") not in (None, "SUCCEEDED", "FAILED", "CANCELLED"):
+        issues.append(ValidationIssue("params.expected_status", "expected_status must be SUCCEEDED, FAILED, or CANCELLED"))
+    if "metric_assertions" in params and not isinstance(params.get("metric_assertions"), dict):
+        issues.append(ValidationIssue("params.metric_assertions", "metric_assertions must be an object"))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     job_type = _job_type(job)
@@ -122,6 +160,8 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_s3_partition_check(params, issues)
     elif job_type == "aws_glue_catalog_compare":
         _validate_glue_catalog_compare(params, issues)
+    elif job_type == "aws_athena_query":
+        _validate_aws_athena_query(params, issues)
     query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 

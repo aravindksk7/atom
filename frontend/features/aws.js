@@ -1,7 +1,8 @@
 (function (global) {
   'use strict';
   // AWS feature slice (AWS tab: ad-hoc S3 checks — metadata, row count,
-  // partition discovery, format validation — plus Glue Catalog compare).
+  // partition discovery, format validation — plus Glue Catalog compare and
+  // Athena query execution).
   // Merged into the Alpine
   // component via the FEATURE_SLICES reduce in app.js.
   //
@@ -17,8 +18,8 @@
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
-      // Which AWS service sub-panel is active. Athena/Airflow are
-      // placeholders until their backends land.
+      // Which AWS service sub-panel is active. Airflow is a placeholder until
+      // its backend lands.
       awsService: 's3',
       awsConfigId: '',
       awsBucket: '',
@@ -49,6 +50,17 @@
       awsGlueError: null,
       awsGlueLoading: false,
       awsGlueJobName: '',
+      awsAthenaDatabase: '',
+      awsAthenaQuery: '',
+      awsAthenaOutputLocation: '',
+      awsAthenaWorkgroup: '',
+      awsAthenaMaxRows: '100',
+      awsAthenaMinRows: '',
+      awsAthenaMaxRowsAssert: '',
+      awsAthenaJobName: '',
+      awsAthenaResult: null,
+      awsAthenaError: null,
+      awsAthenaLoading: false,
 
       _awsReset() {
         this.awsResult = null;
@@ -236,6 +248,72 @@
           this.toast('error', 'Glue job creation failed', e.message);
         } finally {
           this.awsGlueLoading = false;
+        }
+      },
+
+      _awsAthenaRequiredFieldError() {
+        if (!this.awsConfigId) return 'Config is required';
+        if (!(this.awsAthenaQuery || '').trim()) return 'Query is required';
+        if (!(this.awsAthenaOutputLocation || '').trim()) return 'Output location is required';
+        return null;
+      },
+
+      _awsAthenaRunQueryParams() {
+        const maxRows = String(this.awsAthenaMaxRows || '').trim();
+        const params = {
+          config_id: Number(this.awsConfigId),
+          database: (this.awsAthenaDatabase || '').trim() || null,
+          query: (this.awsAthenaQuery || '').trim(),
+          output_location: (this.awsAthenaOutputLocation || '').trim(),
+          workgroup: (this.awsAthenaWorkgroup || '').trim() || null,
+          max_rows: Number(maxRows || 100),
+        };
+        return params;
+      },
+
+      _awsAthenaJobParams() {
+        const params = this._awsAthenaRunQueryParams();
+        const minRows = String(this.awsAthenaMinRows || '').trim();
+        const maxRowsAssert = String(this.awsAthenaMaxRowsAssert || '').trim();
+        if (minRows !== '') params.min_rows = Number(minRows);
+        if (maxRowsAssert !== '') params.max_rows_assert = Number(maxRowsAssert);
+        return params;
+      },
+
+      async awsAthenaRunQuery() {
+        if (this.awsAthenaLoading) return;
+        this.awsAthenaError = null;
+        this.awsAthenaResult = null;
+        const missing = this._awsAthenaRequiredFieldError();
+        if (missing) { this.awsAthenaError = missing; return; }
+        this.awsAthenaLoading = true;
+        try {
+          this.awsAthenaResult = await api('POST', '/api/aws/athena/run-query', this._awsAthenaRunQueryParams());
+        } catch (e) {
+          this.awsAthenaError = e.message;
+          this.toast('error', 'Athena query failed', e.message);
+        } finally {
+          this.awsAthenaLoading = false;
+        }
+      },
+
+      async awsCreateAthenaQueryJob() {
+        if (this.awsAthenaLoading) return;
+        this.awsAthenaError = null;
+        const missing = this._awsAthenaRequiredFieldError();
+        if (missing) { this.awsAthenaError = missing; return; }
+        const name = ((this.awsAthenaJobName || '').trim() || ['athena', (this.awsAthenaDatabase || '').trim() || 'query'].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        this.awsAthenaLoading = true;
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'aws_athena_query', params: this._awsAthenaJobParams(), key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Athena job created', name);
+          this.awsAthenaJobName = '';
+        } catch (e) {
+          this.awsAthenaError = e.message;
+          this.toast('error', 'Athena job creation failed', e.message);
+        } finally {
+          this.awsAthenaLoading = false;
         }
       },
     };

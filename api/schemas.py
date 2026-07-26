@@ -1,8 +1,11 @@
 from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Annotated, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class ConfigCreate(BaseModel):
@@ -448,7 +451,7 @@ class JobDefinition(BaseModel):
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
-        "aws_glue_catalog_compare",
+        "aws_glue_catalog_compare", "aws_athena_query",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -498,6 +501,12 @@ class JobDefinition(BaseModel):
             for field in ("source_database", "source_table", "target_database", "target_table"):
                 if not self.params.get(field):
                     raise ValueError(f"aws_glue_catalog_compare jobs require '{field}' in params")
+        elif self.job_type == "aws_athena_query":
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError("aws_athena_query jobs require 'config_id' or 'config' in params")
+            for field in ("query", "output_location"):
+                if not self.params.get(field):
+                    raise ValueError(f"aws_athena_query jobs require '{field}' in params")
         elif self.job_type == "dbt_artifact":
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")
@@ -1097,6 +1106,62 @@ class GlueCatalogCompareRequest(BaseModel):
     compare_location: bool = True
     compare_formats: bool = True
     compare_partitions: bool = True
+
+
+class AthenaStartQueryRequest(BaseModel):
+    config_id: int
+    database: str | None = None
+    query: NonEmptyStr
+    output_location: NonEmptyStr
+    workgroup: str | None = None
+
+
+class AthenaQueryStatusRequest(BaseModel):
+    config_id: int
+    query_execution_id: str
+
+
+class AthenaQueryResultsRequest(BaseModel):
+    config_id: int
+    query_execution_id: str
+    max_rows: int = Field(default=100, ge=0)
+
+
+class AthenaRunQueryRequest(BaseModel):
+    config_id: int
+    database: str | None = None
+    query: NonEmptyStr
+    output_location: NonEmptyStr
+    workgroup: str | None = None
+    poll_interval_seconds: float = Field(default=0.2, ge=0)
+    max_attempts: int = Field(default=20, ge=1)
+    max_rows: int = Field(default=100, ge=0)
+
+
+class AthenaStartQueryOut(BaseModel):
+    query_execution_id: str
+
+
+class AthenaQueryStatusOut(BaseModel):
+    query_execution_id: str
+    state: str
+    state_change_reason: str | None = None
+    submission_time: datetime | None = None
+    completion_time: datetime | None = None
+    engine_execution_time_ms: int | None = None
+    data_scanned_bytes: int | None = None
+
+
+class AthenaQueryResultsOut(BaseModel):
+    columns: list[str]
+    rows: list[dict[str, str | None]]
+
+
+class AthenaRunQueryOut(BaseModel):
+    query_execution_id: str
+    status: AthenaQueryStatusOut
+    results: AthenaQueryResultsOut
+    dq_metrics: dict[str, Any]
 
 
 class ObjectMetadataOut(BaseModel):

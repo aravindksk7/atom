@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
+from api.services.aws_athena_service import AthenaQueryFailedError, AwsAthenaService
 from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
 from api.services.frame_engine import FrameEngine
@@ -52,6 +53,7 @@ HOLD_POLL_INTERVAL_SECONDS = float(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", 
 HOLD_TIMEOUT_SECONDS = float(os.environ.get("HOLD_TIMEOUT_SECONDS", "86400"))
 BO_REPORT_SAMPLE_ROW_LIMIT = int(os.environ.get("BO_REPORT_SAMPLE_ROW_LIMIT", "20"))
 FILE_SOURCE_QUERY = "__file_source__"
+_MISSING_METRIC = object()
 
 
 def _safe_path_component(value: str) -> str:
@@ -465,6 +467,8 @@ class RunExecutor:
             return self._build_case_s3_partition_check(job)
         if job.job_type == "aws_glue_catalog_compare":
             return self._build_case_aws_glue_catalog_compare(job)
+        if job.job_type == "aws_athena_query":
+            return self._build_case_aws_athena_query(job)
         if job.job_type == "freshness":
             return self._build_case_freshness(job)
         if job.job_type == "schema_snapshot":
@@ -1146,6 +1150,128 @@ class RunExecutor:
             mismatches.append(MismatchRecord({"job": job.name}, "formats", diff["format_mismatch"], None, "format_mismatch"))
         by_type = {m.mismatch_type: sum(1 for x in mismatches if x.mismatch_type == m.mismatch_type) for m in mismatches}
         return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=len(source_cols), target_row_count=len(target_cols), matched_count=0 if mismatches else 1, missing_in_target_count=len(diff.get("missing_columns") or []), missing_in_source_count=len(diff.get("extra_columns") or []), value_mismatch_count=len(mismatches), mismatches=mismatches, status=TestStatus.FAILED if mismatches else TestStatus.PASSED, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": metrics, "by_type": by_type, "catalog_diff": diff})
+
+    def _build_case_aws_athena_query(self, job: JobDefinition):
+        def run_athena_query() -> ReconciliationResult:
+            return self._execute_aws_athena_query(job)
+        return run_athena_query
+
+    @staticmethod
+    def _metric_path(metrics: dict[str, Any], path: str) -> Any:
+        current: Any = metrics
+        for part in path.split("."):
+            if isinstance(current, dict) and part in current:
+                current = current.get(part)
+            else:
+                return _MISSING_METRIC
+        return current
+
+    @staticmethod
+    def _athena_status_metrics(status_obj: Any, query_execution_id: Any = None) -> dict[str, Any]:
+        return {
+            "query_execution_id": query_execution_id or getattr(status_obj, "query_execution_id", None),
+            "state": getattr(status_obj, "state", None),
+            "state_change_reason": getattr(status_obj, "state_change_reason", None),
+            "engine_execution_time_ms": getattr(status_obj, "engine_execution_time_ms", None),
+            "data_scanned_bytes": getattr(status_obj, "data_scanned_bytes", None),
+        }
+
+    def _athena_mismatches(
+        self,
+        job: JobDefinition,
+        params: dict[str, Any],
+        metrics: dict[str, Any],
+        row_count: int,
+    ) -> list[MismatchRecord]:
+        mismatches: list[MismatchRecord] = []
+        expected_status = params.get("expected_status", "SUCCEEDED")
+        if metrics.get("state") != expected_status:
+            mismatches.append(MismatchRecord({"job": job.name}, "status", expected_status, metrics.get("state"), "athena_status_mismatch"))
+        if params.get("min_rows") not in (None, "") and row_count < int(params["min_rows"]):
+            mismatches.append(MismatchRecord({"job": job.name}, "row_count", int(params["min_rows"]), row_count, "athena_row_count_below_min"))
+        if params.get("max_rows_assert") not in (None, "") and row_count > int(params["max_rows_assert"]):
+            mismatches.append(MismatchRecord({"job": job.name}, "row_count", int(params["max_rows_assert"]), row_count, "athena_row_count_above_max"))
+        for path, expected in (params.get("metric_assertions") or {}).items():
+            actual = self._metric_path(metrics, str(path))
+            if actual != expected:
+                mismatch_actual = "<missing>" if actual is _MISSING_METRIC else actual
+                mismatches.append(MismatchRecord({"job": job.name}, str(path), expected, mismatch_actual, "athena_metric_mismatch"))
+        return mismatches
+
+    def _athena_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        metrics: dict[str, Any],
+        mismatches: list[MismatchRecord],
+        executed_at: datetime,
+        duration_seconds: float,
+    ) -> ReconciliationResult:
+        by_type: dict[str, int] = {}
+        for mismatch in mismatches:
+            by_type[mismatch.mismatch_type] = by_type.get(mismatch.mismatch_type, 0) + 1
+        row_count = int(metrics.get("row_count", 0) or 0)
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=row_count,
+            target_row_count=row_count,
+            matched_count=0 if mismatches else row_count,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration_seconds,
+            mismatch_summary={"athena": metrics, "metrics": metrics, "by_type": by_type},
+        )
+
+    def _execute_aws_athena_query(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        max_attempts = int(p["max_attempts"]) if p.get("max_attempts") not in (None, "") else 20
+        max_rows = int(p["max_rows"]) if p.get("max_rows") not in (None, "") else 100
+        try:
+            response = AwsAthenaService(ConfigRepository(self._db)).run_query(
+                self._s3_config_id(job),
+                str(p.get("database", "default")),
+                str(p.get("query", "")),
+                str(p.get("output_location", "")),
+                p.get("workgroup"),
+                float(p.get("poll_interval_seconds", 0.2)),
+                max_attempts,
+                max_rows,
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            if isinstance(exc, AthenaQueryFailedError):
+                # Athena does not expose result rows or DQ metrics for terminal
+                # FAILED/CANCELLED queries. Keep expected_status support status-only:
+                # a matching terminal state passes without metric assertions.
+                metrics = self._athena_status_metrics(exc.status)
+                row_count = int(metrics.get("row_count", 0) or 0)
+                metrics["row_count"] = row_count
+                mismatches = self._athena_mismatches(job, p, metrics, row_count)
+                return self._athena_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+            error_payload = detail if detail is not None else str(exc)
+            metrics = {"error": error_payload}
+            mismatch = MismatchRecord({"job": job.name}, "athena", "ok", error_payload, "athena_error")
+            return self._athena_result(job, TestStatus.ERROR, metrics, [mismatch], executed_at, time.monotonic() - t0)
+
+        status_obj = getattr(response, "status", None)
+        results_obj = getattr(response, "results", None)
+        metrics = dict(getattr(response, "dq_metrics", None) or {})
+        metrics.update({
+            **self._athena_status_metrics(status_obj, getattr(response, "query_execution_id", None)),
+            "columns": metrics.get("columns", getattr(results_obj, "columns", [])),
+        })
+        row_count = int(metrics.get("row_count", len(getattr(results_obj, "rows", []) or [])) or 0)
+        metrics["row_count"] = row_count
+        mismatches = self._athena_mismatches(job, p, metrics, row_count)
+        return self._athena_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
 
     # -- Freshness -----------------------------------------------------------
 
