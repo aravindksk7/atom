@@ -44,6 +44,9 @@ def test_execute_glue_catalog_compare_fails_on_drift(monkeypatch, db_session):
     result = ex._execute_aws_glue_catalog_compare(job())
     assert result.status == TestStatus.FAILED
     assert {m.mismatch_type for m in result.mismatches} == {"missing_columns", "extra_columns", "type_mismatch", "partition_key_mismatch", "location_mismatch", "format_mismatch"}
+    format_mismatch = next(m for m in result.mismatches if m.mismatch_type == "format_mismatch")
+    assert format_mismatch.source_value == diff["format_mismatch"]
+    assert format_mismatch.target_value is None
     assert result.mismatch_summary["catalog_diff"] == diff
 
 

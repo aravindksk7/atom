@@ -1141,7 +1141,7 @@ class RunExecutor:
             item = diff["location_mismatch"]
             mismatches.append(MismatchRecord({"job": job.name}, "location", item.get("source"), item.get("target"), "location_mismatch"))
         if diff.get("format_mismatch"):
-            mismatches.append(MismatchRecord({"job": job.name}, "formats", "source", "target", "format_mismatch"))
+            mismatches.append(MismatchRecord({"job": job.name}, "formats", diff["format_mismatch"], None, "format_mismatch"))
         by_type = {m.mismatch_type: sum(1 for x in mismatches if x.mismatch_type == m.mismatch_type) for m in mismatches}
         return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=len(source_cols), target_row_count=len(target_cols), matched_count=0 if mismatches else 1, missing_in_target_count=len(diff.get("missing_columns") or []), missing_in_source_count=len(diff.get("extra_columns") or []), value_mismatch_count=len(mismatches), mismatches=mismatches, status=TestStatus.FAILED if mismatches else TestStatus.PASSED, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": metrics, "by_type": by_type, "catalog_diff": diff})
 

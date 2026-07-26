@@ -41,6 +41,11 @@ def _require_non_empty(params: dict[str, Any], field: str, issues: list[Validati
         issues.append(ValidationIssue(f"params.{field}", f"S3 jobs require '{field}' in params"))
 
 
+def _require_glue_non_empty(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> None:
+    if not params.get(field):
+        issues.append(ValidationIssue(f"params.{field}", f"aws_glue_catalog_compare jobs require '{field}' in params"))
+
+
 def _non_negative_int(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> int | None:
     if field not in params or params.get(field) in (None, ""):
         return None
@@ -99,7 +104,7 @@ def _validate_glue_catalog_compare(params: dict[str, Any], issues: list[Validati
     if not _has_config_ref(params):
         issues.append(ValidationIssue("params.config_id", "aws_glue_catalog_compare jobs require 'config_id' or 'config' in params"))
     for field in ("source_database", "source_table", "target_database", "target_table"):
-        _require_non_empty(params, field, issues)
+        _require_glue_non_empty(params, field, issues)
     for field in ("compare_location", "compare_formats", "compare_partitions"):
         if field in params and not isinstance(params.get(field), bool):
             issues.append(ValidationIssue(f"params.{field}", f"{field} must be a boolean"))
