@@ -38,6 +38,13 @@ class AthenaRunQueryResponse(BaseModel):
     dq_metrics: dict[str, Any]
 
 
+class AthenaQueryFailedError(RuntimeError):
+    def __init__(self, status: AthenaQueryStatusResponse) -> None:
+        message = f"Athena query ended with {status.state}: {status.state_change_reason or ''}".strip()
+        super().__init__(message)
+        self.status = status
+
+
 def compute_dq_metrics(rows: list[dict[str, str | None]]) -> dict[str, Any]:
     columns = list(rows[0].keys()) if rows else []
     null_counts = {col: 0 for col in columns}
@@ -58,7 +65,7 @@ def compute_dq_metrics(rows: list[dict[str, str | None]]) -> dict[str, Any]:
     numeric = {
         col: {"min": min(vals), "max": max(vals), "avg": sum(vals) / len(vals)}
         for col, vals in numeric_values.items()
-        if vals and col not in non_numeric and null_counts[col] == 0
+        if vals and col not in non_numeric
     }
     return {
         "row_count": len(rows),
@@ -111,16 +118,31 @@ class AwsAthenaService:
         )
 
     def get_query_results(self, config_id: int, query_execution_id: str, max_rows: int = 100) -> AthenaQueryResultsResponse:
-        response = self._client(config_id).get_query_results(QueryExecutionId=query_execution_id, MaxResults=max_rows + 1)
-        raw_rows = (response.get("ResultSet") or {}).get("Rows") or []
-        if not raw_rows:
-            return AthenaQueryResultsResponse(columns=[], rows=[])
-        columns = [cell.get("VarCharValue", "") for cell in raw_rows[0].get("Data", [])]
+        client = self._client(config_id)
+        columns: list[str] = []
         rows: list[dict[str, str | None]] = []
-        for raw in raw_rows[1 : max_rows + 1]:
-            cells = raw.get("Data", [])
-            row = {col: (cells[idx].get("VarCharValue") if idx < len(cells) and cells[idx] else None) for idx, col in enumerate(columns)}
-            rows.append(row)
+        next_token: str | None = None
+        while len(rows) < max_rows or (max_rows <= 0 and not columns):
+            remaining = max(max_rows - len(rows), 0)
+            api_max_results = min(max(remaining + (0 if columns else 1), 1), 1000)
+            kwargs: dict[str, Any] = {"QueryExecutionId": query_execution_id, "MaxResults": api_max_results}
+            if next_token:
+                kwargs["NextToken"] = next_token
+            response = client.get_query_results(**kwargs)
+            raw_rows = (response.get("ResultSet") or {}).get("Rows") or []
+            if not raw_rows:
+                break
+            start_idx = 0
+            if not columns:
+                columns = [cell.get("VarCharValue", "") for cell in raw_rows[0].get("Data", [])]
+                start_idx = 1
+            for raw in raw_rows[start_idx : start_idx + remaining]:
+                cells = raw.get("Data", [])
+                row = {col: (cells[idx].get("VarCharValue") if idx < len(cells) and cells[idx] else None) for idx, col in enumerate(columns)}
+                rows.append(row)
+            next_token = response.get("NextToken")
+            if not next_token:
+                break
         return AthenaQueryResultsResponse(columns=columns, rows=rows)
 
     def run_query(
@@ -136,16 +158,16 @@ class AwsAthenaService:
     ) -> AthenaRunQueryResponse:
         started = self.start_query(config_id, database, query, output_location, workgroup)
         status: AthenaQueryStatusResponse | None = None
-        for _ in range(max_attempts):
+        for attempt in range(max_attempts):
             status = self.get_query_status(config_id, started.query_execution_id)
             if status.state in TERMINAL_STATES:
                 break
-            if poll_interval_seconds:
+            if poll_interval_seconds and attempt < max_attempts - 1:
                 time.sleep(poll_interval_seconds)
         if status is None or status.state not in TERMINAL_STATES:
             raise TimeoutError(f"Athena query did not finish after {max_attempts} attempts")
         if status.state != "SUCCEEDED":
-            raise RuntimeError(f"Athena query ended with {status.state}: {status.state_change_reason or ''}".strip())
+            raise AthenaQueryFailedError(status)
         results = self.get_query_results(config_id, started.query_execution_id, max_rows=max_rows)
         return AthenaRunQueryResponse(
             query_execution_id=started.query_execution_id,
