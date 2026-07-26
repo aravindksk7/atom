@@ -49,6 +49,17 @@
       awsGlueError: null,
       awsGlueLoading: false,
       awsGlueJobName: '',
+      awsAthenaDatabase: '',
+      awsAthenaQuery: '',
+      awsAthenaOutputLocation: '',
+      awsAthenaWorkgroup: '',
+      awsAthenaMaxRows: '100',
+      awsAthenaMinRows: '',
+      awsAthenaMaxRowsAssert: '',
+      awsAthenaJobName: '',
+      awsAthenaResult: null,
+      awsAthenaError: null,
+      awsAthenaLoading: false,
 
       _awsReset() {
         this.awsResult = null;
@@ -236,6 +247,62 @@
           this.toast('error', 'Glue job creation failed', e.message);
         } finally {
           this.awsGlueLoading = false;
+        }
+      },
+
+      _awsAthenaRequiredFieldError() {
+        if (!this.awsConfigId) return 'Config is required';
+        if (!this.awsAthenaQuery) return 'Query is required';
+        if (!this.awsAthenaOutputLocation) return 'Output location is required';
+        return null;
+      },
+
+      _awsAthenaParams() {
+        const params = {
+          config_id: Number(this.awsConfigId),
+          database: this.awsAthenaDatabase || null,
+          query: this.awsAthenaQuery,
+          output_location: this.awsAthenaOutputLocation,
+          workgroup: this.awsAthenaWorkgroup || null,
+          max_rows: Number(this.awsAthenaMaxRows || 100),
+        };
+        if (this.awsAthenaMinRows !== '') params.min_rows = Number(this.awsAthenaMinRows);
+        if (this.awsAthenaMaxRowsAssert !== '') params.max_rows_assert = Number(this.awsAthenaMaxRowsAssert);
+        return params;
+      },
+
+      async awsAthenaRunQuery() {
+        this.awsAthenaError = null;
+        this.awsAthenaResult = null;
+        const missing = this._awsAthenaRequiredFieldError();
+        if (missing) { this.awsAthenaError = missing; return; }
+        this.awsAthenaLoading = true;
+        try {
+          this.awsAthenaResult = await api('POST', '/api/aws/athena/run-query', this._awsAthenaParams());
+        } catch (e) {
+          this.awsAthenaError = e.message;
+          this.toast('error', 'Athena query failed', e.message);
+        } finally {
+          this.awsAthenaLoading = false;
+        }
+      },
+
+      async awsCreateAthenaQueryJob() {
+        this.awsAthenaError = null;
+        const missing = this._awsAthenaRequiredFieldError();
+        if (missing) { this.awsAthenaError = missing; return; }
+        const name = (this.awsAthenaJobName || ['athena', this.awsAthenaDatabase || 'query'].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        this.awsAthenaLoading = true;
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'aws_athena_query', params: this._awsAthenaParams(), key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Athena job created', name);
+          this.awsAthenaJobName = '';
+        } catch (e) {
+          this.awsAthenaError = e.message;
+          this.toast('error', 'Athena job creation failed', e.message);
+        } finally {
+          this.awsAthenaLoading = false;
         }
       },
     };

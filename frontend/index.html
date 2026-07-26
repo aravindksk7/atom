@@ -3616,7 +3616,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="compare-subtabs mb-4">
     <button type="button" data-testid="aws-service-s3" @click="awsService='s3'" :class="awsService === 's3' ? 'sub-tab active' : 'sub-tab'">S3</button>
     <button type="button" data-testid="aws-service-glue" @click="awsService='glue'" :class="awsService === 'glue' ? 'sub-tab active' : 'sub-tab'">Glue</button>
-    <button type="button" data-testid="aws-service-athena" disabled title="Coming soon" class="sub-tab">Athena</button>
+    <button type="button" data-testid="aws-service-athena" @click="awsService='athena'" :class="awsService === 'athena' ? 'sub-tab active' : 'sub-tab'">Athena</button>
     <button type="button" data-testid="aws-service-airflow" disabled title="Coming soon" class="sub-tab">Airflow</button>
   </div>
 
@@ -3824,6 +3824,80 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <div x-show="awsGlueResult.diff.location_mismatch">Location mismatch</div>
             <div x-show="awsGlueResult.diff.format_mismatch">Format mismatch</div>
           </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="awsService === 'athena'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">Amazon Athena</div>
+        <span class="badge badge-blue">Query</span>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Database (optional)</label>
+          <input x-model="awsAthenaDatabase" class="field-input" placeholder="analytics" data-testid="aws-athena-database-input" />
+        </div>
+        <div>
+          <label class="field-label">Workgroup (optional)</label>
+          <input x-model="awsAthenaWorkgroup" class="field-input" placeholder="primary" data-testid="aws-athena-workgroup-input" />
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="field-label">SQL Query</label>
+        <textarea x-model="awsAthenaQuery" rows="5" class="field-input" placeholder="select * from table limit 100" data-testid="aws-athena-query-input"></textarea>
+      </div>
+
+      <div class="mb-3">
+        <label class="field-label">Output Location</label>
+        <input x-model="awsAthenaOutputLocation" class="field-input" placeholder="s3://bucket/athena-results/" data-testid="aws-athena-output-location-input" />
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Max Rows</label>
+          <input x-model="awsAthenaMaxRows" type="number" min="1" class="field-input" placeholder="100" data-testid="aws-athena-max-rows-input" />
+        </div>
+        <div>
+          <label class="field-label">Job Name (optional)</label>
+          <input x-model="awsAthenaJobName" class="field-input" placeholder="auto-generated from database" data-testid="aws-athena-job-name-input" />
+        </div>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label">Min Rows Assertion</label>
+          <input x-model="awsAthenaMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-athena-min-rows-input" />
+        </div>
+        <div>
+          <label class="field-label">Max Rows Assertion</label>
+          <input x-model="awsAthenaMaxRowsAssert" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-athena-max-rows-assert-input" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button @click="awsAthenaRunQuery()" :disabled="awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation" class="btn-primary" data-testid="aws-athena-run-query-btn">Run Athena Query</button>
+        <button @click="awsCreateAthenaQueryJob()" :disabled="awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation" class="btn-secondary" data-testid="aws-athena-create-job-btn">Create Athena Query Job</button>
+      </div>
+
+      <div x-show="awsAthenaLoading" class="text-muted mb-3" data-testid="aws-athena-loading">Running...</div>
+      <div x-show="awsAthenaError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" data-testid="aws-athena-error" x-text="awsAthenaError"></div>
+
+      <div x-show="awsAthenaResult" data-testid="aws-athena-result" class="text-sm">
+        <div class="flex gap-2 flex-wrap mb-2">
+          <span>Status: <strong x-text="awsAthenaResult && (awsAthenaResult.status || awsAthenaResult.state || 'completed')"></strong></span>
+          <span>Rows: <strong x-text="awsAthenaResult && ((awsAthenaResult.rows || []).length || awsAthenaResult.row_count || 0)"></strong></span>
+          <span x-show="awsAthenaResult && awsAthenaResult.execution_time_ms">Execution ms: <strong x-text="awsAthenaResult && awsAthenaResult.execution_time_ms"></strong></span>
+        </div>
+        <template x-if="awsAthenaResult && awsAthenaResult.metrics">
+          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.metrics, null, 2)"></pre>
+        </template>
+        <template x-if="awsAthenaResult && awsAthenaResult.rows && awsAthenaResult.rows.length">
+          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.rows.slice(0, 10), null, 2)"></pre>
         </template>
       </div>
     </div>
