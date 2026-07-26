@@ -947,16 +947,23 @@ class RunExecutor:
         schema_diff: dict[str, Any] | None = None,
     ) -> ReconciliationResult:
         mismatches = mismatches or []
-        summary: dict[str, Any] = {"metrics": metrics}
+        by_type: dict[str, int] = {}
+        for mismatch in mismatches:
+            by_type[mismatch.mismatch_type] = by_type.get(mismatch.mismatch_type, 0) + 1
+        metrics = {**metrics, "by_type": by_type}
+        summary: dict[str, Any] = {"metrics": metrics, "by_type": by_type}
         if schema_diff is not None:
             summary["schema_diff"] = schema_diff
+        match_total = int(metrics.get("row_count", 1) or 0) if not mismatches else 0
+        if not mismatches and match_total == 0 and "row_count" not in metrics:
+            match_total = 1
         return ReconciliationResult(
             query_name=job.name,
             source_env=self._source_env,
             target_env=self._target_env,
             source_row_count=int(metrics.get("row_count", metrics.get("partition_count", 0)) or 0),
             target_row_count=int(metrics.get("row_count", metrics.get("partition_count", 0)) or 0),
-            matched_count=0 if mismatches else int(metrics.get("row_count", metrics.get("partition_count", 0)) or 0),
+            matched_count=match_total,
             missing_in_target_count=0,
             missing_in_source_count=0,
             value_mismatch_count=len(mismatches),
@@ -1026,6 +1033,7 @@ class RunExecutor:
             validation = validate_format(client, bucket, key, fmt, p.get("expected_schema"))
             metrics.update({"parsed": validation.parsed, "schema_ok": validation.schema_ok})
         except SchemaValidationError as exc:
+            metrics.update({"parsed": False, "schema_ok": False})
             schema_diff = {
                 "missing_in_target": list(exc.missing_in_target),
                 "extra_in_target": list(exc.extra_in_target),
