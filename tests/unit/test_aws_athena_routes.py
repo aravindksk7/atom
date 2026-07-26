@@ -70,6 +70,26 @@ def test_run_query_route(client, mock_service):
     mock_service.run_query.assert_called_once_with(1, "curated", "select 1", "s3://out/", None, 0.2, 20, 100)
 
 
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/api/aws/athena/start-query", {"config_id": 1, "query": "", "output_location": "s3://out/"}),
+        ("/api/aws/athena/start-query", {"config_id": 1, "query": "   ", "output_location": "s3://out/"}),
+        ("/api/aws/athena/start-query", {"config_id": 1, "query": "select 1", "output_location": ""}),
+        ("/api/aws/athena/query-results", {"config_id": 1, "query_execution_id": "qid-1", "max_rows": -1}),
+        ("/api/aws/athena/run-query", {"config_id": 1, "query": "select 1", "output_location": "s3://out/", "max_attempts": 0}),
+        ("/api/aws/athena/run-query", {"config_id": 1, "query": "select 1", "output_location": "s3://out/", "max_rows": -1}),
+        ("/api/aws/athena/run-query", {"config_id": 1, "query": "select 1", "output_location": "s3://out/", "poll_interval_seconds": -0.1}),
+    ],
+)
+def test_athena_routes_reject_invalid_request_constraints(client, mock_service, path, payload):
+    r = client.post(path, json=payload)
+    assert r.status_code == 422
+    mock_service.start_query.assert_not_called()
+    mock_service.get_query_results.assert_not_called()
+    mock_service.run_query.assert_not_called()
+
+
 def test_route_preserves_missing_config_http_exception(client, mock_service):
     mock_service.start_query.side_effect = HTTPException(status_code=404, detail="Config not found")
     r = client.post("/api/aws/athena/start-query", json={"config_id": 404, "query": "select 1", "output_location": "s3://out/"})

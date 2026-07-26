@@ -19,6 +19,8 @@ test.describe('20 AWS Athena tab', () => {
         output_location: 's3://athena-out/',
         max_rows: 100,
       });
+      expect(request.postDataJSON()).not.toHaveProperty('min_rows');
+      expect(request.postDataJSON()).not.toHaveProperty('max_rows_assert');
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -63,9 +65,10 @@ test.describe('20 AWS Athena tab', () => {
     await authedPage.locator('[data-testid="nav-tab-aws"]').click();
     await authedPage.locator('[data-testid="aws-service-athena"]').click();
     await authedPage.locator('[data-testid="aws-config-select"]').selectOption('7');
-    await authedPage.locator('[data-testid="aws-athena-database-input"]').fill('curated');
-    await authedPage.locator('[data-testid="aws-athena-query-input"]').fill('select id, amount from orders');
-    await authedPage.locator('[data-testid="aws-athena-output-location-input"]').fill('s3://athena-out/');
+    await authedPage.locator('[data-testid="aws-athena-database-input"]').fill(' curated ');
+    await authedPage.locator('[data-testid="aws-athena-query-input"]').fill('  select id, amount from orders  ');
+    await authedPage.locator('[data-testid="aws-athena-output-location-input"]').fill(' s3://athena-out/ ');
+    await authedPage.locator('[data-testid="aws-athena-min-rows-input"]').fill('1');
 
     await authedPage.locator('[data-testid="aws-athena-run-query-btn"]').click();
     await expect(authedPage.locator('[data-testid="aws-athena-result"]')).toContainText('SUCCEEDED');
@@ -73,7 +76,6 @@ test.describe('20 AWS Athena tab', () => {
     await expect(authedPage.locator('[data-testid="aws-athena-result"]')).toContainText('amount');
 
     await authedPage.locator('[data-testid="aws-athena-job-name-input"]').fill('e2e-athena-orders');
-    await authedPage.locator('[data-testid="aws-athena-min-rows-input"]').fill('1');
     await authedPage.locator('[data-testid="aws-athena-create-job-btn"]').click();
     await expect.poll(() => jobBody).not.toBeNull();
     expect(jobBody.job_type).toBe('aws_athena_query');

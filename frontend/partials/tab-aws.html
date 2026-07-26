@@ -284,7 +284,6 @@
         <div class="flex gap-2 flex-wrap mb-2">
           <span>Status: <strong x-text="awsAthenaResult && awsAthenaResult.status && (awsAthenaResult.status.state || 'completed')"></strong></span>
           <span x-show="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.query_execution_id">Execution ID: <strong x-text="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.query_execution_id"></strong></span>
-          <span x-show="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.output_location">Output: <strong x-text="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.output_location"></strong></span>
           <span>Rows: <strong x-text="awsAthenaResult && awsAthenaResult.results && awsAthenaResult.results.rows ? awsAthenaResult.results.rows.length : 0"></strong></span>
           <span x-show="awsAthenaResult && awsAthenaResult.execution_time_ms">Execution ms: <strong x-text="awsAthenaResult && awsAthenaResult.execution_time_ms"></strong></span>
         </div>

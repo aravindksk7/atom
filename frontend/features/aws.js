@@ -253,22 +253,30 @@
 
       _awsAthenaRequiredFieldError() {
         if (!this.awsConfigId) return 'Config is required';
-        if (!this.awsAthenaQuery) return 'Query is required';
-        if (!this.awsAthenaOutputLocation) return 'Output location is required';
+        if (!(this.awsAthenaQuery || '').trim()) return 'Query is required';
+        if (!(this.awsAthenaOutputLocation || '').trim()) return 'Output location is required';
         return null;
       },
 
-      _awsAthenaParams() {
+      _awsAthenaRunQueryParams() {
+        const maxRows = String(this.awsAthenaMaxRows || '').trim();
         const params = {
           config_id: Number(this.awsConfigId),
-          database: this.awsAthenaDatabase || null,
-          query: this.awsAthenaQuery,
-          output_location: this.awsAthenaOutputLocation,
-          workgroup: this.awsAthenaWorkgroup || null,
-          max_rows: Number(this.awsAthenaMaxRows || 100),
+          database: (this.awsAthenaDatabase || '').trim() || null,
+          query: (this.awsAthenaQuery || '').trim(),
+          output_location: (this.awsAthenaOutputLocation || '').trim(),
+          workgroup: (this.awsAthenaWorkgroup || '').trim() || null,
+          max_rows: Number(maxRows || 100),
         };
-        if (this.awsAthenaMinRows !== '') params.min_rows = Number(this.awsAthenaMinRows);
-        if (this.awsAthenaMaxRowsAssert !== '') params.max_rows_assert = Number(this.awsAthenaMaxRowsAssert);
+        return params;
+      },
+
+      _awsAthenaJobParams() {
+        const params = this._awsAthenaRunQueryParams();
+        const minRows = String(this.awsAthenaMinRows || '').trim();
+        const maxRowsAssert = String(this.awsAthenaMaxRowsAssert || '').trim();
+        if (minRows !== '') params.min_rows = Number(minRows);
+        if (maxRowsAssert !== '') params.max_rows_assert = Number(maxRowsAssert);
         return params;
       },
 
@@ -280,7 +288,7 @@
         if (missing) { this.awsAthenaError = missing; return; }
         this.awsAthenaLoading = true;
         try {
-          this.awsAthenaResult = await api('POST', '/api/aws/athena/run-query', this._awsAthenaParams());
+          this.awsAthenaResult = await api('POST', '/api/aws/athena/run-query', this._awsAthenaRunQueryParams());
         } catch (e) {
           this.awsAthenaError = e.message;
           this.toast('error', 'Athena query failed', e.message);
@@ -294,10 +302,10 @@
         this.awsAthenaError = null;
         const missing = this._awsAthenaRequiredFieldError();
         if (missing) { this.awsAthenaError = missing; return; }
-        const name = (this.awsAthenaJobName || ['athena', this.awsAthenaDatabase || 'query'].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        const name = ((this.awsAthenaJobName || '').trim() || ['athena', (this.awsAthenaDatabase || '').trim() || 'query'].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
         this.awsAthenaLoading = true;
         try {
-          await api('POST', '/api/jobs', { name, job_type: 'aws_athena_query', params: this._awsAthenaParams(), key_columns: [] });
+          await api('POST', '/api/jobs', { name, job_type: 'aws_athena_query', params: this._awsAthenaJobParams(), key_columns: [] });
           if (this.loadJobs) await this.loadJobs();
           this.toast('success', 'Athena job created', name);
           this.awsAthenaJobName = '';

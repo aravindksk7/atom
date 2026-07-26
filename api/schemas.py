@@ -1,8 +1,11 @@
 from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Annotated, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class ConfigCreate(BaseModel):
@@ -1108,8 +1111,8 @@ class GlueCatalogCompareRequest(BaseModel):
 class AthenaStartQueryRequest(BaseModel):
     config_id: int
     database: str | None = None
-    query: str
-    output_location: str
+    query: NonEmptyStr
+    output_location: NonEmptyStr
     workgroup: str | None = None
 
 
@@ -1121,18 +1124,18 @@ class AthenaQueryStatusRequest(BaseModel):
 class AthenaQueryResultsRequest(BaseModel):
     config_id: int
     query_execution_id: str
-    max_rows: int = 100
+    max_rows: int = Field(default=100, ge=0)
 
 
 class AthenaRunQueryRequest(BaseModel):
     config_id: int
     database: str | None = None
-    query: str
-    output_location: str
+    query: NonEmptyStr
+    output_location: NonEmptyStr
     workgroup: str | None = None
-    poll_interval_seconds: float = 0.2
-    max_attempts: int = 20
-    max_rows: int = 100
+    poll_interval_seconds: float = Field(default=0.2, ge=0)
+    max_attempts: int = Field(default=20, ge=1)
+    max_rows: int = Field(default=100, ge=0)
 
 
 class AthenaStartQueryOut(BaseModel):

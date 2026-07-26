@@ -1217,7 +1217,7 @@ class RunExecutor:
             target_env=self._target_env,
             source_row_count=row_count,
             target_row_count=row_count,
-            matched_count=0 if mismatches else max(row_count, 1),
+            matched_count=0 if mismatches else row_count,
             missing_in_target_count=0,
             missing_in_source_count=0,
             value_mismatch_count=len(mismatches),
@@ -1248,6 +1248,9 @@ class RunExecutor:
         except Exception as exc:
             detail = getattr(exc, "detail", None)
             if isinstance(exc, AthenaQueryFailedError):
+                # Athena does not expose result rows or DQ metrics for terminal
+                # FAILED/CANCELLED queries. Keep expected_status support status-only:
+                # a matching terminal state passes without metric assertions.
                 metrics = self._athena_status_metrics(exc.status)
                 row_count = int(metrics.get("row_count", 0) or 0)
                 metrics["row_count"] = row_count

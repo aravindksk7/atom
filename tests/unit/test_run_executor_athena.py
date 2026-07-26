@@ -33,8 +33,10 @@ def job(params=None):
     return JobDefinition(name="athena_orders", job_type="aws_athena_query", params=p)
 
 
-def run_response(row_count=2, state="SUCCEEDED"):
-    return SimpleNamespace(query_execution_id="qid-1", status=SimpleNamespace(state=state, state_change_reason=None, engine_execution_time_ms=42, data_scanned_bytes=1024), results=SimpleNamespace(columns=["id"], rows=[{"id": "1"}, {"id": "2"}]), dq_metrics={"row_count": row_count, "columns": ["id"], "null_counts": {"id": 0}, "distinct_counts": {"id": row_count}, "numeric": {"id": {"min": 1.0, "max": float(row_count), "avg": 1.5}}})
+def run_response(row_count=2, state="SUCCEEDED", rows=None):
+    if rows is None:
+        rows = [{"id": "1"}, {"id": "2"}]
+    return SimpleNamespace(query_execution_id="qid-1", status=SimpleNamespace(state=state, state_change_reason=None, engine_execution_time_ms=42, data_scanned_bytes=1024), results=SimpleNamespace(columns=["id"], rows=rows), dq_metrics={"row_count": row_count, "columns": ["id"], "null_counts": {"id": 0}, "distinct_counts": {"id": row_count}, "numeric": {"id": {"min": 1.0, "max": float(row_count), "avg": 1.5}}})
 
 
 def failed_status(state="FAILED"):
@@ -81,6 +83,7 @@ def test_execute_athena_query_failed_terminal_status_passes_when_expected(monkey
         "data_scanned_bytes": 2048,
         "row_count": 0,
     }
+    assert "dq_metrics" not in result.mismatch_summary["athena"]
 
 
 def test_execute_athena_query_cancelled_terminal_status_fails_when_unexpected(monkeypatch, db_session):
@@ -107,6 +110,15 @@ def test_execute_athena_query_max_rows_assert(monkeypatch, db_session):
     result = executor(db_session)._execute_aws_athena_query(job({"max_rows_assert": 2}))
     assert result.status == TestStatus.FAILED
     assert result.mismatches[0].mismatch_type == "athena_row_count_above_max"
+
+
+def test_execute_athena_query_zero_rows_reports_zero_matches(monkeypatch, db_session):
+    monkeypatch.setattr("api.services.run_executor.AwsAthenaService", lambda repo: SimpleNamespace(run_query=lambda *a, **k: run_response(row_count=0, rows=[])))
+    result = executor(db_session)._execute_aws_athena_query(job())
+    assert result.status == TestStatus.PASSED
+    assert result.source_row_count == 0
+    assert result.target_row_count == 0
+    assert result.matched_count == 0
 
 
 def test_execute_athena_query_missing_metric_assertion_fails_when_expected_none(monkeypatch, db_session):
