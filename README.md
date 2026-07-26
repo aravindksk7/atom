@@ -157,6 +157,15 @@ validate_format(client, "my-bucket", "data/part-0.parquet", "parquet",
                 expected_schema={"id": "int64", "name": "string"})
 ```
 
+### AWS in the Web UI
+
+Add AWS credentials to a saved config (`aws_region`, `aws_access_key_id`,
+`aws_secret_access_key`, `aws_session_token`, `aws_endpoint_url`,
+`aws_verify_ssl`; the secret fields are encrypted at rest). The **AWS** tab
+runs ad-hoc S3 checks against a selected config: object metadata, row counts,
+Hive-style partition discovery, and format validation. The same operations are
+available at `POST /api/aws/s3/{metadata,row-count,partitions,validate-format}`.
+
 ## Architecture
 
 Additional runtime capabilities:
