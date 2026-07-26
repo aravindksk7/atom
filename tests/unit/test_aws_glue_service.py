@@ -139,3 +139,10 @@ def test_glue_runtime_missing_config_maps_to_404(config_repo):
     with pytest.raises(HTTPException) as err:
         AwsGlueRuntime(config_repo).env(999)
     assert err.value.status_code == 404
+
+
+def test_glue_runtime_resolves_named_config(config_repo):
+    cfg = config_repo.create("aws-dev", "dev", {"db_host": "localhost", "db_password": "unused", "aws_region": "us-east-1"})
+    runtime = AwsGlueRuntime(config_repo)
+    assert runtime.config_id("aws-dev") == cfg.id
+    assert runtime.env("aws-dev").name == "dev"

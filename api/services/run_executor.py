@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 import pandas as pd
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
@@ -1122,7 +1123,8 @@ class RunExecutor:
                 compare_partitions=p.get("compare_partitions", True),
             )
         except Exception as exc:
-            return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=0, target_row_count=0, matched_count=0, missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1, mismatches=[MismatchRecord({"job": job.name}, "glue", "ok", str(exc), "glue_error")], status=TestStatus.ERROR, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": {**metrics, "error": str(exc)}, "by_type": {"glue_error": 1}})
+            error_message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=0, target_row_count=0, matched_count=0, missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1, mismatches=[MismatchRecord({"job": job.name}, "glue", "ok", error_message, "glue_error")], status=TestStatus.ERROR, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": {**metrics, "error": error_message}, "by_type": {"glue_error": 1}})
 
         source_cols = compared.source.get("columns", [])
         target_cols = compared.target.get("columns", [])

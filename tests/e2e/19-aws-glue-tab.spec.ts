@@ -82,6 +82,9 @@ test.describe('19 AWS Glue tab', () => {
       source_table: 'orders',
       target_database: 'curated',
       target_table: 'orders',
+      compare_location: true,
+      compare_formats: true,
+      compare_partitions: true,
     });
   });
 });

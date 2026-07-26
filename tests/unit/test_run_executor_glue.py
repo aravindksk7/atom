@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -60,3 +61,16 @@ def test_execute_glue_catalog_compare_errors(monkeypatch, db_session):
     result = ex._execute_aws_glue_catalog_compare(job())
     assert result.status == TestStatus.ERROR
     assert result.mismatches[0].mismatch_type == "glue_error"
+
+
+def test_execute_glue_catalog_compare_preserves_http_exception_detail(monkeypatch, db_session):
+    ex = executor(db_session)
+
+    def fail(*args, **kwargs):
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    monkeypatch.setattr("api.services.run_executor.AwsGlueService", lambda repo: SimpleNamespace(compare_tables=fail))
+    result = ex._execute_aws_glue_catalog_compare(job())
+    assert result.status == TestStatus.ERROR
+    assert result.mismatches[0].target_value == "Config not found"
+    assert result.mismatch_summary["metrics"]["error"] == "Config not found"
