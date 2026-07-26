@@ -282,15 +282,17 @@
 
       <div x-show="awsAthenaResult" data-testid="aws-athena-result" class="text-sm">
         <div class="flex gap-2 flex-wrap mb-2">
-          <span>Status: <strong x-text="awsAthenaResult && (awsAthenaResult.status || awsAthenaResult.state || 'completed')"></strong></span>
-          <span>Rows: <strong x-text="awsAthenaResult && ((awsAthenaResult.rows || []).length || awsAthenaResult.row_count || 0)"></strong></span>
+          <span>Status: <strong x-text="awsAthenaResult && awsAthenaResult.status && (awsAthenaResult.status.state || 'completed')"></strong></span>
+          <span x-show="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.query_execution_id">Execution ID: <strong x-text="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.query_execution_id"></strong></span>
+          <span x-show="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.output_location">Output: <strong x-text="awsAthenaResult && awsAthenaResult.status && awsAthenaResult.status.output_location"></strong></span>
+          <span>Rows: <strong x-text="awsAthenaResult && awsAthenaResult.results && awsAthenaResult.results.rows ? awsAthenaResult.results.rows.length : 0"></strong></span>
           <span x-show="awsAthenaResult && awsAthenaResult.execution_time_ms">Execution ms: <strong x-text="awsAthenaResult && awsAthenaResult.execution_time_ms"></strong></span>
         </div>
-        <template x-if="awsAthenaResult && awsAthenaResult.metrics">
-          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.metrics, null, 2)"></pre>
+        <template x-if="awsAthenaResult && awsAthenaResult.dq_metrics">
+          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.dq_metrics, null, 2)"></pre>
         </template>
-        <template x-if="awsAthenaResult && awsAthenaResult.rows && awsAthenaResult.rows.length">
-          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.rows.slice(0, 10), null, 2)"></pre>
+        <template x-if="awsAthenaResult && awsAthenaResult.results && awsAthenaResult.results.rows && awsAthenaResult.results.rows.length">
+          <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.results.rows.slice(0, 10), null, 2)"></pre>
         </template>
       </div>
     </div>

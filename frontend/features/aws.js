@@ -1,7 +1,8 @@
 (function (global) {
   'use strict';
   // AWS feature slice (AWS tab: ad-hoc S3 checks — metadata, row count,
-  // partition discovery, format validation — plus Glue Catalog compare).
+  // partition discovery, format validation — plus Glue Catalog compare and
+  // Athena query execution).
   // Merged into the Alpine
   // component via the FEATURE_SLICES reduce in app.js.
   //
@@ -17,8 +18,8 @@
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
-      // Which AWS service sub-panel is active. Athena/Airflow are
-      // placeholders until their backends land.
+      // Which AWS service sub-panel is active. Airflow is a placeholder until
+      // its backend lands.
       awsService: 's3',
       awsConfigId: '',
       awsBucket: '',
@@ -272,6 +273,7 @@
       },
 
       async awsAthenaRunQuery() {
+        if (this.awsAthenaLoading) return;
         this.awsAthenaError = null;
         this.awsAthenaResult = null;
         const missing = this._awsAthenaRequiredFieldError();
@@ -288,6 +290,7 @@
       },
 
       async awsCreateAthenaQueryJob() {
+        if (this.awsAthenaLoading) return;
         this.awsAthenaError = null;
         const missing = this._awsAthenaRequiredFieldError();
         if (missing) { this.awsAthenaError = missing; return; }
