@@ -49,3 +49,4 @@ def test_aws_tab_contains_s3_job_creation_controls():
     assert "data-testid=\"aws-job-name-input\"" in html
     assert "data-testid=\"aws-min-rows-input\"" in html
     assert "data-testid=\"aws-expected-columns-input\"" in html
+    assert "Type mismatches:" in html

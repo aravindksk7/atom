@@ -10,8 +10,9 @@
   // body on success, and on a non-2xx response throws an Error carrying both
   // `.message` (a flattened display string via app.js's apiErrorMessage) and
   // `.detail` (the raw FastAPI `detail`). The aws_s3 routes put
-  // `missing_in_target` / `extra_in_target` on `detail` for schema-validation
-  // errors; `_awsPost` reads them off `e.detail` into awsError. See below.
+  // `missing_in_target` / `extra_in_target` / `type_mismatches` on `detail`
+  // for schema-validation errors; `_awsPost` reads them off `e.detail` into
+  // awsError. See below.
   global.ETL_FEATURE_AWS = function () {
     return {
       // ===== STATE =====
@@ -32,8 +33,8 @@
       awsJobError: null,
       awsLoading: false,
       awsResult: null,            // { kind, data }
-      // { message, missing?, extra? } — missing/extra come from the error's
-      // `.detail` (schema-validation drift); null for other errors, so
+      // { message, missing?, extra?, typeMismatches? } — schema drift details
+      // come from the error's `.detail`; null for other errors, so
       // downstream templates should tolerate them being absent.
       awsError: null,
 
@@ -53,6 +54,7 @@
             message: e.message,
             missing: detail.missing_in_target || null,
             extra: detail.extra_in_target || null,
+            typeMismatches: detail.type_mismatches || null,
           };
           this.toast('error', 'AWS S3 check failed', e.message);
           return null;

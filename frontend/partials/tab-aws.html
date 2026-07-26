@@ -113,6 +113,12 @@
           <span x-text="awsError && awsError.message"></span>
           <div x-show="awsError && awsError.missing" class="mt-1">Missing: <span x-text="awsError && (awsError.missing || []).join(', ')"></span></div>
           <div x-show="awsError && awsError.extra" class="mt-1">Extra: <span x-text="awsError && (awsError.extra || []).join(', ')"></span></div>
+          <div x-show="awsError && awsError.typeMismatches" class="mt-1">
+            Type mismatches:
+            <template x-for="m in (awsError && awsError.typeMismatches) || []" :key="m.column">
+              <span class="inline-block mr-2" x-text="m.column + ': expected ' + m.expected_type + ', actual ' + m.actual_type"></span>
+            </template>
+          </div>
         </div>
       </template>
 

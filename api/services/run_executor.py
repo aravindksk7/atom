@@ -934,7 +934,13 @@ class RunExecutor:
 
     def _s3_config_id(self, job: JobDefinition) -> int:
         raw = job.params.get("config_id") or job.params.get("config")
-        return int(raw)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            cfg = ConfigRepository(self._db).get_by_name(str(raw))
+            if cfg is None:
+                raise ValueError(f"Config not found: {raw}")
+            return int(cfg.id)
 
     def _s3_result(
         self,
@@ -1033,7 +1039,7 @@ class RunExecutor:
             validation = validate_format(client, bucket, key, fmt, p.get("expected_schema"))
             metrics.update({"parsed": validation.parsed, "schema_ok": validation.schema_ok})
         except SchemaValidationError as exc:
-            metrics.update({"parsed": False, "schema_ok": False})
+            metrics.update({"parsed": True, "schema_ok": False})
             schema_diff = {
                 "missing_in_target": list(exc.missing_in_target),
                 "extra_in_target": list(exc.extra_in_target),

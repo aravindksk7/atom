@@ -11,6 +11,7 @@ from api.schemas import JobDefinition, RunSettings
 from api.services.run_executor import RunExecutor
 from etl_framework.exceptions import SchemaValidationError
 from etl_framework.repository.database import Base
+from etl_framework.repository.repository import ConfigRepository
 from etl_framework.runner.state import TestStatus
 
 
@@ -54,6 +55,30 @@ def test_execute_s3_row_count_passes_within_bounds(monkeypatch, db_session):
     assert result.matched_count == 5
     assert result.executed_at is not None
     assert result.duration_seconds > 0
+
+
+def test_execute_s3_row_count_resolves_named_config(monkeypatch, db_session):
+    ConfigRepository(db_session).create("qa-aws", "qa", {"aws_region": "us-east-1"})
+    ex = executor(db_session)
+    seen_config_ids = []
+
+    def runtime(_repo):
+        return SimpleNamespace(
+            client=lambda config_id: seen_config_ids.append(config_id) or object(),
+            filesystem=lambda config_id: object(),
+        )
+
+    monkeypatch.setattr("api.services.run_executor.AwsS3Runtime", runtime)
+    monkeypatch.setattr("api.services.run_executor.select_row_count", lambda client, bucket, key, fmt: 5)
+
+    result = ex._execute_s3_row_count(JobDefinition(
+        name="orders_rows",
+        job_type="s3_row_count",
+        params={"config": "qa-aws", "bucket": "b", "key": "orders.csv", "fmt": "csv"},
+    ))
+
+    assert result.status == TestStatus.PASSED
+    assert seen_config_ids == [1]
 
 
 @pytest.mark.parametrize(
@@ -130,7 +155,7 @@ def test_execute_s3_format_validation_fails_schema_drift(monkeypatch, db_session
     assert {m.mismatch_type for m in result.mismatches} == {"missing_columns", "extra_columns", "type_mismatch"}
     assert result.mismatch_summary["by_type"] == {"missing_columns": 1, "extra_columns": 1, "type_mismatch": 1}
     assert result.mismatch_summary["metrics"]["by_type"] == {"missing_columns": 1, "extra_columns": 1, "type_mismatch": 1}
-    assert result.mismatch_summary["metrics"]["parsed"] is False
+    assert result.mismatch_summary["metrics"]["parsed"] is True
     assert result.mismatch_summary["metrics"]["schema_ok"] is False
     assert result.mismatch_summary["schema_diff"]["type_mismatches"] == [
         {"column": "amount", "expected_type": "decimal(12,2)", "actual_type": "string"}
