@@ -139,3 +139,58 @@ def test_ds_job_requires_job_name():
         "params": {},
     })
     assert any(issue.field == "params.job_name" for issue in issues)
+
+
+def test_s3_row_count_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "orders_rows",
+        "job_type": "s3_row_count",
+        "params": {"config_id": 1, "bucket": "b", "key": "orders.csv", "fmt": "csv", "min_rows": 1, "max_rows": 10},
+    })
+    assert issues == []
+
+
+def test_s3_row_count_requires_identity_and_valid_bounds():
+    issues = validate_job_definition({
+        "name": "orders_rows",
+        "job_type": "s3_row_count",
+        "params": {"config_id": 1, "bucket": "", "key": "", "fmt": "xml", "min_rows": 10, "max_rows": 1},
+    })
+    fields = {issue.field for issue in issues}
+    assert fields == {"params.bucket", "params.key", "params.fmt", "params.min_rows"}
+
+
+def test_s3_format_validation_requires_schema_mapping_when_present():
+    issues = validate_job_definition({
+        "name": "orders_schema",
+        "job_type": "s3_format_validation",
+        "params": {"config": "qa", "bucket": "b", "key": "orders.csv", "fmt": "csv", "expected_schema": ["id"]},
+    })
+    assert any(issue.field == "params.expected_schema" for issue in issues)
+
+
+def test_s3_partition_check_validates_columns_and_minimum():
+    issues = validate_job_definition({
+        "name": "orders_partitions",
+        "job_type": "s3_partition_check",
+        "params": {"config_id": 1, "bucket": "b", "prefix": "orders/", "expected_columns": ["dt", "region"], "min_partitions": 1},
+    })
+    assert issues == []
+
+    bad = validate_job_definition({
+        "name": "orders_partitions",
+        "job_type": "s3_partition_check",
+        "params": {"config_id": 1, "bucket": "b", "prefix": "", "expected_columns": ["dt", 3], "min_partitions": -1},
+    })
+    fields = {issue.field for issue in bad}
+    assert fields == {"params.prefix", "params.expected_columns", "params.min_partitions"}
+
+
+def test_job_definition_accepts_s3_job_types():
+    for job_type in ("s3_row_count", "s3_format_validation", "s3_partition_check"):
+        job = JobDefinition(
+            name=job_type,
+            job_type=job_type,
+            params={"config_id": 1, "bucket": "b", "key": "k", "prefix": "p", "fmt": "csv"},
+        )
+        assert job.job_type == job_type

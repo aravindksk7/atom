@@ -165,6 +165,9 @@ Add AWS credentials to a saved config (`aws_region`, `aws_access_key_id`,
 runs ad-hoc S3 checks against a selected config: object metadata, row counts,
 Hive-style partition discovery, and format validation. The same operations are
 available at `POST /api/aws/s3/{metadata,row-count,partitions,validate-format}`.
+The S3 panel can also create tracked row-count, format-validation, and
+partition-check jobs so the same checks flow through run history, scheduling,
+DQ gates, and reports.
 
 ## Architecture
 
@@ -3149,6 +3152,14 @@ npx playwright test                      # full UI suite against a throwaway DB,
 $env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server / S3 (MinIO) / SFTP paths (requires Docker + ODBC Driver 17 for SQL Server; boto3/paramiko installed via requirements.txt)
 npx playwright show-report               # view the last HTML report
 ```
+
+For the live AWS S3 tab flow against MinIO:
+
+```powershell
+$env:E2E_LIVE_BACKENDS = "1"; npx playwright test tests/e2e/18-aws-s3-tab-live.spec.ts
+```
+
+If your machine only has ODBC Driver 18 installed, add `$env:LIVE_SQLSERVER_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"` before the command.
 
 `tests/e2e/17b-multi-file-live-remote.spec.ts` (gated behind `E2E_LIVE_BACKENDS=1`, same convention as `05-adapters.spec.ts`) creates a real `multi_file` job through the job editor UI with one side pointed at the live `minio`/`sftp` container, runs **Preview Mapping** against it for real (Phase 8's preview-only credential fields), saves the job, then triggers a real run — resolving `credentials_ref` against a `SavedConfig`'s `config_data.file_source_credentials` (the same mechanism a real production S3/SFTP job uses) — and asserts the run reaches the same deterministic `FAILED` (region=east passes, region=west doesn't) outcome every other multi-file test in this repo relies on.
 

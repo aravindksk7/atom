@@ -5,6 +5,9 @@ from unittest.mock import MagicMock
 import boto3
 import pytest
 from moto import mock_aws
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from api.services.aws_s3_service import AwsS3Service
 from etl_framework.exceptions import SchemaValidationError
@@ -25,6 +28,29 @@ def _service_with_moto(raw):
     # Inject the moto-backed s3 client so no real AWS/session is built.
     svc._s3_client_override = raw
     return svc
+
+
+@pytest.fixture
+def db_session():
+    from etl_framework.repository.database import Base
+    import etl_framework.repository.models  # noqa: F401
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session_ = sessionmaker(bind=engine)
+    with Session_() as db:
+        yield db
+
+
+@pytest.fixture
+def config_repo(db_session):
+    from etl_framework.repository.repository import ConfigRepository
+
+    return ConfigRepository(db_session)
 
 
 @pytest.fixture
@@ -70,3 +96,15 @@ def test_missing_config_id_raises_404():
     with pytest.raises(HTTPException) as exc:
         svc.metadata(999, "b", "k")
     assert exc.value.status_code == 404
+
+
+def test_aws_s3_service_uses_runtime_for_missing_config(config_repo):
+    from fastapi import HTTPException
+    from api.services.aws_s3_runtime import AwsS3Runtime
+
+    runtime = AwsS3Runtime(config_repo)
+    with pytest.raises(HTTPException) as err:
+        runtime.env(999)
+
+    assert err.value.status_code == 404
+    assert err.value.detail == "Config not found"

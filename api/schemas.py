@@ -447,7 +447,7 @@ class JobDefinition(BaseModel):
     job_type: Literal[
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
-        "bo_job", "ds_job",
+        "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -479,6 +479,18 @@ class JobDefinition(BaseModel):
         elif self.job_type == "ds_job":
             if not self.params.get("job_name"):
                 raise ValueError("ds_job jobs require 'job_name' in params")
+        elif self.job_type in ("s3_row_count", "s3_format_validation"):
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError(f"{self.job_type} jobs require 'config_id' or 'config' in params")
+            for field in ("bucket", "key", "fmt"):
+                if not self.params.get(field):
+                    raise ValueError(f"{self.job_type} jobs require '{field}' in params")
+        elif self.job_type == "s3_partition_check":
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError("s3_partition_check jobs require 'config_id' or 'config' in params")
+            for field in ("bucket", "prefix"):
+                if not self.params.get(field):
+                    raise ValueError(f"s3_partition_check jobs require '{field}' in params")
         elif self.job_type == "dbt_artifact":
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")

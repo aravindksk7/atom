@@ -17,10 +17,94 @@ class ValidationIssue:
     severity: ValidationSeverity = ValidationSeverity.ERROR
 
 
+S3_FORMATS = {"csv", "json", "parquet", "orc"}
+
+
+def _params(job: Any) -> dict[str, Any]:
+    if isinstance(job, dict):
+        return dict(job.get("params") or {})
+    return dict(getattr(job, "params", {}) or {})
+
+
+def _job_type(job: Any) -> str:
+    if isinstance(job, dict):
+        return str(job.get("job_type") or "reconciliation")
+    return str(getattr(job, "job_type", "reconciliation"))
+
+
+def _has_config_ref(params: dict[str, Any]) -> bool:
+    return bool(params.get("config_id") or params.get("config"))
+
+
+def _require_non_empty(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> None:
+    if not params.get(field):
+        issues.append(ValidationIssue(f"params.{field}", f"S3 jobs require '{field}' in params"))
+
+
+def _non_negative_int(params: dict[str, Any], field: str, issues: list[ValidationIssue]) -> int | None:
+    if field not in params or params.get(field) in (None, ""):
+        return None
+    try:
+        value = int(params[field])
+    except (TypeError, ValueError):
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a non-negative integer"))
+        return None
+    if value < 0:
+        issues.append(ValidationIssue(f"params.{field}", f"{field} must be a non-negative integer"))
+        return None
+    return value
+
+
+def _validate_s3_common(params: dict[str, Any], issues: list[ValidationIssue], fields: tuple[str, ...]) -> None:
+    if not _has_config_ref(params):
+        issues.append(ValidationIssue("params.config_id", "S3 jobs require 'config_id' or 'config' in params"))
+    for field in fields:
+        _require_non_empty(params, field, issues)
+
+
+def _validate_s3_format(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    fmt = params.get("fmt")
+    if fmt not in S3_FORMATS:
+        issues.append(ValidationIssue("params.fmt", "fmt must be one of csv, json, parquet, or orc"))
+
+
+def _validate_s3_row_count(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    _validate_s3_common(params, issues, ("bucket", "key"))
+    _validate_s3_format(params, issues)
+    min_rows = _non_negative_int(params, "min_rows", issues)
+    max_rows = _non_negative_int(params, "max_rows", issues)
+    if min_rows is not None and max_rows is not None and min_rows > max_rows:
+        issues.append(ValidationIssue("params.min_rows", "min_rows must be less than or equal to max_rows"))
+
+
+def _validate_s3_format_validation(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    _validate_s3_common(params, issues, ("bucket", "key"))
+    _validate_s3_format(params, issues)
+    expected_schema = params.get("expected_schema")
+    if expected_schema is not None:
+        if not isinstance(expected_schema, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in expected_schema.items()):
+            issues.append(ValidationIssue("params.expected_schema", "expected_schema must map column names to type strings"))
+
+
+def _validate_s3_partition_check(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    _validate_s3_common(params, issues, ("bucket", "prefix"))
+    _non_negative_int(params, "min_partitions", issues)
+    expected_columns = params.get("expected_columns")
+    if expected_columns is not None:
+        if not isinstance(expected_columns, list) or not expected_columns or not all(isinstance(v, str) and v for v in expected_columns):
+            issues.append(ValidationIssue("params.expected_columns", "expected_columns must be a non-empty list of strings"))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    job_type = _get(job, "job_type", "reconciliation")
-    params = _get(job, "params", {}) or {}
+    job_type = _job_type(job)
+    params = _params(job)
+    if job_type == "s3_row_count":
+        _validate_s3_row_count(params, issues)
+    elif job_type == "s3_format_validation":
+        _validate_s3_format_validation(params, issues)
+    elif job_type == "s3_partition_check":
+        _validate_s3_partition_check(params, issues)
     query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 

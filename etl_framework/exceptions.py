@@ -79,14 +79,17 @@ class SchemaValidationError(ETLFrameworkError):
         query_name: str,
         missing_in_target: list[str],
         extra_in_target: list[str],
+        type_mismatches: list[dict[str, str]] | None = None,
     ) -> None:
         self.query_name = query_name
         self.missing_in_target = missing_in_target
         self.extra_in_target = extra_in_target
+        self.type_mismatches = type_mismatches or []
         super().__init__(
             f"Schema mismatch in '{query_name}': "
             f"missing_in_target={missing_in_target}, "
-            f"extra_in_target={extra_in_target}"
+            f"extra_in_target={extra_in_target}, "
+            f"type_mismatches={self.type_mismatches}"
         )
 
 

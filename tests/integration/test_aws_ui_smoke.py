@@ -1,6 +1,8 @@
 """Smoke: /api/aws/s3 routes are mounted and auth-guarded, and the AWS tab is served."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -37,3 +39,14 @@ def test_openapi_lists_aws_routes(client):
     spec = client.get("/openapi.json").json()
     assert "/api/aws/s3/metadata" in spec["paths"]
     assert "/api/aws/s3/validate-format" in spec["paths"]
+
+
+def test_aws_tab_contains_s3_job_creation_controls():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert "data-testid=\"aws-create-row-count-job-btn\"" in html
+    assert "data-testid=\"aws-create-format-validation-job-btn\"" in html
+    assert "data-testid=\"aws-create-partition-check-job-btn\"" in html
+    assert "data-testid=\"aws-job-name-input\"" in html
+    assert "data-testid=\"aws-min-rows-input\"" in html
+    assert "data-testid=\"aws-expected-columns-input\"" in html
+    assert "Type mismatches:" in html

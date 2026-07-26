@@ -16,9 +16,15 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
+from api.services.aws_s3_runtime import AwsS3Runtime
 from api.services.frame_engine import FrameEngine
+from etl_framework.aws_s3.formats import validate_format
+from etl_framework.aws_s3.metadata import read_object_metadata
+from etl_framework.aws_s3.partitions import discover_partitions
+from etl_framework.aws_s3.row_count import RowCounter, select_row_count
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.db.engine import DBEngine
+from etl_framework.exceptions import SchemaValidationError
 from etl_framework.automic.client import AutomicClient
 from etl_framework.sap_bo.client import BORestClient
 from etl_framework.sap_ds.client import DSRestClient
@@ -32,7 +38,7 @@ from etl_framework.reconciliation.segments import (
     pick_auto_segment_columns,
 )
 from etl_framework.repository.models import TestResult
-from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
+from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository
 from etl_framework.runner.health import HealthChecker
 from etl_framework.runner.state import TestCaseState, TestStatus
 from etl_framework.runner.test_runner import TestRunner
@@ -449,6 +455,12 @@ class RunExecutor:
         )
 
     def _build_case(self, job: JobDefinition):
+        if job.job_type == "s3_row_count":
+            return self._build_case_s3_row_count(job)
+        if job.job_type == "s3_format_validation":
+            return self._build_case_s3_format_validation(job)
+        if job.job_type == "s3_partition_check":
+            return self._build_case_s3_partition_check(job)
         if job.job_type == "freshness":
             return self._build_case_freshness(job)
         if job.job_type == "schema_snapshot":
@@ -914,6 +926,170 @@ class RunExecutor:
             "compared_rows_by_column": compared,
             "by_type": by_type,
         }
+
+    # -- AWS S3 Jobs ---------------------------------------------------------
+
+    def _s3_runtime(self) -> AwsS3Runtime:
+        return AwsS3Runtime(ConfigRepository(self._db))
+
+    def _s3_config_id(self, job: JobDefinition) -> int:
+        raw = job.params.get("config_id") or job.params.get("config")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            cfg = ConfigRepository(self._db).get_by_name(str(raw))
+            if cfg is None:
+                raise ValueError(f"Config not found: {raw}")
+            return int(cfg.id)
+
+    def _s3_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        metrics: dict[str, Any],
+        mismatches: list[MismatchRecord] | None = None,
+        executed_at: datetime | None = None,
+        duration_seconds: float = 0.0,
+        schema_diff: dict[str, Any] | None = None,
+    ) -> ReconciliationResult:
+        mismatches = mismatches or []
+        by_type: dict[str, int] = {}
+        for mismatch in mismatches:
+            by_type[mismatch.mismatch_type] = by_type.get(mismatch.mismatch_type, 0) + 1
+        metrics = {**metrics, "by_type": by_type}
+        summary: dict[str, Any] = {"metrics": metrics, "by_type": by_type}
+        if schema_diff is not None:
+            summary["schema_diff"] = schema_diff
+        match_total = int(metrics.get("row_count", 1) or 0) if not mismatches else 0
+        if not mismatches and match_total == 0 and "row_count" not in metrics:
+            match_total = 1
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=int(metrics.get("row_count", metrics.get("partition_count", 0)) or 0),
+            target_row_count=int(metrics.get("row_count", metrics.get("partition_count", 0)) or 0),
+            matched_count=match_total,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at or datetime.now(timezone.utc),
+            duration_seconds=duration_seconds,
+            schema_diff=schema_diff,
+            mismatch_summary=summary,
+        )
+
+    def _build_case_s3_row_count(self, job: JobDefinition):
+        def run_s3_row_count() -> ReconciliationResult:
+            return self._execute_s3_row_count(job)
+        return run_s3_row_count
+
+    def _execute_s3_row_count(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        bucket = str(p.get("bucket", ""))
+        key = str(p.get("key", ""))
+        fmt = str(p.get("fmt", p.get("format", "csv"))).lower()
+        try:
+            runtime = self._s3_runtime()
+            client = runtime.client(self._s3_config_id(job))
+            if fmt in {"csv", "json"}:
+                row_count = select_row_count(client, bucket, key, fmt)
+                engine = "s3_select"
+            else:
+                fs = runtime.filesystem(self._s3_config_id(job))
+                counted = RowCounter(client, fs).count(bucket, key, fmt)
+                row_count = counted.row_count
+                engine = counted.engine
+            metrics = {"bucket": bucket, "key": key, "fmt": fmt, "row_count": row_count, "engine": engine}
+            try:
+                metadata = read_object_metadata(client, bucket, key)
+                metrics.update({"size_bytes": metadata.size_bytes, "etag": metadata.etag})
+            except Exception:
+                pass
+        except Exception as exc:
+            return self._s3_result(job, TestStatus.ERROR, {"bucket": bucket, "key": key, "fmt": fmt, "error": str(exc)}, [
+                MismatchRecord({"job": job.name}, "s3", "ok", str(exc), "s3_error")
+            ], executed_at, time.monotonic() - t0)
+        mismatches: list[MismatchRecord] = []
+        if p.get("min_rows") not in (None, "") and row_count < int(p["min_rows"]):
+            mismatches.append(MismatchRecord({"job": job.name}, "row_count", int(p["min_rows"]), row_count, "row_count_below_min"))
+        if p.get("max_rows") not in (None, "") and row_count > int(p["max_rows"]):
+            mismatches.append(MismatchRecord({"job": job.name}, "row_count", int(p["max_rows"]), row_count, "row_count_above_max"))
+        return self._s3_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+
+    def _build_case_s3_format_validation(self, job: JobDefinition):
+        def run_s3_format_validation() -> ReconciliationResult:
+            return self._execute_s3_format_validation(job)
+        return run_s3_format_validation
+
+    def _execute_s3_format_validation(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        bucket = str(p.get("bucket", ""))
+        key = str(p.get("key", ""))
+        fmt = str(p.get("fmt", p.get("format", "csv"))).lower()
+        metrics = {"bucket": bucket, "key": key, "fmt": fmt}
+        try:
+            client = self._s3_runtime().client(self._s3_config_id(job))
+            validation = validate_format(client, bucket, key, fmt, p.get("expected_schema"))
+            metrics.update({"parsed": validation.parsed, "schema_ok": validation.schema_ok})
+        except SchemaValidationError as exc:
+            metrics.update({"parsed": True, "schema_ok": False})
+            schema_diff = {
+                "missing_in_target": list(exc.missing_in_target),
+                "extra_in_target": list(exc.extra_in_target),
+                "type_mismatches": list(exc.type_mismatches),
+            }
+            mismatches = []
+            if exc.missing_in_target:
+                mismatches.append(MismatchRecord({"job": job.name}, "schema", list(exc.missing_in_target), [], "missing_columns"))
+            if exc.extra_in_target:
+                mismatches.append(MismatchRecord({"job": job.name}, "schema", [], list(exc.extra_in_target), "extra_columns"))
+            for change in exc.type_mismatches:
+                mismatches.append(MismatchRecord({"job": job.name}, change.get("column", "schema"), change.get("expected_type"), change.get("actual_type"), "type_mismatch"))
+            result = self._s3_result(job, TestStatus.FAILED, metrics, mismatches, executed_at, time.monotonic() - t0, schema_diff)
+            return result
+        except Exception as exc:
+            return self._s3_result(job, TestStatus.ERROR, {**metrics, "error": str(exc)}, [
+                MismatchRecord({"job": job.name}, "s3", "ok", str(exc), "s3_error")
+            ], executed_at, time.monotonic() - t0)
+        return self._s3_result(job, TestStatus.PASSED, metrics, [], executed_at, time.monotonic() - t0)
+
+    def _build_case_s3_partition_check(self, job: JobDefinition):
+        def run_s3_partition_check() -> ReconciliationResult:
+            return self._execute_s3_partition_check(job)
+        return run_s3_partition_check
+
+    def _execute_s3_partition_check(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        bucket = str(p.get("bucket", ""))
+        prefix = str(p.get("prefix", ""))
+        try:
+            client = self._s3_runtime().client(self._s3_config_id(job))
+            scheme = discover_partitions(client, bucket, prefix)
+        except Exception as exc:
+            return self._s3_result(job, TestStatus.ERROR, {"bucket": bucket, "prefix": prefix, "error": str(exc)}, [
+                MismatchRecord({"job": job.name}, "s3", "ok", str(exc), "s3_error")
+            ], executed_at, time.monotonic() - t0)
+        entries = list(scheme.entries)
+        object_count = sum(int(getattr(entry, "object_count", 0) or 0) for entry in entries)
+        metrics = {"bucket": bucket, "prefix": prefix, "partition_count": len(entries), "partition_columns": list(scheme.columns), "object_count": object_count}
+        mismatches: list[MismatchRecord] = []
+        expected_columns = p.get("expected_columns")
+        if expected_columns is not None and list(expected_columns) != list(scheme.columns):
+            mismatches.append(MismatchRecord({"job": job.name}, "partition_columns", list(expected_columns), list(scheme.columns), "partition_columns_mismatch"))
+        if p.get("min_partitions") not in (None, "") and len(entries) < int(p["min_partitions"]):
+            mismatches.append(MismatchRecord({"job": job.name}, "partition_count", int(p["min_partitions"]), len(entries), "partition_count_below_min"))
+        return self._s3_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+
+    # -- Freshness -----------------------------------------------------------
 
     def _build_case_freshness(self, job: JobDefinition):
         def run_freshness() -> ReconciliationResult:

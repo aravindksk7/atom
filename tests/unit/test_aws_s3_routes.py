@@ -69,7 +69,11 @@ def test_aws_error_maps_to_400(client, mock_service):
 
 def test_schema_drift_maps_to_400_with_columns(client, mock_service):
     mock_service.validate_format.side_effect = SchemaValidationError(
-        "s3://b/k", missing_in_target=["email"], extra_in_target=["name"])
+        "s3://b/k",
+        missing_in_target=["email"],
+        extra_in_target=["name"],
+        type_mismatches=[{"column": "amount", "expected_type": "decimal(12,2)", "actual_type": "string"}],
+    )
     r = client.post("/api/aws/s3/validate-format",
                     json={"config_id": 1, "bucket": "b", "key": "k", "fmt": "parquet",
                           "expected_schema": {"id": "int64", "email": "string"}})
@@ -78,3 +82,6 @@ def test_schema_drift_maps_to_400_with_columns(client, mock_service):
     assert body["error_type"] == "schema_validation"
     assert body["missing_in_target"] == ["email"]
     assert body["extra_in_target"] == ["name"]
+    assert body["type_mismatches"] == [
+        {"column": "amount", "expected_type": "decimal(12,2)", "actual_type": "string"}
+    ]

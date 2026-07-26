@@ -35,6 +35,7 @@ def _handle(fn, *args):
             "message": str(exc),
             "missing_in_target": exc.missing_in_target,
             "extra_in_target": exc.extra_in_target,
+            "type_mismatches": exc.type_mismatches,
         }) from exc
     except AWSError as exc:
         raise HTTPException(status_code=400, detail={
