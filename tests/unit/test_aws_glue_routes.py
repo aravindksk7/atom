@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -38,7 +39,7 @@ def mock_service():
     svc.compare_tables.return_value = GlueCatalogCompareResponse(match=False, source={}, target={}, diff={"missing_columns": ["amount"], "extra_columns": [], "type_mismatches": [], "partition_key_mismatches": [], "location_mismatch": None, "format_mismatch": None})
     app.dependency_overrides[get_aws_glue_service] = lambda: svc
     yield svc
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_aws_glue_service, None)
 
 
 def test_glue_databases_route(client):
@@ -59,8 +60,45 @@ def test_glue_table_route(client):
     assert r.json()["columns"][0]["name"] == "id"
 
 
-def test_glue_compare_tables_route(client):
+def test_glue_compare_tables_route(client, mock_service):
     r = client.post("/api/aws/glue/compare-tables", json={"config_id": 1, "source_database": "raw", "source_table": "orders", "target_database": "curated", "target_table": "orders"})
     assert r.status_code == 200
     assert r.json()["match"] is False
     assert r.json()["diff"]["missing_columns"] == ["amount"]
+    mock_service.compare_tables.assert_called_once_with(1, "raw", "orders", "curated", "orders", True, True, True)
+
+
+def test_glue_compare_tables_route_passes_false_flags(client, mock_service):
+    r = client.post(
+        "/api/aws/glue/compare-tables",
+        json={
+            "config_id": 1,
+            "source_database": "raw",
+            "source_table": "orders",
+            "target_database": "curated",
+            "target_table": "orders",
+            "compare_location": False,
+            "compare_formats": False,
+            "compare_partitions": False,
+        },
+    )
+    assert r.status_code == 200
+    mock_service.compare_tables.assert_called_once_with(1, "raw", "orders", "curated", "orders", False, False, False)
+
+
+def test_glue_route_preserves_missing_config_http_exception(client, mock_service):
+    mock_service.list_databases.side_effect = HTTPException(status_code=404, detail="Config not found")
+
+    r = client.post("/api/aws/glue/databases", json={"config_id": 999})
+
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Config not found"}
+
+
+def test_glue_route_maps_generic_exception_to_structured_400(client, mock_service):
+    mock_service.list_databases.side_effect = RuntimeError("AWS boom")
+
+    r = client.post("/api/aws/glue/databases", json={"config_id": 1})
+
+    assert r.status_code == 400
+    assert r.json() == {"detail": {"error_type": "RuntimeError", "message": "AWS boom"}}

@@ -43,7 +43,7 @@ def glue_databases(
     request: Request,
     service: AwsGlueService = Depends(get_aws_glue_service),
     db: Session = Depends(get_session),
-):
+) -> GlueDatabasesOut:
     result = _handle(service.list_databases, body.config_id)
     AuditService(db).log(request, "aws_glue.check", "aws_glue", "databases", {"op": "databases"})
     return result
@@ -55,7 +55,7 @@ def glue_tables(
     request: Request,
     service: AwsGlueService = Depends(get_aws_glue_service),
     db: Session = Depends(get_session),
-):
+) -> GlueTablesOut:
     result = _handle(service.list_tables, body.config_id, body.database)
     AuditService(db).log(request, "aws_glue.check", "aws_glue", body.database, {"op": "tables"})
     return result
@@ -67,7 +67,7 @@ def glue_table(
     request: Request,
     service: AwsGlueService = Depends(get_aws_glue_service),
     db: Session = Depends(get_session),
-):
+) -> GlueTableOut:
     result = _handle(service.describe_table, body.config_id, body.database, body.table)
     AuditService(db).log(request, "aws_glue.check", "aws_glue", body.database, {"op": "table", "table": body.table})
     return result
@@ -79,7 +79,7 @@ def glue_compare_tables(
     request: Request,
     service: AwsGlueService = Depends(get_aws_glue_service),
     db: Session = Depends(get_session),
-):
+) -> GlueCatalogCompareOut:
     result = _handle(
         service.compare_tables,
         body.config_id,
