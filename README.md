@@ -3159,6 +3159,8 @@ For the live AWS S3 tab flow against MinIO:
 $env:E2E_LIVE_BACKENDS = "1"; npx playwright test tests/e2e/18-aws-s3-tab-live.spec.ts
 ```
 
+If your machine only has ODBC Driver 18 installed, add `$env:LIVE_SQLSERVER_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"` before the command.
+
 `tests/e2e/17b-multi-file-live-remote.spec.ts` (gated behind `E2E_LIVE_BACKENDS=1`, same convention as `05-adapters.spec.ts`) creates a real `multi_file` job through the job editor UI with one side pointed at the live `minio`/`sftp` container, runs **Preview Mapping** against it for real (Phase 8's preview-only credential fields), saves the job, then triggers a real run — resolving `credentials_ref` against a `SavedConfig`'s `config_data.file_source_credentials` (the same mechanism a real production S3/SFTP job uses) — and asserts the run reaches the same deterministic `FAILED` (region=east passes, region=west doesn't) outcome every other multi-file test in this repo relies on.
 
 Run property-based tests (requires `hypothesis`):

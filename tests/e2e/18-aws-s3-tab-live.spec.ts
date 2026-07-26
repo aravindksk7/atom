@@ -16,6 +16,7 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
   const createdJobs: string[] = [];
 
   test.afterAll(async ({ adminToken }) => {
+    if (!configId && createdJobs.length === 0) return;
     const ctx = await authedContext(adminToken);
     try {
       for (const name of createdJobs) await deleteJob(ctx, name);
@@ -25,8 +26,7 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
     }
   });
 
-  test.beforeEach(async ({ adminToken }) => {
-    if (configId) return;
+  test.beforeAll(async ({ adminToken }) => {
     const ctx = await authedContext(adminToken);
     try {
       const cfg = await createConfig(ctx, `e2e-aws-s3-cfg-${Date.now()}`, 'dev', {
@@ -39,6 +39,9 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
         aws_verify_ssl: false,
       });
       configId = cfg.id;
+    } catch (error) {
+      if (configId) await deleteConfig(ctx, configId);
+      throw error;
     } finally {
       await ctx.dispose();
     }
