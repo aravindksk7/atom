@@ -1066,6 +1066,32 @@ class S3ValidateFormatRequest(BaseModel):
     expected_schema: dict[str, str] | None = None
 
 
+class GlueConfigRequest(BaseModel):
+    config_id: int
+
+
+class GlueTablesRequest(BaseModel):
+    config_id: int
+    database: str
+
+
+class GlueTableRequest(BaseModel):
+    config_id: int
+    database: str
+    table: str
+
+
+class GlueCatalogCompareRequest(BaseModel):
+    config_id: int
+    source_database: str
+    source_table: str
+    target_database: str
+    target_table: str
+    compare_location: bool = True
+    compare_formats: bool = True
+    compare_partitions: bool = True
+
+
 class ObjectMetadataOut(BaseModel):
     bucket: str
     key: str
@@ -1103,3 +1129,30 @@ class FormatValidationOut(BaseModel):
     schema_ok: bool | None = None
     missing_columns: list[str] = Field(default_factory=list)
     extra_columns: list[str] = Field(default_factory=list)
+
+
+class GlueDatabasesOut(BaseModel):
+    databases: list[str]
+
+
+class GlueTablesOut(BaseModel):
+    database: str
+    tables: list[str]
+
+
+class GlueTableOut(BaseModel):
+    database: str
+    table: str
+    columns: list[dict[str, str]]
+    partition_keys: list[dict[str, str]]
+    location: str | None = None
+    input_format: str | None = None
+    output_format: str | None = None
+    table_type: str | None = None
+
+
+class GlueCatalogCompareOut(BaseModel):
+    match: bool
+    source: dict[str, Any]
+    target: dict[str, Any]
+    diff: dict[str, Any]

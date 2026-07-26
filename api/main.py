@@ -9,6 +9,7 @@ from etl_framework.utils.logging import configure_logging
 from etl_framework.utils.tracing import configure_tracing
 from api.routes import configs, runs, jobs, health as health_routes, adapters, compare as compare_routes
 from api.routes import aws_s3 as aws_s3_routes
+from api.routes import aws_glue as aws_glue_routes
 from api.routes import selections as selections_routes
 from api.routes import auth as auth_routes
 from api.routes import audit as audit_routes
@@ -52,6 +53,7 @@ app.include_router(jobs.router, prefix="/api/jobs")
 app.include_router(health_routes.router, prefix="/api/health")
 app.include_router(adapters.router, prefix="/api/adapters")
 app.include_router(aws_s3_routes.router, prefix="/api/aws/s3")
+app.include_router(aws_glue_routes.router, prefix="/api/aws/glue")
 app.include_router(compare_routes.router, prefix="/api/compare")
 app.include_router(auth_routes.router)
 app.include_router(audit_routes.router, prefix="/api/audit")
