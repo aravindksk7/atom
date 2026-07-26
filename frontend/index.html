@@ -3801,16 +3801,16 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div><label class="field-label">Target Table</label><input x-model="awsGlueTargetTable" class="field-input" data-testid="aws-glue-target-table-input" /></div>
       </div>
       <div class="flex gap-4 text-sm mb-3">
-        <label><input type="checkbox" x-model="awsGlueCompareLocation" /> Compare location</label>
-        <label><input type="checkbox" x-model="awsGlueCompareFormats" /> Compare formats</label>
-        <label><input type="checkbox" x-model="awsGlueComparePartitions" /> Compare partitions</label>
+        <label><input type="checkbox" x-model="awsGlueCompareLocation" data-testid="aws-glue-compare-location-checkbox" /> Compare location</label>
+        <label><input type="checkbox" x-model="awsGlueCompareFormats" data-testid="aws-glue-compare-formats-checkbox" /> Compare formats</label>
+        <label><input type="checkbox" x-model="awsGlueComparePartitions" data-testid="aws-glue-compare-partitions-checkbox" /> Compare partitions</label>
       </div>
       <div class="grid-2 mb-3">
         <div><label class="field-label">Job Name (optional)</label><input x-model="awsGlueJobName" class="field-input" data-testid="aws-glue-job-name-input" /></div>
       </div>
       <div class="flex gap-2 flex-wrap mb-3">
-        <button @click="awsGlueCompareTables()" :disabled="!awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-primary" data-testid="aws-glue-compare-btn">Compare Glue Catalog Tables</button>
-        <button @click="awsCreateGlueCatalogCompareJob()" :disabled="!awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-secondary" data-testid="aws-glue-create-job-btn">Create Glue Catalog Compare Job</button>
+        <button @click="awsGlueCompareTables()" :disabled="awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-primary" data-testid="aws-glue-compare-btn">Compare Glue Catalog Tables</button>
+        <button @click="awsCreateGlueCatalogCompareJob()" :disabled="awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-secondary" data-testid="aws-glue-create-job-btn">Create Glue Catalog Compare Job</button>
       </div>
       <div x-show="awsGlueError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" data-testid="aws-glue-error" x-text="awsGlueError"></div>
       <div x-show="awsGlueResult" data-testid="aws-glue-result" class="text-sm">
