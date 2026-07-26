@@ -5,26 +5,21 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
 from api.schemas import (
+    AthenaQueryResultsOut,
     AthenaQueryResultsRequest,
+    AthenaQueryStatusOut,
     AthenaQueryStatusRequest,
+    AthenaRunQueryOut,
     AthenaRunQueryRequest,
+    AthenaStartQueryOut,
     AthenaStartQueryRequest,
 )
 from api.services.audit_service import AuditService
 from api.services.aws_athena_service import (
     AthenaQueryFailedError,
-    AthenaQueryResultsResponse,
-    AthenaQueryStatusResponse,
-    AthenaRunQueryResponse,
-    AthenaStartQueryResponse,
     AwsAthenaService,
 )
 from etl_framework.repository.repository import ConfigRepository
-
-AthenaStartQueryOut = AthenaStartQueryResponse
-AthenaQueryStatusOut = AthenaQueryStatusResponse
-AthenaQueryResultsOut = AthenaQueryResultsResponse
-AthenaRunQueryOut = AthenaRunQueryResponse
 
 router = APIRouter(tags=["aws-athena"])
 

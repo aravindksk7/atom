@@ -1124,9 +1124,35 @@ class AthenaRunQueryRequest(BaseModel):
     query: str
     output_location: str
     workgroup: str | None = None
-    poll_interval_seconds: float = 1.0
-    max_attempts: int = 60
+    poll_interval_seconds: float = 0.2
+    max_attempts: int = 20
     max_rows: int = 100
+
+
+class AthenaStartQueryOut(BaseModel):
+    query_execution_id: str
+
+
+class AthenaQueryStatusOut(BaseModel):
+    query_execution_id: str
+    state: str
+    state_change_reason: str | None = None
+    submission_time: datetime | None = None
+    completion_time: datetime | None = None
+    engine_execution_time_ms: int | None = None
+    data_scanned_bytes: int | None = None
+
+
+class AthenaQueryResultsOut(BaseModel):
+    columns: list[str]
+    rows: list[dict[str, str | None]]
+
+
+class AthenaRunQueryOut(BaseModel):
+    query_execution_id: str
+    status: AthenaQueryStatusOut
+    results: AthenaQueryResultsOut
+    dq_metrics: dict[str, Any]
 
 
 class ObjectMetadataOut(BaseModel):
