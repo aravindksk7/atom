@@ -104,6 +104,19 @@ DATASETS = {
     ],
 }
 
+# Report prompts (parameters) keyed by document id, returned by
+# GET /biprws/raylight/v1/documents/{doc_id}/parameters. Answered against
+# occurrence 0 via PUT …/occurences/0/parameters. Doc 1001 carries a
+# mandatory DateTime prompt so the discover -> answer -> download flow has a
+# date prompt to resolve, mirroring a live WebI document with a run-date
+# prompt.
+PARAMETERS = {
+    "1001": [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False},
+    ],
+}
+
 # Objects that can be scheduled via POST /biprws/infostore/{id}/schedules.
 # Each entry's outcome is reached after SCHEDULE_POLLS_TO_TERMINAL polls of
 # GET /biprws/infostore/{instance_id} -- first poll(s) return "Running" to
@@ -284,6 +297,17 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             )
             return
 
+        parameters_match = re.fullmatch(
+            r"/biprws/raylight/v1/documents/([^/]+)/parameters", path
+        )
+        if parameters_match:
+            doc_id = parameters_match.group(1)
+            self._send_json(
+                HTTPStatus.OK,
+                {"parameters": {"parameter": PARAMETERS.get(doc_id, [])}},
+            )
+            return
+
         reports_match = re.fullmatch(r"/biprws/raylight/v1/documents/([^/]+)/reports", path)
         if reports_match:
             doc_id = reports_match.group(1)
@@ -441,6 +465,23 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             instance_id = f"inst-{_next_instance_id[0]}"
             _SCHEDULE_INSTANCES[instance_id] = {"object_id": object_id, "polls_seen": 0}
             self._send_json(HTTPStatus.OK, {"id": instance_id})
+            return
+
+        self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+
+        answer_match = re.fullmatch(
+            r"/biprws/raylight/v1/documents/([^/]+)/occurences/0/parameters", path
+        )
+        if answer_match:
+            if not self._require_token():
+                return
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length:
+                self.rfile.read(length)
+            self._send_json(HTTPStatus.OK, {"success": True})
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})

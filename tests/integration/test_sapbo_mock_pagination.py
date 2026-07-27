@@ -80,3 +80,23 @@ def test_list_reports_pages_past_real_mock_server_page_cap(client, sapbo_mock_se
 
     assert len(reports) == len(module.REPORTS[bulk_doc_id])
     assert {r["id"] for r in reports} == {r["id"] for r in module.REPORTS[bulk_doc_id]}
+
+
+def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_server):
+    """End-to-end date-prompt flow against the real mock server: discover the
+    document's prompts (GET …/parameters), answer occurrence 0 (PUT
+    …/occurences/0/parameters), then export the report. Proves the mock's
+    parameter-discovery GET and occurrence-0 answering PUT agree wire-to-wire
+    with BORestClient."""
+    doc_id, report_id = "1001", "rpt-sales"
+
+    params = client.get_document_parameters(doc_id)
+    assert any(p["type"] == "DateTime" for p in params)
+
+    client.answer_document_parameters(
+        doc_id,
+        [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+    )
+
+    data = client.download_report(doc_id, report_id, "xlsx")
+    assert data
