@@ -217,6 +217,29 @@ def test_download_bo_report_returns_bytes(service):
     assert result == b"PDF bytes"
 
 
+def test_download_bo_report_answers_parameters_before_downloading(monkeypatch):
+    from api.services.adapter_service import AdapterService
+    calls = []
+    fake = MagicMock()
+    fake.answer_document_parameters.side_effect = lambda *a, **k: calls.append("answer")
+    fake.download_report.side_effect = lambda *a, **k: calls.append("download") or b"XLSXBYTES"
+
+    svc = AdapterService(MagicMock())
+    monkeypatch.setattr(svc, "_get_env_config", lambda cid: MagicMock(bo_auth_type="secEnterprise"))
+    monkeypatch.setattr(svc, "_client_for_auth", lambda env, auth: fake)
+    monkeypatch.setattr(svc, "_authenticate_if_needed", lambda c, a: None)
+
+    out = svc.download_bo_report(
+        1, "124267", "R1", "xlsx", auth=None,
+        parameters=[{"id": 0, "type": "DateTime", "value": "2026-06-02"}],
+        timezone="Etc/GMT-1",
+    )
+    assert out == b"XLSXBYTES"
+    assert calls == ["answer", "download"]  # answer strictly before download
+    built = fake.answer_document_parameters.call_args[0][1]
+    assert built[0]["value"] == "2026-06-01T23:00:00.000Z"  # tz-converted
+
+
 # ---------------------------------------------------------------------------
 # lookup_automic_job
 # ---------------------------------------------------------------------------

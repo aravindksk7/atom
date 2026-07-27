@@ -9,13 +9,14 @@ from datetime import date
 from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
-from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOReportOut
+from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
+from etl_framework.sap_bo.parameters import build_parameter_answers
 
 # SAP BO CALs (concurrent access licenses) are pooled server-side and only
 # freed on logoff. Serialize all BO client use to one at a time so parallel
@@ -282,6 +283,28 @@ class AdapterService:
                 client.logout()
         return [BOReportOut(id=r["id"], name=r["name"], report_index=r.get("reportIndex", 0)) for r in raw]
 
+    def get_bo_document_parameters(
+        self,
+        config_id: int,
+        doc_id: str,
+        auth: SAPBOAuthContext | None = None,
+    ) -> list[BOParamOut]:
+        env = self._get_env_config(config_id)
+        with _bo_lock:
+            client = self._client_for_auth(env, auth)
+            try:
+                self._authenticate_if_needed(client, auth)
+                raw = client.get_document_parameters(doc_id)
+            except Exception as exc:
+                auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
+                raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
+            finally:
+                client.logout()
+        return [
+            BOParamOut(id=p["id"], name=p["name"], type=p["type"], mandatory=p["mandatory"])
+            for p in raw
+        ]
+
     def download_bo_report(
         self,
         config_id: int,
@@ -289,12 +312,17 @@ class AdapterService:
         report_id: str,
         fmt: str,
         auth: SAPBOAuthContext | None = None,
+        parameters: list[dict] | None = None,
+        timezone: str | None = None,
     ) -> bytes:
         env = self._get_env_config(config_id)
         with _bo_lock:
             client = self._client_for_auth(env, auth)
             try:
                 self._authenticate_if_needed(client, auth)
+                if parameters:
+                    built = build_parameter_answers(parameters, timezone or "UTC")
+                    client.answer_document_parameters(doc_id, built)
                 return client.download_report(doc_id, report_id, fmt)
             except Exception as exc:
                 auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
