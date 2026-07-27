@@ -115,6 +115,53 @@ def test_run_multi_file_compare_ignore_policy_proceeds_with_unmatched(tmp_path, 
         db.close()
 
 
+def test_run_multi_file_compare_supports_xlsx_with_different_dynamic_names(tmp_path, monkeypatch) -> None:
+    import pandas as pd
+
+    from api.services import file_source
+    from api.services.compare_service import CompareService
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+
+    source_name = "sales_east_17.xlsx"
+    target_name = "financials-east-B17.xlsx"
+    frame = pd.DataFrame({"id": [1, 2], "amount": [100.0, 250.5]})
+    frame.to_excel(source_dir / source_name, index=False)
+    frame.to_excel(target_dir / target_name, index=False)
+
+    db = _make_db()
+    try:
+        run_id = "test-run-mf-compare-xlsx-dynamic"
+        RunRepository(db).create_run(run_id=run_id, source_env="Source A", target_env="Source B", run_type="multi_file")
+
+        req = MultiFileCompareRequest(
+            key_columns=["id"],
+            file_mapping={
+                "strategy": "explicit",
+                "match_on": ["region", "batch"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_{region:alpha}_{batch:num}.xlsx"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials-{region:alpha}-B{batch:num}.xlsx"},
+            },
+        )
+        svc = CompareService(db, ConfigRepository(db))
+        svc.run_multi_file_compare(req, run_id)
+
+        run = RunRepository(db).get_run(run_id)
+        assert run.status == "PASSED"
+        assert len(run.results) == 1
+        pair_summary = run.results[0].mismatch_summary["file_pairs"][0]
+        assert pair_summary["source_files"] == [source_name]
+        assert pair_summary["target_files"] == [target_name]
+    finally:
+        db.close()
+
+
 def test_run_multi_file_compare_rejects_remote_kinds(tmp_path) -> None:
     from api.services.compare_service import CompareService
 

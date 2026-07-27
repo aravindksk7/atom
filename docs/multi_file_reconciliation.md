@@ -53,6 +53,26 @@ for the full design; this page is the quick reference.
   proceeds silently. Unmatched groups are always recorded in the result's
   `mismatch_summary` regardless of policy.
 
+## Filename pattern tokens
+
+Multi-file reconciliation supports dynamic filename patterns on each side.
+Source and target patterns may use different prefixes, suffixes, separators,
+and extensions as long as the tokens listed in `match_on` appear in both
+patterns.
+
+- `{region}` captures a simple token up to `_`, `.`, `/`, or `\`.
+- `{batch:num}` captures one or more digits.
+- `{code:alpha}` captures one or more ASCII letters.
+- `{id:alnum}` captures one or more ASCII letters or digits.
+- `{anything:any}` captures one or more characters except path separators.
+- `{date:%Y%m%d}` captures fixed-width date-style digits.
+- `{custom:regex([A-Z]{2}\d{4})}` captures a custom regex.
+- `*` and `?` can be used as glob wildcards outside token braces.
+
+Example: source `sales_{region:alpha}_{batch:num}.xlsx` and target
+`financials-{region:alpha}-B{batch:num}.xlsx` can be paired with
+`match_on: ["region", "batch"]`.
+
 ## Supported file formats
 
 Both sides are read through the framework's tabular reader: `.csv`, `.tsv`,
@@ -249,13 +269,10 @@ themselves and never exercised the real imports.
 
 ## Current limitations (Phase 9)
 
-- The Compare tab's Multi-File sub-tab (ad-hoc, no saved job) is still
-  `kind: "local"`-only for both preview AND running a comparison — the job
-  editor's Preview Mapping button supports `s3`/`sftp` now (Phase 8, via
-  inline `file_source_credentials`), but ad-hoc *running* a comparison
-  against remote sources is a separate, still-unsolved question (see Phase
-  7's scope decisions) and the Compare tab's form has no kind selector to
-  even attempt it.
+- The Compare tab's Multi-File sub-tab remains `kind: "local"` for both
+  preview and running a comparison. Within local server-accessible directories,
+  it uses the shared tabular reader for CSV, Excel, JSON, XML, TSV, and
+  delimiter-sniffed text files.
 - There's no admin UI for populating a saved job's real
   `config_snapshot["file_source_credentials"]` — an operator has to attach
   it to a `SavedConfig`'s JSON directly via `/api/configs`. Preview's inline

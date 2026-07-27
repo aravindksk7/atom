@@ -36,10 +36,43 @@ _TOKEN_RE = re.compile(r"\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)(?::(?P<spec>[^}]*))?
 
 _STRFTIME_DIGIT_WIDTH = {"%Y": 4, "%m": 2, "%d": 2, "%H": 2, "%M": 2, "%S": 2}
 
+_TOKEN_SPEC_REGEX_PREFIX = "regex("
 
-def _spec_to_regex(spec: str | None) -> str:
+
+def _custom_spec_to_regex(token_name: str, spec: str) -> str:
+    if not spec.startswith(_TOKEN_SPEC_REGEX_PREFIX) or not spec.endswith(")"):
+        return ""
+    inner = spec[len(_TOKEN_SPEC_REGEX_PREFIX):-1]
+    if not inner:
+        raise ValueError(f"file pattern token '{token_name}' has empty regex")
+    try:
+        re.compile(inner)
+    except re.error as exc:
+        raise ValueError(
+            f"file pattern token '{token_name}' has invalid regex: {exc}"
+        ) from exc
+    if "(?P<" in inner:
+        raise ValueError(
+            f"file pattern token '{token_name}' custom regex must not define named groups"
+        )
+    return inner
+
+
+def _spec_to_regex(spec: str | None, token_name: str) -> str:
     if not spec:
         return r"[^_./\\]+"
+    builtins = {
+        "num": r"\d+",
+        "number": r"\d+",
+        "alpha": r"[A-Za-z]+",
+        "alnum": r"[A-Za-z0-9]+",
+        "any": r"[^/\\]+",
+    }
+    if spec in builtins:
+        return builtins[spec]
+    custom = _custom_spec_to_regex(token_name, spec)
+    if custom:
+        return custom
     out: list[str] = []
     i = 0
     while i < len(spec):
@@ -51,6 +84,44 @@ def _spec_to_regex(spec: str | None) -> str:
             out.append(re.escape(spec[i]))
             i += 1
     return "".join(out)
+
+
+def _find_regex_spec_end(pattern: str, spec_start: int) -> int | None:
+    i = spec_start + len(_TOKEN_SPEC_REGEX_PREFIX)
+    depth = 1
+    in_char_class = False
+    escaped = False
+    while i < len(pattern):
+        ch = pattern[i]
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "[":
+            in_char_class = True
+        elif ch == "]" and in_char_class:
+            in_char_class = False
+        elif not in_char_class:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        i += 1
+    return None
+
+
+def _find_token_end(pattern: str, spec_start: int) -> int | None:
+    if pattern.startswith(_TOKEN_SPEC_REGEX_PREFIX, spec_start):
+        regex_end = _find_regex_spec_end(pattern, spec_start)
+        if regex_end is None or regex_end >= len(pattern) or pattern[regex_end] != "}":
+            return None
+        return regex_end + 1
+    end = pattern.find("}", spec_start)
+    if end == -1:
+        return None
+    return end + 1
 
 
 def _glob_segment_to_regex(segment: str) -> str:
@@ -80,12 +151,22 @@ def compile_token_pattern(pattern: str) -> re.Pattern[str]:
     """
     regex_parts: list[str] = []
     pos = 0
-    for match in _TOKEN_RE.finditer(pattern):
+    while pos < len(pattern):
+        match = _TOKEN_RE.search(pattern, pos)
+        if match is None:
+            break
+        token_end = _find_token_end(pattern, match.start("spec")) if match.group("spec") is not None else match.end()
+        if token_end is None:
+            spec = match.group("spec")
+            if spec and spec.startswith(_TOKEN_SPEC_REGEX_PREFIX):
+                name = match.group("name")
+                raise ValueError(f"file pattern token '{name}' has invalid regex")
+            break
         regex_parts.append(_glob_segment_to_regex(pattern[pos:match.start()]))
         name = match.group("name")
-        spec = match.group("spec")
-        regex_parts.append(f"(?P<{name}>{_spec_to_regex(spec)})")
-        pos = match.end()
+        spec = pattern[match.start("spec"):token_end - 1] if match.group("spec") is not None else None
+        regex_parts.append(f"(?P<{name}>{_spec_to_regex(spec, name)})")
+        pos = token_end
     regex_parts.append(_glob_segment_to_regex(pattern[pos:]))
     return re.compile("^" + "".join(regex_parts) + "$")
 

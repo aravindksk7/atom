@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
+import pytest
 
 from etl_framework.reconciliation.compare_utils import (
     build_mismatch_summary,
@@ -11,6 +12,7 @@ from etl_framework.reconciliation.compare_utils import (
     value_mismatch_mask,
     values_match,
 )
+from etl_framework.reconciliation.file_mapping import compile_token_pattern
 
 
 def test_normalize_string_columns_applies_case_and_whitespace_rules():
@@ -43,3 +45,49 @@ def test_numeric_delta_and_summary():
         "compared_rows_by_column": {"<row>": 3},
         "by_type": {"value_diff": 3, "missing_in_target": 1, "missing_in_source": 2},
     }
+
+
+def test_compile_token_pattern_supports_builtin_dynamic_specs() -> None:
+    pattern = compile_token_pattern("sales_{region:alpha}_{batch:num}_{code:alnum}.{ext:alpha}")
+
+    match = pattern.match("sales_WEST_001_A9.xlsx")
+
+    assert match is not None
+    assert match.groupdict() == {
+        "region": "WEST",
+        "batch": "001",
+        "code": "A9",
+        "ext": "xlsx",
+    }
+    assert pattern.match("sales_WEST_A01_A9.xlsx") is None
+    assert pattern.match("sales_123_001_A9.xlsx") is None
+
+
+def test_compile_token_pattern_supports_custom_regex_specs() -> None:
+    pattern = compile_token_pattern(r"prod_{id:regex([A-Z]{2}\d{4})}.json")
+
+    match = pattern.match("prod_AB1234.json")
+
+    assert match is not None
+    assert match.groupdict() == {"id": "AB1234"}
+    assert pattern.match("prod_ABC123.json") is None
+
+
+def test_compile_token_pattern_keeps_existing_date_and_glob_behavior() -> None:
+    pattern = compile_token_pattern("sales_*_{date:%Y%m%d}.csv")
+
+    match = pattern.match("sales_any_region_20260728.csv")
+
+    assert match is not None
+    assert match.groupdict() == {"date": "20260728"}
+    assert pattern.match("sales_any_region_2026-07-28.csv") is None
+
+
+def test_compile_token_pattern_rejects_invalid_custom_regex() -> None:
+    with pytest.raises(ValueError, match="file pattern token 'id' has invalid regex"):
+        compile_token_pattern(r"prod_{id:regex([A-Z]+}.json")
+
+
+def test_compile_token_pattern_rejects_empty_custom_regex() -> None:
+    with pytest.raises(ValueError, match="file pattern token 'id' has empty regex"):
+        compile_token_pattern("prod_{id:regex()}.json")

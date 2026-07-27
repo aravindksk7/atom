@@ -5717,23 +5717,26 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </div>
     <div class="border-t border-slate-200 pt-3">
-      <p class="text-xs font-medium text-slate-500 mb-2">Source (local only)</p>
+      <p class="text-xs font-medium text-slate-500 mb-1">Source server file set</p>
+      <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Files are parsed as CSV, Excel, JSON, XML, TSV, or delimited text when supported by the parser.</p>
       <div class="grid-2">
-        <input x-model="mfCompareSourceRoot" class="field-input" placeholder="/spool/exports"
+        <input x-model="mfCompareSourceRoot" class="field-input" placeholder="/spool/exports/source"
                data-testid="compare-mf-source-root-input" />
-        <input x-model="mfCompareSourcePattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
+        <input x-model="mfCompareSourcePattern" class="field-input" placeholder="sales_{region}_{batch:num}_{date:%Y%m%d}.xlsx"
                data-testid="compare-mf-source-pattern-input" />
       </div>
     </div>
     <div class="border-t border-slate-200 pt-3">
-      <p class="text-xs font-medium text-slate-500 mb-2">Target (local only)</p>
+      <p class="text-xs font-medium text-slate-500 mb-1">Target server file set</p>
+      <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Target files may use different names from source files as long as shared tokens match.</p>
       <div class="grid-2">
-        <input x-model="mfCompareTargetRoot" class="field-input" placeholder="/exports/finance"
+        <input x-model="mfCompareTargetRoot" class="field-input" placeholder="/spool/exports/target"
                data-testid="compare-mf-target-root-input" />
-        <input x-model="mfCompareTargetPattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
+        <input x-model="mfCompareTargetPattern" class="field-input" placeholder="financials-{region}-B{batch:num}-{date:%Y%m%d}.json"
                data-testid="compare-mf-target-pattern-input" />
       </div>
     </div>
+    <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>
     <div class="flex items-center gap-2">
       <button @click="previewMfCompareMapping()"
               :disabled="mfComparePreviewLoading"

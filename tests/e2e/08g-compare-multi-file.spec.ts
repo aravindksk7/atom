@@ -39,6 +39,31 @@ test.describe('08g compare / multi-file', () => {
     await expect(authedPage.locator('[data-testid="compare-mf-result-pair"][data-status="FAILED"]')).toContainText('region=west');
   });
 
+  test('previews and runs non-CSV file sets with dynamic source and target names', async ({ authedPage }) => {
+    await openMultiFile(authedPage);
+
+    await authedPage.locator('[data-testid="compare-mf-key-columns-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-mf-match-on-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-mf-source-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_source_dynamic'));
+    await authedPage.locator('[data-testid="compare-mf-source-pattern-input"]').fill('extract_{id:alnum}.json');
+    await authedPage.locator('[data-testid="compare-mf-target-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_target_dynamic'));
+    await authedPage.locator('[data-testid="compare-mf-target-pattern-input"]').fill('prod_{id:regex([A-Z]{2}\\d{2})}.json');
+
+    await authedPage.locator('[data-testid="compare-mf-preview-btn"]').click();
+    await expect(authedPage.locator('[data-testid="compare-mf-preview-result"]')).toContainText('1 pair(s) matched');
+    await expect(authedPage.locator('[data-testid="compare-mf-preview-pair"]')).toHaveCount(1);
+    await expect(authedPage.locator('[data-testid="compare-mf-preview-pair"]')).toContainText('extract_AB12.json');
+    await expect(authedPage.locator('[data-testid="compare-mf-preview-pair"]')).toContainText('prod_AB12.json');
+
+    await authedPage.locator('[data-testid="compare-mf-run-btn"]').click();
+    await expect(authedPage.locator('[data-testid="compare-mf-results"]')).toBeVisible({ timeout: 20_000 });
+    await expect(authedPage.locator('[data-testid="compare-mf-results"]')).toContainText('PASSED');
+
+    const passedPair = authedPage.locator('[data-testid="compare-mf-result-pair"][data-status="PASSED"]');
+    await expect(passedPair).toHaveCount(1);
+    await expect(passedPair).toContainText('extract_AB12.json');
+  });
+
   test('negative: running with no source root shows an error toast', async ({ authedPage }) => {
     await openMultiFile(authedPage);
     await authedPage.locator('[data-testid="compare-mf-match-on-input"]').fill('region');
