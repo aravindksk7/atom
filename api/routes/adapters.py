@@ -23,6 +23,8 @@ from api.schemas import (
     BOJobCreateRequest,
     BOLogoffRequest,
     BOLogonRequest,
+    BOParamOut,
+    BOReportDownloadRequest,
     BOReportOut,
     JobDefinition,
     BOTestRequest,
@@ -30,7 +32,7 @@ from api.schemas import (
     RestApiTestRequest,
 )
 from api.services.adapter_service import AdapterService, SAPBOAuthContext
-from etl_framework.repository.repository import ConfigRepository, JobRepository
+from etl_framework.repository.repository import ConfigRepository, JobRepository, SettingsRepository
 from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["adapters"])
@@ -152,6 +154,16 @@ def list_bo_reports(
     return service.list_bo_reports(config_id, doc_id, _sap_bo_auth_from_request(request))
 
 
+@router.get("/sap-bo/documents/{doc_id}/parameters", response_model=list[BOParamOut])
+def list_bo_document_parameters(
+    doc_id: str,
+    config_id: int,
+    request: Request,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.get_bo_document_parameters(config_id, doc_id, _sap_bo_auth_from_request(request))
+
+
 @router.get("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
 def download_bo_report(
     doc_id: str,
@@ -176,6 +188,35 @@ def download_bo_report(
         headers={
             "Content-Disposition": f'attachment; filename="report_{doc_id}_{report_id}.{ext}"'
         },
+    )
+
+
+@router.post("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
+def download_bo_report_with_parameters(
+    doc_id: str,
+    report_id: str,
+    config_id: int,
+    body: BOReportDownloadRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+    service: AdapterService = Depends(get_adapter_service),
+):
+    tz = SettingsRepository(db).get_timezone()
+    content = service.download_bo_report(
+        config_id,
+        doc_id,
+        report_id,
+        fmt=body.format,
+        auth=_sap_bo_auth_from_request(request),
+        parameters=[p.model_dump() for p in body.parameters],
+        timezone=tz,
+    )
+    mime = _MIME_MAP.get(body.format, "application/octet-stream")
+    ext = _EXT_MAP.get(body.format, "bin")
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}_{report_id}.{ext}"'},
     )
 
 

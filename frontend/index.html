@@ -1309,6 +1309,27 @@
             </select>
           </div>
         </div>
+        <div x-show="jobModal.job_type === 'bo_report'">
+          <div class="flex items-center justify-between mb-1">
+            <label class="field-label mb-0">Report Parameters</label>
+            <button @click="addBoParameter()" class="btn-secondary btn-sm text-xs">+ Add Parameter</button>
+          </div>
+          <template x-if="jobModal.bo_parameters && jobModal.bo_parameters.length > 0">
+            <div class="space-y-2 mt-1">
+              <template x-for="(param, idx) in jobModal.bo_parameters" :key="idx">
+                <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
+                  <input x-model.number="param.id" type="number" class="field-input text-xs py-1 flex-shrink-0 w-24" placeholder="ID" />
+                  <select x-model="param.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-36">
+                    <option value="DateTime">DateTime</option>
+                    <option value="String">String</option>
+                  </select>
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'" class="field-input text-xs py-1 flex-1" placeholder="Value" />
+                  <button @click="removeBoParameter(idx)" class="btn-danger btn-sm text-xs py-1 px-2">✕</button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
         <div x-show="jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'bo_live'"
              class="border border-slate-200 rounded-lg p-3">
           <div class="mode-row mb-2">
@@ -3374,6 +3395,22 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </div>
               <!-- Report list -->
               <div x-show="expandedBODocs.includes(doc.id)" class="ml-4 mt-1 space-y-1">
+                <!-- Report prompts (parameters). Shown only when the report has any. -->
+                <template x-if="(boReportParams[doc.id] || []).length > 0">
+                  <div class="px-3 py-1 space-y-1">
+                    <div class="text-muted text-xs">Prompts</div>
+                    <template x-for="p in (boReportParams[doc.id] || [])" :key="p.id">
+                      <label class="field-label block">
+                        <span x-text="(p.name || ('Prompt ' + p.id)) + (p.mandatory ? ' *' : '')"></span>
+                        <input x-show="p.type === 'DateTime'" type="date"
+                               x-model="boParamValues[doc.id][p.id]" class="field-input" />
+                        <input x-show="p.type !== 'DateTime'" type="text"
+                               x-model="boParamValues[doc.id][p.id]" class="field-input"
+                               :placeholder="p.type" />
+                      </label>
+                    </template>
+                  </div>
+                </template>
                 <template x-if="!boReports[doc.id]">
                   <div class="text-muted text-xs px-3 py-1">Loading reports…</div>
                 </template>

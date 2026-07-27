@@ -302,6 +302,67 @@ def test_bo_report_job_returns_error_on_failure():
     assert run.results[0].status == TestStatus.ERROR.value
 
 
+def _bo_report_job(params):
+    from api.schemas import JobDefinition
+    return JobDefinition(
+        name="prompted_report",
+        job_type="bo_report",
+        params=params,
+    )
+
+
+def test_bo_report_answers_fixed_parameters_before_download():
+    db = _session()
+    RunRepository(db).create_run("r-bo-prompt", "dev", "prod", {})
+    executor = _make_executor(
+        db, "r-bo-prompt", [],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+    job = _bo_report_job({
+        "report_id": "101",
+        "bo_report_id": "1",
+        "format": "csv",
+        "bo_parameters": [{"id": 0, "type": "DateTime", "value": "2026-06-02"}],
+    })
+
+    with patch("api.services.run_executor.BORestClient") as MockBO, \
+         patch("api.services.run_executor.SettingsRepository") as MockSettings:
+        MockSettings.return_value.get_timezone.return_value = "Etc/GMT-1"
+        inst = MockBO.return_value
+        inst.download_report.return_value = b"id,sku\n1,A100\n"
+        executor._build_case_bo_report(job)()
+
+    # answer_document_parameters must run BEFORE download_report
+    method_names = [c[0] for c in inst.mock_calls]
+    assert "answer_document_parameters" in method_names
+    assert method_names.index("answer_document_parameters") < method_names.index("download_report")
+
+    # doc_id is the report_id param; DateTime value is tz-converted to UTC "...Z"
+    inst.answer_document_parameters.assert_called_once_with(
+        "101",
+        [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+    )
+
+
+def test_bo_report_does_not_answer_when_no_bo_parameters():
+    db = _session()
+    RunRepository(db).create_run("r-bo-noprompt", "dev", "prod", {})
+    executor = _make_executor(
+        db, "r-bo-noprompt", [],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+    job = _bo_report_job({"report_id": "101", "bo_report_id": "1", "format": "csv"})
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.download_report.return_value = b"id,sku\n1,A100\n"
+        executor._build_case_bo_report(job)()
+
+    inst.answer_document_parameters.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # automic_job dispatch
 # ---------------------------------------------------------------------------

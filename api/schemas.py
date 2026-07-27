@@ -645,6 +645,24 @@ class BODocRanOnOut(BaseModel):
     supported: bool = True
 
 
+class BOParamOut(BaseModel):
+    id: int
+    name: str = ""
+    type: str = ""
+    mandatory: bool = False
+
+
+class BOParamAnswer(BaseModel):
+    id: int
+    type: str
+    value: str
+
+
+class BOReportDownloadRequest(BaseModel):
+    format: str = "xlsx"
+    parameters: list[BOParamAnswer] = []
+
+
 class AdapterTestOut(BaseModel):
     ok: bool
     message: str

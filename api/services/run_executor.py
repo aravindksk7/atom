@@ -41,7 +41,8 @@ from etl_framework.reconciliation.segments import (
     pick_auto_segment_columns,
 )
 from etl_framework.repository.models import TestResult
-from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository
+from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository, SettingsRepository
+from etl_framework.sap_bo.parameters import build_parameter_answers
 from etl_framework.runner.health import HealthChecker
 from etl_framework.runner.state import TestCaseState, TestStatus
 from etl_framework.runner.test_runner import TestRunner
@@ -588,6 +589,12 @@ class RunExecutor:
             report_id = job.params.get("bo_report_id", "")
             fmt = job.params.get("format", "xlsx")
             try:
+                bo_parameters = job.params.get("bo_parameters")
+                if bo_parameters:
+                    tz = SettingsRepository(self._db).get_timezone()
+                    client.answer_document_parameters(
+                        doc_id, build_parameter_answers(bo_parameters, tz)
+                    )
                 data = client.download_report(doc_id, report_id, fmt)
             finally:
                 client.logout()
@@ -1595,6 +1602,12 @@ class RunExecutor:
             report_id = job.params.get("bo_report_id", "")
             fmt = job.params.get("format", "xlsx")
             try:
+                bo_parameters = job.params.get("bo_parameters")
+                if bo_parameters:
+                    tz = SettingsRepository(self._db).get_timezone()
+                    client.answer_document_parameters(
+                        doc_id, build_parameter_answers(bo_parameters, tz)
+                    )
                 data = client.download_report(doc_id, report_id, fmt)
             finally:
                 client.logout()

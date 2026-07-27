@@ -382,6 +382,7 @@ class BORestClient:
         url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
         collected: list[dict] = []
         last_id: int | None = None
+        previous_batch_size: int | None = None
         page_count = 0
         while page_count < self._MAX_PAGES:
             where = "SI_KIND='Webi'" if last_id is None else f"SI_KIND='Webi' AND SI_ID > {last_id}"
@@ -418,17 +419,36 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), "documents", "document", "entries")
             if not batch:
                 break
-            collected.extend(batch)
             try:
-                last_id = max(int(d.get("SI_ID", 0)) for d in batch)
+                batch_max_id = max(int(d.get("SI_ID", 0)) for d in batch)
             except (TypeError, ValueError):
                 logger.warning(
                     "SAP BO CMS query returned a non-numeric SI_ID -- stopping keyset "
                     "pagination with the %d document(s) collected so far", len(collected),
                 )
                 break
-            if len(batch) < self._PAGE_REQUEST_SIZE:
+            # Guard against a gateway/server that ignores the `SI_ID > cursor`
+            # clause and re-serves an already-seen page (the same class of
+            # intermediary that defeated page/Range above): if the max id
+            # didn't advance past the previous cursor, stop instead of looping
+            # to _MAX_PAGES on duplicate data.
+            if last_id is not None and batch_max_id <= last_id:
+                logger.warning(
+                    "SAP BO CMS query cursor did not advance past SI_ID %d (server re-served an "
+                    "already-seen page) -- stopping with %d document(s) collected so far",
+                    last_id, len(collected),
+                )
                 break
+            collected.extend(batch)
+            last_id = batch_max_id
+            # A page shorter than the *previous* page means the collection is
+            # exhausted; a page shorter than the requested TOP does NOT -- this
+            # deployment caps every result set below our TOP (observed: 50 rows
+            # vs TOP 200), so keying off TOP stops after the first page and
+            # loses the rest. Same rule as the page-param path's docstring.
+            if previous_batch_size is not None and len(batch) < previous_batch_size:
+                break
+            previous_batch_size = len(batch)
             page_count += 1
         results = []
         for d in collected:
@@ -467,6 +487,7 @@ class BORestClient:
         document_ids: list[str] = []
         seen: set[str] = set()
         last_id: int | None = None
+        previous_batch_size: int | None = None
         page_count = 0
         while page_count < self._MAX_PAGES:
             where = date_clause if last_id is None else f"{date_clause} AND SI_ID > {last_id}"
@@ -502,13 +523,8 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), "documents", "document", "entries")
             if not batch:
                 break
-            for entry in batch:
-                parent_id = str(entry.get("SI_PARENTID", ""))
-                if parent_id and parent_id not in seen:
-                    seen.add(parent_id)
-                    document_ids.append(parent_id)
             try:
-                last_id = max(int(entry.get("SI_ID", 0)) for entry in batch)
+                batch_max_id = max(int(entry.get("SI_ID", 0)) for entry in batch)
             except (TypeError, ValueError):
                 logger.warning(
                     "SAP BO CMS query for run-date filtering returned a non-numeric SI_ID -- "
@@ -516,8 +532,27 @@ class BORestClient:
                     len(document_ids),
                 )
                 break
-            if len(batch) < self._PAGE_REQUEST_SIZE:
+            # Same re-serve guard as _list_documents_via_cms_query: stop if the
+            # cursor didn't advance rather than looping on a re-served page.
+            if last_id is not None and batch_max_id <= last_id:
+                logger.warning(
+                    "SAP BO CMS query for run-date filtering cursor did not advance past SI_ID %d "
+                    "(server re-served an already-seen page) -- stopping with %d document id(s)",
+                    last_id, len(document_ids),
+                )
                 break
+            for entry in batch:
+                parent_id = str(entry.get("SI_PARENTID", ""))
+                if parent_id and parent_id not in seen:
+                    seen.add(parent_id)
+                    document_ids.append(parent_id)
+            last_id = batch_max_id
+            # Short-vs-previous means exhausted; short-vs-TOP does not (this
+            # deployment caps results below our TOP) -- see
+            # _list_documents_via_cms_query for the same rule and rationale.
+            if previous_batch_size is not None and len(batch) < previous_batch_size:
+                break
+            previous_batch_size = len(batch)
             page_count += 1
         return document_ids
 
@@ -563,6 +598,78 @@ class BORestClient:
                 "reportIndex": r.get("reportIndex", 0),
             })
         return results
+
+    def get_document_parameters(self, doc_id: str) -> list[dict]:
+        """GET …/documents/{doc_id}/parameters — list a report's prompts.
+
+        Returns one dict per prompt: {"id", "name", "type", "mandatory"}.
+        Unwraps both the flat {"parameters":[…]} and nested
+        {"parameters":{"parameter":[…]}} BIP shapes (same convention as
+        list_documents).
+        """
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code == 404:
+            raise ReportNotFoundError(report_id=doc_id, env_name=self._base_url)
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=doc_id,
+                http_status=response.status_code,
+                response_body=response.text,
+            )
+        raw = _unwrap_collection(response.json(), "parameters", "parameter")
+        return [
+            {
+                "id": p.get("id"),
+                "name": p.get("name", ""),
+                "type": p.get("type", p.get("@type", "")),
+                "mandatory": bool(p.get("mandatory", False)),
+            }
+            for p in raw
+        ]
+
+    def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
+        """PUT …/documents/{doc_id}/occurences/0/parameters — answer prompts.
+
+        `built_answers` is a list of already-finalized
+        {"id", "type", "value"} (date conversion done by
+        etl_framework.sap_bo.parameters.build_parameter_answers). Logs the
+        answered prompt ids so a deployment where export ignores occurrence-0
+        answers is diagnosable rather than silently wrong.
+        """
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/occurences/0/parameters"
+        body = {"parameters": {"parameter": [
+            {"id": a["id"], "answer": {"values": {"value": [
+                {"$": a["value"], "@type": a["type"]}]}}}
+            for a in built_answers
+        ]}}
+        logger.info(
+            "SAP BO answering %d parameter(s) on document %s occurrence 0 (ids=%s)",
+            len(built_answers), doc_id, [a["id"] for a in built_answers],
+        )
+        response = self._session.put(
+            url,
+            params={"dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false"},
+            json=body,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=doc_id,
+                http_status=response.status_code,
+                response_body=response.text,
+            )
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
