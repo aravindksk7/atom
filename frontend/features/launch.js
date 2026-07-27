@@ -139,7 +139,7 @@
         target_source_mode: 'path', target_file_b64: '', target_file_name: '',
         key_columns_raw: 'id', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
-        bo_report_id: '', bo_page_id: '', bo_format: 'xlsx',
+        bo_report_id: '', bo_page_id: '', bo_format: 'xlsx', bo_parameters: [],
         automic_job_name: '', automic_run_id: '',
         bo_job_object_id: '', bo_job_schedule_params_raw: '',
         bo_job_poll_interval_s: '', bo_job_timeout_s: '',
@@ -275,6 +275,7 @@
         bo_report_id: job.params?.report_id || '',
         bo_page_id: job.params?.bo_report_id || '',
         bo_format: job.params?.format || 'xlsx',
+        bo_parameters: (job.params?.bo_parameters || []).map(p => ({ ...p })),
         // Fields with colliding param keys (e.g. 'job_name' shared by automic_job/ds_job,
         // 'poll_interval_s'/'timeout_s' shared by bo_job/ds_job) must guard on job.job_type
         // to prevent one type's saved value silently leaking into another type's hidden field
@@ -481,6 +482,14 @@
       this.jobModal.rules.splice(idx, 1);
     },
 
+    addBoParameter() {
+      this.jobModal.bo_parameters.push({ id: 0, type: 'DateTime', value: '' });
+    },
+
+    removeBoParameter(idx) {
+      this.jobModal.bo_parameters.splice(idx, 1);
+    },
+
     async validateJob() {
       const m = this.jobModal;
       if (!m.name || !this.jobModalEditing) return;
@@ -569,6 +578,11 @@
         if (m.bo_report_id) params.report_id = m.bo_report_id;
         if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
         params.format = m.bo_format || 'xlsx';
+        params.bo_parameters = (m.bo_parameters || []).map(p => ({
+          id: Number(p.id) || 0,
+          type: p.type,
+          value: String(p.value ?? ''),
+        }));
       }
       if (m.job_type === 'dbt_artifact') {
         if (m.dbt_manifest_path) params.manifest_path = m.dbt_manifest_path;
