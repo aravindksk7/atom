@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from api.schemas import (
     AdapterTestOut, BODocOut, BODocRanOnOut, BOAuthSessionOut, BOReportOut,
-    AutomicJobStatusOut, JobDefinition,
+    BOParamOut, AutomicJobStatusOut, JobDefinition,
 )
 from etl_framework.repository.database import Base
 from etl_framework.repository import database as _db_module
@@ -213,6 +213,37 @@ def test_download_bo_report_default_format_is_xlsx(client, mock_adapter_service)
     # fmt is passed as a keyword arg; fall back to positional if present
     fmt_value = call_args.kwargs.get("fmt") or (call_args.args[3] if len(call_args.args) > 3 else None)
     assert fmt_value == "xlsx"
+
+
+def test_get_document_parameters_route(client, mock_adapter_service):
+    mock_adapter_service.get_bo_document_parameters.return_value = [
+        BOParamOut(id=0, name="Start Date", type="DateTime", mandatory=True),
+    ]
+    resp = client.get("/api/adapters/sap-bo/documents/124267/parameters?config_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == 0
+    assert data[0]["name"] == "Start Date"
+    assert data[0]["type"] == "DateTime"
+    assert data[0]["mandatory"] is True
+    args = mock_adapter_service.get_bo_document_parameters.call_args.args
+    assert args[:2] == (1, "124267")
+
+
+def test_post_download_with_parameters_threads_timezone(client, mock_adapter_service):
+    with patch("api.routes.adapters.SettingsRepository") as MockSettings:
+        MockSettings.return_value.get_timezone.return_value = "Etc/GMT-1"
+        resp = client.post(
+            "/api/adapters/sap-bo/documents/124267/reports/R1/download?config_id=1",
+            json={
+                "format": "xlsx",
+                "parameters": [{"id": 0, "type": "DateTime", "value": "2026-06-02"}],
+            },
+        )
+    assert resp.status_code == 200
+    kwargs = mock_adapter_service.download_bo_report.call_args.kwargs
+    assert kwargs["timezone"] == "Etc/GMT-1"
+    assert kwargs["parameters"] == [{"id": 0, "type": "DateTime", "value": "2026-06-02"}]
 
 
 # ---------------------------------------------------------------------------
