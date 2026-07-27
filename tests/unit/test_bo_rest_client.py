@@ -417,10 +417,16 @@ def test_list_documents_falls_back_to_cms_query_when_range_also_stuck(authentica
 
     assert len(docs) == 37
     assert docs[0] == {"id": "0", "name": "Doc 0", "folder": "42"}
-    assert mock_post.call_count == 1
-    call_kwargs = mock_post.call_args[1]
-    assert "cmsquery" in mock_post.call_args[0][0]
-    assert "SELECT" in call_kwargs["json"]["query"].upper()
+    # Keyset pagination probes one page past the first (the first page could be
+    # a server cap below TOP, not the end); here the server re-serves the same
+    # batch, so the cursor-didn't-advance guard stops at the second call
+    # without double-counting the re-served rows.
+    assert mock_post.call_count == 2
+    first_call = mock_post.call_args_list[0]
+    assert "cmsquery" in first_call[0][0]
+    assert "SELECT" in first_call[1]["json"]["query"].upper()
+    assert "SI_ID >" not in first_call[1]["json"]["query"]
+    assert "SI_ID > 36" in mock_post.call_args_list[1][1]["json"]["query"]
 
 
 def test_list_documents_keeps_raylight_result_when_cms_query_unavailable(authenticated_client):
@@ -481,6 +487,39 @@ def test_list_documents_cms_query_pages_past_its_own_default_result_cap(authenti
     assert "SI_ID >" not in first_query
     assert "SI_ID > 200" in second_query
     assert "SI_ID > 400" in third_query
+
+
+def test_list_documents_cms_query_pages_past_a_server_cap_below_requested_top(authenticated_client):
+    """Live regression (the "only 50 documents shown" report): this on-prem
+    CMS server caps every result set at 50 rows regardless of the requested
+    `TOP 200`. Keyset pagination must treat "shorter than the previous page"
+    (or empty) as the end -- NOT "shorter than TOP" -- exactly like the
+    page-param path already does (`len(batch) < previous_batch_size`). A page
+    shorter than what we *asked for* only means the server's own cap is below
+    our TOP, not that the collection is exhausted. Before the fix the first
+    50-row page tripped `len(batch) < TOP` and returned only 50 of 130 docs."""
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json.return_value = {"documents": [{"id": str(i), "name": f"Doc {i}", "folder": ""} for i in range(10)]}
+
+    ranges = [(1, 51), (51, 101), (101, 131)]  # server caps at 50: 50, 50, then 30
+    post_responses = []
+    for start, end in ranges:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "documents": [{"SI_ID": str(i), "SI_NAME": f"Doc {i}", "SI_ANCESTOR": "42"} for i in range(start, end)]
+        }
+        post_responses.append(resp)
+
+    with patch.object(authenticated_client._session, "get", return_value=get_resp), \
+         patch.object(authenticated_client._session, "post", side_effect=post_responses) as mock_post:
+        docs = authenticated_client.list_documents()
+
+    assert [d["id"] for d in docs] == [str(i) for i in range(1, 131)]
+    assert mock_post.call_count == 3
+    assert "SI_ID > 50" in mock_post.call_args_list[1][1]["json"]["query"]
+    assert "SI_ID > 100" in mock_post.call_args_list[2][1]["json"]["query"]
 
 
 def test_list_documents_cms_query_keeps_partial_data_when_a_later_page_fails(authenticated_client):
@@ -548,7 +587,10 @@ def test_list_document_ids_with_runs_on_returns_distinct_parent_ids(authenticate
     with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
         ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
     assert ids == ["500", "501"]
-    query = mock_post.call_args[1]["json"]["query"]
+    # First query: no keyset cursor yet, correct instance/date clauses. (The
+    # keyset loop probes a second page; the server re-serves the same batch, so
+    # the cursor-didn't-advance guard stops without adding duplicate parents.)
+    query = mock_post.call_args_list[0][1]["json"]["query"]
     assert "SI_INSTANCE=1" in query
     assert "SI_STARTTIME >= @2026.07.20.00.00.00" in query
     assert "SI_STARTTIME < @2026.07.21.00.00.00" in query
@@ -572,6 +614,27 @@ def test_list_document_ids_with_runs_on_pages_via_keyset(authenticated_client):
     assert mock_post.call_count == 2
     second_query = mock_post.call_args_list[1][1]["json"]["query"]
     assert "SI_ID > 200" in second_query
+
+
+def test_list_document_ids_with_runs_on_pages_past_a_server_cap_below_requested_top(authenticated_client):
+    """Same "cap below TOP" regression as the document listing, for the
+    run-date instance query: a 50-row server cap must not be mistaken for the
+    last page, or the run-date filter silently matches only the first 50
+    instances by SI_ID."""
+    ranges = [(1, 51), (51, 101), (101, 131)]  # server caps at 50: 50, 50, then 30
+    responses = []
+    for start, end in ranges:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "documents": [{"SI_ID": str(i), "SI_PARENTID": f"doc{i}"} for i in range(start, end)]
+        }
+        responses.append(resp)
+    with patch.object(authenticated_client._session, "post", side_effect=responses) as mock_post:
+        ids = authenticated_client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    assert len(ids) == 130
+    assert mock_post.call_count == 3
+    assert "SI_ID > 100" in mock_post.call_args_list[2][1]["json"]["query"]
 
 
 def test_list_document_ids_with_runs_on_returns_none_when_endpoint_unavailable(authenticated_client):

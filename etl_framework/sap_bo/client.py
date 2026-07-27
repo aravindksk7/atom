@@ -382,6 +382,7 @@ class BORestClient:
         url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
         collected: list[dict] = []
         last_id: int | None = None
+        previous_batch_size: int | None = None
         page_count = 0
         while page_count < self._MAX_PAGES:
             where = "SI_KIND='Webi'" if last_id is None else f"SI_KIND='Webi' AND SI_ID > {last_id}"
@@ -418,17 +419,36 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), "documents", "document", "entries")
             if not batch:
                 break
-            collected.extend(batch)
             try:
-                last_id = max(int(d.get("SI_ID", 0)) for d in batch)
+                batch_max_id = max(int(d.get("SI_ID", 0)) for d in batch)
             except (TypeError, ValueError):
                 logger.warning(
                     "SAP BO CMS query returned a non-numeric SI_ID -- stopping keyset "
                     "pagination with the %d document(s) collected so far", len(collected),
                 )
                 break
-            if len(batch) < self._PAGE_REQUEST_SIZE:
+            # Guard against a gateway/server that ignores the `SI_ID > cursor`
+            # clause and re-serves an already-seen page (the same class of
+            # intermediary that defeated page/Range above): if the max id
+            # didn't advance past the previous cursor, stop instead of looping
+            # to _MAX_PAGES on duplicate data.
+            if last_id is not None and batch_max_id <= last_id:
+                logger.warning(
+                    "SAP BO CMS query cursor did not advance past SI_ID %d (server re-served an "
+                    "already-seen page) -- stopping with %d document(s) collected so far",
+                    last_id, len(collected),
+                )
                 break
+            collected.extend(batch)
+            last_id = batch_max_id
+            # A page shorter than the *previous* page means the collection is
+            # exhausted; a page shorter than the requested TOP does NOT -- this
+            # deployment caps every result set below our TOP (observed: 50 rows
+            # vs TOP 200), so keying off TOP stops after the first page and
+            # loses the rest. Same rule as the page-param path's docstring.
+            if previous_batch_size is not None and len(batch) < previous_batch_size:
+                break
+            previous_batch_size = len(batch)
             page_count += 1
         results = []
         for d in collected:
@@ -467,6 +487,7 @@ class BORestClient:
         document_ids: list[str] = []
         seen: set[str] = set()
         last_id: int | None = None
+        previous_batch_size: int | None = None
         page_count = 0
         while page_count < self._MAX_PAGES:
             where = date_clause if last_id is None else f"{date_clause} AND SI_ID > {last_id}"
@@ -502,13 +523,8 @@ class BORestClient:
             batch = _unwrap_collection(response.json(), "documents", "document", "entries")
             if not batch:
                 break
-            for entry in batch:
-                parent_id = str(entry.get("SI_PARENTID", ""))
-                if parent_id and parent_id not in seen:
-                    seen.add(parent_id)
-                    document_ids.append(parent_id)
             try:
-                last_id = max(int(entry.get("SI_ID", 0)) for entry in batch)
+                batch_max_id = max(int(entry.get("SI_ID", 0)) for entry in batch)
             except (TypeError, ValueError):
                 logger.warning(
                     "SAP BO CMS query for run-date filtering returned a non-numeric SI_ID -- "
@@ -516,8 +532,27 @@ class BORestClient:
                     len(document_ids),
                 )
                 break
-            if len(batch) < self._PAGE_REQUEST_SIZE:
+            # Same re-serve guard as _list_documents_via_cms_query: stop if the
+            # cursor didn't advance rather than looping on a re-served page.
+            if last_id is not None and batch_max_id <= last_id:
+                logger.warning(
+                    "SAP BO CMS query for run-date filtering cursor did not advance past SI_ID %d "
+                    "(server re-served an already-seen page) -- stopping with %d document id(s)",
+                    last_id, len(document_ids),
+                )
                 break
+            for entry in batch:
+                parent_id = str(entry.get("SI_PARENTID", ""))
+                if parent_id and parent_id not in seen:
+                    seen.add(parent_id)
+                    document_ids.append(parent_id)
+            last_id = batch_max_id
+            # Short-vs-previous means exhausted; short-vs-TOP does not (this
+            # deployment caps results below our TOP) -- see
+            # _list_documents_via_cms_query for the same rule and rationale.
+            if previous_batch_size is not None and len(batch) < previous_batch_size:
+                break
+            previous_batch_size = len(batch)
             page_count += 1
         return document_ids
 
