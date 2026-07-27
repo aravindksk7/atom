@@ -235,3 +235,16 @@ def test_job_definition_rejects_dbt_manifest_without_run_results():
             key_columns=[],
             params={"manifest_path": "target/manifest.json"},
         )
+
+
+def test_bo_report_download_request_defaults():
+    from api.schemas import BOReportDownloadRequest
+    req = BOReportDownloadRequest()
+    assert req.format == "xlsx"
+    assert req.parameters == []
+
+
+def test_bo_param_answer_roundtrip():
+    from api.schemas import BOParamAnswer
+    a = BOParamAnswer(id=0, type="DateTime", value="2026-06-02")
+    assert a.model_dump() == {"id": 0, "type": "DateTime", "value": "2026-06-02"}
