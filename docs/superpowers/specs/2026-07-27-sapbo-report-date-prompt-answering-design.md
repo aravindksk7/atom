@@ -158,11 +158,13 @@ The service does not read settings itself; the **route** supplies `timezone`
 
 ### 5. `api/services/run_executor.py` — job execution
 
-`_build_case_bo_report`, `_build_case_bo_live_recon`, `_build_case_bo_job`
-each currently do `client.download_report(doc_id, report_id, fmt)`. Before
-that call, when `job.params.get("bo_parameters")` is present: resolve the app
-timezone (via `SettingsRepository`), `build_parameter_answers`, then
+`_build_case_bo_report` and `_build_case_bo_live_recon` each currently do
+`client.download_report(doc_id, report_id, fmt)`. Before that call, when
+`job.params.get("bo_parameters")` is present: resolve the app timezone (via
+`SettingsRepository`), `build_parameter_answers`, then
 `client.answer_document_parameters(doc_id, built)`. Then download as today.
+(`_build_case_bo_job` is out of scope — it runs via `schedule_object` with its
+own `schedule_params`, not `download_report`.)
 
 `job.params["bo_parameters"]` is a list of fixed `{"id", "type", "value"}`.
 `BOJobCreateRequest` and the job `params` schema gain an optional
