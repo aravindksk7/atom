@@ -85,6 +85,22 @@
               </div>
               <!-- Report list -->
               <div x-show="expandedBODocs.includes(doc.id)" class="ml-4 mt-1 space-y-1">
+                <!-- Report prompts (parameters). Shown only when the report has any. -->
+                <template x-if="(boReportParams[doc.id] || []).length > 0">
+                  <div class="px-3 py-1 space-y-1">
+                    <div class="text-muted text-xs">Prompts</div>
+                    <template x-for="p in (boReportParams[doc.id] || [])" :key="p.id">
+                      <label class="field-label block">
+                        <span x-text="(p.name || ('Prompt ' + p.id)) + (p.mandatory ? ' *' : '')"></span>
+                        <input x-show="p.type === 'DateTime'" type="date"
+                               x-model="boParamValues[doc.id][p.id]" class="field-input" />
+                        <input x-show="p.type !== 'DateTime'" type="text"
+                               x-model="boParamValues[doc.id][p.id]" class="field-input"
+                               :placeholder="p.type" />
+                      </label>
+                    </template>
+                  </div>
+                </template>
                 <template x-if="!boReports[doc.id]">
                   <div class="text-muted text-xs px-3 py-1">Loading reports…</div>
                 </template>

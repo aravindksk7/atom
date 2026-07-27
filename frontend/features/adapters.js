@@ -16,6 +16,8 @@
     boDocs: [],
     expandedBODocs: [],
     boReports: {},         // doc.id → list of reports
+    boReportParams: {},    // doc.id → [{id,name,type,mandatory}] (report prompts)
+    boParamValues: {},     // doc.id → { param_id → value }
     boFilterQuery: '',
     boRanOnDate: '',
     boRanOnDocIds: null,   // Set<string> | null — null means no date filter active
@@ -77,6 +79,8 @@
       this.boDocs = [];
       this.expandedBODocs = [];
       this.boReports = {};
+      this.boReportParams = {};
+      this.boParamValues = {};
       this.boFilterQuery = '';
       this.boRanOnDate = '';
       this.boRanOnDocIds = null;
@@ -157,6 +161,9 @@
         return;
       }
       this.expandedBODocs.push(doc.id);
+      // Discover the report's prompts in parallel with the report list so the
+      // download control knows whether to POST parameters or use the plain GET.
+      this.loadBOReportParams(doc);
       if (!this.boReports[doc.id]) {
         try {
           const reports = await api('GET',
@@ -169,13 +176,64 @@
       }
     },
 
-    async downloadBOReport(docId, reportId, format) {
+    // Fetch (and cache) the prompt/parameter definitions for a document's
+    // report. Returns the cached list on repeat calls. Uses the spread-assign
+    // idiom (like boReports) so Alpine picks up the change reactively.
+    async loadBOReportParams(doc) {
+      if (this.boReportParams[doc.id]) return this.boReportParams[doc.id];
       try {
-        const { blob, disposition } = await apiBlob(
-          `/api/adapters/sap-bo/documents/${docId}/reports/${reportId}/download?config_id=${this.boConfigId}&format=${format}`
+        const params = await api('GET',
+          `/api/adapters/sap-bo/documents/${doc.id}/parameters?config_id=${this.boConfigId}`);
+        this.boReportParams = { ...this.boReportParams, [doc.id]: params };
+        if (!this.boParamValues[doc.id]) {
+          this.boParamValues = { ...this.boParamValues, [doc.id]: {} };
+        }
+        return params;
+      } catch (e) {
+        this.toast('error', 'Could not load report parameters', e.message);
+        this.boReportParams = { ...this.boReportParams, [doc.id]: [] };
+        return [];
+      }
+    },
+
+    async downloadBOReport(docId, reportId, format) {
+      // Ensure prompt definitions are known before deciding which path to use;
+      // returns the cached list when already loaded (e.g. on doc expand).
+      const params = await this.loadBOReportParams({ id: docId });
+      // No prompts → keep the existing authenticated GET blob download.
+      if (!params.length) {
+        try {
+          const { blob, disposition } = await apiBlob(
+            `/api/adapters/sap-bo/documents/${docId}/reports/${reportId}/download?config_id=${this.boConfigId}&format=${format}`
+          );
+          const match = disposition.match(/filename="?([^"]+)"?/);
+          triggerDownload(blob, match ? match[1] : `report_${docId}_${reportId}.${format}`);
+          this.toast('success', 'Download started');
+        } catch (e) {
+          this.toast('error', 'Download failed', e.message);
+        }
+        return;
+      }
+      // Has prompts → POST the collected values to the parameterized endpoint.
+      // Auth is replicated from the api()/apiBlob() helpers (Bearer token).
+      const values = this.boParamValues[docId] || {};
+      const parameters = params.map(p => ({ id: p.id, type: p.type, value: values[p.id] || '' }));
+      try {
+        const token = normalizeToken(sessionStorage.getItem('etl_token'));
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const resp = await fetch(
+          API + `/api/adapters/sap-bo/documents/${docId}/reports/${reportId}/download?config_id=${this.boConfigId}`,
+          { method: 'POST', headers, body: JSON.stringify({ format, parameters }) }
         );
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          this.toast('error', 'Download failed', apiErrorMessage(err.detail ?? err, resp.statusText));
+          return;
+        }
+        const disposition = resp.headers.get('content-disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/);
-        triggerDownload(blob, match ? match[1] : `report_${docId}_${reportId}.${format}`);
+        triggerDownload(await resp.blob(), match ? match[1] : `report_${docId}_${reportId}.${format}`);
         this.toast('success', 'Download started');
       } catch (e) {
         this.toast('error', 'Download failed', e.message);
