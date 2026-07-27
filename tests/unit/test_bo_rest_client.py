@@ -1065,3 +1065,32 @@ def test_get_document_parameters_404_raises_report_not_found(authenticated_clien
     with patch.object(authenticated_client._session, "get", return_value=resp):
         with pytest.raises(ReportNotFoundError):
             authenticated_client.get_document_parameters("999")
+
+
+def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client):
+    resp = MagicMock()
+    resp.status_code = 200
+    with patch.object(authenticated_client._session, "put", return_value=resp) as mock_put:
+        authenticated_client.answer_document_parameters(
+            "124267",
+            [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+        )
+    url = mock_put.call_args[0][0]
+    assert url.endswith("/documents/124267/occurences/0/parameters")
+    assert mock_put.call_args[1]["params"] == {
+        "dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false",
+    }
+    assert mock_put.call_args[1]["json"] == {"parameters": {"parameter": [
+        {"id": 0, "answer": {"values": {"value": [
+            {"$": "2026-06-01T23:00:00.000Z", "@type": "DateTime"}]}}}]}}
+
+
+def test_answer_document_parameters_raises_on_http_error(authenticated_client):
+    from etl_framework.exceptions import BOAPIError
+    resp = MagicMock()
+    resp.status_code = 400
+    resp.text = "bad prompt"
+    with patch.object(authenticated_client._session, "put", return_value=resp):
+        with pytest.raises(BOAPIError):
+            authenticated_client.answer_document_parameters(
+                "124267", [{"id": 0, "type": "DateTime", "value": "x"}])

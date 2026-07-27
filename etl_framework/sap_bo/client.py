@@ -635,6 +635,42 @@ class BORestClient:
             for p in raw
         ]
 
+    def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
+        """PUT …/documents/{doc_id}/occurences/0/parameters — answer prompts.
+
+        `built_answers` is a list of already-finalized
+        {"id", "type", "value"} (date conversion done by
+        etl_framework.sap_bo.parameters.build_parameter_answers). Logs the
+        answered prompt ids so a deployment where export ignores occurrence-0
+        answers is diagnosable rather than silently wrong.
+        """
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/occurences/0/parameters"
+        body = {"parameters": {"parameter": [
+            {"id": a["id"], "answer": {"values": {"value": [
+                {"$": a["value"], "@type": a["type"]}]}}}
+            for a in built_answers
+        ]}}
+        logger.info(
+            "SAP BO answering %d parameter(s) on document %s occurrence 0 (ids=%s)",
+            len(built_answers), doc_id, [a["id"] for a in built_answers],
+        )
+        response = self._session.put(
+            url,
+            params={"dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false"},
+            json=body,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=doc_id,
+                http_status=response.status_code,
+                response_body=response.text,
+            )
+
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
