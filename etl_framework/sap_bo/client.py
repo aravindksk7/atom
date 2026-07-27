@@ -599,6 +599,42 @@ class BORestClient:
             })
         return results
 
+    def get_document_parameters(self, doc_id: str) -> list[dict]:
+        """GET …/documents/{doc_id}/parameters — list a report's prompts.
+
+        Returns one dict per prompt: {"id", "name", "type", "mandatory"}.
+        Unwraps both the flat {"parameters":[…]} and nested
+        {"parameters":{"parameter":[…]}} BIP shapes (same convention as
+        list_documents).
+        """
+        if not self._token:
+            self.authenticate()
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
+        response = self._session.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+        if response.status_code == 404:
+            raise ReportNotFoundError(report_id=doc_id, env_name=self._base_url)
+        if response.status_code >= 400:
+            raise BOAPIError(
+                report_id=doc_id,
+                http_status=response.status_code,
+                response_body=response.text,
+            )
+        raw = _unwrap_collection(response.json(), "parameters", "parameter")
+        return [
+            {
+                "id": p.get("id"),
+                "name": p.get("name", ""),
+                "type": p.get("type", p.get("@type", "")),
+                "mandatory": bool(p.get("mandatory", False)),
+            }
+            for p in raw
+        ]
+
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

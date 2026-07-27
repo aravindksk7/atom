@@ -1039,3 +1039,29 @@ def test_wait_for_completion_raises_timeout_error_when_never_terminal(authentica
     with patch.object(authenticated_client, "get_schedule_status", return_value=TestStatus.RUNNING):
         with pytest.raises(TimeoutError, match="inst-42"):
             authenticated_client.wait_for_completion("inst-42", timeout_s=0.05, poll_interval_s=0.01)
+
+
+def test_get_document_parameters_parses_nested_prompt_collection(authenticated_client):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"parameters": {"parameter": [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True},
+        {"id": 1, "name": "Region", "type": "String"},
+    ]}}
+    with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get:
+        params = authenticated_client.get_document_parameters("124267")
+    assert params == [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False},
+    ]
+    assert mock_get.call_args[0][0].endswith("/documents/124267/parameters")
+
+
+def test_get_document_parameters_404_raises_report_not_found(authenticated_client):
+    from etl_framework.exceptions import ReportNotFoundError
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.text = "not found"
+    with patch.object(authenticated_client._session, "get", return_value=resp):
+        with pytest.raises(ReportNotFoundError):
+            authenticated_client.get_document_parameters("999")
