@@ -167,8 +167,11 @@ The service does not read settings itself; the **route** supplies `timezone`
 own `schedule_params`, not `download_report`.)
 
 `job.params["bo_parameters"]` is a list of fixed `{"id", "type", "value"}`.
-`BOJobCreateRequest` and the job `params` schema gain an optional
-`bo_parameters`.
+`bo_parameters` is persisted through the generic `POST/PUT /api/jobs`
+endpoint (job `params` is a free-form `dict[str, Any]`), which the job editor
+already uses. The quick-create `BOJobCreateRequest` / `/jobs/from-bo-report`
+path is intentionally left unchanged — it creates a bare job the user then
+edits to add prompts — so no schema change is needed there.
 
 ### 6. Frontend
 
