@@ -154,11 +154,11 @@ def _rows_for_doc(doc_id: str) -> list[dict]:
 # SI_STARTTIME range clause for the run-date filter.
 _CEQL_TOP_RE = re.compile(r"SELECT TOP (\d+)")
 _CEQL_CURSOR_RE = re.compile(r"SI_ID > (\d+)")
-_CEQL_DATE_RANGE_RE = re.compile(r"SI_STARTTIME >= @([\d.]+) AND SI_STARTTIME < @([\d.]+)")
+_CEQL_DATE_RANGE_RE = re.compile(r"SI_STARTTIME >= '([\d.]+)' AND SI_STARTTIME < '([\d.]+)'")
 
 
 def _parse_ceql_date_literal(literal: str) -> date:
-    """Parse a CeQL `@yyyy.MM.dd.HH.mm.ss` date literal's date portion."""
+    """Parse a CeQL `'yyyy.MM.dd.HH.mm.ss'` date literal's date portion."""
     year, month, day = (int(part) for part in literal.split(".")[:3])
     return date(year, month, day)
 

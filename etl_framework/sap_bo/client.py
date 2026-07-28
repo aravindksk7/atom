@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import requests
 import pandas as pd
 from urllib.parse import urlparse
@@ -85,6 +85,7 @@ class BORestClient:
         self._owns_token = False
         self._session = requests.Session()
         self._verify_ssl = env_config.bo_verify_ssl
+        self._server_utc_offset_hours = env_config.bo_server_utc_offset_hours
         proxy_url = env_config.bo_proxy_url.strip()
         if proxy_url:
             self._session.proxies.update({"http": proxy_url, "https": proxy_url})
@@ -479,9 +480,19 @@ class BORestClient:
         already collected instead of discarding them.
         """
         url = f"{self._base_url}{self.CMS_QUERY_ENDPOINT}"
-        day_start = f"@{day.year}.{day.month:02d}.{day.day:02d}.00.00.00"
-        next_day = day + timedelta(days=1)
-        day_end = f"@{next_day.year}.{next_day.month:02d}.{next_day.day:02d}.00.00.00"
+        # CeQL time literals are single-quoted 'yyyy.MM.dd.HH.mm.ss' strings.
+        # The @-prefixed form is not valid CeQL: the live on-prem CMS parses it
+        # far enough to reach execution, then fails with HTTP 500 (the listing
+        # query works precisely because it carries no time literal).
+        #
+        # The CMS stores/compares SI_STARTTIME in UTC, so the requested local
+        # `day` window [00:00 local, next 00:00 local) is shifted back by the
+        # server's UTC offset to express it in UTC (offset 0 => unchanged).
+        offset = timedelta(hours=self._server_utc_offset_hours)
+        start_utc = datetime(day.year, day.month, day.day) - offset
+        end_utc = start_utc + timedelta(days=1)
+        day_start = f"'{start_utc:%Y.%m.%d.%H.%M.%S}'"
+        day_end = f"'{end_utc:%Y.%m.%d.%H.%M.%S}'"
         date_clause = f"SI_INSTANCE=1 AND SI_STARTTIME >= {day_start} AND SI_STARTTIME < {day_end}"
 
         document_ids: list[str] = []

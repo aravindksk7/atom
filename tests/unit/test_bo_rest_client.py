@@ -592,9 +592,28 @@ def test_list_document_ids_with_runs_on_returns_distinct_parent_ids(authenticate
     # the cursor-didn't-advance guard stops without adding duplicate parents.)
     query = mock_post.call_args_list[0][1]["json"]["query"]
     assert "SI_INSTANCE=1" in query
-    assert "SI_STARTTIME >= @2026.07.20.00.00.00" in query
-    assert "SI_STARTTIME < @2026.07.21.00.00.00" in query
+    # CeQL time literals are single-quoted 'yyyy.MM.dd.HH.mm.ss' strings, NOT
+    # @-prefixed tokens -- the live on-prem CMS returns HTTP 500 on the @ form.
+    assert "SI_STARTTIME >= '2026.07.20.00.00.00'" in query
+    assert "SI_STARTTIME < '2026.07.21.00.00.00'" in query
     assert "SI_ID >" not in query
+
+
+def test_list_document_ids_with_runs_on_shifts_window_to_utc(env_config):
+    """CMS compares SI_STARTTIME in UTC, so a UTC+1 server's local day must be
+    expressed as a UTC window shifted back one hour (23:00 the prior day to
+    23:00 that day)."""
+    from etl_framework.sap_bo.client import BORestClient
+    client = BORestClient(env_config.model_copy(update={"bo_server_utc_offset_hours": 1}))
+    client._token = "fake-token-123"
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"documents": []}
+    with patch.object(client._session, "post", return_value=resp) as mock_post:
+        client.list_document_ids_with_runs_on(date(2026, 7, 20))
+    query = mock_post.call_args_list[0][1]["json"]["query"]
+    assert "SI_STARTTIME >= '2026.07.19.23.00.00'" in query
+    assert "SI_STARTTIME < '2026.07.20.23.00.00'" in query
 
 
 def test_list_document_ids_with_runs_on_pages_via_keyset(authenticated_client):

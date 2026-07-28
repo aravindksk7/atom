@@ -42,6 +42,11 @@ class EnvironmentConfig(BaseModel):
     bo_timeout: int = 60
     bo_proxy_url: str = ""
     bo_verify_ssl: bool = True
+    # Hours the SAP BO/CMS server's local clock is ahead of UTC. The CMS
+    # stores/compares SI_STARTTIME in UTC, so the run-date filter converts a
+    # requested local day to UTC using this offset. Default 0 = server on UTC;
+    # set per deployment (the known on-prem server runs UTC+1).
+    bo_server_utc_offset_hours: float = 0.0
     ds_url: str = ""
     ds_user: str = ""
     ds_password: str = ""
@@ -96,6 +101,13 @@ class EnvironmentConfig(BaseModel):
     def validate_ds_timeout(cls, v: int) -> int:
         if v <= 0:
             raise ValueError(f"must be > 0, got {v}")
+        return v
+
+    @field_validator("bo_server_utc_offset_hours")
+    @classmethod
+    def validate_bo_server_utc_offset_hours(cls, v: float) -> float:
+        if not (-14 <= v <= 14):
+            raise ValueError(f"must be between -14 and 14, got {v}")
         return v
 
     @field_validator("bo_auth_type")
