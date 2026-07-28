@@ -231,9 +231,15 @@
         },
         {
           title: 'Pair files by filename token (explicit strategy)',
-          text: 'Give the source and target a root folder and a pattern with {token} placeholders, e.g. sales_{region}_{date:%Y%m%d}.csv. List the tokens that identify a matching pair under Match On (e.g. region, date). Files sharing the same token values on both sides become one comparison pair; several files sharing a key on one side are concatenated before comparison.',
+          text: 'Give the source and target a root folder and a pattern with {token} placeholders. Source and target names can be different as long as Match On tokens exist on both sides. Examples: sales_{region:alpha}_{batch:num}.xlsx vs financials-{region:alpha}-B{batch:num}.xlsx with Match On region,batch; extract_{id:alnum}.json vs prod_{id:regex([A-Z]{2}\\d{2})}.json with Match On id; sales_{region}_{date:%Y%m%d}.csv vs finance-{region}-{date:%Y%m%d}.tsv with Match On region,date. Files sharing the same token values on both sides become one comparison pair; several files sharing a key on one side are concatenated before comparison.',
           where: 'Job editor -> Input Source -> Multiple Files -> Strategy: Explicit',
-          tip: 'A token like {date:%Y%m%d} constrains the captured value to 8 digits. Give a token an explicit format spec if its value can contain "_" or "." (e.g. north_america), otherwise it stops capturing too early.',
+          tip: 'Token formats: {name}, {batch:num}, {code:alpha}, {id:alnum}, {anything:any}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\\d{4})}, plus * and ? outside braces. If source has no region, do not put region in Match On; match on a shared batch/date/id token or use Automated.',
+        },
+        {
+          title: 'Use regular expressions for custom filename IDs',
+          text: 'Use regex(...) when a filename token has a precise business format. Type {id:regex([A-Z]{2}\\d{4})} for IDs like AB1234, {period:regex(20\\d{4})} for periods like 202607, or {code:regex([A-Z0-9]{6})} for six-character uppercase codes. In JSON job definitions escape backslashes as \\\\d; in the Web UI type \\d normally. The framework wraps the token in its own named group, so do not include named groups inside the custom regex.',
+          where: 'Job editor / Compare -> Multi-File -> Source/Target Pattern',
+          warn: 'Every custom regex still belongs to one token. Match On uses the token name, not the regex text.',
         },
         {
           title: 'Or let the framework guess pairs (automated strategy)',
@@ -275,8 +281,9 @@
         },
         {
           title: 'Run a one-off multi-file compare with no saved job',
-          text: 'You don\'t need to save a job to try this out. Open Compare -> Multi-File, configure the same strategy/match-on/unmatched-policy fields, Preview Mapping, then Run Comparison to get a real, revisitable run without creating a catalog entry first.',
+          text: 'You don\'t need to save a job to try this out. Open Compare -> Multi-File, choose Explicit when filenames share tokens or Automated when they do not, enter Key Columns for row matching, then fill local server Source/Target roots and patterns. Example: Source /spool/source + sales_{region:alpha}_{batch:num}.xlsx, Target /spool/target + financials-{region:alpha}-B{batch:num}.xlsx, Match On region,batch, Key Columns id. Click Preview Mapping, check pair count and unmatched files, then Run Comparison to get a real, revisitable run without creating a catalog entry first.',
           where: 'Compare -> Multi-File',
+          tip: 'For JSON IDs, try extract_{id:alnum}.json vs prod_{id:regex([A-Z]{2}\\d{2})}.json with Match On id. The Compare tab is local-path only; use saved jobs for s3/sftp.',
         },
       ],
     },
@@ -554,9 +561,9 @@
         },
         {
           title: 'Run an ad-hoc multi-file compare',
-          text: 'On the Multi-File card, configure a source/target file mapping (strategy, match-on tokens or automated-mapping signals, key/exclude columns, unmatched policy) and click Preview Mapping to see pairs before running. Click Run Comparison to reconcile every matched pair and store it as a real run — no saved job needed. Only local source/target paths are supported (not S3/SFTP).',
+          text: 'On the Multi-File card, configure a source/target file mapping and run it without saving a job. Steps: 1) choose Explicit or Automated; 2) enter Key Columns such as id or order_id; 3) for Explicit, enter Match On tokens such as region,batch or id; 4) enter local server Source/Target roots; 5) enter filename patterns; 6) Preview Mapping and check pairs/unmatched files; 7) Run Comparison to store a real run. Example patterns: sales_{region:alpha}_{batch:num}.xlsx vs financials-{region:alpha}-B{batch:num}.xlsx, or extract_{id:alnum}.json vs prod_{id:regex([A-Z]{2}\\d{2})}.json. Only local source/target paths are supported here (not S3/SFTP).',
           where: 'Compare -> Multi-File',
-          tip: 'Pairs run sequentially here (not in parallel like a saved multi_file job) — fine for a handful of ad-hoc files.',
+          tip: 'Pairs run sequentially here (not in parallel like a saved multi_file job). If one side lacks region, leave region out of Match On and match on a shared batch/date/id token, or use Automated.',
         },
         {
           title: 'Run a SQL direct compare',

@@ -73,6 +73,33 @@ Example: source `sales_{region:alpha}_{batch:num}.xlsx` and target
 `financials-{region:alpha}-B{batch:num}.xlsx` can be paired with
 `match_on: ["region", "batch"]`.
 
+### Filename pattern examples
+
+Use these examples as copyable starting points. Source and target filenames
+do **not** need to be identical; they only need to expose the same tokens
+listed in `match_on` when you use explicit matching.
+
+| Use case | Source pattern | Target pattern | Match On | Notes |
+| --- | --- | --- | --- | --- |
+| Region + batch Excel exports | `sales_{region:alpha}_{batch:num}.xlsx` | `financials-{region:alpha}-B{batch:num}.xlsx` | `region, batch` | Matches `sales_WEST_001.xlsx` to `financials-WEST-B001.xlsx`. |
+| Alphanumeric extract ID | `extract_{id:alnum}.json` | `prod_{id:regex([A-Z]{2}\d{2})}.json` | `id` | Matches `extract_AB12.json` to `prod_AB12.json`; target regex requires 2 letters + 2 digits. |
+| Region + date flat files | `sales_{region}_{date:%Y%m%d}.csv` | `finance-{region}-{date:%Y%m%d}.tsv` | `region, date` | Matches `sales_east_20260728.csv` to `finance-east-20260728.tsv`. |
+| Batch only, no region on source | `sales_batch_{batch:num}.xlsx` | `finance_{region:alpha}_batch_{batch:num}.xlsx` | `batch` | Region is captured for display but not used for pairing. Useful when one side omits a region. |
+| Flexible prefix/suffix | `source_*_{id:alnum}.dat` | `target_{anything:any}_{id:alnum}.txt` | `id` | `*` ignores a segment outside tokens; `{anything:any}` captures any non-path text inside a token. |
+| No stable shared token | `*.csv` | `*.xlsx` | none | Switch Strategy to Automated and compare by filename similarity, columns, and row-count ratio. |
+
+Custom regex tips:
+
+- Put the regex inside `regex(...)`, for example
+  `{id:regex([A-Z]{2}\d{4})}` for `AB1234`.
+- Escape backslashes in JSON job definitions as `\\d`; in the Web UI type
+  `\d` normally.
+- Do not add named capture groups inside custom regex tokens. The framework
+  already wraps the token in a named group using the token name.
+- Keep `match_on` to the smallest stable set of tokens. If source has no
+  region, do not include `region` in `match_on`; match on `batch`, `date`,
+  or another shared identifier instead.
+
 ## Supported file formats
 
 Both sides are read through the framework's tabular reader: `.csv`, `.tsv`,
@@ -228,6 +255,44 @@ You don't need a saved job to run a one-off multi-file reconciliation.
 The Compare tab's **Multi-File** sub-tab lets you configure a source/target
 file mapping (strategy, `match_on` or automated-mapping signals, key/exclude
 columns, unmatched policy) and run it directly:
+
+1. Open **Compare -> Multi-File**.
+2. Enter labels for Source A and Source B if the defaults are not clear.
+3. Choose **Strategy**:
+   - **Explicit** when source and target filenames expose shared tokens such
+     as `region`, `batch`, `date`, or `id`.
+   - **Automated** when names do not share a reliable token; enable filename,
+     column, and row-count signals as needed.
+4. For Explicit, fill **Match On** with comma-separated token names, for
+   example `region,batch` or `id`. Every token listed here must appear in
+   both source and target patterns.
+5. Fill **Key Columns** with row-level business keys such as `id` or
+   `order_id,line_id`. These are data columns inside each file, not filename
+   tokens.
+6. Fill **Source root** and **Target root** with server-accessible directories.
+   The ad-hoc Compare tab uses local server paths only, not browser upload
+   folders and not S3/SFTP.
+7. Fill **Source pattern** and **Target pattern** with filename patterns. The
+   patterns can have different prefixes, separators, and extensions as long
+   as their `match_on` tokens line up.
+8. Click **Preview Mapping**. Confirm the pair count, filenames, and unmatched
+   source/target groups before running.
+9. If preview is wrong, adjust the pattern, Match On tokens, or Unmatched
+   Policy. Use **Warn and proceed** while validating large folders so one
+   stray file does not stop the whole comparison.
+10. Click **Run Comparison**. The app creates a real run, reconciles matched
+    pairs sequentially, and stores one aggregate result.
+11. Review the per-pair breakdown in Compare, or open the run in Reports for
+    the full HTML report and exports.
+
+Ad-hoc examples:
+
+| Scenario | Source root / pattern | Target root / pattern | Match On | Key Columns |
+| --- | --- | --- | --- | --- |
+| Excel files with different names | `/spool/source` + `sales_{region:alpha}_{batch:num}.xlsx` | `/spool/target` + `financials-{region:alpha}-B{batch:num}.xlsx` | `region,batch` | `id` |
+| JSON extracts with custom target ID | `/data/source` + `extract_{id:alnum}.json` | `/data/prod` + `prod_{id:regex([A-Z]{2}\d{2})}.json` | `id` | `id` |
+| CSV vs TSV by region/date | `/exports/qa` + `sales_{region}_{date:%Y%m%d}.csv` | `/exports/prod` + `finance-{region}-{date:%Y%m%d}.tsv` | `region,date` | `order_id` |
+| Source has no region | `/exports/source` + `sales_batch_{batch:num}.xlsx` | `/exports/target` + `finance_{region:alpha}_batch_{batch:num}.xlsx` | `batch` | `id` |
 
 - **Preview Mapping** reuses the same `POST /api/jobs/preview-file-mapping`
   endpoint the job editor uses — same discovery/pairing logic, no job needs
