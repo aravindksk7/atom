@@ -162,6 +162,66 @@ def test_run_multi_file_compare_supports_xlsx_with_different_dynamic_names(tmp_p
         db.close()
 
 
+def test_full_differences_recompute_includes_ad_hoc_multi_file_rows(tmp_path, monkeypatch) -> None:
+    """Regression: write_recomputed_differences (used by the full-differences
+    export, "Load all for this test", and the full HTML report) had no
+    ``multi_file`` branch, so an ad-hoc multi-file run fell through to
+    _write_reconciliation_run -- which only recomputes SAVED jobs -- and wrote
+    ZERO rows. That made every "show all differences beyond the cap" surface
+    come back empty for multi-file compares. This asserts the recompute now
+    reproduces the run's real differences.
+    """
+    from api.services import file_source
+    from api.services.compare_service import CompareService
+    from api.services.difference_export import write_recomputed_differences
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_east.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (source_dir / "sales_west.csv").write_text("id,value\n2,beta\n", encoding="utf-8")
+    (target_dir / "financials_east.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_west.csv").write_text("id,value\n2,BETA\n", encoding="utf-8")
+
+    db = _make_db()
+    try:
+        run_id = "test-run-mf-recompute"
+        req = MultiFileCompareRequest(
+            key_columns=["id"],
+            file_mapping={
+                "strategy": "explicit",
+                "match_on": ["region"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_{region}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}.csv"},
+            },
+        )
+        # Mirror what api/routes/compare.py:compare_multi_file persists so the
+        # recompute dispatcher can identify this as a multi_file run.
+        RunRepository(db).create_run(
+            run_id=run_id, source_env="Source A", target_env="Source B", run_type="multi_file",
+            config_snapshot={"compare_request_type": "multi_file", "request": req.model_dump(mode="json")},
+        )
+        CompareService(db, ConfigRepository(db)).run_multi_file_compare(req, run_id)
+
+        run = RunRepository(db).get_run(run_id)
+        expected = run.results[0].value_mismatch_count
+        assert expected >= 1  # region=west: beta vs BETA
+
+        out = tmp_path / "recompute.jsonl"
+        row_count = write_recomputed_differences(db, run, "json", out)
+        assert row_count == expected, f"recompute wrote {row_count} rows, expected {expected}"
+
+        body = out.read_text(encoding="utf-8")
+        assert "__pair__" in body  # rows carry their file-pair key
+        assert "west" in body      # the mismatching pair (region=west)
+    finally:
+        db.close()
+
+
 def test_run_multi_file_compare_rejects_remote_kinds(tmp_path) -> None:
     from api.services.compare_service import CompareService
 

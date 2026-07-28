@@ -388,6 +388,8 @@ def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path
             _write_bo_compare(db, payload or {}, writer)
         elif request_type == "recon_file":
             _write_recon_file_compare(db, payload or {}, writer)
+        elif request_type == "multi_file":
+            _write_multi_file_compare(db, payload or {}, writer)
         else:
             _write_reconciliation_run(db, run, writer)
         return writer.row_count
@@ -513,6 +515,70 @@ def _write_recon_file_compare(db: Session, payload: dict[str, Any], writer: Diff
                     })
         return
     raise RuntimeError("Both recompute sources must resolve to the same type")
+
+
+def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
+    """Recompute an ad-hoc (no saved job) multi-file compare and stream ALL
+    differences to ``writer`` -- uncapped, unlike the persisted MismatchDetail
+    rows the inline report shows. Mirrors ``CompareService.run_multi_file_compare``
+    (discover -> pair -> reconcile every pair), tagging each row with its
+    ``__pair__`` key exactly as the live path did, so a downstream full report /
+    differences export shows the same rows the run originally found.
+
+    Without this branch, ``write_recomputed_differences`` fell through to
+    ``_write_reconciliation_run``, which only recomputes SAVED reconciliation
+    jobs -- an ad-hoc ``multi_file`` run has no ``SavedJob``, so zero rows were
+    written and "Load all", the full-differences export, and the full HTML
+    report all came back empty once the run exceeded the inline row cap.
+    """
+    from api.schemas import MultiFileCompareRequest
+    from api.services.multi_file_remote import RemoteFileSourceSession
+
+    req = MultiFileCompareRequest(**payload)
+    spec = FileMappingSpec.from_params({"file_mapping": req.file_mapping})
+    if spec.source.kind != "local" or spec.target.kind != "local":
+        raise RuntimeError("Ad-hoc multi-file compare only supports 'local' source/target kinds.")
+    test_name = req.label_a or "multi_file_compare"
+
+    with RemoteFileSourceSession({}) as session:
+        source_files = session.discover(spec.source)
+        target_files = session.discover(spec.target)
+
+        if spec.strategy == "automated":
+            source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
+            target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
+            mapping, _ = pair_files_automated(
+                source_files, source_frames, target_files, target_frames, spec.automated,
+            )
+        else:
+            mapping = pair_files(source_files, target_files, spec.match_on)
+
+        for pair in mapping.pairs:
+            source_df = pd.concat(
+                [session.read_file(f, spec.source) for f in pair.source.files],
+                ignore_index=True,
+            )
+            target_df = pd.concat(
+                [session.read_file(f, spec.target) for f in pair.target.files],
+                ignore_index=True,
+            )
+            source_df, target_df, resolved_keys = resolve_key_columns(
+                source_df, target_df, req.key_columns or [], req.exclude_columns or [],
+            )
+            pair_key = dict(zip(mapping.match_on, pair.key)) if mapping.match_on else {
+                "source_file": pair.source.files[0].file_name if pair.source.files else None,
+                "target_file": pair.target.files[0].file_name if pair.target.files else None,
+            }
+            pair_writer = _PairKeyDifferenceWriter(writer, pair_key)
+            _write_tabular_differences(
+                source_df,
+                target_df,
+                key_columns=resolved_keys,
+                exclude_columns=req.exclude_columns or [],
+                options=req.advanced,
+                test_name=test_name,
+                writer=pair_writer,
+            )
 
 
 def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWriter) -> None:
