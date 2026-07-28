@@ -11,6 +11,19 @@ import { authedContext, createMultiFileJob, deleteJob, triggerRun, waitForTermin
 // UI-driven test aligned with the API-driven one above.
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
 
+async function waitForExportCompleted(ctx: Awaited<ReturnType<typeof authedContext>>, runId: string, exportId: string) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const resp = await ctx.get(`/api/runs/${runId}/exports/${exportId}`);
+    expect(resp.ok()).toBeTruthy();
+    const job = await resp.json();
+    if (job.status === 'COMPLETED') return job;
+    if (job.status === 'FAILED') throw new Error(`export ${exportId} failed: ${job.error_message || 'unknown error'}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`export ${exportId} did not complete within timeout`);
+}
+
 test.describe('17 multi-file reconciliation', () => {
   // adminToken is worker-scoped (fixtures.ts), so it's available to beforeAll/afterAll
   // hooks directly -- see 04-history.spec.ts for the full rationale.
@@ -90,6 +103,52 @@ test.describe('17 multi-file reconciliation', () => {
       expect(byRegion.east.status).toBe('PASSED');
       expect(byRegion.west.status).toBe('FAILED');
       expect(byRegion.west.value_mismatch_count).toBe(1);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  test('downloadable reports include every multi_file comparison pair', async ({ adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    try {
+      const htmlResp = await ctx.get(`/api/runs/${runId}/mismatches/download?format=html`);
+      expect(htmlResp.ok()).toBeTruthy();
+      const html = await htmlResp.text();
+      expect(html).toContain('data-testid="file-pair-row"');
+      expect(html).toContain('region=east');
+      expect(html).toContain('sales_east.csv');
+      expect(html).toContain('financials_east.csv');
+      expect(html).toContain('region=west');
+      expect(html).toContain('sales_west.csv');
+      expect(html).toContain('financials_west.csv');
+      expect(html).toContain('mismatches: 1');
+
+      const exportResp = await ctx.post(`/api/runs/${runId}/exports`, { data: { format: 'html' } });
+      expect(exportResp.ok()).toBeTruthy();
+      const exportJob = await exportResp.json();
+      await waitForExportCompleted(ctx, runId, exportJob.export_id);
+
+      const exportDownload = await ctx.get(`/api/runs/${runId}/exports/${exportJob.export_id}/download`);
+      expect(exportDownload.ok()).toBeTruthy();
+      const exportHtml = await exportDownload.text();
+      expect(exportHtml).toContain('region=east');
+      expect(exportHtml).toContain('region=west');
+      expect(exportHtml).toContain('sales_east.csv');
+      expect(exportHtml).toContain('sales_west.csv');
+
+      const junitResp = await ctx.get(`/api/runs/${runId}/junit`);
+      expect(junitResp.ok()).toBeTruthy();
+      const junit = await junitResp.text();
+      expect(junit).toContain('pairs: 1 passed, 1 failed, 0 errored');
+      expect(junit).toContain('region=east PASSED sales_east.csv -&gt; financials_east.csv');
+      expect(junit).toContain('region=west FAILED sales_west.csv -&gt; financials_west.csv');
+
+      const markdownResp = await ctx.get(`/api/runs/${runId}/markdown-summary`);
+      expect(markdownResp.ok()).toBeTruthy();
+      const markdown = await markdownResp.text();
+      expect(markdown).toContain('| File Pair | Status | Source | Target | Mismatches |');
+      expect(markdown).toContain('| region=east | ✅ PASSED | sales_east.csv | financials_east.csv | 0 |');
+      expect(markdown).toContain('| region=west | ❌ FAILED | sales_west.csv | financials_west.csv | 1 |');
     } finally {
       await ctx.dispose();
     }

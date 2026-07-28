@@ -1458,6 +1458,26 @@ def _sanitize_ci_value(value) -> str:
     return text.replace("<!--", "< !--").replace("-->", "-- >")
 
 
+def _markdown_cell(value) -> str:
+    return _sanitize_ci_value(value).replace("|", "\\|")
+
+
+def _markdown_pair_key(pair: dict) -> str:
+    key = pair.get("key") if isinstance(pair.get("key"), dict) else {}
+    if not key:
+        return "pair"
+    return ",".join(f"{k}={v}" for k, v in sorted(key.items()))
+
+
+def _markdown_file_list(names) -> str:
+    values = [str(name) for name in (names or [])]
+    return ", ".join(values) if values else "-"
+
+
+def _markdown_pair_mismatches(pair: dict) -> int:
+    return int(pair.get("value_mismatch_count") or 0) + int(pair.get("missing_in_target_count") or 0) + int(pair.get("missing_in_source_count") or 0)
+
+
 def _render_markdown_summary(run) -> str:
     if run.ci_context:
         trigger_line = (
@@ -1480,6 +1500,29 @@ def _render_markdown_summary(run) -> str:
     for result in run.results:
         emoji = _STATUS_EMOJI.get(result.effective_status, result.effective_status)
         lines.append(f"| {result.query_name} | {emoji} {result.effective_status} | {result.duration_seconds:.1f}s |")
+        summary = getattr(result, "mismatch_summary", None)
+        pairs = summary.get("file_pairs") if isinstance(summary, dict) else None
+        if isinstance(pairs, list) and pairs:
+            lines.extend([
+                "",
+                f"### File pairs for {result.query_name}",
+                "",
+                "| File Pair | Status | Source | Target | Mismatches |",
+                "|-----------|--------|--------|--------|------------|",
+            ])
+            for pair in pairs:
+                if not isinstance(pair, dict):
+                    continue
+                status = str(pair.get("status") or "UNKNOWN")
+                pair_emoji = _STATUS_EMOJI.get(status, status)
+                lines.append(
+                    "| "
+                    f"{_markdown_cell(_markdown_pair_key(pair))} | "
+                    f"{pair_emoji} {_markdown_cell(status)} | "
+                    f"{_markdown_cell(_markdown_file_list(pair.get('source_files')))} | "
+                    f"{_markdown_cell(_markdown_file_list(pair.get('target_files')))} | "
+                    f"{_markdown_pair_mismatches(pair)} |"
+                )
     lines.append("")
     lines.append(f"[View full run in Atom](/#/runs/{run.run_id})")
     return "\n".join(lines)
