@@ -650,6 +650,7 @@ class BOParamOut(BaseModel):
     name: str = ""
     type: str = ""
     mandatory: bool = False
+    default: str = ""
 
 
 class BOParamAnswer(BaseModel):

@@ -1070,10 +1070,51 @@ def test_get_document_parameters_parses_nested_prompt_collection(authenticated_c
     with patch.object(authenticated_client._session, "get", return_value=resp) as mock_get:
         params = authenticated_client.get_document_parameters("124267")
     assert params == [
-        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True},
-        {"id": 1, "name": "Region", "type": "String", "mandatory": False},
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True, "default": ""},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False, "default": ""},
     ]
     assert mock_get.call_args[0][0].endswith("/documents/124267/parameters")
+
+
+def test_get_document_parameters_reads_datatype_from_nested_answer(authenticated_client):
+    """Real BIP raylight nests the value data type under `answer` (top-level
+    `type` is the parameter kind, "prompt"). The datatype must come from
+    answer.type, else DateTime prompts are exported as raw text and BO 502s."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"parameters": {"parameter": [
+        {"id": 0, "name": "Start Date", "type": "prompt", "mandatory": True,
+         "answer": {"id": 0, "type": "DateTime"}},
+        {"id": 1, "name": "Region", "type": "prompt",
+         "answer": {"id": 1, "type": "String"}},
+    ]}}
+    with patch.object(authenticated_client._session, "get", return_value=resp):
+        params = authenticated_client.get_document_parameters("124313")
+    assert params == [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True, "default": ""},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False, "default": ""},
+    ]
+
+
+def test_get_document_parameters_extracts_default_answer_value(authenticated_client):
+    """A prompt carrying a current answer surfaces as an editable `default`;
+    a DateTime instant is trimmed to YYYY-MM-DD for the date picker."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"parameters": {"parameter": [
+        {"id": 0, "name": "Start Date", "type": "prompt", "mandatory": True,
+         "answer": {"type": "DateTime", "values": {"value": [
+             {"$": "2026-05-08T00:00:00.000Z", "@type": "DateTime"}]}}},
+        {"id": 1, "name": "Region", "type": "prompt",
+         "answer": {"type": "String", "values": {"value": [
+             {"$": "ASX", "@type": "String"}]}}},
+    ]}}
+    with patch.object(authenticated_client._session, "get", return_value=resp):
+        params = authenticated_client.get_document_parameters("124313")
+    assert params == [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True, "default": "2026-05-08"},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False, "default": "ASX"},
+    ]
 
 
 def test_get_document_parameters_404_raises_report_not_found(authenticated_client):

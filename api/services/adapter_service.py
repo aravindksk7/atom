@@ -301,7 +301,8 @@ class AdapterService:
             finally:
                 client.logout()
         return [
-            BOParamOut(id=p["id"], name=p["name"], type=p["type"], mandatory=p["mandatory"])
+            BOParamOut(id=p["id"], name=p["name"], type=p["type"],
+                       mandatory=p["mandatory"], default=p.get("default", ""))
             for p in raw
         ]
 

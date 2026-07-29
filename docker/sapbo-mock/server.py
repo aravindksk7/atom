@@ -110,10 +110,14 @@ DATASETS = {
 # mandatory DateTime prompt so the discover -> answer -> download flow has a
 # date prompt to resolve, mirroring a live WebI document with a run-date
 # prompt.
+# Shape mirrors real BIP raylight: top-level `type` is the parameter kind
+# ("prompt"); the value data type lives under `answer.type`.
 PARAMETERS = {
     "1001": [
-        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True},
-        {"id": 1, "name": "Region", "type": "String", "mandatory": False},
+        {"id": 0, "name": "Start Date", "type": "prompt", "mandatory": True,
+         "answer": {"id": 0, "type": "DateTime"}},
+        {"id": 1, "name": "Region", "type": "prompt", "mandatory": False,
+         "answer": {"id": 1, "type": "String"}},
     ],
 }
 

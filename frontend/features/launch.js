@@ -483,7 +483,11 @@
     },
 
     addBoParameter() {
-      this.jobModal.bo_parameters.push({ id: 0, type: 'DateTime', value: '' });
+      // Match the interactive download default: a DateTime prompt pre-fills
+      // today's local date (ISO YYYY-MM-DD for the date picker), editable.
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      this.jobModal.bo_parameters.push({ id: 0, type: 'DateTime', value: today });
     },
 
     removeBoParameter(idx) {

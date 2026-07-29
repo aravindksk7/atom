@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from datetime import date, datetime, timedelta
 import requests
@@ -636,15 +637,35 @@ class BORestClient:
                 response_body=response.text,
             )
         raw = _unwrap_collection(response.json(), "parameters", "parameter")
-        return [
-            {
+        result = []
+        for p in raw:
+            # Real BIP raylight nests the value data type ("DateTime"/"String")
+            # under `answer`; the top-level `type` is the parameter kind
+            # ("prompt"). Prefer answer.type so date prompts are recognised and
+            # converted — else they export as raw text and BO rejects (502).
+            answer = p.get("answer") or {}
+            dtype = (
+                answer.get("type") or answer.get("@type")
+                or p.get("type") or p.get("@type", "")
+            )
+            # Surface the prompt's current/default answer value when the
+            # listing carries one, so the UI can pre-fill an editable default.
+            vals = (answer.get("values") or {}).get("value") or []
+            if isinstance(vals, dict):
+                vals = [vals]
+            default = str(vals[0].get("$", "")) if vals else ""
+            # A DateTime default arrives as a full ISO instant; the <input
+            # type="date"> picker only accepts YYYY-MM-DD, so trim to the date.
+            if dtype == "DateTime" and re.match(r"^\d{4}-\d{2}-\d{2}", default):
+                default = default[:10]
+            result.append({
                 "id": p.get("id"),
                 "name": p.get("name", ""),
-                "type": p.get("type", p.get("@type", "")),
+                "type": dtype,
                 "mandatory": bool(p.get("mandatory", False)),
-            }
-            for p in raw
-        ]
+                "default": default,
+            })
+        return result
 
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
         """PUT …/documents/{doc_id}/occurences/0/parameters — answer prompts.

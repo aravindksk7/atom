@@ -186,7 +186,10 @@
           `/api/adapters/sap-bo/documents/${doc.id}/parameters?config_id=${this.boConfigId}`);
         this.boReportParams = { ...this.boReportParams, [doc.id]: params };
         if (!this.boParamValues[doc.id]) {
-          this.boParamValues = { ...this.boParamValues, [doc.id]: {} };
+          this.boParamValues = {
+            ...this.boParamValues,
+            [doc.id]: this.defaultBOParamValues(params),
+          };
         }
         return params;
       } catch (e) {
@@ -194,6 +197,20 @@
         this.boReportParams = { ...this.boReportParams, [doc.id]: [] };
         return [];
       }
+    },
+
+    // Seed each prompt with an editable default: the BO-supplied current
+    // value when present, otherwise today's date for DateTime prompts (so the
+    // most common "run for a date" case is pre-filled, ISO YYYY-MM-DD as the
+    // date picker requires) and blank for everything else.
+    defaultBOParamValues(params) {
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const seeded = {};
+      for (const p of params) {
+        seeded[p.id] = p.default || (p.type === 'DateTime' ? today : '');
+      }
+      return seeded;
     },
 
     async downloadBOReport(docId, reportId, format) {
@@ -217,6 +234,14 @@
       // Has prompts → POST the collected values to the parameterized endpoint.
       // Auth is replicated from the api()/apiBlob() helpers (Bearer token).
       const values = this.boParamValues[docId] || {};
+      // Block on unanswered mandatory prompts here rather than let BO reject
+      // the export (which surfaces as a generic 502).
+      const missing = params.filter(p => p.mandatory && !String(values[p.id] || '').trim());
+      if (missing.length) {
+        this.toast('error', 'Missing required prompts',
+          missing.map(p => p.name || ('Prompt ' + p.id)).join(', '));
+        return;
+      }
       const parameters = params.map(p => ({ id: p.id, type: p.type, value: values[p.id] || '' }));
       try {
         const token = normalizeToken(sessionStorage.getItem('etl_token'));
