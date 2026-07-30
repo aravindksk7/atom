@@ -243,6 +243,9 @@ class RunStatusOut(BaseModel):
     error: int = 0
     run_type: str = "reconciliation"
     pair_id: str | None = None
+    # True when the run kept exactly one tabular data artifact, so it can be
+    # row-diffed against a file in the Compare tab rather than only stat-compared.
+    has_data_artifact: bool = False
 
     model_config = {"from_attributes": True}
 

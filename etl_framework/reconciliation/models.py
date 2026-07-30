@@ -38,6 +38,8 @@ class ReconciliationResult:
     mismatch_summary: dict[str, Any] | None = None
     source_file_name: str | None = None
     target_file_name: str | None = None
+    # Path to the raw data this result was computed from, when the run fetched it.
+    data_artifact_path: str | None = None
 
     @property
     def total_issues(self) -> int:

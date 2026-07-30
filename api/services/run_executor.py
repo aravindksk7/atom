@@ -1612,11 +1612,13 @@ class RunExecutor:
             finally:
                 client.logout()
 
+            artifact_name = f"bo_report_{doc_id}_{report_id}.{fmt}"
             df = read_tabular(
                 content_b64=base64.b64encode(data).decode("ascii"),
-                file_name=f"bo_report_{doc_id}_{report_id}.{fmt}",
+                file_name=artifact_name,
             )
             row_count = len(df)
+            artifact_path = self._persist_run_data_artifact(data, artifact_name)
             sample_rows = json.loads(
                 df.head(BO_REPORT_SAMPLE_ROW_LIMIT).to_json(orient="records", date_format="iso")
             )
@@ -1635,8 +1637,26 @@ class RunExecutor:
                 executed_at=datetime.now(timezone.utc),
                 duration_seconds=time.monotonic() - t0,
                 sample_rows=sample_rows,
+                data_artifact_path=artifact_path,
             )
         return run_job
+
+    def _persist_run_data_artifact(self, data: bytes, file_name: str) -> str | None:
+        """Keep the raw bytes a job fetched so a later compare can re-read them.
+
+        Best-effort by design: a storage failure must never fail the run that
+        already produced a valid result.
+        """
+        from api.services import upload_store
+
+        try:
+            return upload_store.persist_run_data_artifact(self._run_id, data, file_name)
+        except Exception:
+            logger.warning(
+                "Could not persist data artifact %s for run %s", file_name, self._run_id,
+                exc_info=True,
+            )
+            return None
 
     def _build_case_bo_job(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:

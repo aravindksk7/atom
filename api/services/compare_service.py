@@ -16,6 +16,7 @@ from api.schemas import (
 )
 from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
+from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
 from etl_framework.reconciliation.chunker import load_in_chunks
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.models import TestResult
@@ -35,6 +36,11 @@ def _load_in_chunks(
 logger = logging.getLogger("api.services.compare_service")
 
 _SENTINEL_QUERY = "__file_source__"
+
+
+def _recon_kind_label(is_dataframe: bool) -> str:
+    """Human-readable name for what a recon source loaded as, for error details."""
+    return "a tabular file" if is_dataframe else "an HTML report or stored run"
 _DEFAULT_COMPARE_MISMATCH_ROW_LIMIT = 5000
 _KEY_CANDIDATES = (
     "id",
@@ -421,7 +427,13 @@ class CompareService:
             if _is_df_a != _is_df_b:
                 raise HTTPException(
                     status_code=422,
-                    detail="Both sources must be the same type (both tabular files or both HTML/stored runs)",
+                    detail=(
+                        f"Source A resolved to {_recon_kind_label(_is_df_a)} and "
+                        f"Source B resolved to {_recon_kind_label(_is_df_b)}. "
+                        "Both sources must be the same type: two tabular files "
+                        "(.csv/.xlsx/.xls/.json/.xml/.tsv/.txt), or two report-shaped "
+                        "sources (HTML report or stored run)."
+                    ),
                 )
             if _is_df_a:
                 self._run_tabular_file_compare(req, run_id, stats_a, stats_b)
@@ -512,8 +524,10 @@ class CompareService:
     def _load_recon_source(self, req: ReconFileCompareRequest, side: str):
         """Load one side of a recon-file compare.
 
-        Returns dict[str, dict] for stored-run and HTML sources,
-        or pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .xml, .tsv, .txt).
+        Returns pd.DataFrame for tabular file sources (.csv, .xlsx, .json, .xml,
+        .tsv, .txt) and for stored runs that persisted exactly one tabular data
+        artifact (e.g. a bo_report run's downloaded report). Returns
+        dict[str, dict] of per-test stats for every other stored run and for HTML.
         """
         stored_run_id = req.stored_run_id if side == "a" else req.stored_run_id_b
         file_path = req.file_a_path if side == "a" else req.file_b_path
@@ -524,6 +538,9 @@ class CompareService:
             run = self._repo.get_run(stored_run_id)
             if run is None:
                 raise HTTPException(status_code=404, detail=f"Stored run for Source {side.upper()} not found")
+            frame = load_row_diffable_frame(run)
+            if frame is not None:
+                return frame
             return {
                 r.query_name: {
                     "status": r.effective_status,
@@ -534,7 +551,6 @@ class CompareService:
                 for r in run.results
             }
 
-        _TABULAR_EXTS = {".csv", ".xlsx", ".xls", ".json", ".xml", ".tsv", ".txt"}
         name = file_name or file_path or ""
         ext = Path(name).suffix.lower() if name else ""
         if ext in _TABULAR_EXTS:

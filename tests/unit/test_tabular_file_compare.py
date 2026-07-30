@@ -265,6 +265,99 @@ def test_mixed_sources_raise_422(monkeypatch):
     assert exc.value.status_code == 422
 
 
+def test_mixed_sources_422_detail_names_each_side_and_its_kind(monkeypatch):
+    """The old detail said only "both sources must be the same type", leaving the
+    operator to guess which side was which. Name both sides and what each resolved to."""
+    from fastapi import HTTPException
+    svc = _svc()
+
+    monkeypatch.setattr(svc, "_load_recon_source", lambda req, side: (
+        pd.DataFrame({"id": [1]}) if side == "a" else {"q1": {}}
+    ))
+    svc._repo.update_run_status = MagicMock()
+
+    req = ReconFileCompareRequest(
+        file_a_content_b64=_b64csv({"id": [1]}), file_a_name="a.csv",
+        stored_run_id_b="run-b",
+    )
+    with patch("api.services.compare_service.MetricsWriter"):
+        with pytest.raises(HTTPException) as exc:
+            svc.run_recon_file_compare(req, "run-mixed")
+
+    detail = exc.value.detail
+    assert "Source A" in detail and "Source B" in detail
+    assert "tabular file" in detail
+    assert "stored run" in detail
+
+
+def _artifact_root(tmp_path, monkeypatch):
+    from api.services import upload_store
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+
+
+def test_load_recon_source_returns_df_when_stored_run_has_tabular_artifact(tmp_path, monkeypatch):
+    """A bo_report run persists its downloaded data; a stored run pointing at that
+    artifact must load as a DataFrame so it can be row-diffed against a file."""
+    svc = _svc()
+    _artifact_root(tmp_path, monkeypatch)
+    artifact = tmp_path / "bo_report_123_456.csv"
+    pd.DataFrame({"id": [1, 2], "val": [10, 20]}).to_csv(artifact, index=False)
+    run = SimpleNamespace(results=[
+        SimpleNamespace(query_name="q1", effective_status="PASSED",
+                        source_row_count=2, target_row_count=2, total_issues=0,
+                        data_artifact_path=str(artifact))
+    ])
+    svc._repo.get_run = MagicMock(return_value=run)
+
+    req = ReconFileCompareRequest(stored_run_id="run-a", file_b_name="b.csv", file_b_content_b64="x")
+    result = svc._load_recon_source(req, "a")
+
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == ["id", "val"]
+
+
+def test_stored_run_falls_back_to_stats_when_artifact_missing_on_disk(tmp_path, monkeypatch):
+    """Retention cleanup deletes artifacts; a stale path must degrade to the stats
+    dict rather than raising, so run-vs-report compares keep working."""
+    svc = _svc()
+    _artifact_root(tmp_path, monkeypatch)
+    run = SimpleNamespace(results=[
+        SimpleNamespace(query_name="q1", effective_status="PASSED",
+                        source_row_count=2, target_row_count=2, total_issues=0,
+                        data_artifact_path=str(tmp_path / "deleted.csv"))
+    ])
+    svc._repo.get_run = MagicMock(return_value=run)
+
+    req = ReconFileCompareRequest(stored_run_id="run-a", stored_run_id_b="run-b")
+    result = svc._load_recon_source(req, "a")
+
+    assert isinstance(result, dict)
+    assert "q1" in result
+
+
+def test_stored_run_with_multiple_artifacts_uses_stats_dict(tmp_path, monkeypatch):
+    """Multi-job runs have no single frame to diff — stay on the stats path."""
+    svc = _svc()
+    _artifact_root(tmp_path, monkeypatch)
+    for name in ("one.csv", "two.csv"):
+        pd.DataFrame({"id": [1]}).to_csv(tmp_path / name, index=False)
+    run = SimpleNamespace(results=[
+        SimpleNamespace(query_name="q1", effective_status="PASSED", source_row_count=1,
+                        target_row_count=1, total_issues=0,
+                        data_artifact_path=str(tmp_path / "one.csv")),
+        SimpleNamespace(query_name="q2", effective_status="PASSED", source_row_count=1,
+                        target_row_count=1, total_issues=0,
+                        data_artifact_path=str(tmp_path / "two.csv")),
+    ])
+    svc._repo.get_run = MagicMock(return_value=run)
+
+    req = ReconFileCompareRequest(stored_run_id="run-a", stored_run_id_b="run-b")
+    result = svc._load_recon_source(req, "a")
+
+    assert isinstance(result, dict)
+    assert set(result) == {"q1", "q2"}
+
+
 def test_load_bo_source_dispatches_to_api_source():
     svc = _svc()
     svc._config_repo = MagicMock()

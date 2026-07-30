@@ -1,5 +1,9 @@
 (function (global) {
   'use strict';
+  // Extensions the recon-file backend reads as tabular data; anything else on that
+  // side is parsed as an HTML report. Mirrors TABULAR_EXTS in
+  // api/services/run_data_artifact.py — keep the two lists in step.
+  const RECON_TABULAR_EXTS = ['.csv', '.xlsx', '.xls', '.json', '.xml', '.tsv', '.txt'];
   // Compare feature slice (Compare tab + Schema-Explorer helpers used by it).
   // Merged into the Alpine component via the FEATURE_SLICES reduce in app.js.
   global.ETL_FEATURE_COMPARE = function () {
@@ -482,6 +486,48 @@
       }
     },
 
+    // Recon-file mode can only diff like against like: two tabular data sources, or
+    // two report-shaped ones. Mixing them used to be accepted by the UI and only
+    // rejected server-side, after a run row had already been created and failed.
+    reconSourceKind(side) {
+      const type = side === 'a' ? this.fileSourceAType : this.fileSourceBType;
+      if (type === 'run') {
+        const runId = side === 'a' ? this.fileRunIdA : this.fileRunIdB;
+        if (!runId) return 'none';
+        // A run that kept its downloaded data (e.g. a BO report job) is row-diffable;
+        // every other run only exposes per-test stats.
+        const run = (this.runs || []).find(r => r.run_id === runId);
+        return run && run.has_data_artifact ? 'tabular' : 'report';
+      }
+      const ref = (type === 'upload'
+        ? (side === 'a' ? this.fileNameA : this.fileNameB)
+        : (side === 'a' ? this.filePathA : this.filePathB)) || '';
+      const trimmed = ref.trim();
+      if (!trimmed) return 'none';
+      const dot = trimmed.lastIndexOf('.');
+      const ext = dot >= 0 ? trimmed.slice(dot).toLowerCase() : '';
+      return RECON_TABULAR_EXTS.indexOf(ext) >= 0 ? 'tabular' : 'report';
+    },
+
+    reconSourceKindMismatch() {
+      const a = this.reconSourceKind('a');
+      const b = this.reconSourceKind('b');
+      return a !== 'none' && b !== 'none' && a !== b;
+    },
+
+    reconSourceKindWarning() {
+      if (!this.reconSourceKindMismatch()) return '';
+      const describe = (side) => {
+        const kind = this.reconSourceKind(side);
+        if (kind === 'tabular') return 'tabular data';
+        const type = side === 'a' ? this.fileSourceAType : this.fileSourceBType;
+        return type === 'run' ? 'a stored run (per-test stats only)' : 'an HTML report';
+      };
+      return 'Source A is ' + describe('a') + ' and Source B is ' + describe('b')
+        + '. Both sides must be the same kind: two tabular files '
+        + '(' + RECON_TABULAR_EXTS.join(', ') + '), or two report-shaped sources.';
+    },
+
     async runFileCompare() {
       this.fileCompareLoading = true;
       this.fileCompareResult = null;
@@ -514,6 +560,7 @@
         };
         applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A, this.fileNameA);
         applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B, this.fileNameB);
+        if (this.reconSourceKindMismatch()) throw new Error(this.reconSourceKindWarning());
         payload.advanced = this._buildAdvanced('file');
         const run = await api('POST', '/api/compare/recon-file', payload);
         const poll = setInterval(async () => {

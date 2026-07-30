@@ -4921,7 +4921,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </div>
           </div>
         </div>
-        <button data-testid="compare-file-run-btn" @click="runFileCompare()" :disabled="fileCompareLoading" class="btn-primary">
+        <div data-testid="compare-file-kind-warning" x-show="reconSourceKindMismatch()"
+             class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+             x-text="reconSourceKindWarning()"></div>
+        <button data-testid="compare-file-run-btn" @click="runFileCompare()"
+                :disabled="fileCompareLoading || reconSourceKindMismatch()" class="btn-primary">
           <span x-show="!fileCompareLoading">Compare Files</span>
           <span x-show="fileCompareLoading">Comparing...</span>
         </button>

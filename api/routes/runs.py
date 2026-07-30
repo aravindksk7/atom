@@ -57,6 +57,7 @@ from api.services.run_executor import RunExecutor
 from api.services.pytest_runner import PytestRunExecutor
 from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository
 from api.services.artifact_service import ArtifactService
+from api.services.run_data_artifact import run_has_row_diffable_artifact
 from api.services.artifact_views import render_logs_html, render_metrics_html
 from api.services.audit_service import AuditService
 from api.services.log_parser import detect_log_level, parse_log_events, filter_log_events
@@ -196,6 +197,7 @@ def _run_status_out(run) -> RunStatusOut:
         error=snapshot.error,
         run_type=snapshot.run_type,
         pair_id=snapshot.pair_id,
+        has_data_artifact=run_has_row_diffable_artifact(run),
     )
 
 

@@ -153,6 +153,9 @@ class TestResult(Base):
     segment_summary = Column(JSON, nullable=True)
     mismatch_summary = Column(JSON, nullable=True)
     schema_diff = Column(JSON, nullable=True)
+    # Path to the raw data this result was computed from, when the run fetched it
+    # (e.g. a bo_report download). Lets a later compare re-read it as a frame.
+    data_artifact_path = Column(Text, nullable=True)
 
     # Override fields for marking test outcomes as passing even when they fail
     override_status = Column(String(20), nullable=True)
