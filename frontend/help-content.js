@@ -563,7 +563,7 @@
         },
         {
           title: 'Compare reconciliation files',
-          text: 'On the Recon File Compare card, compare two stored runs or an HTML report against a production HTML report. Both sides must be the same kind: two report-shaped sources (HTML report or stored run), or two tabular sources (.csv/.xlsx/.xls/.json/.xml/.tsv/.txt). A BO report job run counts as tabular — it keeps the report it downloaded, so it row-diffs against a spreadsheet.',
+          text: 'On the Recon File Compare card, compare two stored runs or an HTML report against a production HTML report. Both sides must be the same kind: two report-shaped sources (HTML report or stored run), or two tabular sources (.csv/.xlsx/.xls/.json/.xml/.tsv/.txt). A run that pulled data live from SAP BO counts as tabular — a bo_report job, or a reconciliation with Input Source = Live SAP BO — because it keeps the report it downloaded (its source side), so it row-diffs against a spreadsheet.',
           where: 'Compare -> Recon File Compare',
           tip: 'Mixing kinds is blocked before the run is created. A stored run only row-diffs while its saved data file is inside the upload retention window; after that it falls back to per-test stats.',
         },

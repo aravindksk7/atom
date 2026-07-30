@@ -42,6 +42,50 @@ def _session():
     return Session(engine)
 
 
+def _bo_live_recon_run(db, tmp_path, monkeypatch, run_id="r-bo-live", data=_CSV):
+    """A reconciliation job whose source is pulled live from BO and whose target is
+    a local file — the other shape of "an already-passed SAP BO run"."""
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    target = tmp_path / "prod_snapshot.csv"
+    target.write_bytes(data)
+    from api.services import file_source
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    RunRepository(db).create_run(run_id, "qa", "prod", {})
+    JobRepository(db).create({
+        "name": "qa_vs_prod",
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": "",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "101",
+            "bo_report_id": "1",
+            "format": "csv",
+            "target_file_path": str(target),
+        },
+        "enabled": True,
+    })
+    executor = RunExecutor(
+        db=db,
+        run_id=run_id,
+        source_env="qa",
+        target_env="prod",
+        job_sequence=["qa_vs_prod"],
+        run_settings=RunSettings(use_live_connections=True, metrics_enabled=False),
+        config_snapshot=_BO_SNAPSHOT,
+    )
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        MockBO.return_value.download_report.return_value = data
+        executor.execute()
+    return RunRepository(db).get_run(run_id)
+
+
 def _bo_report_run(db, tmp_path, monkeypatch, run_id="r-bo-report", data=_CSV, fmt="csv"):
     monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
     RunRepository(db).create_run(run_id, "bo", "bo", {})
@@ -128,6 +172,37 @@ def test_bo_report_run_persists_downloaded_report_as_artifact(tmp_path, monkeypa
     result = run.results[0]
     assert result.data_artifact_path
     assert Path(result.data_artifact_path).read_bytes() == _CSV
+
+
+def test_bo_live_recon_run_persists_its_live_pull_as_artifact(tmp_path, monkeypatch):
+    """A bo_live recon is equally "a SAP BO run" a user may later want as Source A,
+    so it must keep the data it pulled from BO — its source side."""
+    run = _bo_live_recon_run(_session(), tmp_path, monkeypatch)
+
+    result = run.results[0]
+    assert result.data_artifact_path
+    assert Path(result.data_artifact_path).read_bytes() == _CSV
+
+
+def test_stored_bo_live_recon_run_loads_as_frame_for_recon_compare(tmp_path, monkeypatch):
+    from api.services.compare_service import CompareService
+    from etl_framework.repository.repository import ConfigRepository
+
+    db = _session()
+    _bo_live_recon_run(db, tmp_path, monkeypatch)
+    svc = CompareService(db, ConfigRepository(db))
+
+    frame = svc._load_recon_source(
+        ReconFileCompareRequest(
+            stored_run_id="r-bo-live",
+            file_b_name="reference.csv",
+            file_b_content_b64="aWQsdmFsdWUKMSxhbHBoYQo=",
+        ),
+        "a",
+    )
+
+    assert isinstance(frame, pd.DataFrame)
+    assert list(frame.columns) == ["id", "value"]
 
 
 def test_bo_report_run_survives_artifact_persist_failure(tmp_path, monkeypatch):

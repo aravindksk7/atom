@@ -598,10 +598,15 @@ class RunExecutor:
                 data = client.download_report(doc_id, report_id, fmt)
             finally:
                 client.logout()
+            artifact_name = f"bo_report_{doc_id}_{report_id}.{fmt}"
             source_df = read_tabular(
                 content_b64=base64.b64encode(data).decode("ascii"),
-                file_name=f"bo_report_{doc_id}_{report_id}.{fmt}",
+                file_name=artifact_name,
             )
+            # Keep the live pull so this run can later serve as a source in the
+            # Compare tab. "The run's data" here is its source side — the rows it
+            # fetched from BO — not the local target it was diffed against.
+            artifact_path = self._persist_run_data_artifact(data, artifact_name)
             target_df = self._load_job_file_frame(job, "target")
 
             source_df, target_df, resolved_keys = resolve_key_columns(
@@ -628,6 +633,7 @@ class RunExecutor:
                 result,
                 source_file_name=None,
                 target_file_name=self._job_file_name(job, "target"),
+                data_artifact_path=artifact_path,
             )
         return run_job
 

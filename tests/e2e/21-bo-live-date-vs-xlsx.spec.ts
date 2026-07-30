@@ -86,14 +86,17 @@ test.describe('21 bo_live report for a date vs local xlsx', () => {
     return runId;
   }
 
-  async function listRunIds(adminToken: string): Promise<string[]> {
+  async function listRuns(adminToken: string): Promise<any[]> {
     const ctx = await authedContext(adminToken);
     try {
-      const runs = await (await ctx.get('/api/runs')).json();
-      return runs.map((r: { run_id: string }) => r.run_id);
+      return await (await ctx.get('/api/runs')).json();
     } finally {
       await ctx.dispose();
     }
+  }
+
+  async function listRunIds(adminToken: string): Promise<string[]> {
+    return (await listRuns(adminToken)).map((r: { run_id: string }) => r.run_id);
   }
 
   async function runResult(adminToken: string, runId: string) {
@@ -166,5 +169,45 @@ test.describe('21 bo_live report for a date vs local xlsx', () => {
 
     expect(result.source_row_count).toBe(3);
     expect(result.target_row_count).toBe(2);
+  });
+
+  test('the passed bo_live run can then be compared as Source A against an xlsx', async ({ authedPage, adminToken }) => {
+    // A bo_live recon is also "an already-passed SAP BO run"; it keeps its live
+    // pull, so Compare -> Run/File vs Report accepts it opposite a tabular file
+    // instead of rejecting the pair as mismatched kinds.
+    const runs = await listRuns(adminToken);
+    const boLiveRun = runs.find((r: { run_id: string; has_data_artifact: boolean }) => r.has_data_artifact);
+    expect(boLiveRun, 'the bo_live run must expose a data artifact').toBeTruthy();
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-compare"]').click();
+    await authedPage.locator('[data-testid="compare-subtab-recon"]').click();
+    await authedPage.locator('[data-testid="compare-recon-mode-file"]').click();
+    await authedPage.locator('[data-testid="compare-file-source-a-mode-run"]').click();
+    await authedPage.locator('[data-testid="compare-file-source-a-run-select"]').selectOption(boLiveRun.run_id);
+    await authedPage.locator('[data-testid="compare-file-source-b-mode-upload"]').click();
+    await authedPage.locator('[data-testid="compare-file-source-b-upload-input"]').setInputFiles(PROD_SNAPSHOT);
+
+    await expect(authedPage.locator('[data-testid="compare-file-kind-warning"]')).toBeHidden();
+    const before = await listRunIds(adminToken);
+    await authedPage.locator('[data-testid="compare-file-run-btn"]').click();
+    await expect(authedPage.locator('[data-testid="compare-file-results"]')).toContainText('Results', { timeout: 30_000 });
+
+    let compareRunId = '';
+    await expect.poll(async () => {
+      compareRunId = (await listRunIds(adminToken)).find((id) => !before.includes(id)) || '';
+      return Boolean(compareRunId);
+    }, { timeout: 20_000 }).toBe(true);
+
+    const ctx = await authedContext(adminToken);
+    try {
+      const status = await waitForTerminal(ctx, compareRunId, 60_000);
+      expect(String(status.status).toUpperCase()).not.toBe('ERROR');
+      const run = await (await ctx.get(`/api/runs/${compareRunId}`)).json();
+      expect(run.results[0].error_message).toBeFalsy();
+      expect(run.results[0].source_row_count).toBeGreaterThan(0);
+    } finally {
+      await ctx.dispose();
+    }
   });
 });
