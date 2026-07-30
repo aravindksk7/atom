@@ -109,6 +109,47 @@ test.describe('02 launch/jobs', () => {
     await expect(authedPage.locator(`[data-testid="job-row-${name}"]`)).toBeVisible();
   });
 
+  test('bo_live reconciliation job persists its report prompts', async ({ authedPage, adminToken }) => {
+    // Regression: the Report Parameters panel was shown only for job_type bo_report,
+    // and _buildJobRequestBody set params.bo_parameters only in that branch — so a
+    // bo_live recon silently pulled the report with whatever prompt answers the
+    // document last held, ignoring the picked run date.
+    const name = `e2e-bo-live-prompts-${Date.now()}`;
+    createdJobNames.push(name);
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await authedPage.locator('[data-testid="job-new-btn"]').click();
+    await authedPage.locator('[data-testid="job-modal-name-input"]').fill(name);
+    await authedPage.locator('[data-testid="job-modal-source-mode-select"]').selectOption('bo_live');
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    await authedPage.locator('input.field-input[placeholder="101"]').fill('9001');
+    await authedPage.locator('input.field-input[x-model="jobModal.bo_page_id"]').fill('2');
+
+    const params = authedPage.locator('[data-testid="job-modal-bo-params"]');
+    await expect(params).toBeVisible();
+    await params.getByRole('button', { name: '+ Add Parameter' }).click();
+    await params.locator('input[placeholder="ID"]').fill('5');
+    await params.locator('input[type="date"]').fill('2026-06-02');
+
+    await authedPage.locator('[data-testid="job-modal-bo-live-target-mode-upload"]').click();
+    await authedPage.locator('[data-testid="job-modal-bo-live-target-upload-input"]')
+      .setInputFiles(path.join(__dirname, 'fixtures', 'data', 'target.csv'));
+    await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeHidden();
+
+    const ctx = await authedContext(adminToken);
+    try {
+      // There is no GET /api/jobs/{name} — the list endpoint is the only reader.
+      const jobs = await (await ctx.get('/api/jobs')).json();
+      const saved = jobs.find((j: { name: string }) => j.name === name);
+      expect(saved).toBeTruthy();
+      expect(saved.params.bo_parameters).toEqual([{ id: 5, type: 'DateTime', value: '2026-06-02' }]);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
   test('negative: saving without a query is blocked client-side (Save stays disabled)', async ({ authedPage }) => {
     // canSaveJob() for a SQL-mode reconciliation job requires BOTH m.query?.trim()
     // and non-empty key_columns_raw (frontend/app.js canSaveJob()). openNewJobModal()

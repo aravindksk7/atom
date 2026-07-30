@@ -37,6 +37,71 @@ test.describe('08a compare / BO report', () => {
     await expect(authedPage.locator('[data-testid="compare-bo-result-status"]')).toHaveText('FAILED', { timeout: 20_000 });
   });
 
+  test('live source prompts load into the UI and reach the compare request', async ({ authedPage, adminToken }) => {
+    // Proves the whole prompt path is wired in the browser: picking a document
+    // fetches the document's parameters, renders them as editable rows, and the
+    // edited answers ride along in POST /api/compare/bo-report. Previously the
+    // live source sent no bo_parameters at all, so a run-date prompt was ignored.
+    const ctx = await authedContext(adminToken);
+    let cfgId: number;
+    try {
+      const cfg = await createConfig(ctx, `e2e-bo-prompts-${Date.now()}`, 'dev', {
+        db_host: 'unused', db_password: 'unused',
+        bo_url: 'http://127.0.0.1:1', bo_user: 'u', bo_password: 'p',
+      });
+      cfgId = cfg.id;
+    } finally {
+      await ctx.dispose();
+    }
+
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    await authedPage.route('**/api/adapters/sap-bo/documents?**', (r) =>
+      r.fulfill(json([{ id: '9001', name: 'Sales Orders', folder: 'Public' }])));
+    await authedPage.route('**/api/adapters/sap-bo/documents/9001/reports**', (r) =>
+      r.fulfill(json([{ id: '2', name: 'Orders', reportIndex: 0 }])));
+    await authedPage.route('**/api/adapters/sap-bo/documents/9001/parameters**', (r) =>
+      r.fulfill(json([
+        { id: 5, name: 'Run Date', type: 'DateTime', mandatory: true, default: '' },
+        { id: 6, name: 'Region', type: 'Text', mandatory: false, default: 'EMEA' },
+      ])));
+
+    let posted: any = null;
+    await authedPage.route('**/api/compare/bo-report', (r) => {
+      posted = JSON.parse(r.request().postData() || '{}');
+      return r.fulfill(json({ run_id: 'stub-run', status: 'PENDING' }));
+    });
+    await authedPage.route('**/api/runs/stub-run/status', (r) =>
+      r.fulfill(json({ run_id: 'stub-run', status: 'PASSED', total_tests: 0 })));
+
+    await openBO(authedPage);
+    await authedPage.locator('[data-testid="compare-bo-source-a-mode-live"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-a-config-select"]').selectOption(String(cfgId!));
+    await authedPage.locator('[data-testid="compare-bo-source-a-doc-select"]').selectOption('9001');
+    await authedPage.locator('[data-testid="compare-bo-source-a-report-select"]').selectOption('2');
+
+    // Discovered prompts render, named, with a date picker for the DateTime one.
+    const promptRows = authedPage.locator('[data-testid="compare-bo-source-a-params"]');
+    await expect(promptRows).toBeVisible();
+    await expect(promptRows).toContainText('Run Date');
+    await expect(promptRows).toContainText('Region');
+    await promptRows.locator('input[type="date"]').fill('2026-06-02');
+    await expect(promptRows.locator('input[type="text"]')).toHaveValue('EMEA');
+
+    await authedPage.locator('[data-testid="compare-bo-source-b-mode-upload"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-b-upload-input"]').setInputFiles(dataFile('target.csv'));
+    await authedPage.locator('[data-testid="compare-bo-key-columns-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-bo-run-btn"]').click();
+
+    await expect.poll(() => posted !== null).toBe(true);
+    expect(posted.source_a.bo_parameters).toEqual([
+      { id: 5, type: 'DateTime', value: '2026-06-02' },
+      { id: 6, type: 'Text', value: 'EMEA' },
+    ]);
+
+    const cleanup = await authedContext(adminToken);
+    try { await deleteConfig(cleanup, cfgId!); } finally { await cleanup.dispose(); }
+  });
+
   test.describe('live BO mock', () => {
     test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1');
     let boConfigId: number;

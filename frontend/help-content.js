@@ -109,6 +109,12 @@
           tip: 'For reconciliation the minimum is a query and one or more key_columns that uniquely identify a row.',
         },
         {
+          title: 'Answer a report\'s prompts (Report Parameters)',
+          text: 'For a bo_report job, or a reconciliation job with Input Source = "Live SAP BO", the Report Parameters panel supplies the document\'s prompt answers. Click "Load from report" to pull the real prompt ids, types, and defaults from BO (needs a selected config and the BO Document ID) rather than typing numeric ids by hand; a date prompt defaults to today. Answers are PUT to the document immediately before the export, so the pulled data reflects the date you set.',
+          where: 'Job editor -> Report Parameters',
+          tip: 'Without these, a prompted report exports using whatever answers were last saved on the document — usually the wrong day, with no error. A date is converted to the UTC instant BO expects using the app timezone in Settings.',
+        },
+        {
           title: 'Compare many files per side (multi-file reconciliation)',
           text: 'For a reconciliation job, set Input Source to "Multiple Files" instead of a single query or file. Pick a strategy (explicit match-on tokens like region/date, or automated similarity-based guessing), set the unmatched-file policy, and fill in source/target kind (local, s3, or sftp) + root + pattern + credentials_ref (s3/sftp only -- the name the saved job looks up at real run time). Click Preview Mapping to see the resulting pairs and unmatched groups before saving.',
           where: 'Job editor -> Input Source -> Multiple Files',
@@ -546,8 +552,9 @@
       steps: [
         {
           title: 'Compare SAP BO reports',
-          text: 'On the BO Report Compare card, compare two BO report sources from live BO, file paths, or uploads. Pick each side type and reference a config + report/document ID.',
+          text: 'On the BO Report Compare card, compare two BO report sources from live BO, file paths, or uploads. Pick each side type and reference a config + report/document ID. For a Live side, the document\'s prompts load automatically once you pick the report and appear as Report Prompts — a date prompt defaults to today and is editable. Those answers are sent to BO before the export, so the pull reflects the date you picked.',
           where: 'Compare -> BO Report Compare',
+          tip: 'A date prompt is converted from your picked calendar date to the UTC instant BO expects using the app timezone (Settings). If the server clock runs at a fixed offset, set a fixed zone such as Etc/GMT-1 rather than a DST-aware one.',
         },
         {
           title: 'Reconcile two environments directly',

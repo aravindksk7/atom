@@ -462,15 +462,20 @@
             </select>
           </div>
         </div>
-        <div x-show="jobModal.job_type === 'bo_report'">
+        <div x-show="boPromptsApplicable()" data-testid="job-modal-bo-params">
           <div class="flex items-center justify-between mb-1">
             <label class="field-label mb-0">Report Parameters</label>
-            <button @click="addBoParameter()" class="btn-secondary btn-sm text-xs">+ Add Parameter</button>
+            <div class="flex gap-2">
+              <button @click="loadBoParametersFromDocument()" data-testid="job-modal-bo-params-load-btn"
+                      class="btn-secondary btn-sm text-xs">Load from report</button>
+              <button @click="addBoParameter()" class="btn-secondary btn-sm text-xs">+ Add Parameter</button>
+            </div>
           </div>
           <template x-if="jobModal.bo_parameters && jobModal.bo_parameters.length > 0">
             <div class="space-y-2 mt-1">
               <template x-for="(param, idx) in jobModal.bo_parameters" :key="idx">
                 <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
+                  <span x-show="param.name" class="text-xs text-slate-600 py-1 w-28 truncate" x-text="param.name"></span>
                   <input x-model.number="param.id" type="number" class="field-input text-xs py-1 flex-shrink-0 w-24" placeholder="ID" />
                   <select x-model="param.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-36">
                     <option value="DateTime">DateTime</option>

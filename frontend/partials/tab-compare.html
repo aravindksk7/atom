@@ -72,6 +72,20 @@
               <option value="">Select report</option>
               <template x-for="(r, boReportsAIdx) in boReportsA" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsAIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
+            <div data-testid="compare-bo-source-a-params" x-show="boSourceA.parameters && boSourceA.parameters.length > 0" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="field-label mb-0">Report Prompts</label>
+                <button @click="loadCompareBOParameters('a')" class="btn-secondary btn-sm text-xs">Reload</button>
+              </div>
+              <template x-for="(param, idx) in boSourceA.parameters" :key="'pa-' + idx">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
+                        :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                </div>
+              </template>
+            </div>
           </div>
         </template>
         <template x-if="boSourceAType === 'path'">
@@ -119,6 +133,20 @@
               <option value="">Select report</option>
               <template x-for="(r, boReportsBIdx) in boReportsB" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsBIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
+            <div data-testid="compare-bo-source-b-params" x-show="boSourceB.parameters && boSourceB.parameters.length > 0" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="field-label mb-0">Report Prompts</label>
+                <button @click="loadCompareBOParameters('b')" class="btn-secondary btn-sm text-xs">Reload</button>
+              </div>
+              <template x-for="(param, idx) in boSourceB.parameters" :key="'pb-' + idx">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
+                        :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                </div>
+              </template>
+            </div>
           </div>
         </template>
         <template x-if="boSourceBType === 'path'">
@@ -1054,6 +1082,17 @@
               </select>
               <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
               <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
+              <button data-testid="compare-colstats-source-a-load-prompts-btn"
+                      @click="loadBOSourceParameters(colStatsSourceA)" class="btn-secondary btn-sm text-xs">Load prompts</button>
+              <div data-testid="compare-colstats-source-a-params" x-show="colStatsSourceA.parameters && colStatsSourceA.parameters.length > 0" class="space-y-2">
+                <template x-for="(param, idx) in colStatsSourceA.parameters" :key="'csa-' + idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
+                    <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
           <template x-if="colStatsSourceAType === 'api'">
@@ -1097,6 +1136,17 @@
               </select>
               <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
               <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+              <button data-testid="compare-colstats-source-b-load-prompts-btn"
+                      @click="loadBOSourceParameters(colStatsSourceB)" class="btn-secondary btn-sm text-xs">Load prompts</button>
+              <div data-testid="compare-colstats-source-b-params" x-show="colStatsSourceB.parameters && colStatsSourceB.parameters.length > 0" class="space-y-2">
+                <template x-for="(param, idx) in colStatsSourceB.parameters" :key="'csb-' + idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
+                    <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
           <template x-if="colStatsSourceBType === 'api'">

@@ -788,6 +788,11 @@ class SourceConfig(BaseModel):
     file_content_b64: str | None = None
     file_name: str | None = None
     api_endpoint_name: str | None = None
+    # Prompt answers for a live source, answered before the export is pulled —
+    # same contract as BOReportDownloadRequest.parameters and a bo_report job's
+    # params["bo_parameters"]. Without these, a prompted report exports with
+    # whatever answers were last saved on the document.
+    bo_parameters: list[BOParamAnswer] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":

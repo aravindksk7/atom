@@ -202,6 +202,12 @@ class CompareService:
         self._db.add(result)
         self._db.commit()
 
+    def _app_timezone(self) -> str:
+        """App timezone used to convert date-only prompts to the UTC instant BO wants."""
+        from etl_framework.repository.repository import SettingsRepository
+
+        return SettingsRepository(self._db).get_timezone()
+
     def _load_bo_source(self, src, fallback_doc_id: str | None, fallback_report_id: str | None):
         if src.source_type == "live":
             doc_id = src.doc_id or fallback_doc_id
@@ -219,6 +225,19 @@ class CompareService:
             from etl_framework.sap_bo.client import BORestClient
             client = BORestClient(env)
             try:
+                # Answer the document's prompts first, on this same session, exactly
+                # as AdapterService.download_bo_report and the bo_report/bo_live job
+                # paths do — otherwise a run-date prompt is ignored and the export
+                # reflects whatever answers the document last held.
+                if src.bo_parameters:
+                    from etl_framework.sap_bo.parameters import build_parameter_answers
+                    client.answer_document_parameters(
+                        doc_id,
+                        build_parameter_answers(
+                            [p.model_dump() for p in src.bo_parameters],
+                            self._app_timezone(),
+                        ),
+                    )
                 raw = client.download_report(doc_id, report_id, src.format)
                 return read_tabular(
                     content_b64=base64.b64encode(raw).decode("ascii"),

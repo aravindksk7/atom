@@ -482,12 +482,59 @@
       this.jobModal.rules.splice(idx, 1);
     },
 
+    _buildBoParameters(m) {
+      return (m.bo_parameters || []).map(p => ({
+        id: Number(p.id) || 0,
+        type: p.type,
+        value: String(p.value ?? ''),
+      }));
+    },
+
+    // Prompts apply to any job that pulls a report live from BO — the bo_report
+    // job type and a bo_live-sourced reconciliation.
+    boPromptsApplicable(m) {
+      const job = m || this.jobModal || {};
+      return job.job_type === 'bo_report'
+        || (job.job_type === 'reconciliation' && job.source_mode === 'bo_live');
+    },
+
+    // Pull the document's real prompt ids/types/defaults from BO, the same
+    // endpoint the Adaptors tab uses, instead of hand-typing numeric ids.
+    async loadBoParametersFromDocument() {
+      const m = this.jobModal;
+      const configId = m.previewConfigId || this.launchSettings.config_id;
+      if (!configId || !m.bo_report_id) {
+        this.toast('warn', 'Cannot load prompts', 'Select a config and enter the BO Document ID first');
+        return;
+      }
+      try {
+        const params = await api('GET',
+          `/api/adapters/sap-bo/documents/${encodeURIComponent(m.bo_report_id)}/parameters?config_id=${configId}`);
+        const existing = new Map((m.bo_parameters || []).map(p => [Number(p.id), p]));
+        m.bo_parameters = (params || []).map(p => ({
+          id: p.id,
+          name: p.name || '',
+          type: p.type || 'String',
+          // Keep an answer the user already typed for this prompt id.
+          value: existing.get(Number(p.id))?.value
+            || p.default
+            || (p.type === 'DateTime' ? this._todayIsoDate() : ''),
+        }));
+        this.toast('success', 'Prompts loaded', `${m.bo_parameters.length} parameter(s) from BO`);
+      } catch (e) {
+        this.toast('error', 'Load prompts failed', e.message);
+      }
+    },
+
+    _todayIsoDate() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    },
+
     addBoParameter() {
       // Match the interactive download default: a DateTime prompt pre-fills
       // today's local date (ISO YYYY-MM-DD for the date picker), editable.
-      const d = new Date();
-      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      this.jobModal.bo_parameters.push({ id: 0, type: 'DateTime', value: today });
+      this.jobModal.bo_parameters.push({ id: 0, type: 'DateTime', value: this._todayIsoDate() });
     },
 
     removeBoParameter(idx) {
@@ -537,6 +584,10 @@
         if (m.bo_report_id) params.report_id = m.bo_report_id;
         if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
         params.format = m.bo_format || 'xlsx';
+        // _build_case_bo_live_recon answers these before pulling the report, exactly
+        // as the bo_report path does. Omitting them meant a bo_live recon always
+        // exported whatever prompt answers the document last held.
+        params.bo_parameters = this._buildBoParameters(m);
         if (m.target_source_mode === 'upload' && m.target_file_b64) {
           params.target_file_content_b64 = m.target_file_b64;
           if (m.target_file_name) params.target_file_name = m.target_file_name;
@@ -582,11 +633,7 @@
         if (m.bo_report_id) params.report_id = m.bo_report_id;
         if (m.bo_page_id) params.bo_report_id = m.bo_page_id;
         params.format = m.bo_format || 'xlsx';
-        params.bo_parameters = (m.bo_parameters || []).map(p => ({
-          id: Number(p.id) || 0,
-          type: p.type,
-          value: String(p.value ?? ''),
-        }));
+        params.bo_parameters = this._buildBoParameters(m);
       }
       if (m.job_type === 'dbt_artifact') {
         if (m.dbt_manifest_path) params.manifest_path = m.dbt_manifest_path;
@@ -1296,6 +1343,7 @@
         bo_report_id: m.bo_report_id,
         bo_page_id: m.bo_page_id,
         bo_format: m.bo_format,
+        bo_parameters: (m.bo_parameters || []).map(p => ({ ...p })),
         automic_job_name: m.automic_job_name,
         automic_run_id: m.automic_run_id,
         dbt_manifest_path: m.dbt_manifest_path,

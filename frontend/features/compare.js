@@ -26,8 +26,8 @@
 
     boSourceAType: 'live',
     boSourceBType: 'upload',
-    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '' },
-    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '' },
+    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [] },
+    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [] },
     boDocsA: [],
     boDocsB: [],
     boReportsA: [],
@@ -145,8 +145,8 @@
     // Column Stats
     colStatsSourceAType: 'upload',
     colStatsSourceBType: 'upload',
-    colStatsSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '' },
-    colStatsSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '' },
+    colStatsSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [] },
+    colStatsSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [] },
     colStatsQueryName: 'stats_compare',
     colStatsFloatTol: '1e-9',
     colStatsRowCountTol: 0,
@@ -232,6 +232,42 @@
       } catch (e) {
         this.toast('error', 'Load reports failed', e.message);
       }
+      await this.loadCompareBOParameters(side);
+    },
+
+    async loadCompareBOParameters(side) {
+      await this.loadBOSourceParameters(side === 'a' ? this.boSourceA : this.boSourceB);
+    },
+
+    // Discover a document's prompts the same way the Adaptors tab does, so ids come
+    // from BO instead of being typed by hand. Shared by the BO Report Compare card
+    // (auto, on document select) and Column Stats (on demand — it types doc ids).
+    async loadBOSourceParameters(src) {
+      if (!src || !src.configId || !src.docId) return;
+      try {
+        const params = await api('GET',
+          `/api/adapters/sap-bo/documents/${encodeURIComponent(src.docId)}/parameters?config_id=${src.configId}`);
+        const existing = new Map((src.parameters || []).map(p => [Number(p.id), p]));
+        src.parameters = (params || []).map(p => ({
+          id: p.id,
+          name: p.name || '',
+          type: p.type || 'String',
+          mandatory: Boolean(p.mandatory),
+          // Keep an answer already typed for this prompt id across a reload.
+          value: existing.get(Number(p.id))?.value
+            || p.default
+            || (p.type === 'DateTime' ? this._todayIso() : ''),
+        }));
+      } catch (e) {
+        // A document with no prompts, or an unreachable parameters resource, must
+        // not block the compare — leave the rows empty and let the pull proceed.
+        src.parameters = [];
+      }
+    },
+
+    _todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     },
 
     handleBOFileUpload(event, side, namespace) {
@@ -347,6 +383,13 @@
           doc_id: src.docId || null,
           report_id: src.reportId || null,
           format: 'xlsx',
+          // Prompt answers, or the export ignores the picked date and reflects
+          // whatever answers the document last held.
+          bo_parameters: (src.parameters || []).map(p => ({
+            id: Number(p.id) || 0,
+            type: p.type,
+            value: String(p.value ?? ''),
+          })),
         };
       }
       if (type === 'path') return { source_type: 'path', file_path: src.filePath };

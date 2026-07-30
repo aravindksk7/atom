@@ -1309,15 +1309,20 @@
             </select>
           </div>
         </div>
-        <div x-show="jobModal.job_type === 'bo_report'">
+        <div x-show="boPromptsApplicable()" data-testid="job-modal-bo-params">
           <div class="flex items-center justify-between mb-1">
             <label class="field-label mb-0">Report Parameters</label>
-            <button @click="addBoParameter()" class="btn-secondary btn-sm text-xs">+ Add Parameter</button>
+            <div class="flex gap-2">
+              <button @click="loadBoParametersFromDocument()" data-testid="job-modal-bo-params-load-btn"
+                      class="btn-secondary btn-sm text-xs">Load from report</button>
+              <button @click="addBoParameter()" class="btn-secondary btn-sm text-xs">+ Add Parameter</button>
+            </div>
           </div>
           <template x-if="jobModal.bo_parameters && jobModal.bo_parameters.length > 0">
             <div class="space-y-2 mt-1">
               <template x-for="(param, idx) in jobModal.bo_parameters" :key="idx">
                 <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
+                  <span x-show="param.name" class="text-xs text-slate-600 py-1 w-28 truncate" x-text="param.name"></span>
                   <input x-model.number="param.id" type="number" class="field-input text-xs py-1 flex-shrink-0 w-24" placeholder="ID" />
                   <select x-model="param.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-36">
                     <option value="DateTime">DateTime</option>
@@ -4449,6 +4454,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option value="">Select report</option>
               <template x-for="(r, boReportsAIdx) in boReportsA" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsAIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
+            <div data-testid="compare-bo-source-a-params" x-show="boSourceA.parameters && boSourceA.parameters.length > 0" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="field-label mb-0">Report Prompts</label>
+                <button @click="loadCompareBOParameters('a')" class="btn-secondary btn-sm text-xs">Reload</button>
+              </div>
+              <template x-for="(param, idx) in boSourceA.parameters" :key="'pa-' + idx">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
+                        :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                </div>
+              </template>
+            </div>
           </div>
         </template>
         <template x-if="boSourceAType === 'path'">
@@ -4496,6 +4515,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option value="">Select report</option>
               <template x-for="(r, boReportsBIdx) in boReportsB" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsBIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
+            <div data-testid="compare-bo-source-b-params" x-show="boSourceB.parameters && boSourceB.parameters.length > 0" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="field-label mb-0">Report Prompts</label>
+                <button @click="loadCompareBOParameters('b')" class="btn-secondary btn-sm text-xs">Reload</button>
+              </div>
+              <template x-for="(param, idx) in boSourceB.parameters" :key="'pb-' + idx">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
+                        :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                </div>
+              </template>
+            </div>
           </div>
         </template>
         <template x-if="boSourceBType === 'path'">
@@ -5431,6 +5464,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </select>
               <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
               <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
+              <button data-testid="compare-colstats-source-a-load-prompts-btn"
+                      @click="loadBOSourceParameters(colStatsSourceA)" class="btn-secondary btn-sm text-xs">Load prompts</button>
+              <div data-testid="compare-colstats-source-a-params" x-show="colStatsSourceA.parameters && colStatsSourceA.parameters.length > 0" class="space-y-2">
+                <template x-for="(param, idx) in colStatsSourceA.parameters" :key="'csa-' + idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
+                    <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
           <template x-if="colStatsSourceAType === 'api'">
@@ -5474,6 +5518,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </select>
               <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
               <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+              <button data-testid="compare-colstats-source-b-load-prompts-btn"
+                      @click="loadBOSourceParameters(colStatsSourceB)" class="btn-secondary btn-sm text-xs">Load prompts</button>
+              <div data-testid="compare-colstats-source-b-params" x-show="colStatsSourceB.parameters && colStatsSourceB.parameters.length > 0" class="space-y-2">
+                <template x-for="(param, idx) in colStatsSourceB.parameters" :key="'csb-' + idx">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
+                    <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
           <template x-if="colStatsSourceBType === 'api'">
