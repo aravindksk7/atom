@@ -106,7 +106,7 @@ DATASETS = {
 
 # Report prompts (parameters) keyed by document id, returned by
 # GET /biprws/raylight/v1/documents/{doc_id}/parameters. Answered against
-# occurrence 0 via PUT …/occurences/0/parameters. Doc 1001 carries a
+# occurrence 1 via PUT …/occurrences/1/parameters. Doc 1001 carries a
 # mandatory DateTime prompt so the discover -> answer -> download flow has a
 # date prompt to resolve, mirroring a live WebI document with a run-date
 # prompt.
@@ -477,7 +477,10 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         answer_match = re.fullmatch(
-            r"/biprws/raylight/v1/documents/([^/]+)/occurences/0/parameters", path
+            # Must match the live server's real path exactly ("occurrences",
+            # two r's, index 1). The previous regex mirrored the spec's
+            # mis-transcription, so it rubber-stamped a URL that 404s for real.
+            r"/biprws/raylight/v1/documents/([^/]+)/occurrences/1/parameters", path
         )
         if answer_match:
             if not self._require_token():

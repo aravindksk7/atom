@@ -1136,7 +1136,11 @@ def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client)
             [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
         )
     url = mock_put.call_args[0][0]
-    assert url.endswith("/documents/124267/occurences/0/parameters")
+    # Path taken verbatim from the captured 200-OK browser trace: the segment
+    # is "occurrences" (two r's) and the index is 1. The original spec
+    # mis-transcribed it as "occurences/0", which 404s on the live server.
+    assert url.endswith("/documents/124267/occurrences/1/parameters")
+    assert "/occurences/" not in url
     assert mock_put.call_args[1]["params"] == {
         "dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false",
     }

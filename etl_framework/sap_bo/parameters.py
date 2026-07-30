@@ -10,6 +10,17 @@ DST note: ZoneInfo is DST-aware. A summer date under a DST zone (Europe/Paris
 -> +2) yields "...22:00Z", while the observed server used a fixed +1 (no DST)
 giving "...23:00Z". To match a fixed-offset server, set the app timezone to a
 fixed zone such as "Etc/GMT-1"; the builder stays faithful to ZoneInfo.
+
+UNRESOLVED (2026-07-30): a second captured trace from the same deployment
+contradicts the first. Picking 2026-05-08 there sent
+"2026-05-08T00:00:00.000Z" — plain UTC midnight, i.e. *no* offset applied —
+whereas the first trace (2026-06-02 -> "2026-06-01T23:00:00.000Z") implies +1.
+Both dates fall inside the same DST period, so DST does not explain the gap;
+the likeliest cause is that the two captures were taken from browsers in
+different timezones. Until that is settled, the app timezone setting decides:
+"UTC" reproduces the second trace exactly, "Etc/GMT-1" reproduces the first.
+Behaviour is deliberately left driven by configuration rather than re-guessed
+from one sample.
 """
 from __future__ import annotations
 
@@ -20,6 +31,12 @@ from zoneinfo import ZoneInfo
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _UTC = ZoneInfo("UTC")
 
+# BO reports a prompt's data type in the parameters *listing* using a different
+# vocabulary than it accepts in the answer PUT's `@type`: the listing calls a
+# string prompt "Text", while the captured 200-OK answer uses "String".
+# Only trace-proven aliases go here; anything unknown passes through unchanged.
+_ANSWER_TYPE_ALIASES = {"Text": "String"}
+
 
 def build_parameter_answers(answers: list[dict], tz: str) -> list[dict]:
     """Return prompt answers with each `value` finalized for the BO PUT body.
@@ -27,17 +44,24 @@ def build_parameter_answers(answers: list[dict], tz: str) -> list[dict]:
     `answers`: list of {"id": int, "type": str, "value": str}. For a DateTime
     prompt whose value is a bare ISO date (YYYY-MM-DD), convert local midnight
     in `tz` to a UTC "...000Z" string. Everything else passes through verbatim.
+    `type` is also mapped from the listing's vocabulary to the one the answer
+    PUT accepts (see _ANSWER_TYPE_ALIASES).
     """
     zone = ZoneInfo(tz)
     built: list[dict] = []
     for answer in answers:
         value = answer["value"]
-        if answer.get("type") == "DateTime" and _DATE_ONLY.match(str(value)):
+        ptype = answer.get("type")
+        if ptype == "DateTime" and _DATE_ONLY.match(str(value)):
             local_midnight = datetime.combine(
                 datetime.strptime(value, "%Y-%m-%d").date(),
                 time(0, 0),
                 tzinfo=zone,
             )
             value = local_midnight.astimezone(_UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        built.append({"id": answer["id"], "type": answer["type"], "value": value})
+        built.append({
+            "id": answer["id"],
+            "type": _ANSWER_TYPE_ALIASES.get(ptype, ptype),
+            "value": value,
+        })
     return built

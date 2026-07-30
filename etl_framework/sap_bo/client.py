@@ -667,26 +667,39 @@ class BORestClient:
             })
         return result
 
+    # Occurrence path segment taken verbatim from the captured 200-OK browser
+    # trace against the live server: ".../documents/{id}/occurrences/1/parameters".
+    # Note the spelling ("occurrences", two r's) and the index (1, not 0) — the
+    # original design spec mis-transcribed both, and the misspelled URI simply
+    # does not exist on the server, which answers 404.
+    ANSWER_OCCURRENCE = "1"
+
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
-        """PUT …/documents/{doc_id}/occurences/0/parameters — answer prompts.
+        """PUT …/documents/{doc_id}/occurrences/1/parameters — answer prompts.
 
         `built_answers` is a list of already-finalized
-        {"id", "type", "value"} (date conversion done by
+        {"id", "type", "value"} (date conversion and answer-vocabulary
+        normalisation done by
         etl_framework.sap_bo.parameters.build_parameter_answers). Logs the
-        answered prompt ids so a deployment where export ignores occurrence-0
-        answers is diagnosable rather than silently wrong.
+        full URL and the server's response body on failure so a path or
+        vocabulary mismatch on a given deployment names itself instead of
+        surfacing as an opaque 502.
         """
         if not self._token:
             self.authenticate()
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/occurences/0/parameters"
+        url = (
+            f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+            f"/occurrences/{self.ANSWER_OCCURRENCE}/parameters"
+        )
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
             for a in built_answers
         ]}}
         logger.info(
-            "SAP BO answering %d parameter(s) on document %s occurrence 0 (ids=%s)",
-            len(built_answers), doc_id, [a["id"] for a in built_answers],
+            "SAP BO answering %d parameter(s) on document %s occurrence %s (ids=%s, types=%s)",
+            len(built_answers), doc_id, self.ANSWER_OCCURRENCE,
+            [a["id"] for a in built_answers], [a["type"] for a in built_answers],
         )
         response = self._session.put(
             url,
@@ -697,6 +710,10 @@ class BORestClient:
             verify=self._verify_ssl,
         )
         if response.status_code >= 400:
+            logger.error(
+                "SAP BO rejected the prompt answer PUT %s -> HTTP %s: %s",
+                url, response.status_code, response.text,
+            )
             raise BOAPIError(
                 report_id=doc_id,
                 http_status=response.status_code,

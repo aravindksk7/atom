@@ -1,5 +1,19 @@
 # SAP BO report date-prompt answering — design
 
+> **Correction (2026-07-30).** The PUT path quoted throughout this document —
+> `…/documents/{doc_id}/occurences/0/parameters` — mis-transcribes the captured
+> browser trace. The real path is
+> `…/documents/{doc_id}/occurrences/1/parameters`: **"occurrences" with two r's,
+> and index 1, not 0.** The misspelled URI does not exist on the live server,
+> which answers 404 (surfaced to the UI as an opaque 502). The client, the
+> sapbo-mock server, and the unit tests all copied the same misspelling, so
+> they agreed with each other and none agreed with the server. Fixed in
+> `answer_document_parameters`; see also the "Text" vs "String" note below.
+>
+> Second correction: the parameters *listing* reports a string prompt's type as
+> `"Text"`, but the answer PUT requires `@type: "String"`. The answer builder
+> now maps between the two vocabularies.
+
 ## Problem
 
 The ETL framework can list and download SAP BusinessObjects (WebI) reports,
