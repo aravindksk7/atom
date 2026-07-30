@@ -84,10 +84,9 @@ def test_list_reports_pages_past_real_mock_server_page_cap(client, sapbo_mock_se
 
 def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_server):
     """End-to-end date-prompt flow against the real mock server: discover the
-    document's prompts (GET …/parameters), answer occurrence 0 (PUT
-    …/occurrences/1/parameters), then export the report. Proves the mock's
-    parameter-discovery GET and occurrence-0 answering PUT agree wire-to-wire
-    with BORestClient."""
+    document's prompts (GET …/parameters), answer them (PUT …/parameters),
+    then export the report. Proves the discovery GET and the answering PUT
+    agree wire-to-wire with BORestClient."""
     doc_id, report_id = "1001", "rpt-sales"
 
     params = client.get_document_parameters(doc_id)
@@ -100,3 +99,23 @@ def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_serv
 
     data = client.download_report(doc_id, report_id, "xlsx")
     assert data
+
+
+def test_mock_rejects_occurrence_scoped_answer_like_the_live_server(sapbo_mock_server):
+    """The mock must 404 an occurrence-scoped answer PUT exactly as the live
+    server does. An occurrence exists only inside an interactive viewing
+    session, so a stateless client has none. Without this the mock would once
+    again rubber-stamp a URL that fails in production."""
+    import requests
+
+    (host, port), _module = sapbo_mock_server
+    resp = requests.put(
+        f"http://{host}:{port}"
+        "/biprws/raylight/v1/documents/1001/occurrences/1/parameters",
+        json={"parameters": {"parameter": []}},
+        headers={"X-SAP-LogonToken": "test-token", "Content-Type": "application/json"},
+        timeout=10,
+    )
+
+    assert resp.status_code == 404
+    assert "Occurrence" in resp.text

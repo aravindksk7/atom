@@ -1,18 +1,32 @@
 # SAP BO report date-prompt answering — design
 
 > **Correction (2026-07-30).** The PUT path quoted throughout this document —
-> `…/documents/{doc_id}/occurences/0/parameters` — mis-transcribes the captured
-> browser trace. The real path is
-> `…/documents/{doc_id}/occurrences/1/parameters`: **"occurrences" with two r's,
-> and index 1, not 0.** The misspelled URI does not exist on the live server,
-> which answers 404 (surfaced to the UI as an opaque 502). The client, the
-> sapbo-mock server, and the unit tests all copied the same misspelling, so
-> they agreed with each other and none agreed with the server. Fixed in
-> `answer_document_parameters`; see also the "Text" vs "String" note below.
+> `…/documents/{doc_id}/occurences/0/parameters` — is wrong twice over, and the
+> second error is the interesting one.
 >
-> Second correction: the parameters *listing* reports a string prompt's type as
+> 1. It mis-transcribes the captured browser trace, which reads
+>    `…/occurrences/1/parameters` ("occurrences" with two r's, index 1).
+> 2. **More importantly, the traced URL should not have been copied at all.**
+>    An occurrence is created when a document is *opened* in an interactive
+>    viewing session, so "1" was that browser session's own instance. A
+>    stateless REST client never opens the document and therefore has no
+>    occurrence; the live server replies `404 WSR 00400 — the resource of type
+>    "Occurrence" with identifier "1" does not exist`. The correct target is
+>    the **document-level** resource, `PUT …/documents/{doc_id}/parameters` —
+>    the same one `get_document_parameters` already reads successfully.
+>
+> This also resolves the "known-uncertain" flagged below: the question was
+> whether answering occurrence 0 persists to the export. It does not arise —
+> there is no occurrence to answer.
+>
+> Third correction: the parameters *listing* reports a string prompt's type as
 > `"Text"`, but the answer PUT requires `@type: "String"`. The answer builder
 > now maps between the two vocabularies.
+>
+> Process note: the client, the sapbo-mock server, and the unit tests were all
+> written from this document, so they agreed with each other and none agreed
+> with the server. sapbo-mock now returns the live server's exact 404 for any
+> occurrence-scoped answer PUT, so this class of error can be falsified locally.
 
 ## Problem
 

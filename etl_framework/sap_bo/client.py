@@ -667,15 +667,20 @@ class BORestClient:
             })
         return result
 
-    # Occurrence path segment taken verbatim from the captured 200-OK browser
-    # trace against the live server: ".../documents/{id}/occurrences/1/parameters".
-    # Note the spelling ("occurrences", two r's) and the index (1, not 0) — the
-    # original design spec mis-transcribed both, and the misspelled URI simply
-    # does not exist on the server, which answers 404.
-    ANSWER_OCCURRENCE = "1"
-
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
-        """PUT …/documents/{doc_id}/occurrences/1/parameters — answer prompts.
+        """PUT …/documents/{doc_id}/parameters — answer a document's prompts.
+
+        Answers the **document-level** parameters resource — the same one
+        `get_document_parameters` reads — rather than an occurrence.
+
+        The captured browser trace answered
+        `…/documents/{id}/occurrences/1/parameters`, but an occurrence is
+        created when a document is *opened* in an interactive viewing session,
+        so "1" was that session's own instance. A stateless REST client never
+        opens the document and therefore has no occurrence; addressing one
+        makes the server reply 404 with `the resource of type "Occurrence"
+        with identifier "1" does not exist`. Answering the document itself
+        needs no session-scoped id.
 
         `built_answers` is a list of already-finalized
         {"id", "type", "value"} (date conversion and answer-vocabulary
@@ -687,18 +692,15 @@ class BORestClient:
         """
         if not self._token:
             self.authenticate()
-        url = (
-            f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
-            f"/occurrences/{self.ANSWER_OCCURRENCE}/parameters"
-        )
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
             for a in built_answers
         ]}}
         logger.info(
-            "SAP BO answering %d parameter(s) on document %s occurrence %s (ids=%s, types=%s)",
-            len(built_answers), doc_id, self.ANSWER_OCCURRENCE,
+            "SAP BO answering %d parameter(s) on document %s (ids=%s, types=%s)",
+            len(built_answers), doc_id,
             [a["id"] for a in built_answers], [a["type"] for a in built_answers],
         )
         response = self._session.put(

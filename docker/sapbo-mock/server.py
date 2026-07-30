@@ -106,7 +106,7 @@ DATASETS = {
 
 # Report prompts (parameters) keyed by document id, returned by
 # GET /biprws/raylight/v1/documents/{doc_id}/parameters. Answered against
-# occurrence 1 via PUT …/occurrences/1/parameters. Doc 1001 carries a
+# the document itself via PUT …/documents/{id}/parameters. Doc 1001 carries a
 # mandatory DateTime prompt so the discover -> answer -> download flow has a
 # date prompt to resolve, mirroring a live WebI document with a run-date
 # prompt.
@@ -476,11 +476,24 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
 
+        # An occurrence only exists inside an interactive viewing session, so a
+        # REST client addressing one must fail here exactly as the live server
+        # does — otherwise the mock rubber-stamps a URL that 404s for real.
+        occurrence_match = re.fullmatch(
+            r"/biprws/raylight/v1/documents/([^/]+)/occurrences?/([^/]+)/parameters", path
+        )
+        if occurrence_match:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": {
+                "error_code": "WSR 00400",
+                "message": (
+                    'the resource of type "Occurrence" with identifier '
+                    f'"{occurrence_match.group(2)}" does not exist.'
+                ),
+            }})
+            return
+
         answer_match = re.fullmatch(
-            # Must match the live server's real path exactly ("occurrences",
-            # two r's, index 1). The previous regex mirrored the spec's
-            # mis-transcription, so it rubber-stamped a URL that 404s for real.
-            r"/biprws/raylight/v1/documents/([^/]+)/occurrences/1/parameters", path
+            r"/biprws/raylight/v1/documents/([^/]+)/parameters", path
         )
         if answer_match:
             if not self._require_token():

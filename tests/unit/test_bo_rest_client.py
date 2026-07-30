@@ -1136,11 +1136,14 @@ def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client)
             [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
         )
     url = mock_put.call_args[0][0]
-    # Path taken verbatim from the captured 200-OK browser trace: the segment
-    # is "occurrences" (two r's) and the index is 1. The original spec
-    # mis-transcribed it as "occurences/0", which 404s on the live server.
-    assert url.endswith("/documents/124267/occurrences/1/parameters")
-    assert "/occurences/" not in url
+    # Answer the document-level parameters resource, NOT an occurrence. An
+    # occurrence only exists inside an interactive viewing session (the browser
+    # trace's "occurrences/1" was that session's own instance); a stateless
+    # REST client has none, and the server replies 404 'the resource of type
+    # "Occurrence" with identifier "1" does not exist'. This is the same
+    # resource whose GET already returns the prompt list.
+    assert url.endswith("/documents/124267/parameters")
+    assert "occurrence" not in url.lower()
     assert mock_put.call_args[1]["params"] == {
         "dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false",
     }
