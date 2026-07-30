@@ -30,6 +30,11 @@ PAGE_CAP = int(os.getenv("SAPBO_MOCK_PAGE_CAP", "10"))
 DOCUMENTS = [
     {"id": "1001", "name": "Sales Orders", "folder": "/Public Folders/ATOM"},
     {"id": "1002", "name": "Inventory Snapshot", "folder": "/Public Folders/ATOM"},
+    # Export depends on its answered run-date prompt (DATASETS_BY_DATE). Kept
+    # separate from 1001 on purpose: answers persist for the mock process's
+    # lifetime, so making 1001 date-dependent would leak one spec's answered
+    # date into every later spec that downloads it.
+    {"id": "1003", "name": "Daily Sales (prompted)", "folder": "/Public Folders/ATOM"},
 ]
 
 REPORTS = {
@@ -39,6 +44,9 @@ REPORTS = {
     ],
     "1002": [
         {"id": "rpt-inventory", "name": "Inventory", "reportIndex": 0},
+    ],
+    "1003": [
+        {"id": "rpt-daily-sales", "name": "Daily Orders", "reportIndex": 0},
     ],
 }
 
@@ -102,6 +110,12 @@ DATASETS = {
     ("2000", "rpt-2000-0"): [
         {"id": 1, "sku": "Z900", "amount": 12.00, "status": "OPEN"},
     ],
+    # Fallback for doc 1003 when its run-date prompt has not been answered —
+    # deliberately unlike every dated row set, so a test asserting a dated row
+    # count cannot pass on an unanswered pull.
+    ("1003", "rpt-daily-sales"): [
+        {"id": 99, "sku": "UNANSWERED", "amount": 0.00, "status": "NONE"},
+    ],
 }
 
 # Report prompts (parameters) keyed by document id, returned by
@@ -119,6 +133,13 @@ PARAMETERS = {
         {"id": 1, "name": "Region", "type": "prompt", "mandatory": False,
          "answer": {"id": 1, "type": "String"}},
     ],
+    # Doc 1003's prompts drive which rows it exports (DATASETS_BY_DATE).
+    "1003": [
+        {"id": 0, "name": "Start Date", "type": "prompt", "mandatory": True,
+         "answer": {"id": 0, "type": "DateTime"}},
+        {"id": 1, "name": "Region", "type": "prompt", "mandatory": False,
+         "answer": {"id": 1, "type": "String"}},
+    ],
 }
 
 # Objects that can be scheduled via POST /biprws/infostore/{id}/schedules.
@@ -128,6 +149,31 @@ PARAMETERS = {
 SCHEDULABLE_OBJECTS = {
     "3001": "Success",
     "3002": "Failed",
+}
+
+# Prompt answers recorded by PUT …/documents/{doc_id}/parameters:
+# doc_id -> {prompt id -> answered value}. A real WebI document keeps its
+# answers server-side and exports accordingly, which is the behaviour a
+# date-prompt e2e has to be able to observe.
+_ANSWERED: dict[str, dict[int, str]] = {}
+
+# Per-UTC-day row sets for a document whose export depends on its run-date
+# prompt. Without this the download is static and a test cannot tell a
+# correctly-answered pull from one that ignored the date entirely. Keyed by the
+# date portion of the answered DateTime instant, which is what a BO server on
+# UTC resolves the answer to. Days not listed fall back to DATASETS.
+DATASETS_BY_DATE = {
+    ("1003", "rpt-daily-sales"): {
+        "2026-06-02": [
+            {"id": 1, "sku": "A100", "amount": 25.50, "status": "SHIPPED"},
+            {"id": 2, "sku": "B200", "amount": 50.00, "status": "OPEN"},
+            {"id": 3, "sku": "C300", "amount": 75.00, "status": "SHIPPED"},
+        ],
+        "2026-06-03": [
+            {"id": 4, "sku": "D400", "amount": 10.25, "status": "OPEN"},
+            {"id": 5, "sku": "E500", "amount": 99.99, "status": "SHIPPED"},
+        ],
+    },
 }
 SCHEDULE_POLLS_TO_TERMINAL = 2
 
@@ -140,6 +186,27 @@ def _collapse_single(items: list) -> list | dict:
     """Mirror SAP BO biprws: a one-element collection serializes as a bare
     object, not a one-element array."""
     return items[0] if len(items) == 1 else items
+
+
+def _answered_date(doc_id: str) -> str | None:
+    """UTC calendar day answered for this document's DateTime prompt, if any."""
+    answers = _ANSWERED.get(doc_id) or {}
+    for prompt in PARAMETERS.get(doc_id, []):
+        if (prompt.get("answer") or {}).get("type") != "DateTime":
+            continue
+        value = answers.get(prompt.get("id"))
+        if value:
+            return str(value)[:10]
+    return None
+
+
+def _rows_for_download(doc_id: str, report_id: str) -> list[dict] | None:
+    by_date = DATASETS_BY_DATE.get((doc_id, report_id))
+    if by_date:
+        answered = _answered_date(doc_id)
+        if answered and answered in by_date:
+            return by_date[answered]
+    return DATASETS.get((doc_id, report_id))
 
 
 def _rows_for_doc(doc_id: str) -> list[dict]:
@@ -334,7 +401,7 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
         )
         if content_match:
             doc_id, report_id = content_match.groups()
-            rows = DATASETS.get((doc_id, report_id))
+            rows = _rows_for_download(doc_id, report_id)
             if rows is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"report {report_id} not found"})
                 return
@@ -473,6 +540,29 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    @staticmethod
+    def _record_answers(doc_id: str, raw: bytes) -> None:
+        """Store answers from a parameters PUT so later exports can honour them.
+
+        Body shape mirrors what BORestClient sends:
+        {"parameters": {"parameter": [{"id": 0, "answer": {"values": {"value":
+        [{"$": "2026-06-02T00:00:00.000Z", "@type": "DateTime"}]}}}]}}
+        """
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return
+        entries = ((body.get("parameters") or {}).get("parameter")) or []
+        if isinstance(entries, dict):
+            entries = [entries]
+        recorded = _ANSWERED.setdefault(doc_id, {})
+        for entry in entries:
+            values = ((entry.get("answer") or {}).get("values") or {}).get("value") or []
+            if isinstance(values, dict):
+                values = [values]
+            if values:
+                recorded[entry.get("id")] = values[0].get("$", "")
+
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
 
@@ -499,8 +589,8 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if not self._require_token():
                 return
             length = int(self.headers.get("Content-Length", "0") or "0")
-            if length:
-                self.rfile.read(length)
+            raw = self.rfile.read(length) if length else b""
+            self._record_answers(answer_match.group(1), raw)
             self._send_json(HTTPStatus.OK, {"success": True})
             return
 
