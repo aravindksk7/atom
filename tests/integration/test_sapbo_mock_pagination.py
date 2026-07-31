@@ -101,11 +101,11 @@ def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_serv
     assert data
 
 
-def test_mock_rejects_occurrence_scoped_answer_like_the_live_server(sapbo_mock_server):
-    """The mock must 404 an occurrence-scoped answer PUT exactly as the live
-    server does. An occurrence exists only inside an interactive viewing
-    session, so a stateless client has none. Without this the mock would once
-    again rubber-stamp a URL that fails in production."""
+def test_mock_rejects_occurrence_1_answer_like_the_live_server(sapbo_mock_server):
+    """Pins the one occurrence behaviour actually observed against the live
+    server: a 404 for identifier "1", the session-scoped id copied out of a
+    captured browser trace. Scoped deliberately to identifier 1 — see
+    test_mock_takes_no_position_on_occurrence_0 for why."""
     import requests
 
     (host, port), _module = sapbo_mock_server
@@ -119,3 +119,33 @@ def test_mock_rejects_occurrence_scoped_answer_like_the_live_server(sapbo_mock_s
 
     assert resp.status_code == 404
     assert "Occurrence" in resp.text
+
+
+def test_mock_takes_no_position_on_occurrence_0(sapbo_mock_server):
+    """Occurrence 0 is an open question, and the mock must not answer it.
+
+    The 404 above was for identifier "1" and was generalised to "a stateless
+    client has no occurrence at all". Index 0 was never tried, and the
+    on-premises UI was later observed reading report data from
+    …/documents/{id}/occurences/0?reportids={n}. If the mock kept emitting the
+    live server's typed "Occurrence does not exist" error for index 0 it would
+    fail a correct fix, which is exactly the rubber-stamping this mock exists
+    to prevent — just inverted.
+
+    So index 0 gets the generic no-handler 404: still a 404, but without the
+    live server's error vocabulary, marking absence of evidence rather than
+    evidence of absence. Replace this test with the real behaviour once the
+    live probe reports it.
+    """
+    import requests
+
+    (host, port), _module = sapbo_mock_server
+    resp = requests.put(
+        f"http://{host}:{port}"
+        "/biprws/raylight/v1/documents/1001/occurences/0/parameters",
+        json={"parameters": {"parameter": []}},
+        headers={"X-SAP-LogonToken": "test-token", "Content-Type": "application/json"},
+        timeout=10,
+    )
+
+    assert "Occurrence" not in resp.text

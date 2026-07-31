@@ -1,6 +1,8 @@
+import io
 import logging
 import re
 import time
+import zipfile
 from datetime import date, datetime, timedelta
 import requests
 import pandas as pd
@@ -41,6 +43,34 @@ def _unwrap_collection(data: dict, plural_key: str, singular_key: str, *fallback
     if isinstance(container, dict) and singular_key in container:
         container = container[singular_key]
     return _as_list(container)
+
+
+def _count_export_rows(data: bytes, format: str) -> int | None:
+    """Rows in an exported report, or None when the format/bytes can't be counted.
+
+    Only the tabular exports are countable: xlsx via the first worksheet's
+    <row> elements (no openpyxl dependency — the export log must never be the
+    thing that fails), csv via non-empty lines. PDF and anything unparseable
+    return None, meaning "unknown", never "empty".
+    """
+    if not data:
+        return 0
+    if format == "csv":
+        text = data.decode("utf-8", "replace")
+        return len([line for line in text.splitlines() if line.strip()])
+    if format != "xlsx" or data[:2] != b"PK":
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            sheets = sorted(
+                n for n in archive.namelist() if n.startswith("xl/worksheets/sheet")
+            )
+            if not sheets:
+                return None
+            xml = archive.read(sheets[0]).decode("utf-8", "replace")
+            return xml.count("<row ") + xml.count("<row>")
+    except Exception:  # noqa: BLE001 - diagnostics must not break the download
+        return None
 
 
 def _dedupe_by_id(items: list[dict]) -> list[dict]:
@@ -721,6 +751,13 @@ class BORestClient:
                 http_status=response.status_code,
                 response_body=response.text,
             )
+        # A 200 here does not prove the answer took effect on the document the
+        # export later reads. Log what the server echoed back so an accepted-
+        # but-ignored answer is visible in the same run as the blank export.
+        logger.info(
+            "SAP BO answer PUT for document %s -> HTTP %s: %s",
+            doc_id, response.status_code, str(response.text or "")[:1500],
+        )
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
@@ -748,7 +785,67 @@ class BORestClient:
                 http_status=response.status_code,
                 response_body=response.text,
             )
+        rows = _count_export_rows(response.content, format)
+        logger.info(
+            "SAP BO export doc=%s report=%s fmt=%s -> HTTP %s, content-type=%s, "
+            "bytes=%d, rows=%s",
+            doc_id, report_id, format, response.status_code,
+            (response.headers or {}).get("Content-Type"),
+            len(response.content), "unknown" if rows is None else rows,
+        )
+        # A header-only export is the on-premises blank-report symptom: the
+        # report layout exports fine while its data providers never ran. The
+        # export itself can't tell which, so dump the document's data-provider
+        # state while the session is still open.
+        if rows is not None and rows <= 1:
+            logger.warning(
+                "SAP BO export doc=%s report=%s returned the report layout but "
+                "no data rows (rows=%s, bytes=%d). Collecting diagnostics.",
+                doc_id, report_id, rows, len(response.content),
+            )
+            self._log_blank_export_diagnostics(doc_id)
         return response.content
+
+    def _diagnostic_get(self, label: str, url: str) -> None:
+        """GET a diagnostic resource and log status + body. Never raises."""
+        try:
+            response = self._session.get(
+                url,
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            logger.warning(
+                "SAP BO blank-export diagnostic [%s] %s -> HTTP %s: %s",
+                label, url, response.status_code, str(response.text or "")[:1000],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SAP BO blank-export diagnostic [%s] %s failed: %s", label, url, exc
+            )
+
+    def _log_blank_export_diagnostics(self, doc_id: str) -> None:
+        """Gather, in one shot, the evidence that distinguishes the candidate
+        causes of a header-only export. Diagnostics only — every call swallows
+        its errors, so this can never turn a successful export into a failure.
+
+        - `dataproviders`: whether the document's data providers ever executed.
+          Distinguishes "no data refreshed" from "refreshed, genuinely 0 rows".
+        - `occurences/0` before and after opening the document: the on-premises
+          web UI reads report data from
+          `…/documents/{id}/occurences/0?reportids={n}` (BO's own spelling,
+          single r) inside a Fiori BI viewing session. A previous 404 for
+          identifier "1" was read as proof that a stateless client has no
+          occurrence at all, but index 0 was never tried. Probing it cold and
+          again after `GET /documents/{id}` says whether occurrence 0 is
+          unconditional, created by opening the document, or genuinely
+          portal-only.
+        """
+        doc_url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+        self._diagnostic_get("dataproviders", f"{doc_url}/dataproviders")
+        self._diagnostic_get("occurence-0-cold", f"{doc_url}/occurences/0")
+        self._diagnostic_get("open-document", doc_url)
+        self._diagnostic_get("occurence-0-after-open", f"{doc_url}/occurences/0")
 
     def schedule_object(self, object_id: str, schedule_params: dict | None = None) -> str:
         """POST /biprws/infostore/{object_id}/schedules — schedule any BOE

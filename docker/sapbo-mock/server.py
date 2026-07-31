@@ -566,13 +566,23 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
 
-        # An occurrence only exists inside an interactive viewing session, so a
-        # REST client addressing one must fail here exactly as the live server
-        # does — otherwise the mock rubber-stamps a URL that 404s for real.
+        # What was actually observed against the live server: a 404 for
+        # occurrence identifier "1", copied from a captured browser trace. That
+        # was generalised here to "a stateless client has no occurrence at
+        # all" — but index 0 was never tried, and a later trace showed the
+        # on-premises UI reading report data from
+        # …/documents/{id}/occurences/0?reportids={n} (BO's own spelling,
+        # single r). So index 0 is an OPEN QUESTION, not a known 404.
+        #
+        # This handler therefore 404s only the identifiers whose 404 was
+        # observed. Occurrence 0 falls through to the generic no-handler 404
+        # below, which is an absence of evidence rather than a mock asserting
+        # live behaviour it has never seen. Once the live probe settles index
+        # 0, model it here from that output — not from this comment.
         occurrence_match = re.fullmatch(
             r"/biprws/raylight/v1/documents/([^/]+)/occurrences?/([^/]+)/parameters", path
         )
-        if occurrence_match:
+        if occurrence_match and occurrence_match.group(2) != "0":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": {
                 "error_code": "WSR 00400",
                 "message": (

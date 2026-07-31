@@ -920,6 +920,147 @@ def test_download_report_http_error_raises(authenticated_client):
 
 
 # ---------------------------------------------------------------------------
+# download_report export diagnostics
+# ---------------------------------------------------------------------------
+
+def _xlsx_with_rows(row_count: int) -> bytes:
+    """Minimal xlsx: one worksheet carrying `row_count` <row> elements."""
+    import io
+    import zipfile
+
+    rows = "".join(f'<row r="{i + 1}"><c r="A{i + 1}" t="inlineStr">'
+                   f'<is><t>v{i}</t></is></c></row>' for i in range(row_count))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            '<?xml version="1.0"?><worksheet><sheetData>'
+            f"{rows}</sheetData></worksheet>",
+        )
+    return buf.getvalue()
+
+
+def test_download_report_logs_export_size_and_row_count(authenticated_client, caplog):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = _xlsx_with_rows(4)
+    mock_response.headers = {"Content-Type": "application/vnd.openxmlformats"}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "rows=4" in caplog.text
+    assert "bytes=" in caplog.text
+
+
+def test_download_report_warns_and_probes_dataproviders_when_no_data_rows(
+    authenticated_client, caplog
+):
+    """A header-only export is the on-premises blank-report symptom: the report
+    layout comes back but no data rows. Say so, and dump the document's
+    data-provider state so the next real run shows whether the data providers
+    ever executed."""
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(1)
+    export.headers = {"Content-Type": "application/vnd.openxmlformats"}
+    probe = MagicMock()
+    probe.status_code = 200
+    probe.text = '{"dataproviders":{"dataprovider":[{"id":"DP0"}]}}'
+
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export, probe, probe, probe, probe]) as mock_get:
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            result = authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+
+    assert result == export.content
+    assert "no data rows" in caplog.text
+    assert "DP0" in caplog.text
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert any(u.endswith("/documents/DOC1/dataproviders") for u in urls)
+
+
+def test_blank_export_probes_occurrence_zero_before_and_after_opening(
+    authenticated_client, caplog
+):
+    """The on-premises UI reads report data from
+    .../documents/{id}/occurences/0 (BO's spelling, single r) inside a viewing
+    session. An earlier 404 for identifier "1" was generalised to "a stateless
+    client has no occurrence"; index 0 was never tried. A blank export must
+    probe occurrence 0 cold AND after opening the document, so a real run says
+    which of the two it is instead of leaving it to inference."""
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(1)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    probe.text = "{}"
+
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4) as mock_get:
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert urls.count("http://bo.example.com/biprws/raylight/v1/documents/DOC1/occurences/0") == 2
+    # the document open must sit between the two occurrence probes
+    occ_positions = [i for i, u in enumerate(urls) if u.endswith("/occurences/0")]
+    open_position = urls.index("http://bo.example.com/biprws/raylight/v1/documents/DOC1")
+    assert occ_positions[0] < open_position < occ_positions[1]
+    assert "occurence-0-cold" in caplog.text
+    assert "occurence-0-after-open" in caplog.text
+
+
+def test_download_report_does_not_probe_when_export_has_data(authenticated_client):
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(5)
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get", return_value=export) as mock_get:
+        authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert mock_get.call_count == 1
+
+
+def test_download_report_does_not_probe_for_pdf(authenticated_client):
+    """Row counting only works for the tabular formats; a PDF must not be
+    mistaken for a blank export."""
+    export = MagicMock()
+    export.status_code = 200
+    export.content = b"%PDF-1.4 tiny"
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get", return_value=export) as mock_get:
+        authenticated_client.download_report("DOC1", "RPT2", "pdf")
+    assert mock_get.call_count == 1
+
+
+def test_download_report_survives_a_failing_dataprovider_probe(authenticated_client):
+    """The probe is diagnostics only — it must never turn a successful export
+    into an error."""
+    export = MagicMock()
+    export.status_code = 200
+    export.content = b"id,name\n"          # header row only
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export, RuntimeError("probe boom")]):
+        result = authenticated_client.download_report("DOC1", "RPT2", "csv")
+    assert result == b"id,name\n"
+
+
+def test_answer_document_parameters_logs_the_server_response(authenticated_client, caplog):
+    """The answer PUT returning 200 does not prove the answer took effect; log
+    what the server echoed back so a silently-ignored answer is visible."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = '{"parameters":{"parameter":[{"id":0,"answer":{"info":"echoed"}}]}}'
+    with patch.object(authenticated_client._session, "put", return_value=mock_response):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "DOC1", [{"id": 0, "type": "DateTime", "value": "2026-07-29T00:00:00.000Z"}]
+            )
+    assert "echoed" in caplog.text
+
+
+# ---------------------------------------------------------------------------
 # schedule_object
 # ---------------------------------------------------------------------------
 
