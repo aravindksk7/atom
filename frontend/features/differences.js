@@ -39,6 +39,12 @@
       const tab = params.get('tab');
       const run = params.get('run');
       const result = params.get('result');
+      if (tab && tab !== 'differences') {
+        if ((this.tabs || []).some((t) => t.id === tab)) {
+          this.onTabEnter(tab);
+        }
+        return;
+      }
       if (tab === 'differences' && run) {
         this.currentView = 'differences';
         this.selectDifferenceRun(run).then(() => {

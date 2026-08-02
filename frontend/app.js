@@ -306,6 +306,34 @@ function _appRaw() {
       else this.stopSchedulerReportPolling();
       if (id === 'logs') this.startGlobalLogsPolling();
       else this.stopGlobalLogsPolling();
+      if (id === 'help') this.loadHelpContent();
+    },
+
+    // help-content.js is 64KB of static copy for a tab most users never
+    // open, so it is injected on first visit instead of at boot. It sets
+    // window.ETL_HELP (see that file's header comment). app.js reads that
+    // global into helpSections/helpActiveId at construction time, which now
+    // happens before the script exists -- so those two properties are
+    // re-assigned here once it lands. On failure _helpContentPromise is
+    // cleared so the next open retries.
+    loadHelpContent() {
+      if (this.helpSections.length) return Promise.resolve();
+      if (this._helpContentPromise) return this._helpContentPromise;
+      this._helpContentPromise = new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = 'help-content.js';
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('help-content.js failed to load'));
+        document.head.appendChild(el);
+      }).then(() => {
+        const sections = (window.ETL_HELP && window.ETL_HELP.sections) || [];
+        this.helpSections = sections;
+        if (!this.helpActiveId && sections[0]) this.helpActiveId = sections[0].id;
+      }).catch((e) => {
+        this._helpContentPromise = null;
+        this.toast('error', 'Help unavailable', e.message);
+      });
+      return this._helpContentPromise;
     },
 
     async init() {

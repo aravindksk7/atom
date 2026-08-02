@@ -98,4 +98,26 @@ test.describe('20 dark foundation', () => {
     );
     expect(overflow).toBeLessThanOrEqual(0);
   });
+
+  test('help content is fetched only when the Help tab is opened', async ({ authedPage }) => {
+    const helpRequests: string[] = [];
+    authedPage.on('request', (r) => {
+      if (r.url().includes('help-content.js')) helpRequests.push(r.url());
+    });
+
+    await authedPage.goto('/');
+    expect(helpRequests).toHaveLength(0);
+
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+    await expect.poll(() => helpRequests.length).toBe(1);
+
+    // Content actually rendered, not just fetched.
+    await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
+
+    // Reopening must not refetch.
+    await authedPage.locator('[data-testid="nav-tab-home"]').click();
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+    await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
+    expect(helpRequests).toHaveLength(1);
+  });
 });

@@ -42,4 +42,12 @@ test.describe('11 help', () => {
     await authedPage.locator('[data-testid="help-search-input"]').fill('exit code 6');
     await expect(authedPage.locator('text=Read gate exit codes')).toBeVisible();
   });
+
+  test('Help deep-link loads content on first paint and after reload', async ({ authedPage }) => {
+    await authedPage.goto('/?tab=help');
+    await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
+
+    await authedPage.reload();
+    await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
+  });
 });
