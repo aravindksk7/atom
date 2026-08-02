@@ -2410,7 +2410,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      TAB 4 – HISTORY
      ==================================================================== -->
-<div x-show="currentView === 'history'" x-cloak>
+<template x-if="currentView === 'history'"><div>
 
   <!-- Detail view -->
   <template x-if="selectedRun">
@@ -3303,7 +3303,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div><!-- end runs sub-tab -->
     </div>
   </template>
-</div>
+</div></template>
 
 
 <!-- ====================================================================

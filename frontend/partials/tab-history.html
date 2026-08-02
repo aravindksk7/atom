@@ -1,4 +1,4 @@
-<div x-show="currentView === 'history'" x-cloak>
+<template x-if="currentView === 'history'"><div>
 
   <!-- Detail view -->
   <template x-if="selectedRun">
@@ -891,4 +891,4 @@
       </div><!-- end runs sub-tab -->
     </div>
   </template>
-</div>
+</div></template>

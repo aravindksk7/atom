@@ -89,6 +89,23 @@ test.describe('04 history', () => {
     await expect(authedPage.locator('.data-table').getByText('1 value / 1 missing in target / 1 missing in source')).toBeVisible();
   });
 
+  test('the run chart re-renders after navigating away and back', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-history"]').click();
+    await authedPage.locator('[data-testid="history-subtab-runs"]').click();
+    await authedPage.locator(`[data-testid="history-run-row-${runId}"]`).click();
+    await expect(authedPage.locator('#runChart')).toBeVisible();
+
+    await authedPage.locator('[data-testid="nav-tab-home"]').click();
+    await expect(authedPage.locator('#runChart')).toHaveCount(0);
+
+    await authedPage.locator('[data-testid="nav-tab-history"]').click();
+    const painted = await authedPage.locator('#runChart').evaluate(
+      (c: HTMLCanvasElement) => c.width > 0 && c.height > 0,
+    );
+    expect(painted).toBe(true);
+  });
+
   test('Download Full HTML Report produces a self-contained file with all mismatches', async ({ authedPage, adminToken }) => {
     const ctx = await authedContext(adminToken);
     let fullReportJobName = '';
