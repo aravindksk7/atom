@@ -6384,7 +6384,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      HELP CENTER
      ==================================================================== -->
-<div x-show="currentView === 'help'" x-cloak>
+<template x-if="currentView === 'help'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Help Center</div>
@@ -6446,7 +6446,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </template>
     </div>
   </div>
-</div>
+</div></template>
 
     <script src="app-config.js"></script>
     <script src="app-help.js"></script>
