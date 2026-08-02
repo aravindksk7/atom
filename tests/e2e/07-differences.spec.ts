@@ -63,4 +63,24 @@ test.describe('07 differences', () => {
     await expect(authedPage.locator('.toast-title')).toContainText('Reason required');
     await expect(authedPage.locator('.toast-msg')).toContainText('Enter a reason before deciding these mismatches');
   });
+
+  test('the insight charts re-render after navigating away and back', async ({ authedPage }) => {
+    await openDiffForRun(authedPage);
+    await expect(authedPage.locator('#diffColumnsChart')).toBeVisible();
+    await expect(authedPage.locator('#diffTypeChart')).toBeVisible();
+
+    await authedPage.locator('[data-testid="nav-tab-home"]').click();
+    await expect(authedPage.locator('#diffColumnsChart')).toHaveCount(0);
+    await expect(authedPage.locator('#diffTypeChart')).toHaveCount(0);
+
+    await authedPage.locator('[data-testid="nav-tab-differences"]').click();
+    const columnsPainted = await authedPage.locator('#diffColumnsChart').evaluate(
+      (c: HTMLCanvasElement) => c.width > 0 && c.height > 0,
+    );
+    const typesPainted = await authedPage.locator('#diffTypeChart').evaluate(
+      (c: HTMLCanvasElement) => c.width > 0 && c.height > 0,
+    );
+    expect(columnsPainted).toBe(true);
+    expect(typesPainted).toBe(true);
+  });
 });
