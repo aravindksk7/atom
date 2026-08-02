@@ -3309,7 +3309,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      TAB 5 – ADAPTERS
      ==================================================================== -->
-<div x-show="currentView === 'adapters'" x-cloak>
+<template x-if="currentView === 'adapters'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Integration Hub</div>
@@ -3642,7 +3642,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </div>
   </div>
-</div>
+</div></template>
 <template x-if="currentView === 'aws'"><div>
   <div class="section-header">
     <div>
