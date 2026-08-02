@@ -133,7 +133,7 @@ test.describe('20 dark foundation', () => {
     await expect(authedPage.locator('[data-testid="global-logs-panel"]')).toHaveCount(0);
   });
 
-  test.fixme('boot produces no Alpine expression errors', async ({ authedPage }) => {
+  test('boot produces no Alpine expression errors', async ({ authedPage }) => {
     const errors: string[] = [];
     authedPage.on('console', (m) => {
       if (/Alpine Expression Error/.test(m.text())) errors.push(m.text());
@@ -141,5 +141,13 @@ test.describe('20 dark foundation', () => {
     await authedPage.goto('/');
     await authedPage.locator('[data-testid="home-view"]').waitFor();
     expect(errors).toEqual([]);
+  });
+
+  test('boot DOM is a fraction of the old eager-mount tree', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="home-view"]').waitFor();
+    const nodes = await authedPage.evaluate(() => document.querySelectorAll('*').length);
+    // Was 4070 with all 14 tabs eager. Home is ~45 nodes plus the shell.
+    expect(nodes).toBeLessThan(1500);
   });
 });
