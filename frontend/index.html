@@ -3947,7 +3947,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      TAB 6 – REPORTS
      ==================================================================== -->
-<div x-show="currentView === 'reports'" x-cloak>
+<template x-if="currentView === 'reports'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Report Viewer</div>
@@ -4109,7 +4109,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="empty-state-title">Select a run to view its report</div>
     </div>
   </template>
-</div>
+</div></template>
 
 <!-- ====================================================================
      TAB - SCHEDULER REPORTS
