@@ -173,7 +173,7 @@
 <!-- ====================================================================
      TAB 1 – CONFIG EDITOR
      ==================================================================== -->
-<div x-show="currentView === 'config'" x-cloak>
+<template x-if="currentView === 'config'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Configuration Editor</div>
@@ -835,7 +835,7 @@
       </div>
     </div>
   </div>
-</div>
+</div></template>
 
 
 <!-- ====================================================================
