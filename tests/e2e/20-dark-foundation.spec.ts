@@ -150,4 +150,21 @@ test.describe('20 dark foundation', () => {
     // Was 4070 with all 14 tabs eager. Home is ~45 nodes plus the shell.
     expect(nodes).toBeLessThan(1500);
   });
+
+  test('initial page load stays inside the transfer budget', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="home-view"]').waitFor();
+
+    const totalKB = await authedPage.evaluate(() => {
+      const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+      const res = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+      const bytes = (nav?.transferSize ?? 0) + res.reduce((s, r) => s + (r.transferSize || 0), 0);
+      return Math.round(bytes / 1024);
+    });
+
+    // Was ~1100 KB: 396 KB index.html + 201 KB Chart.js + 64 KB help-content
+    // + the feature bundle, all uncompressed. gzip plus deferring the 64 KB
+    // help payload should land well under half of that.
+    expect(totalKB).toBeLessThan(500);
+  });
 });
