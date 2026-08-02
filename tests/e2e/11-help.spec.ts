@@ -4,6 +4,7 @@ test.describe('11 help', () => {
   test('sidebar lists sections from window.ETL_HELP', async ({ authedPage }) => {
     await authedPage.goto('/');
     await authedPage.locator('[data-testid="nav-tab-help"]').click();
+    await expect.poll(() => authedPage.evaluate(() => Boolean((window as any).ETL_HELP?.sections?.length))).toBe(true);
     const firstTitle = await authedPage.evaluate(() => (window as any).ETL_HELP.sections[0].title);
     await expect(authedPage.locator(`text=${firstTitle}`).first()).toBeVisible();
   });
