@@ -985,19 +985,19 @@ button:focus-visible {
    ========================================================= */
 :root {
   --bg: #050505;
-  --panel: #0d0f12;
-  --panel-2: #12161b;
-  --panel-3: #171d24;
-  --panel-raised: #1c212c;
+  --panel:        rgb(var(--c-panel));
+  --panel-2:      rgb(var(--c-panel-2));
+  --panel-3:      rgb(var(--c-panel-3));
+  --panel-raised: rgb(var(--c-raised));
   --line: rgba(255,255,255,0.10);
   --line-strong: rgba(255,255,255,0.16);
   /* --border aliases --line rather than adopting the design spec's #262c38,
      to keep the existing dark-theme border look unchanged; revisit only if a
      dedicated border color is needed later. */
   --border: var(--line);
-  --text: #f4f7fb;
-  --text-soft: #c7d0dc;
-  --muted: #8491a3;
+  --text:         rgb(var(--c-text));
+  --text-soft:    rgb(var(--c-text-soft));
+  --muted:        rgb(var(--c-muted));
   /* single brand accent — terminal amber. Used for chrome/interaction (nav, tabs,
      primary actions, focus, selection). Categorical badge colors below are
      intentionally independent so data-type coding stays legible. */
@@ -1026,6 +1026,41 @@ button:focus-visible {
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #f43f5e;
+
+  /* ---- Channel triplets for the Tailwind palette retarget ----------------
+     tailwind.config.js maps every color utility onto these via
+     rgb(var(--c-x) / <alpha-value>), which is what keeps bg-opacity-*
+     utilities working. Surface and text tokens are redefined in terms of
+     their triplet so existing styles.css consumers are unaffected.
+     ---------------------------------------------------------------------- */
+  --c-bg:          5   5   5;
+  --c-panel:       13  15  18;
+  --c-panel-2:     18  22  27;
+  --c-panel-3:     23  29  36;
+  --c-raised:      28  33  44;
+  --c-text:       244 247 251;
+  --c-text-soft:  199 208 220;
+  --c-muted:      132 145 163;
+
+  /* Borders are NEW tokens, for Tailwind only. --line / --line-strong stay
+     translucent rgba() because styles.css applies them over several
+     different surfaces and translucency is correct there. Tailwind's
+     border-slate-* needs solid values, so these are the 0.10 / 0.16 white
+     values pre-composited over --panel. */
+  --c-border-1:    37  39  42;   /* #25272a */
+  --c-border-2:    52  53  56;   /* #343538 */
+
+  /* Hue tints: -50/-100 are the hue at 12% over --panel, -200/-300 at 30%,
+     and -400 and up are the hue's light variant (readable as text on dark).
+     Every text-on-tint pair here clears WCAG AA; the tightest is red at
+     4.71:1. */
+  --c-rose-tint:    42  27  32;   --c-rose-edge:    84  44  53;   --c-rose:    251 113 133;
+  --c-emerald-tint: 18  39  34;   --c-emerald-edge: 25  74  59;   --c-emerald:  52 211 153;
+  --c-amber-tint:   42  36  20;   --c-amber-edge:   84  68  23;   --c-amber:   251 191  36;
+  --c-red-tint:     41  21  27;   --c-red-edge:     82  29  41;   --c-red:     244  63  94;
+  --c-indigo-tint:  27  30  46;   --c-indigo-edge:  48  53  87;   --c-indigo:  129 140 248;
+  --c-orange-tint:  42  31  23;   --c-orange-edge:  84  54  31;   --c-orange:  251 146  60;
+  --c-sky-tint:     18  36  46;   --c-sky-edge:     26  67  87;   --c-sky:      56 189 248;
 }
 
 /* ---- Light theme override (spec-scoped: tokens + sidebar/top bar/Home/
