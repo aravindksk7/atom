@@ -74,4 +74,28 @@ test.describe('20 dark foundation', () => {
     // utility silently produces a fully opaque color.
     expect(probe).toMatch(/rgba?\(.*0\.4\)?/);
   });
+
+  test('sidebar collapses to the icon rail below 1024px', async ({ authedPage }) => {
+    await authedPage.setViewportSize({ width: 1440, height: 900 });
+    await authedPage.goto('/');
+    const sidebar = authedPage.locator('[data-testid="app-sidebar"]');
+    await expect(sidebar).not.toHaveClass(/is-collapsed/);
+
+    await authedPage.setViewportSize({ width: 1000, height: 900 });
+    await expect(sidebar).toHaveClass(/is-collapsed/);
+
+    // Above the breakpoint again, the user's own preference comes back.
+    await authedPage.setViewportSize({ width: 1440, height: 900 });
+    await expect(sidebar).not.toHaveClass(/is-collapsed/);
+  });
+
+  test('the page does not scroll horizontally at 1024px', async ({ authedPage }) => {
+    await authedPage.setViewportSize({ width: 1024, height: 900 });
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    const overflow = await authedPage.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
 });

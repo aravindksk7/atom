@@ -309,9 +309,23 @@ function _appRaw() {
     },
 
     async init() {
+      // The user's collapse preference is theirs above 1024px. Below it there
+      // isn't room for the 232px rail, so the sidebar is forced collapsed and
+      // the preference is restored on the way back up. Labels are bound with
+      // x-show, so this cannot be done in CSS alone.
+      let widthPreference = this.sidebarCollapsed;
+      const narrow = window.matchMedia('(max-width: 1024px)');
+      const applyWidth = (matches) => {
+        this.sidebarCollapsed = matches ? true : widthPreference;
+      };
       this.$watch('sidebarCollapsed', (v) => {
-        try { localStorage.setItem('etl_sidebar_collapsed', String(v)); } catch (_) {}
+        if (!narrow.matches) {
+          widthPreference = v;
+          try { localStorage.setItem('etl_sidebar_collapsed', String(v)); } catch (_) {}
+        }
       });
+      narrow.addEventListener('change', (e) => applyWidth(e.matches));
+      applyWidth(narrow.matches);
       this.storedTokenValue = normalizeToken(sessionStorage.getItem('etl_token'));
       await this.loadAuthSetupStatus();
       if (this.storedTokenValue) sessionStorage.setItem('etl_token', this.storedTokenValue);

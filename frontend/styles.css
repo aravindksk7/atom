@@ -2197,3 +2197,17 @@ mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2p
     grid-template-columns: 120px minmax(180px, 1fr);
   }
 }
+
+/* ---- 1024px floor -----------------------------------------------------
+   The shell's viewport floor is 1024px (tablet / small laptop). The
+   sidebar's collapse is driven from app.js because its labels are
+   x-show-bound; everything here is the grid reflow that goes with it.
+   ---------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-group .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compare-source-grid { grid-template-columns: 1fr; }
+  .vs-divider { min-height: auto; padding: 0.25rem 0; }
+  .scheduler-report-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
