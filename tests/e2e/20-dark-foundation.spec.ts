@@ -1,0 +1,77 @@
+import { test, expect } from './fixtures';
+
+/**
+ * The app is dark-only. 672 hardcoded light Tailwind classes (bg-white,
+ * text-slate-700, ...) used to render every non-auth modal as a white card
+ * with dark inputs inside it. tailwind.config.js now maps the palette onto
+ * dark CSS-variable tokens, so these assertions pin that mapping down.
+ *
+ * The e2e suite asserts behavior, not color -- nothing else in it would
+ * catch a regression here.
+ */
+
+/** Parse "rgb(28, 33, 44)" / "rgb(28 33 44 / 0.5)" into [r,g,b]. */
+function rgb(value: string): [number, number, number] {
+  const parts = value.match(/\d+(\.\d+)?/g);
+  if (!parts) throw new Error(`unparseable color: ${value}`);
+  return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+}
+
+/** Perceived lightness 0-255, good enough to tell "dark surface" from "white". */
+function lightness(value: string): number {
+  const [r, g, b] = rgb(value);
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+test.describe('20 dark foundation', () => {
+  test('bg-white resolves to a dark raised surface, not white', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    const probe = await authedPage.evaluate(() => {
+      const el = document.createElement('div');
+      el.className = 'bg-white';
+      document.body.appendChild(el);
+      const bg = getComputedStyle(el).backgroundColor;
+      el.remove();
+      return bg;
+    });
+    expect(lightness(probe)).toBeLessThan(60);
+  });
+
+  test('body text classes resolve to light text', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    const probe = await authedPage.evaluate(() => {
+      const el = document.createElement('div');
+      el.className = 'text-slate-700';
+      document.body.appendChild(el);
+      const color = getComputedStyle(el).color;
+      el.remove();
+      return color;
+    });
+    expect(lightness(probe)).toBeGreaterThan(150);
+  });
+
+  test('the contract modal is a dark card, not a white slab', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-contracts"]').click();
+    await authedPage.locator('[data-testid="contracts-new-btn"]').click();
+    const modal = authedPage.locator('[data-testid="contract-modal"] > div');
+    await expect(modal).toBeVisible();
+    const bg = await modal.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(lightness(bg)).toBeLessThan(60);
+  });
+
+  test('opacity utilities still work after the palette retarget', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    const probe = await authedPage.evaluate(() => {
+      const el = document.createElement('div');
+      el.className = 'bg-black bg-opacity-40';
+      document.body.appendChild(el);
+      const bg = getComputedStyle(el).backgroundColor;
+      el.remove();
+      return bg;
+    });
+    // <alpha-value> substitution is what makes this work; without it the
+    // utility silently produces a fully opaque color.
+    expect(probe).toMatch(/rgba?\(.*0\.4\)?/);
+  });
+});
