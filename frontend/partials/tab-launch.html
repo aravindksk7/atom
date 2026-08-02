@@ -652,10 +652,10 @@
                 </div>
               </template>
               <p x-show="(jobModal.mfPreviewResult?.unmatched_sources || []).length"
-                 x-text="'Unmatched sources: ' + jobModal.mfPreviewResult.unmatched_sources.map(g => (g.files||[]).join(', ')).join('; ')"
+                 x-text="'Unmatched sources: ' + (jobModal.mfPreviewResult?.unmatched_sources || []).map(g => (g.files||[]).join(', ')).join('; ')"
                  class="text-amber-600"></p>
               <p x-show="(jobModal.mfPreviewResult?.unmatched_targets || []).length"
-                 x-text="'Unmatched targets: ' + jobModal.mfPreviewResult.unmatched_targets.map(g => (g.files||[]).join(', ')).join('; ')"
+                 x-text="'Unmatched targets: ' + (jobModal.mfPreviewResult?.unmatched_targets || []).map(g => (g.files||[]).join(', ')).join('; ')"
                  class="text-amber-600"></p>
             </div>
           </div>

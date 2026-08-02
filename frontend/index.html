@@ -1495,10 +1495,10 @@
                 </div>
               </template>
               <p x-show="(jobModal.mfPreviewResult?.unmatched_sources || []).length"
-                 x-text="'Unmatched sources: ' + jobModal.mfPreviewResult.unmatched_sources.map(g => (g.files||[]).join(', ')).join('; ')"
+                 x-text="'Unmatched sources: ' + (jobModal.mfPreviewResult?.unmatched_sources || []).map(g => (g.files||[]).join(', ')).join('; ')"
                  class="text-amber-600"></p>
               <p x-show="(jobModal.mfPreviewResult?.unmatched_targets || []).length"
-                 x-text="'Unmatched targets: ' + jobModal.mfPreviewResult.unmatched_targets.map(g => (g.files||[]).join(', ')).join('; ')"
+                 x-text="'Unmatched targets: ' + (jobModal.mfPreviewResult?.unmatched_targets || []).map(g => (g.files||[]).join(', ')).join('; ')"
                  class="text-amber-600"></p>
             </div>
           </div>
@@ -4211,15 +4211,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
   </div>
 
-  <div x-show="schedulerReportEditing" x-cloak class="modal-backdrop" @click.self="schedulerReportEditing = null">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <div class="drawer-header"><div class="drawer-title">Edit Schedule</div><button class="drawer-close" @click="schedulerReportEditing = null">x</button></div>
-      <label class="field-label">Cron expression</label>
-      <input class="field-input mb-3" x-model="schedulerReportEditing.cron_expr" />
-      <label class="inline-flex items-center gap-2 mb-4"><input type="checkbox" x-model="schedulerReportEditing.enabled" /> Enabled</label>
-      <div class="flex gap-2 justify-end"><button class="btn-secondary" @click="schedulerReportEditing = null">Cancel</button><button class="btn-primary" @click="schedulerReportSaveEdit()">Save</button></div>
+  <!-- x-if, not x-show: schedulerReportEditing is null while the modal is closed,
+       and x-show keeps the subtree mounted, so the x-model bindings below would
+       keep dereferencing null and log an Alpine expression error per field. -->
+  <template x-if="schedulerReportEditing">
+    <div class="modal-backdrop" @click.self="schedulerReportEditing = null">
+      <div class="modal-box" role="dialog" aria-modal="true">
+        <div class="drawer-header"><div class="drawer-title">Edit Schedule</div><button class="drawer-close" @click="schedulerReportEditing = null">x</button></div>
+        <label class="field-label">Cron expression</label>
+        <input class="field-input mb-3" x-model="schedulerReportEditing.cron_expr" />
+        <label class="inline-flex items-center gap-2 mb-4"><input type="checkbox" x-model="schedulerReportEditing.enabled" /> Enabled</label>
+        <div class="flex gap-2 justify-end"><button class="btn-secondary" @click="schedulerReportEditing = null">Cancel</button><button class="btn-primary" @click="schedulerReportSaveEdit()">Save</button></div>
+      </div>
     </div>
-  </div>
+  </template>
 </div></template>
 
 <!-- ====================================================================

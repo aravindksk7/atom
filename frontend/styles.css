@@ -1591,28 +1591,14 @@ select {
 .toast-error { border-left-color: var(--rose); }
 .toast-warn { border-left-color: var(--amber); }
 
-.bg-rose-50,
-.bg-sky-50,
-.bg-emerald-50,
-.bg-slate-50,
-.bg-slate-100,
-.bg-indigo-50,
-.bg-amber-50 {
-  background-color: rgba(255,255,255,0.06) !important;
-}
-.border-slate-100,
-.border-slate-200,
-.border-emerald-200,
-.border-rose-200 {
-  border-color: var(--line) !important;
-}
-.text-rose-700,
-.text-rose-600,
-.text-rose-500 { color: #fda4af !important; }
-.text-emerald-700,
-.text-emerald-500 { color: #86efac !important; }
-.text-indigo-500 { color: #67e8f9 !important; }
-.text-sky-700 { color: #67e8f9 !important; }
+/* The !important block that used to sit here (added in 721543a, when the app
+   was still light-themed underneath) flattened every -50 tint to one grey and
+   remapped several text hues. It predates the palette retarget and now defeats
+   it: bg-emerald-50 (pass) and bg-rose-50 (fail) rendered identically, and
+   text-indigo-500 rendered cyan. tailwind.config.js maps all of these onto the
+   --c-* tints already, so the overrides are removed rather than reconciled.
+   Any future "this utility looks wrong in dark mode" fix belongs in
+   tailwind.config.js, not in an !important rule here. */
 
 ::selection {
   background: rgba(var(--accent-rgb),0.32);
@@ -2204,10 +2190,16 @@ mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2p
    x-show-bound; everything here is the grid reflow that goes with it.
    ---------------------------------------------------------------------- */
 @media (max-width: 1024px) {
-  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .settings-group .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .compare-source-grid { grid-template-columns: 1fr; }
   .vs-divider { min-height: auto; padding: 0.25rem 0; }
   .scheduler-report-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* The dense grids are Tailwind's md:grid-cols-*, not the hand-written
+     .grid-3/.grid-4 helpers -- those two are defined in this file but never
+     used in markup, so targeting them here did nothing. Tailwind's md: is a
+     min-width:768px rule, so a 4- or 5-up grid stays 4- or 5-up all the way
+     down to 768. These overrides win on source order at equal specificity
+     (one class each), which is why the escaped-colon selectors are needed. */
+  .md\:grid-cols-4,
+  .md\:grid-cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

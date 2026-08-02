@@ -16,7 +16,13 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showJobModal: false,
-    jobModal: {},
+    // The multi-file panel in tab-launch.html binds jobModal.mf_*_preview_creds.*
+    // for 16 credential fields. Those bindings evaluate as soon as the Launch tab
+    // mounts — long before newJob()/openJobModal() assigns the full shape — so the
+    // two nested containers must exist from the start or Alpine logs an expression
+    // error per field. Both code paths overwrite these wholesale, so seeding them
+    // empty here changes nothing once a modal is actually opened.
+    jobModal: { mf_source_preview_creds: {}, mf_target_preview_creds: {} },
     jobModalEditing: false,
     jobGateVerdicts: {},
     launchSettings: {

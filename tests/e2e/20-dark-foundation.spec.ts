@@ -75,6 +75,37 @@ test.describe('20 dark foundation', () => {
     expect(probe).toMatch(/rgba?\(.*0\.4\)?/);
   });
 
+  /**
+   * These tints carry status meaning — bg-emerald-50 is a pass, bg-rose-50 is a
+   * failure, bg-amber-50 is a warning (see tab-adapters, tab-config,
+   * tab-contracts). An !important block in styles.css used to flatten all of
+   * them to one grey, which silently erased that signal while every other test
+   * stayed green. Assert they stay distinguishable from each other.
+   */
+  test('status tints stay distinct from one another', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    const tints = await authedPage.evaluate(() => {
+      const read = (cls: string) => {
+        const el = document.createElement('div');
+        el.className = cls;
+        document.body.appendChild(el);
+        const bg = getComputedStyle(el).backgroundColor;
+        el.remove();
+        return bg;
+      };
+      return {
+        emerald: read('bg-emerald-50'),
+        rose: read('bg-rose-50'),
+        amber: read('bg-amber-50'),
+        sky: read('bg-sky-50'),
+        indigo: read('bg-indigo-50'),
+        slate: read('bg-slate-50'),
+      };
+    });
+    const values = Object.values(tints);
+    expect(new Set(values).size, `tints collapsed: ${JSON.stringify(tints)}`).toBe(values.length);
+  });
+
   test('sidebar collapses to the icon rail below 1024px', async ({ authedPage }) => {
     await authedPage.setViewportSize({ width: 1440, height: 900 });
     await authedPage.goto('/');
@@ -133,14 +164,32 @@ test.describe('20 dark foundation', () => {
     await expect(authedPage.locator('[data-testid="global-logs-panel"]')).toHaveCount(0);
   });
 
-  test('boot produces no Alpine expression errors', async ({ authedPage }) => {
+  /**
+   * Lazy-mounting moved these errors rather than fixing them: asserting only on
+   * boot passed while 18 jobModal.mf_*_preview_creds errors still fired the
+   * moment the Launch tab mounted. Every tab has to be visited, or the gate
+   * measures the mount timing instead of the bug.
+   */
+  test('no Alpine expression errors at boot or on any tab', async ({ authedPage }) => {
     const errors: string[] = [];
     authedPage.on('console', (m) => {
       if (/Alpine Expression Error/.test(m.text())) errors.push(m.text());
     });
+
     await authedPage.goto('/');
     await authedPage.locator('[data-testid="home-view"]').waitFor();
-    expect(errors).toEqual([]);
+    expect(errors, 'boot').toEqual([]);
+
+    const tabs = ['config', 'adapters', 'aws', 'contracts', 'jobs', 'monitor',
+                  'history', 'reports', 'scheduler-reports', 'differences',
+                  'compare', 'logs', 'help'];
+    for (const tab of tabs) {
+      await authedPage.locator(`[data-testid="nav-tab-${tab}"]`).click();
+      // Alpine flushes bindings on the next tick, so let the mount settle
+      // before sampling — otherwise a clean read just means we looked early.
+      await authedPage.waitForTimeout(150);
+      expect(errors, `after opening the ${tab} tab`).toEqual([]);
+    }
   });
 
   test('boot DOM is a fraction of the old eager-mount tree', async ({ authedPage }) => {
