@@ -233,6 +233,10 @@ class RunTrigger(BaseModel):
 
 class RunStatusOut(BaseModel):
     run_id: str
+    # Human-readable handle derived from the run ("file compare · dev → prod ·
+    # 00a638ef"). Computed server-side so the UI and the downloadable HTML report
+    # cannot drift -- see api/services/run_label.py.
+    label: str = ""
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None

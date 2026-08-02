@@ -2456,7 +2456,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="text-muted text-xs">Pass/Fail/Slow distribution</div>
         </div>
         <div class="card space-y-2 text-sm">
-          <div><span class="text-muted">Run ID</span><br><span class="font-mono text-xs" x-text="selectedRun.run_id"></span></div>
+          <div><span class="text-muted">Run</span><br><span class="text-xs font-semibold" x-text="runLabel(selectedRun)"></span><br><span class="font-mono text-xs text-muted" x-text="selectedRun.run_id"></span></div>
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
@@ -3153,7 +3153,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -3164,7 +3164,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -3283,8 +3283,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
               <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
-                <td class="font-mono text-xs text-slate-500">
-                  <span x-text="run.run_id.substring(0,8)+'…'"></span>
+                <td class="text-xs text-slate-500">
+                  <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
                 <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
@@ -4243,7 +4243,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <select data-testid="diff-run-select" x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
-          <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
+          <option :value="run.run_id" x-text="runLabel(run) + ' [' + run.status + ']'"></option>
         </template>
       </select>
       <select data-testid="diff-test-select" x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1">
@@ -4344,11 +4344,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </template>
             <template x-for="m in diffRows" :key="m.id">
               <tr>
-                <td><span class="badge" :class="m.mismatch_type === 'value_diff' ? 'badge-amber' : m.mismatch_type === 'missing_in_target' ? 'badge-sky' : 'badge-purple'" x-text="m.mismatch_type"></span></td>
+                <!-- Rendering matches the HTML report and the Compare tab: a missing
+                     row/column outranks a drifted value, presence sentinels render as
+                     markers rather than as diffable data, and the multi-file pair is
+                     its own chip. See features/diff-search.js and diff-render.js. -->
+                <td><span class="badge" :class="isPresenceType(m.mismatch_type) ? 'badge-rose' : 'badge-amber'" x-text="m.mismatch_type"></span></td>
                 <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
-                <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
-                <td class="font-mono text-xs" x-text="m.source_value ?? 'NULL'"></td>
-                <td class="font-mono text-xs" x-text="m.target_value ?? 'NULL'"></td>
+                <td class="font-mono text-xs">
+                  <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                        title="File pair this row came from"></span>
+                  <span x-text="rowKeyText(m)"></span>
+                </td>
+                <td class="font-mono text-xs" x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"></td>
+                <td class="font-mono text-xs" x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"></td>
                 <td><span class="badge" :class="m.accepted ? 'badge-green' : m.rejected ? 'badge-rose' : 'badge-gray'" x-text="m.accepted ? 'Accepted' : m.rejected ? 'Rejected' : 'Pending'"></span></td>
               </tr>
             </template>
@@ -5068,7 +5076,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                           </select>
                           <input type="text"
                                  x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
-                                 placeholder="Search key values…"
+                                 placeholder="Search every field… try col:amount or -type:missing"
+                                 title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
                                  class="diff-filter-search">
                           <span class="diff-filter-count"
                                 x-text="filteredDetailLabel(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter, r)">
@@ -5089,18 +5098,21 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                             <tbody>
                               <template x-for="(m, mi) in filteredDiff(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter)" :key="m.id">
                                 <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
-                                  <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate"
-                                      x-text="JSON.stringify(m.key_values)"></td>
+                                  <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate">
+                                    <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                                          title="File pair this row came from"></span>
+                                    <span x-text="rowKeyText(m)"></span>
+                                  </td>
                                   <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
-                                  <td class="px-2 py-1 text-emerald-700 border-r border-slate-100">
-                                    <span x-html="renderSrc(m.source_value, m.target_value)"
+                                  <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                    <span x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"
                                           :class="expandedCell[m.id+'_src'] ? '' : 'diff-val-truncated'"></span>
                                     <button x-show="(String(m.source_value||'')).length > 60 && !expandedCell[m.id+'_src']"
                                             @click="expandedCell = {...expandedCell, [m.id+'_src']: true}"
                                             class="diff-expand-btn">…more</button>
                                   </td>
-                                  <td class="px-2 py-1 text-red-700 border-r border-slate-100">
-                                    <span x-html="renderTgt(m.source_value, m.target_value)"
+                                  <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                    <span x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"
                                           :class="expandedCell[m.id+'_tgt'] ? '' : 'diff-val-truncated'"></span>
                                     <button x-show="(String(m.target_value||'')).length > 60 && !expandedCell[m.id+'_tgt']"
                                             @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
@@ -5360,7 +5372,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                         </select>
                         <input type="text"
                                x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
-                               placeholder="Search key values…"
+                               placeholder="Search every field… try col:amount or -type:missing"
+                               title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
                                class="diff-filter-search">
                         <span class="diff-filter-count"
                               x-text="filteredDetailLabel(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter, r)">
@@ -5382,18 +5395,21 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                           <tbody>
                             <template x-for="(m, mi) in filteredDiff(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter)" :key="m.id">
                               <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
-                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate"
-                                    x-text="JSON.stringify(m.key_values)"></td>
+                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate">
+                                  <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                                        title="File pair this row came from"></span>
+                                  <span x-text="rowKeyText(m)"></span>
+                                </td>
                                 <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
-                                <td class="px-2 py-1 text-emerald-700 border-r border-slate-100">
-                                  <span x-html="renderSrc(m.source_value, m.target_value)"
+                                <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                  <span x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"
                                         :class="expandedCell[m.id+'_src'] ? '' : 'diff-val-truncated'"></span>
                                   <button x-show="(String(m.source_value||'')).length > 60 && !expandedCell[m.id+'_src']"
                                           @click="expandedCell = {...expandedCell, [m.id+'_src']: true}"
                                           class="diff-expand-btn">…more</button>
                                 </td>
-                                <td class="px-2 py-1 text-red-700 border-r border-slate-100">
-                                  <span x-html="renderTgt(m.source_value, m.target_value)"
+                                <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                  <span x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"
                                         :class="expandedCell[m.id+'_tgt'] ? '' : 'diff-val-truncated'"></span>
                                   <button x-show="(String(m.target_value||'')).length > 60 && !expandedCell[m.id+'_tgt']"
                                           @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
@@ -6440,7 +6456,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <script src="help-content.js"></script>
     <script src="app-help.js"></script>
     <script src="contract-examples.js"></script>
-    <script src="features/compare.js"></script>
+    <script src="features/diff-search.js"></script>
+<script src="features/diff-render.js"></script>
+<script src="features/compare.js"></script>
     <script src="features/config.js"></script>
     <script src="features/launch.js"></script>
     <script src="features/monitor.js"></script>

@@ -142,6 +142,136 @@ def test_write_full_html_report_key_values_round_trip_as_dict_not_double_encoded
     assert parsed == {"id": 42}
 
 
+def test_write_full_html_report_applies_severity_colours_and_search(tmp_path, monkeypatch):
+    """The "Download Full HTML Report" path goes through write_full_html_report, not
+    the plain report writer -- assert the downloaded file itself carries the severity
+    colour coding and the inlined search engine, with no mocks in the way.
+
+    Rows missing on each side exercise both directions: the recompute writes the
+    literal sentinels "present"/"missing" as values, which is what used to render
+    red-for-present / green-for-missing.
+    """
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository.models import TestRun
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path,))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    # ids 9,10 only in source -> missing_in_target; id 11 only in target ->
+    # missing_in_source; id 1 differs in value -> value_diff.
+    src.write_text("id,amount\n1,100\n2,2\n9,9\n10,10\n", encoding="utf-8")
+    tgt.write_text("id,amount\n1,101\n2,2\n11,11\n", encoding="utf-8")
+
+    request = {"file_a_path": str(src), "file_b_path": str(tgt), "key_columns": ["id"]}
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-full-html-severity",
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "recon_file", "request": request},
+        )
+        repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="Run / File A",
+            source_env="dev",
+            target_env="prod",
+            source_row_count=4,
+            target_row_count=3,
+            matched_count=2,
+            missing_in_target_count=2,
+            missing_in_source_count=1,
+            value_mismatch_count=1,
+            mismatches=[],
+            status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc),
+            duration_seconds=0.1,
+        ))
+        run_id = run.run_id
+
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        out_path = tmp_path / "report_full.html"
+        de.write_full_html_report(db, run, out_path)
+
+    html = out_path.read_text(encoding="utf-8")
+
+    # Both missing directions really were produced by the recompute.
+    assert 'data-type="missing_in_target"' in html
+    assert 'data-type="missing_in_source"' in html
+
+    # Severity colour coding reached the downloaded file.
+    assert "diff-panel-absent" in html
+    assert "presence-absent" in html
+    assert "presence-present" in html
+    assert '<span class="badge badge-fail">missing_in_target</span>' in html
+    assert '<span class="badge badge-fail">missing_in_source</span>' in html
+    assert '<span class="badge badge-amber">value_diff</span>' in html
+    # The sentinels are no longer emitted as raw diffable values.
+    assert ">present</span>" not in html
+    assert ">missing</span>" not in html
+
+    # Search engine is inlined, so the downloaded file searches offline.
+    assert "function parseDiffQuery" in html
+    assert "matchesDiffQuery(rowSearchFields(tr), terms)" in html
+    assert 'id="filter-help-chips"' in html
+    assert "<script src=" not in html
+
+
+def test_write_full_html_report_header_carries_a_meaningful_run_label(tmp_path, monkeypatch):
+    """A bare uuid4 in the header says nothing about what the run was. The
+    downloaded file must lead with the derived label -- and still carry the full
+    id, since that is what URLs and export paths key on."""
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository.models import TestRun
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path,))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text("id,amount\n1,100\n", encoding="utf-8")
+    tgt.write_text("id,amount\n1,101\n", encoding="utf-8")
+
+    run_id = "abc12345-0000-4000-8000-000000000000"
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id=run_id,
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={
+                "compare_request_type": "recon_file",
+                "request": {"file_a_path": str(src), "file_b_path": str(tgt), "key_columns": ["id"]},
+            },
+        )
+        repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="Run / File A",
+            source_env="dev", target_env="prod",
+            source_row_count=1, target_row_count=1, matched_count=0,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1,
+            mismatches=[], status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        ))
+
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        out_path = tmp_path / "report_full.html"
+        de.write_full_html_report(db, run, out_path)
+
+    html = out_path.read_text(encoding="utf-8")
+
+    label = "file compare · dev → prod · abc12345"
+    assert f'<span id="run-label" style="font-weight:600">{label}</span>' in html
+    # Distinguishes one downloaded file (and browser tab) from the next.
+    assert f"<title>ETL Report - {label}</title>" in html
+    # The full id is still present and copyable.
+    assert f'<span id="run-id" style="font-family: monospace;">{run_id}</span>' in html
+
+
 def test_write_full_html_report_real_recompute_renders_every_row_untruncated(tmp_path, monkeypatch):
     """No mocks: a recon_file compare with 150 differing rows (well past the report's
     usual 100-row display cap) recomputed from the real CSV files must render all 150

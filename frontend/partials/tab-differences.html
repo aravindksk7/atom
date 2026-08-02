@@ -12,7 +12,7 @@
       <select data-testid="diff-run-select" x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
-          <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
+          <option :value="run.run_id" x-text="runLabel(run) + ' [' + run.status + ']'"></option>
         </template>
       </select>
       <select data-testid="diff-test-select" x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1">
@@ -113,11 +113,19 @@
             </template>
             <template x-for="m in diffRows" :key="m.id">
               <tr>
-                <td><span class="badge" :class="m.mismatch_type === 'value_diff' ? 'badge-amber' : m.mismatch_type === 'missing_in_target' ? 'badge-sky' : 'badge-purple'" x-text="m.mismatch_type"></span></td>
+                <!-- Rendering matches the HTML report and the Compare tab: a missing
+                     row/column outranks a drifted value, presence sentinels render as
+                     markers rather than as diffable data, and the multi-file pair is
+                     its own chip. See features/diff-search.js and diff-render.js. -->
+                <td><span class="badge" :class="isPresenceType(m.mismatch_type) ? 'badge-rose' : 'badge-amber'" x-text="m.mismatch_type"></span></td>
                 <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
-                <td class="font-mono text-xs" x-text="JSON.stringify(m.key_values)"></td>
-                <td class="font-mono text-xs" x-text="m.source_value ?? 'NULL'"></td>
-                <td class="font-mono text-xs" x-text="m.target_value ?? 'NULL'"></td>
+                <td class="font-mono text-xs">
+                  <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                        title="File pair this row came from"></span>
+                  <span x-text="rowKeyText(m)"></span>
+                </td>
+                <td class="font-mono text-xs" x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"></td>
+                <td class="font-mono text-xs" x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"></td>
                 <td><span class="badge" :class="m.accepted ? 'badge-green' : m.rejected ? 'badge-rose' : 'badge-gray'" x-text="m.accepted ? 'Accepted' : m.rejected ? 'Rejected' : 'Pending'"></span></td>
               </tr>
             </template>

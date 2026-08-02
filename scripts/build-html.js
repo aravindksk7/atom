@@ -6,6 +6,16 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE = path.join(ROOT, 'frontend', 'index.template.html');
 const OUTPUT = path.join(ROOT, 'frontend', 'index.html');
+// The mismatch search engine is shared with the downloadable HTML report, which
+// must stay self-contained and therefore inlines it. The report's copy is the
+// canonical one; the browser gets a generated copy so both surfaces cannot drift.
+// tests/unit/test_diff_search_sync.py fails if this copy is stale.
+const SEARCH_SRC = path.join(ROOT, 'etl_framework', 'reporting', 'templates', '_diff_search.js');
+const SEARCH_OUT = path.join(ROOT, 'frontend', 'features', 'diff-search.js');
+const SEARCH_BANNER =
+  '// GENERATED FILE -- do not edit.\n' +
+  '// Source: etl_framework/reporting/templates/_diff_search.js\n' +
+  '// Regenerate with: node scripts/build-html.js\n';
 // Allow an optional trailing \r so the marker still matches when the template
 // uses CRLF line endings (this repo checks out CRLF via core.autocrlf=true).
 const INCLUDE_RE = /^<!-- INCLUDE: (.+?) -->\r?$/;
@@ -52,4 +62,11 @@ function build() {
   console.log(`Built ${OUTPUT} from ${TEMPLATE} + ${includeCount} partials`);
 }
 
+function buildSearchScript() {
+  const source = fs.readFileSync(SEARCH_SRC, 'utf8');
+  fs.writeFileSync(SEARCH_OUT, SEARCH_BANNER + source);
+  console.log(`Built ${SEARCH_OUT} from ${SEARCH_SRC}`);
+}
+
+buildSearchScript();
 build();

@@ -686,7 +686,8 @@
                           </select>
                           <input type="text"
                                  x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
-                                 placeholder="Search key values…"
+                                 placeholder="Search every field… try col:amount or -type:missing"
+                                 title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
                                  class="diff-filter-search">
                           <span class="diff-filter-count"
                                 x-text="filteredDetailLabel(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter, r)">
@@ -707,18 +708,21 @@
                             <tbody>
                               <template x-for="(m, mi) in filteredDiff(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter)" :key="m.id">
                                 <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
-                                  <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate"
-                                      x-text="JSON.stringify(m.key_values)"></td>
+                                  <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate">
+                                    <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                                          title="File pair this row came from"></span>
+                                    <span x-text="rowKeyText(m)"></span>
+                                  </td>
                                   <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
-                                  <td class="px-2 py-1 text-emerald-700 border-r border-slate-100">
-                                    <span x-html="renderSrc(m.source_value, m.target_value)"
+                                  <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                    <span x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"
                                           :class="expandedCell[m.id+'_src'] ? '' : 'diff-val-truncated'"></span>
                                     <button x-show="(String(m.source_value||'')).length > 60 && !expandedCell[m.id+'_src']"
                                             @click="expandedCell = {...expandedCell, [m.id+'_src']: true}"
                                             class="diff-expand-btn">…more</button>
                                   </td>
-                                  <td class="px-2 py-1 text-red-700 border-r border-slate-100">
-                                    <span x-html="renderTgt(m.source_value, m.target_value)"
+                                  <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                    <span x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"
                                           :class="expandedCell[m.id+'_tgt'] ? '' : 'diff-val-truncated'"></span>
                                     <button x-show="(String(m.target_value||'')).length > 60 && !expandedCell[m.id+'_tgt']"
                                             @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"
@@ -978,7 +982,8 @@
                         </select>
                         <input type="text"
                                x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
-                               placeholder="Search key values…"
+                               placeholder="Search every field… try col:amount or -type:missing"
+                               title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
                                class="diff-filter-search">
                         <span class="diff-filter-count"
                               x-text="filteredDetailLabel(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter, r)">
@@ -1000,18 +1005,21 @@
                           <tbody>
                             <template x-for="(m, mi) in filteredDiff(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter)" :key="m.id">
                               <tr :class="mi % 2 === 0 ? 'bg-white' : 'bg-red-50'">
-                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate"
-                                    x-text="JSON.stringify(m.key_values)"></td>
+                                <td class="px-2 py-1 font-mono text-slate-500 border-r border-slate-100 max-w-xs truncate">
+                                  <span x-show="rowPairLabel(m)" class="pair-chip" x-text="rowPairLabel(m)"
+                                        title="File pair this row came from"></span>
+                                  <span x-text="rowKeyText(m)"></span>
+                                </td>
                                 <td class="px-2 py-1 font-semibold border-r border-slate-100" x-text="m.column_name"></td>
-                                <td class="px-2 py-1 text-emerald-700 border-r border-slate-100">
-                                  <span x-html="renderSrc(m.source_value, m.target_value)"
+                                <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                  <span x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"
                                         :class="expandedCell[m.id+'_src'] ? '' : 'diff-val-truncated'"></span>
                                   <button x-show="(String(m.source_value||'')).length > 60 && !expandedCell[m.id+'_src']"
                                           @click="expandedCell = {...expandedCell, [m.id+'_src']: true}"
                                           class="diff-expand-btn">…more</button>
                                 </td>
-                                <td class="px-2 py-1 text-red-700 border-r border-slate-100">
-                                  <span x-html="renderTgt(m.source_value, m.target_value)"
+                                <td class="px-2 py-1 text-slate-700 border-r border-slate-100">
+                                  <span x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"
                                         :class="expandedCell[m.id+'_tgt'] ? '' : 'diff-val-truncated'"></span>
                                   <button x-show="(String(m.target_value||'')).length > 60 && !expandedCell[m.id+'_tgt']"
                                           @click="expandedCell = {...expandedCell, [m.id+'_tgt']: true}"

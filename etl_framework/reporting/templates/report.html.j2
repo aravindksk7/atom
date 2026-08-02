@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ETL Test Report - {{ suite.started_at }}</title>
+  {# Downloaded reports pile up as browser tabs and as files; the label makes one
+     distinguishable from the next where a timestamp alone did not. #}
+  <title>ETL Report - {{ suite.run_label or suite.run_id }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700;800&display=swap" />
@@ -157,13 +159,30 @@
     .diff-values-cell { padding:6px 8px !important; }
     .diff-panels { display:flex; gap:8px; }
     .diff-panel { flex:1; min-width:0; background:rgba(255,255,255,0.04); border-radius:6px; padding:8px 10px; position:relative; }
-    .diff-panel-src { border-left:3px solid var(--rose); }
-    .diff-panel-tgt { border-left:3px solid var(--emerald); }
+    /* Panel accents are severity-keyed, not side-keyed: red marks the side that
+       is actually wrong (the one missing the row/column). A plain value_diff has
+       no "bad side" -- both panels stay neutral and the char-level del/ins
+       highlights below carry the old-vs-new signal. Colouring src red / tgt
+       green unconditionally used to render "present" red and "missing" green on
+       row-missing differences, i.e. exactly backwards. */
+    .diff-panel-src, .diff-panel-tgt { border-left:3px solid rgba(148,163,184,0.5); }
+    .diff-panel-absent { border-left-color:var(--rose); background:rgba(251,113,133,0.10); }
+    .presence-absent { color:#fda4af; font-weight:600; }
+    .presence-present { color:var(--muted); }
+    /* Multi-file pair rollup. Same rule as the row-level panels: red marks the
+       pairs that are actually wrong, so a failing pair cannot be mistaken for a
+       passing one at a glance. */
+    .pair-chip { display:inline-block; background:rgba(255,255,255,0.08); border:1px solid var(--line); border-radius:999px; padding:0 7px; margin-right:4px; font-size:0.9em; color:var(--soft); }
+    .pair-row { border:1px solid var(--line); border-left:3px solid rgba(148,163,184,0.5); border-radius:8px; padding:6px; background:rgba(255,255,255,0.03); }
+    .pair-row-failed { border-left-color:var(--rose); background:rgba(251,113,133,0.10); }
     .diff-panel-label { display:block; font-size:0.7em; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin-bottom:4px; }
     .diff-panel-val { font-family:monospace; font-size:0.88em; word-break:break-all; color:var(--soft); }
     .diff-del { background:rgba(251,113,133,0.30); color:#fda4af; border-radius:2px; padding:0 1px; }
     .diff-ins { background:rgba(52,211,153,0.28); color:#86efac; border-radius:2px; padding:0 1px; }
     .null-val { color:var(--muted); font-style:italic; }
+    /* Search hits. Deliberately not red or green -- those two already mean
+       "absent" and "inserted" in this report. */
+    mark.q-hit { background:rgba(var(--accent-rgb),0.30); color:var(--text); border-radius:2px; padding:0 1px; }
     .copy-btn { position:absolute; top:6px; right:6px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.85em; opacity:0; transition:opacity 0.15s; }
     .diff-panel:hover .copy-btn { opacity:1; }
 
@@ -198,11 +217,22 @@
       {% endif %}
     {% endmacro %}
     {% set suite_total_issues = suite.total_issues if suite.total_issues is defined else (suite.reconciliation_results | sum(attribute='total_issues')) %}
+    {# Mismatch types whose source/target values are presence sentinels ("present"
+       / "missing" / "absent") rather than real data. Keep in step with
+       PRESENCE_TYPES in the script block below and in frontend/features/diff-render.js. #}
+    {% set presence_types = ('missing_in_target', 'missing_in_source', 'missing_columns', 'extra_columns') %}
+    {% set absent_sentinels = ('missing', 'absent') %}
 
     <div id="header">
       <h1>ETL Framework Execution Report</h1>
-      <p><strong>Run ID:</strong> <span style="font-family: monospace;">{{ suite.run_id }}</span></p>
-      <p><strong>Started:</strong> {{ suite.started_at }}</p>
+      {# suite.run_label is undefined (and falsy) for callers that pass a raw runner
+         suite rather than a RunReportSnapshot -- fall back to the bare id. #}
+      <p><strong>Run:</strong> <span id="run-label" style="font-weight:600">{{ suite.run_label or suite.run_id }}</span></p>
+      <p><strong>Run ID:</strong> <span id="run-id" style="font-family: monospace;">{{ suite.run_id }}</span>
+        <button class="filter-clear-btn" style="margin-left:6px"
+                onclick="copyVal(this, document.getElementById('run-id').textContent)"
+                title="Copy the full run ID">⎘</button></p>
+      <p><strong>Started:</strong> {{ suite.started_at | to_local or '—' }}</p>
       <p><strong>Environments:</strong> {{ suite.source_env }} &rarr; {{ suite.target_env }}</p>
       {% if suite.file_name_a or suite.file_name_b %}
       <p><strong>Files:</strong> {{ suite.file_name_a or '—' }} &rarr; {{ suite.file_name_b or '—' }}</p>
@@ -303,16 +333,32 @@
         <select id="filter-col" onchange="filterState.col=this.value;applyFilters()">
           <option value="">All columns</option>
         </select>
+        {# Populated from the rendered rows and hidden entirely unless this run
+           actually paired files, so single-file reports are unchanged. #}
+        <select id="filter-pair" style="display:none" onchange="filterState.pair=this.value;applyFilters()">
+          <option value="">All pairs</option>
+        </select>
         <select id="filter-type" onchange="filterState.type=this.value;applyFilters()">
           <option value="">All types</option>
           <option value="value_diff">Value diff</option>
           <option value="missing_in_target">Missing →</option>
           <option value="missing_in_source">Missing ←</option>
         </select>
-        <input id="filter-search" type="text" placeholder="Search key values… (/ to focus)"
-               oninput="clearTimeout(window.__filterSearchDebounce); var _v=this.value; window.__filterSearchDebounce=setTimeout(function(){filterState.search=_v;applyFilters();}, 200);">
+        <input id="filter-search" type="text" placeholder="Search every field… try col:amount or -type:missing (/ to focus)"
+               title="Terms AND together. col:amount · type:missing · test:orders · key:1042 · src:NULL · tgt:0 · val:abc · &quot;two words&quot; · -exclude"
+               oninput="clearTimeout(window.__filterSearchDebounce); var _v=this.value; window.__filterSearchDebounce=setTimeout(function(){filterState.search=_v;applyFilters();}, 150);">
         <button class="filter-clear-btn" onclick="clearFilters()">✕ Clear</button>
+        <button class="filter-clear-btn" id="filter-help-btn" onclick="toggleSearchHelp()" title="Search syntax">?</button>
         <span id="filter-count"></span>
+        <div id="filter-help" style="display:none;flex-basis:100%">
+          <div style="font-size:0.8em;color:var(--muted);line-height:1.9">
+            Terms AND together; matching is case-insensitive substring. Click an example to insert it.
+            <div id="filter-help-chips" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"></div>
+          </div>
+        </div>
+      </div>
+      <div id="filter-empty" style="display:none;margin:10px 0;padding:10px 14px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:0.88em">
+        No mismatch matches this search. <button class="filter-clear-btn" onclick="clearFilters()">Clear filters</button>
       </div>
       <h2>Reconciliation Results</h2>
       <table>
@@ -347,22 +393,28 @@
                   <summary style="cursor:pointer;color:var(--accent);font-family:var(--font-display);">File pairs</summary>
                   <div style="margin-top:6px;display:grid;gap:6px;">
                     {% for pair in result.mismatch_summary.file_pairs %}
-                    <div data-testid="file-pair-row" data-status="{{ pair.status }}" style="border:1px solid var(--line);border-radius:8px;padding:6px;background:rgba(255,255,255,0.03);">
-                      <div><strong>{{ pair.status }}</strong> {% if pair.key %}{% for k, v in pair.key.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+                    {% set pair_failed = pair.status in ('FAILED', 'ERROR') or pair.error %}
+                    <div data-testid="file-pair-row" data-status="{{ pair.status }}"
+                         class="pair-row{% if pair_failed %} pair-row-failed{% endif %}">
+                      <div>{{ status_badge(pair.status) }} {% if pair.key %}{% for k, v in pair.key.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
                       <div>Source: {{ pair.source_files | join(', ') }}</div>
                       <div>Target: {{ pair.target_files | join(', ') }}</div>
                       <div>Rows: {{ pair.source_row_count or 0 }} / {{ pair.target_row_count or 0 }}; mismatches: {{ pair.value_mismatch_count or 0 }}</div>
                       {% if pair.error %}<div style="color:#fda4af;">Error: {{ pair.error }}</div>{% endif %}
                     </div>
                     {% endfor %}
+                    {# A file with no counterpart is the file-level form of a missing row --
+                       give it the same absent treatment, and say which side lacks it. #}
                     {% if result.mismatch_summary.unmatched_sources %}
-                    <div data-testid="unmatched-sources"><strong>Unmatched sources:</strong>
-                      {% for group in result.mismatch_summary.unmatched_sources %}{{ group.files | join(', ') }}{% if not loop.last %}; {% endif %}{% endfor %}
+                    <div data-testid="unmatched-sources" class="pair-row pair-row-failed">
+                      <div><span class="presence-absent">&#8709; no target counterpart</span></div>
+                      {% for group in result.mismatch_summary.unmatched_sources %}<div>Source: {{ group.files | join(', ') }}</div>{% endfor %}
                     </div>
                     {% endif %}
                     {% if result.mismatch_summary.unmatched_targets %}
-                    <div data-testid="unmatched-targets"><strong>Unmatched targets:</strong>
-                      {% for group in result.mismatch_summary.unmatched_targets %}{{ group.files | join(', ') }}{% if not loop.last %}; {% endif %}{% endfor %}
+                    <div data-testid="unmatched-targets" class="pair-row pair-row-failed">
+                      <div><span class="presence-absent">&#8709; no source counterpart</span></div>
+                      {% for group in result.mismatch_summary.unmatched_targets %}<div>Target: {{ group.files | join(', ') }}</div>{% endfor %}
                     </div>
                     {% endif %}
                   </div>
@@ -444,30 +496,39 @@
               </thead>
               <tbody id="mismatch-tbody-{{ result.id }}">
                 {% for mm in result.mismatches %}
+                {% set pair_key = mm.key_values.get('__pair__') if mm.key_values is mapping else None %}
+                {% set row_key = mm.key_values | reject_pair_key %}
+                {% set pair_label = pair_key | pair_key_label %}
+                {% set is_presence = mm.mismatch_type in presence_types %}
+                {% set src_absent = is_presence and (mm.source_value | string | lower) in absent_sentinels %}
+                {% set tgt_absent = is_presence and (mm.target_value | string | lower) in absent_sentinels %}
                 <tr data-mismatch
                     data-test="{{ result.query_name }}"
                     data-column="{{ mm.column_name }}"
                     data-type="{{ mm.mismatch_type }}"
                     data-key="{{ mm.key_values | tojson | forceescape }}"
+                    data-pair="{{ pair_label }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
                     data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}"
                     data-accepted="{{ 'true' if mm.accepted else 'false' }}"
                     data-rejected="{{ 'true' if mm.rejected else 'false' }}">
-                  <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
+                  <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% elif is_presence %}badge-fail{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
                   <td>{{ mm.column_name }}</td>
-                  <td style="font-family: monospace; font-size: 0.85em;">{{ mm.key_values | tojson }}</td>
+                  <td style="font-family: monospace; font-size: 0.85em;">
+                    {% if pair_label %}<span class="pair-chip" title="File pair this row came from">{{ pair_label }}</span> {% endif %}{{ row_key | tojson }}
+                  </td>
                   <td class="diff-values-cell" colspan="2">
                     <div class="diff-panels">
-                      <div class="diff-panel diff-panel-src">
+                      <div class="diff-panel diff-panel-src{% if src_absent %} diff-panel-absent{% endif %}">
                         <span class="diff-panel-label">{{ suite.source_env }}</span>
                         <span class="diff-panel-val" data-role="src-diff"
-                              data-raw="{{ mm.source_value if mm.source_value is not none else '' }}">{{ mm.source_value if mm.source_value is not none else 'NULL' }}</span>
+                              data-raw="{{ mm.source_value if mm.source_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if src_absent else 'present' }}">{{ '∅ absent' if src_absent else '● present' }}</span>{% else %}{{ mm.source_value if mm.source_value is not none else 'NULL' }}{% endif %}</span>
                         <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.src)" title="Copy source value">⎘</button>
                       </div>
-                      <div class="diff-panel diff-panel-tgt">
+                      <div class="diff-panel diff-panel-tgt{% if tgt_absent %} diff-panel-absent{% endif %}">
                         <span class="diff-panel-label">{{ suite.target_env }}</span>
                         <span class="diff-panel-val" data-role="tgt-diff"
-                              data-raw="{{ mm.target_value if mm.target_value is not none else '' }}">{{ mm.target_value if mm.target_value is not none else 'NULL' }}</span>
+                              data-raw="{{ mm.target_value if mm.target_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if tgt_absent else 'present' }}">{{ '∅ absent' if tgt_absent else '● present' }}</span>{% else %}{{ mm.target_value if mm.target_value is not none else 'NULL' }}{% endif %}</span>
                         <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.tgt)" title="Copy target value">⎘</button>
                       </div>
                     </div>
@@ -528,6 +589,10 @@
     <span id="nav-pos">0 / 0</span>
     <button class="nav-btn" onclick="navTo(1)">Next ↓</button>
   </div>
+
+  <script>
+  {{ diff_search_js | safe }}
+  </script>
 
   <script>
   var aggregateMismatchData = [
@@ -640,7 +705,39 @@
     return m2;
   }
 
-  function renderSrc(a,b){
+  // ── Presence rows ────────────────────────────────────────────────────────
+  // Row/column-missing differences carry the sentinels "present"/"missing" as
+  // their values, not real data. Char-diffing two sentinels is meaningless and
+  // used to paint "present" red and "missing" green. Render an explicit marker
+  // instead and let red mean "this side is the one that's absent".
+  // Keep in step with presence_types in the Jinja block above.
+  var PRESENCE_TYPES = {missing_in_target:1, missing_in_source:1, missing_columns:1, extra_columns:1};
+
+  function isPresenceType(type){ return !!PRESENCE_TYPES[type]; }
+
+  function isAbsentValue(v){
+    var s = String(v==null?'':v).toLowerCase();
+    return s==='missing' || s==='absent';
+  }
+
+  function renderPresence(v){
+    return isAbsentValue(v)
+      ? '<span class="presence-absent">&#8709; absent</span>'
+      : '<span class="presence-present">&#9679; present</span>';
+  }
+
+  function applyPanelSeverity(tr, type, src, tgt){
+    var presence = isPresenceType(type);
+    [['src-diff', src], ['tgt-diff', tgt]].forEach(function(pair){
+      var el = tr.querySelector('[data-role="'+pair[0]+'"]');
+      var panel = el && el.closest('.diff-panel');
+      if(!panel) return;
+      panel.classList.toggle('diff-panel-absent', presence && isAbsentValue(pair[1]));
+    });
+  }
+
+  function renderSrc(a,b,type){
+    if(isPresenceType(type)) return renderPresence(a);
     if(a==null&&b==null) return '<span class="null-val">NULL</span>';
     if(a==null) return '<span class="null-val">NULL</span>';
     if(b==null) return escHtml(String(a));
@@ -652,7 +749,8 @@
     }).join('');
   }
 
-  function renderTgt(a,b){
+  function renderTgt(a,b,type){
+    if(isPresenceType(type)) return renderPresence(b);
     if(a==null&&b==null) return '<span class="null-val">NULL</span>';
     if(b==null) return '<span class="null-val">NULL</span>';
     if(a==null) return escHtml(String(b));
@@ -667,37 +765,136 @@
   // ── Apply diff to rendered mismatch rows ─────────────────────────────────
   function applyDiff() {
     document.querySelectorAll('tr[data-mismatch]').forEach(function(tr) {
-      var src = tr.dataset.src, tgt = tr.dataset.tgt;
-      tr.querySelectorAll('[data-role="src-diff"]').forEach(function(el){ el.innerHTML = renderSrc(src,tgt); });
-      tr.querySelectorAll('[data-role="tgt-diff"]').forEach(function(el){ el.innerHTML = renderTgt(src,tgt); });
+      var src = tr.dataset.src, tgt = tr.dataset.tgt, type = tr.dataset.type;
+      tr.querySelectorAll('[data-role="src-diff"]').forEach(function(el){ el.innerHTML = renderSrc(src,tgt,type); });
+      tr.querySelectorAll('[data-role="tgt-diff"]').forEach(function(el){ el.innerHTML = renderTgt(src,tgt,type); });
+      applyPanelSeverity(tr, type, src, tgt);
     });
   }
 
   // ── Filter ────────────────────────────────────────────────────────────────
-  var filterState = {test:'',col:'',type:'',search:''};
+  var filterState = {test:'',col:'',type:'',pair:'',search:''};
+
+  // Cached per row: the search fields are derived from data-* attributes that
+  // only change when a row is replaced wholesale by the load-all injection,
+  // which creates fresh elements and therefore a fresh cache.
+  function rowSearchFields(tr) {
+    if(!tr.__diffFields) {
+      tr.__diffFields = diffSearchFields({
+        test_name: tr.dataset.test,
+        column_name: tr.dataset.column,
+        mismatch_type: tr.dataset.type,
+        key_values: tr.dataset.key,
+        source_value: tr.dataset.src,
+        target_value: tr.dataset.tgt
+      });
+    }
+    return tr.__diffFields;
+  }
+
+  // Highlighting is cosmetic; filtering above is exhaustive. Cap the DOM
+  // rewriting so a search across a very large report stays responsive.
+  var HIGHLIGHT_ROW_CAP = 300;
+
+  function refreshHighlights(visibleRows, terms) {
+    var container = document.getElementById('mismatches');
+    if(!container) return;
+    clearDiffHighlights(container);
+    var needles = diffQueryNeedles(terms);
+    if(!needles.length) return;
+    var limit = Math.min(visibleRows.length, HIGHLIGHT_ROW_CAP);
+    for(var i=0;i<limit;i++) highlightDiffMatches(visibleRows[i], needles);
+  }
 
   function applyFilters() {
     var rows = document.querySelectorAll('tr[data-mismatch]');
-    var shown=0;
+    var terms = parseDiffQuery(filterState.search);
+    var visible=[];
     rows.forEach(function(tr) {
       var ok = (
-        (!filterState.test   || tr.dataset.test===filterState.test) &&
-        (!filterState.col    || tr.dataset.column===filterState.col) &&
-        (!filterState.type   || tr.dataset.type===filterState.type) &&
-        (!filterState.search || tr.dataset.key.toLowerCase().includes(filterState.search.toLowerCase()))
+        (!filterState.test || tr.dataset.test===filterState.test) &&
+        (!filterState.col  || tr.dataset.column===filterState.col) &&
+        (!filterState.type || tr.dataset.type===filterState.type) &&
+        (!filterState.pair || tr.dataset.pair===filterState.pair) &&
+        (!terms.length     || matchesDiffQuery(rowSearchFields(tr), terms))
       );
       tr.style.display = ok ? '' : 'none';
-      if(ok) shown++;
+      if(ok) visible.push(tr);
     });
-    updateFilterCount(shown, rows.length);
+    refreshHighlights(visible, terms);
+    updateFilterCount(visible.length, rows.length);
+    var empty = document.getElementById('filter-empty');
+    if(empty) empty.style.display = (rows.length && !visible.length) ? '' : 'none';
     navIndex=-1; buildNavList();
   }
 
   function clearFilters() {
-    filterState.test=filterState.col=filterState.type=filterState.search='';
-    ['filter-test','filter-col','filter-type'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+    filterState.test=filterState.col=filterState.type=filterState.pair=filterState.search='';
+    ['filter-test','filter-col','filter-type','filter-pair'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
     var fs=document.getElementById('filter-search'); if(fs) fs.value='';
     applyFilters();
+  }
+
+  // ── Search syntax help ───────────────────────────────────────────────────
+  var SEARCH_EXAMPLES = [
+    ['col:amount', 'only the amount column'],
+    ['type:missing', 'any missing-row difference'],
+    ['test:orders', 'one test'],
+    ['key:1042', 'a row key'],
+    ['pair:west', 'one multi-file pair'],
+    ['src:NULL', 'source side only'],
+    ['tgt:0.00', 'target side only'],
+    ['val:error', 'either side'],
+    ['"two words"', 'exact phrase'],
+    ['-type:value_diff', 'exclude a term']
+  ];
+
+  function insertSearchExample(token) {
+    var input = document.getElementById('filter-search');
+    if(!input) return;
+    var current = input.value.trim();
+    input.value = current ? current + ' ' + token : token;
+    filterState.search = input.value;
+    input.focus();
+    applyFilters();
+  }
+
+  function buildSearchHelp() {
+    var host = document.getElementById('filter-help-chips');
+    if(!host) return;
+    SEARCH_EXAMPLES.forEach(function(pair) {
+      var btn = document.createElement('button');
+      btn.className = 'filter-clear-btn';
+      btn.style.fontFamily = 'monospace';
+      btn.textContent = pair[0];
+      btn.title = pair[1];
+      btn.onclick = function(){ insertSearchExample(pair[0]); };
+      host.appendChild(btn);
+    });
+  }
+
+  function toggleSearchHelp() {
+    var help = document.getElementById('filter-help');
+    if(help) help.style.display = help.style.display === 'none' ? '' : 'none';
+  }
+
+  function populatePairFilter() {
+    var sel = document.getElementById('filter-pair');
+    if(!sel) return;
+    var pairs = new Set();
+    document.querySelectorAll('tr[data-mismatch]').forEach(function(tr){
+      if(tr.dataset.pair) pairs.add(tr.dataset.pair);
+    });
+    // Only a multi-file run has pairs -- leave the control hidden otherwise
+    // rather than showing an "All pairs" dropdown with nothing in it.
+    if(!pairs.size) { sel.style.display='none'; return; }
+    var existing = new Set([].slice.call(sel.options).map(function(o){return o.value;}));
+    Array.from(pairs).sort().forEach(function(pair){
+      if(existing.has(pair)) return;
+      var opt=document.createElement('option'); opt.value=pair; opt.textContent=pair; sel.appendChild(opt);
+      existing.add(pair);
+    });
+    sel.style.display='';
   }
 
   function populateColFilter() {
@@ -815,7 +1012,11 @@
   }
 
   function mismatchTypeBadgeClass(type){
-    return (type === 'value_diff' || type === 'value_mismatch') ? 'badge-amber' : 'badge-gray';
+    if(type === 'value_diff' || type === 'value_mismatch') return 'badge-amber';
+    // A wholly missing row/column outranks a single drifted value -- it must not
+    // read calmer than one.
+    if(isPresenceType(type)) return 'badge-fail';
+    return 'badge-gray';
   }
 
   function mismatchRowKey(columnName, mismatchType, keyValuesText){
@@ -829,6 +1030,7 @@
     tr.dataset.column = row.column_name || '';
     tr.dataset.type = row.mismatch_type || '';
     tr.dataset.key = typeof row.key_values === 'string' ? row.key_values : JSON.stringify(row.key_values || {});
+    tr.dataset.pair = diffPairLabel(row.key_values);
     tr.dataset.src = row.source_value || '';
     tr.dataset.tgt = row.target_value || '';
     // The recompute export has no accepted/rejected field (DIFFERENCE_FIELDS doesn't carry it) —
@@ -839,7 +1041,10 @@
     tr.innerHTML =
       '<td><span class="badge ' + mismatchTypeBadgeClass(row.mismatch_type) + '">' + escHtml(row.mismatch_type) + '</span></td>' +
       '<td>' + escHtml(row.column_name) + '</td>' +
-      '<td style="font-family: monospace; font-size: 0.85em;">' + escHtml(tr.dataset.key) + '</td>' +
+      '<td style="font-family: monospace; font-size: 0.85em;">' +
+        (tr.dataset.pair ? '<span class="pair-chip" title="File pair this row came from">' + escHtml(tr.dataset.pair) + '</span> ' : '') +
+        escHtml(diffKeyWithoutPair(row.key_values)) +
+      '</td>' +
       '<td class="diff-values-cell" colspan="2">' +
         '<div class="diff-panels">' +
           '<div class="diff-panel diff-panel-src">' +
@@ -884,6 +1089,7 @@
 
   function refreshAfterInjection(){
     populateColFilter();
+    populatePairFilter();
     applyDiff();
     computeAcceptedStats();
     applyFilters();
@@ -1077,7 +1283,9 @@
   // ── Initialise on DOM ready ───────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function(){
     populateColFilter();
+    populatePairFilter();
     applyDiff();
+    buildSearchHelp();
     buildHeatmap();
     buildDonut();
     computeAcceptedStats();

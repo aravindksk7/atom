@@ -26,13 +26,11 @@ test.describe('08b compare / reconciliation', () => {
     await expect(authedPage.getByText('Differs', { exact: true })).toBeVisible();
   });
 
-  test('KNOWN BUG: expanding a differing row renders blank source/target cells (renderSrc/renderTgt undefined)', async ({ authedPage }) => {
-    // See "Known pre-existing bug encountered during research" in the plan header:
-    // renderSrc/renderTgt are referenced by index.html but never defined in any loaded
-    // script. Alpine's x-html evaluator catches the ReferenceError internally (reporting
-    // it as an uncaught page error rather than a console.error) and falls back to
-    // `undefined`, which x-html then coerces to the literal string "undefined" as the
-    // cell's innerHTML — the sibling :class binding is unaffected and still applies.
+  test('expanding a differing row renders real source/target values', async ({ authedPage }) => {
+    // Was a KNOWN BUG: renderSrc/renderTgt were referenced by index.html but defined in
+    // no loaded script (the modularization left them behind in app.js.bak), so Alpine's
+    // x-html evaluator swallowed a ReferenceError and wrote the literal string
+    // "undefined" into every value cell. They now live in features/diff-render.js.
     const pageErrors: string[] = [];
     authedPage.on('pageerror', (err) => pageErrors.push(err.message));
 
@@ -41,9 +39,11 @@ test.describe('08b compare / reconciliation', () => {
     await expect(authedPage.locator('[data-testid="compare-file-results"]')).toContainText('Results', { timeout: 20_000 });
 
     await authedPage.locator('[data-testid^="compare-file-row-"]').first().click();
-    await expect(authedPage.locator('td.text-emerald-700 span:visible').first()).toHaveText('undefined');
-    await expect.poll(() => pageErrors.some((e) => e.includes('renderSrc is not defined'))).toBe(true);
-    expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(true);
+    const firstValueCell = authedPage.locator('td.text-slate-700 span:visible').first();
+    await expect(firstValueCell).not.toHaveText('undefined');
+    await expect(firstValueCell).not.toBeEmpty();
+    expect(pageErrors.some((e) => e.includes('renderSrc is not defined'))).toBe(false);
+    expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(false);
   });
 
   test('negative: Launch Dual-Env with no config selected shows guard toast', async ({ authedPage }) => {

@@ -760,13 +760,14 @@
     filteredDiff(diffs, filterKey, filterState) {
       const f = filterState[filterKey] || {};
       if (!f.type && !f.col && !f.search) return diffs;
+      // The free-text box used to search key values alone, so a column name or
+      // either side's value was unreachable. It now runs the same query engine
+      // the downloadable HTML report uses -- see features/diff-search.js.
+      const terms = parseDiffQuery(f.search || '');
       return (diffs || []).filter(m => {
         if (f.type && m.mismatch_type !== f.type) return false;
         if (f.col  && m.column_name !== f.col)   return false;
-        if (f.search) {
-          const key = JSON.stringify(m.key_values || {}).toLowerCase();
-          if (!key.includes(f.search.toLowerCase())) return false;
-        }
+        if (terms.length && !matchesDiffQuery(diffSearchFields(m), terms)) return false;
         return true;
       });
     },

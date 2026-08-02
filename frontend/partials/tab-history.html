@@ -40,7 +40,7 @@
           <div class="text-muted text-xs">Pass/Fail/Slow distribution</div>
         </div>
         <div class="card space-y-2 text-sm">
-          <div><span class="text-muted">Run ID</span><br><span class="font-mono text-xs" x-text="selectedRun.run_id"></span></div>
+          <div><span class="text-muted">Run</span><br><span class="text-xs font-semibold" x-text="runLabel(selectedRun)"></span><br><span class="font-mono text-xs text-muted" x-text="selectedRun.run_id"></span></div>
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
@@ -737,7 +737,7 @@
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -748,7 +748,7 @@
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="run.run_id.substring(0,8) + '… [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -867,8 +867,8 @@
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
               <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
-                <td class="font-mono text-xs text-slate-500">
-                  <span x-text="run.run_id.substring(0,8)+'…'"></span>
+                <td class="text-xs text-slate-500">
+                  <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
                 <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>

@@ -1733,6 +1733,30 @@ select option {
 }
 .null-val { color: #94a3b8; font-style: italic; }
 
+/* Presence markers for row/column-missing differences. Their stored values are
+   the sentinels "present"/"missing", not data -- char-diffing them tinted
+   "present" red and "missing" green. Red here marks the side that is absent.
+   Mirrors .presence-* in etl_framework/reporting/templates/report.html.j2. */
+.presence-absent { color: #be123c; font-weight: 600; }
+.presence-present { color: #64748b; }
+
+/* Multi-file pair chip -- the file pair a difference row came from, split out of
+   key_values so the key cell shows row identity alone. */
+.pair-chip {
+  display: inline-block;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 0 7px;
+  margin-right: 4px;
+  font-size: 0.9em;
+  color: #475569;
+}
+
+/* Search hits. Deliberately not red or green -- those already mean "absent" and
+   "inserted" in a diff. */
+mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2px; padding: 0 1px; }
+
 /* Filter bar (Compare tab) */
 .diff-filter-bar {
   display: flex;

@@ -861,6 +861,28 @@ function _appRaw() {
     // ===========================================================
     // UTILITIES
     // ===========================================================
+    // Human-readable handle for a run ("file compare · dev → prod · 00a638ef").
+    // Derived server-side and delivered on the run DTO, so this stays a pure
+    // read -- the report and the UI can never label the same run differently.
+    // Falls back to the short id for payloads that carry no label (the progress
+    // SSE stream, for one).
+    runLabel(run) {
+      if (!run) return '—';
+      if (run.label) return run.label;
+      return run.run_id ? run.run_id.substring(0, 8) + '…' : '—';
+    },
+
+    // Multi-file rows carry their file pair under __pair__ inside key_values.
+    // Split it out so the key cell shows the row's identity and the pair reads
+    // as its own chip -- see features/diff-search.js for the shared derivation.
+    rowPairLabel(m) {
+      return diffPairLabel(m && m.key_values);
+    },
+
+    rowKeyText(m) {
+      return diffKeyWithoutPair(m && m.key_values);
+    },
+
     fmtDate(iso) {
       if (!iso) return '—';
       // Treat bare ISO strings (no timezone suffix) as UTC so conversion below is correct

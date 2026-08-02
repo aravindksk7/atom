@@ -50,10 +50,10 @@ test.describe('08c compare / SQL', () => {
     await expect(authedPage.locator('.compare-chip.chip-regressed')).toHaveText('1 differ');
   });
 
-  test('KNOWN BUG: SQL diff row expansion also hits the undefined renderSrc/renderTgt', async ({ authedPage }) => {
-    // Same underlying bug as 08b's recon-file test — see the plan header's
-    // "Known pre-existing bug encountered during research" section. renderSrc/renderTgt
-    // throw as uncaught page errors, not console.error calls.
+  test('SQL diff row expansion renders real source/target values', async ({ authedPage }) => {
+    // Was the same KNOWN BUG as 08b's recon-file test: renderSrc/renderTgt threw as
+    // uncaught page errors because no loaded script defined them. Fixed by
+    // frontend/features/diff-render.js.
     const pageErrors: string[] = [];
     authedPage.on('pageerror', (err) => pageErrors.push(err.message));
 
@@ -66,9 +66,11 @@ test.describe('08c compare / SQL', () => {
     await expect(authedPage.locator('[data-testid="compare-sql-results"]')).toContainText('Results', { timeout: 20_000 });
 
     await authedPage.locator('[data-testid^="compare-sql-row-"]').first().click();
-    await expect(authedPage.locator('td.text-emerald-700 span:visible').first()).toHaveText('undefined');
-    await expect.poll(() => pageErrors.some((e) => e.includes('renderSrc is not defined'))).toBe(true);
-    expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(true);
+    const firstValueCell = authedPage.locator('td.text-slate-700 span:visible').first();
+    await expect(firstValueCell).not.toHaveText('undefined');
+    await expect(firstValueCell).not.toBeEmpty();
+    expect(pageErrors.some((e) => e.includes('renderSrc is not defined'))).toBe(false);
+    expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(false);
   });
 
   test('negative: malformed SQL surfaces backend error', async ({ authedPage }) => {

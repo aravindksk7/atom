@@ -187,6 +187,7 @@ def _run_status_out(run) -> RunStatusOut:
     snapshot = build_run_report_snapshot(run)
     return RunStatusOut(
         run_id=snapshot.run_id,
+        label=snapshot.run_label,
         status=snapshot.status,
         started_at=snapshot.started_at,
         completed_at=snapshot.completed_at,

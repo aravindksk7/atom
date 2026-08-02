@@ -166,8 +166,183 @@ class TestReportTemplateSmoke:
         assert "region=west" in html
         assert "sales_west.csv" in html
         assert "financials_west.csv" in html
-        assert "Unmatched sources" in html
+        # Unmatched files now read as "absent on the other side" rather than the
+        # neutral "Unmatched sources" heading -- see TestMultiFilePairSeverity.
+        assert 'data-testid="unmatched-sources"' in html
+        assert "no target counterpart" in html
         assert "sales_north.csv" in html
+
+
+def test_started_at_rendered_via_to_local_filter(tmp_path):
+    """The header interpolated the raw datetime, so it read
+    "2026-07-01 12:00:00+00:00" -- microseconds and a UTC offset, while every
+    other timestamp in the report is localized."""
+    suite = _make_suite()
+    html = _render(suite, tmp_path)
+
+    expected = suite.started_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    assert f"<strong>Started:</strong> {expected}</p>" in html
+    assert str(suite.started_at) not in html
+
+
+def test_started_at_missing_renders_a_dash_not_none(tmp_path):
+    suite = _make_suite()
+    suite.started_at = None
+
+    html = _render(suite, tmp_path)
+
+    assert "<strong>Started:</strong> —</p>" in html
+    assert "<strong>Started:</strong> None" not in html
+
+
+def test_to_local_passes_through_a_non_datetime_unchanged():
+    """Callers hand the template several suite shapes; a filter that assumed
+    datetime would blow up the whole report over one field."""
+    from etl_framework.reporting.generator import to_local
+
+    assert to_local("2026-07-01T12:00:00Z") == "2026-07-01T12:00:00Z"
+    assert to_local(None) == ""
+
+
+class TestMultiFilePairKey:
+    """Multi-file rows carry their file pair under __pair__ inside key_values.
+    It is pairing metadata, not row identity, so it renders as its own chip and
+    filters on its own rather than sitting raw inside the key JSON."""
+
+    def _paired_mm(self, region, kid, col="amount"):
+        mm = _make_mm(col, "100", "101", mm_type="value_diff")
+        mm.key_values = {"__pair__": {"region": region}, "id": kid}
+        return mm
+
+    def _rendered_rows(self, html):
+        """Just the rendered mismatch markup -- not the script block below it,
+        which legitimately mentions pair-chip as a string it builds."""
+        body = html.split('id="mismatches"')[1]
+        return body.split("<script")[0]
+
+    def _key_cell(self, html):
+        """The visible Row Key Values cell. data-key deliberately keeps the raw
+        key including __pair__ -- the search engine splits key: from pair: off
+        that one attribute -- so only the cell itself must be clean."""
+        marker = '<td style="font-family: monospace; font-size: 0.85em;">'
+        start = html.index(marker, html.index('id="mismatches"'))
+        return html[start:html.index("</td>", start)]
+
+    def test_pair_renders_as_a_chip_and_leaves_the_key_clean(self, tmp_path):
+        html = _render(_make_suite([self._paired_mm("west", 9)]), tmp_path)
+
+        assert '<span class="pair-chip" title="File pair this row came from">region=west</span>' in html
+        assert '{"id": 9}' in self._key_cell(html)
+        # The raw metadata no longer leaks into the visible key cell.
+        assert "__pair__" not in self._key_cell(html)
+
+    def test_row_carries_the_pair_for_filtering(self, tmp_path):
+        html = _render(_make_suite([self._paired_mm("west", 9)]), tmp_path)
+        assert 'data-pair="region=west"' in html
+
+    def test_pair_filter_control_exists_and_is_applied(self, tmp_path):
+        html = _render(_make_suite([self._paired_mm("west", 9)]), tmp_path)
+
+        assert 'id="filter-pair"' in html
+        assert "populatePairFilter" in html
+        assert "tr.dataset.pair===filterState.pair" in html
+
+    def test_unpaired_rows_get_no_chip(self, tmp_path):
+        html = _render(_make_suite([_make_mm("amount", "1", "2")]), tmp_path)
+
+        assert "pair-chip" not in self._rendered_rows(html)
+        assert 'data-pair=""' in html
+
+    def test_load_all_injection_builds_the_same_chip(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+        builder = html.split("function buildMismatchRow")[1][:1600]
+
+        assert "diffPairLabel(row.key_values)" in builder
+        assert "diffKeyWithoutPair(row.key_values)" in builder
+
+
+class TestMultiFilePairSeverity:
+    """A multi-file run's per-pair rollup is the one place a whole FILE can be
+    missing, and it rendered every pair identically -- plain bold status text,
+    same neutral border for PASSED and FAILED, and unmatched files as an
+    unstyled list. Same defect as the row-level colours, one level up."""
+
+    def _suite(self):
+        suite = _make_suite()
+        result = suite.reconciliation_results[0]
+        result.source_file_name = "3 file(s) across 3 pair(s)"
+        result.target_file_name = "2 file(s) across 2 pair(s)"
+        result.mismatch_summary = {
+            "file_pairs": [
+                {"key": {"region": "east"}, "status": "PASSED",
+                 "source_files": ["sales_east.csv"], "target_files": ["fin_east.csv"],
+                 "source_row_count": 2, "target_row_count": 2, "value_mismatch_count": 0},
+                {"key": {"region": "west"}, "status": "FAILED",
+                 "source_files": ["sales_west.csv"], "target_files": ["fin_west.csv"],
+                 "source_row_count": 2, "target_row_count": 2, "value_mismatch_count": 1},
+                {"key": {"region": "south"}, "status": "ERROR",
+                 "source_files": ["sales_south.csv"], "target_files": ["fin_south.csv"],
+                 "error": "could not parse header"},
+            ],
+            "unmatched_sources": [{"key": {"region": "north"}, "files": ["sales_north.csv"]}],
+            "unmatched_targets": [{"key": {"region": "far"}, "files": ["fin_far.csv"]}],
+        }
+        return suite
+
+    def _pair_block(self, html, region):
+        """One pair's markup: from its wrapper up to the next pair (or the
+        unmatched-files block), so nested divs inside it are not cut off."""
+        start = html.rindex('<div data-testid="file-pair-row"', 0, html.index(f"region={region}"))
+        rest = html[start + 1:]
+        ends = [
+            offset for offset in (
+                rest.find('<div data-testid="file-pair-row"'),
+                rest.find('data-testid="unmatched-'),
+            ) if offset != -1
+        ]
+        return rest[:min(ends)] if ends else rest
+
+    def _block(self, html, testid, until):
+        """Markup of one data-testid block, up to the next landmark -- slicing at
+        the first </div> would cut off the nested file list."""
+        start = html.index(f'data-testid="{testid}"')
+        rest = html[start:]
+        end = rest.find(until, 1)
+        return rest[:end] if end != -1 else rest
+
+    def test_pair_status_uses_the_same_badges_as_the_results_table(self, tmp_path):
+        html = _render(self._suite(), tmp_path)
+
+        assert 'class="badge badge-pass">PASSED' in self._pair_block(html, "east")
+        assert 'class="badge badge-fail">FAILED' in self._pair_block(html, "west")
+        assert 'class="badge badge-fail">ERROR' in self._pair_block(html, "south")
+        # The unstyled bold status is gone.
+        assert "<strong>FAILED</strong>" not in html
+
+    def test_failing_pairs_carry_a_severity_accent(self, tmp_path):
+        html = _render(self._suite(), tmp_path)
+
+        assert "pair-row-failed" in self._pair_block(html, "west")
+        assert "pair-row-failed" in self._pair_block(html, "south")
+        assert "pair-row-failed" not in self._pair_block(html, "east")
+
+    def test_unmatched_files_read_as_absent_on_the_other_side(self, tmp_path):
+        html = _render(self._suite(), tmp_path)
+
+        sources = self._block(html, "unmatched-sources", "unmatched-targets")
+        assert "presence-absent" in sources
+        assert "sales_north.csv" in sources
+        # Says which side is missing it, rather than just "unmatched".
+        assert "no target" in sources.lower()
+
+        targets = self._block(html, "unmatched-targets", "</details>")
+        assert "presence-absent" in targets
+        assert "fin_far.csv" in targets
+        assert "no source" in targets.lower()
+
+    def test_pair_error_still_shown(self, tmp_path):
+        html = _render(self._suite(), tmp_path)
+        assert "could not parse header" in self._pair_block(html, "south")
 
 
 def test_accepted_at_rendered_via_to_local_filter(tmp_path):
@@ -355,3 +530,101 @@ def test_analytics_use_uncapped_aggregate_counts(tmp_path):
 def test_filter_search_is_debounced(tmp_path):
     html = _render(_make_suite(), tmp_path)
     assert "setTimeout" in html.split('id="filter-search"')[1][:400]
+
+
+class TestSearchWiring:
+    """The report's filter box must search every field, not just key values."""
+
+    def test_search_engine_is_inlined(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+
+        # Inlined, not linked: the downloaded report has to work offline.
+        assert "function parseDiffQuery" in html
+        assert "function matchesDiffQuery" in html
+        assert "<script src=" not in html
+
+    def test_filters_run_the_shared_query_engine(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+        applied = html.split("function applyFilters")[1][:900]
+
+        assert "matchesDiffQuery(rowSearchFields(tr), terms)" in applied
+        # The old behaviour -- substring over the key JSON alone -- is gone.
+        assert "dataset.key.toLowerCase().includes" not in html
+
+    def test_search_affordances_present(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+
+        assert 'id="filter-help"' in html
+        assert 'id="filter-empty"' in html
+        assert "col:amount" in html
+        assert "-type:value_diff" in html
+        assert "buildSearchHelp" in html
+
+    def test_hits_are_highlighted_in_a_colour_that_is_not_a_diff_colour(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+
+        assert "highlightDiffMatches" in html
+        assert "clearDiffHighlights" in html
+        # Accent, not rose/emerald -- those already mean absent/inserted here.
+        assert "mark.q-hit { background:rgba(var(--accent-rgb),0.30)" in html
+
+
+def _panel_html(html, role):
+    """Return the diff panel markup wrapping the given data-role span."""
+    marker = 'data-role="%s"' % role
+    start = html.rindex('<div class="diff-panel', 0, html.index(marker))
+    return html[start:html.index("</div>", html.index(marker))]
+
+
+class TestSeverityColorCoding:
+    """Red must mark the side that is *wrong*, never merely "the source side".
+
+    Regression guard: row-missing differences store the literal sentinels
+    "present"/"missing" as values, so the old char-diff painted the word
+    "present" red (deleted) and "missing" green (inserted) -- exactly backwards.
+    """
+
+    def test_missing_in_target_marks_target_panel_absent(self, tmp_path):
+        mm = _make_mm("<row>", "present", "missing", mm_type="missing_in_target")
+        html = _render(_make_suite([mm]), tmp_path)
+
+        assert "diff-panel-absent" in _panel_html(html, "tgt-diff")
+        assert "diff-panel-absent" not in _panel_html(html, "src-diff")
+
+    def test_missing_in_source_marks_source_panel_absent(self, tmp_path):
+        mm = _make_mm("<row>", "missing", "present", mm_type="missing_in_source")
+        html = _render(_make_suite([mm]), tmp_path)
+
+        assert "diff-panel-absent" in _panel_html(html, "src-diff")
+        assert "diff-panel-absent" not in _panel_html(html, "tgt-diff")
+
+    def test_presence_sentinels_render_as_markers_not_diffed_words(self, tmp_path):
+        mm = _make_mm("<row>", "present", "missing", mm_type="missing_in_target")
+        html = _render(_make_suite([mm]), tmp_path)
+
+        assert "presence-absent" in _panel_html(html, "tgt-diff")
+        assert "presence-present" in _panel_html(html, "src-diff")
+
+    def test_value_diff_keeps_neutral_panels(self, tmp_path):
+        mm = _make_mm("amount", "100.00", "100.01", mm_type="value_diff")
+        html = _render(_make_suite([mm]), tmp_path)
+
+        assert "diff-panel-absent" not in _panel_html(html, "src-diff")
+        assert "diff-panel-absent" not in _panel_html(html, "tgt-diff")
+
+    def test_missing_row_badge_outranks_value_diff_badge(self, tmp_path):
+        missing = _make_mm("<row>", "present", "missing", mm_type="missing_in_target")
+        drift = _make_mm("amount", "100.00", "100.01", mm_type="value_diff")
+        html = _render(_make_suite([missing, drift]), tmp_path)
+
+        assert '<span class="badge badge-fail">missing_in_target</span>' in html
+        assert '<span class="badge badge-amber">value_diff</span>' in html
+
+    def test_client_side_injection_shares_the_severity_rules(self, tmp_path):
+        html = _render(_make_suite(), tmp_path)
+
+        # The "Load all differences" path rebuilds rows in JS; it must classify
+        # presence rows the same way the server-rendered rows are classified.
+        assert "isPresenceType" in html
+        assert "renderPresence" in html
+        assert "badge-fail" in html.split("function mismatchTypeBadgeClass")[1][:400]

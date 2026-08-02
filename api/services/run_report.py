@@ -180,6 +180,26 @@ class RunReportSnapshot:
     file_name_b: str | None = None
 
     @property
+    def run_label(self) -> str:
+        """Human-readable handle, e.g. "file compare · dev → prod · 00a638ef".
+        Derived rather than stored -- see api/services/run_label.py."""
+        from api.services.run_label import run_display_label
+
+        return run_display_label(
+            run_id=self.run_id,
+            run_type=self.run_type,
+            source_env=self.source_env,
+            target_env=self.target_env,
+            config_snapshot=self.config_snapshot,
+        )
+
+    @property
+    def short_run_id(self) -> str:
+        from api.services.run_label import short_run_id
+
+        return short_run_id(self.run_id)
+
+    @property
     def test_cases(self) -> list[ReportResult]:
         return self.results
 
