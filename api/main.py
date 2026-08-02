@@ -1,6 +1,7 @@
 from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -46,6 +47,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-SAP-LogonToken"],
     expose_headers=["X-Total-Count", "X-Stored-Complete"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(BearerTokenMiddleware)
 
 app.include_router(configs.router, prefix="/api/configs")
