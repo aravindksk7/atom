@@ -1,7 +1,7 @@
 # Frontend Dark Foundation — Design
 
 **Date:** 2026-08-02
-**Status:** Approved (design), pending implementation plan
+**Status:** Implemented (see `docs/superpowers/plans/2026-08-02-frontend-dark-foundation.md`)
 **Author:** Principal data engineer (via brainstorming)
 **Depends on:** `frontend/features/` + `frontend/partials/` modularization (merged — `docs/superpowers/plans/2026-07-16-frontend-modularization.md`)
 **Supersedes:** the deferred "add light theme via design tokens" line item in `docs/superpowers/plans/2026-07-16-etl-modernization-phase6.md` § Out of Scope
