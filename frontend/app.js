@@ -33,14 +33,6 @@ function normalizeToken(raw) {
   return token;
 }
 
-function readStoredTheme() {
-  try {
-    return localStorage.getItem('etl_theme') === 'light' ? 'light' : 'dark';
-  } catch (_) {
-    return 'dark';
-  }
-}
-
 function readStoredBool(key) {
   try {
     return localStorage.getItem(key) === 'true';
@@ -177,7 +169,6 @@ function _appRaw() {
       { id: 'system', label: 'System' },
     ],
     apiOk: false,
-    themeMode: readStoredTheme(),
     sidebarCollapsed: readStoredBool('etl_sidebar_collapsed'),
 
     // -----------------------------------------------------------
@@ -317,18 +308,7 @@ function _appRaw() {
       else this.stopGlobalLogsPolling();
     },
 
-    applyTheme() {
-      document.documentElement.setAttribute('data-theme', this.themeMode);
-    },
-
-    toggleTheme() {
-      this.themeMode = this.themeMode === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem('etl_theme', this.themeMode); } catch (_) {}
-      this.applyTheme();
-    },
-
     async init() {
-      this.applyTheme();
       this.$watch('sidebarCollapsed', (v) => {
         try { localStorage.setItem('etl_sidebar_collapsed', String(v)); } catch (_) {}
       });

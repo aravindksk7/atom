@@ -1073,25 +1073,6 @@ button:focus-visible {
   --c-sky-tint:     18  36  46;   --c-sky-edge:     26  67  87;   --c-sky:      56 189 248;
 }
 
-/* ---- Light theme override (spec-scoped: tokens + sidebar/top bar/Home/
-   buttons/forms/cards/tables/status pills only — other tab-specific styling
-   keeps its dark look in both modes, per 2026-07-16 design spec) ---- */
-:root[data-theme="light"] {
-  --bg: #f7f8fb;
-  --panel: #ffffff;
-  --panel-2: #f3f5f9;
-  --panel-3: #eef0f5;
-  --panel-raised: #eef0f5;
-  --line: #e2e5eb;
-  --line-strong: #d3d8e0;
-  --border: var(--line);
-  --text: #151922;
-  --text-soft: #525a6b;
-  --muted: #8992a3;
-  --primary-soft: rgba(99,102,241,0.08);
-  --shadow: 0 10px 30px rgba(15,23,42,0.08);
-}
-
 html { background: var(--bg); }
 body {
   background:

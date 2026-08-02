@@ -59,10 +59,6 @@
     <span class="page-title" x-text="currentTabLabel"></span>
     <div class="flex items-center gap-3 ml-auto">
       <span class="text-xs" :class="apiOk ? 'text-emerald-500' : 'text-rose-400'" x-text="apiOk ? '● Connected' : '● Offline'"></span>
-      <button class="theme-toggle-btn" data-testid="theme-toggle-btn" @click="toggleTheme()" :aria-label="themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-        <span x-show="themeMode === 'dark'">🌙</span>
-        <span x-show="themeMode === 'light'">☀️</span>
-      </button>
     </div>
   </div>
 </nav>

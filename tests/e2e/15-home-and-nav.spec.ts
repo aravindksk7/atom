@@ -38,16 +38,12 @@ test.describe('15 home and navigation', () => {
     await expect(authedPage.locator('[data-testid="config-new-btn"]')).toBeVisible();
   });
 
-  test('theme toggle persists across reload', async ({ authedPage }) => {
+  test('the app is dark-only with no theme toggle', async ({ authedPage }) => {
     await authedPage.goto('/');
-    await expect(authedPage.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await authedPage.locator('[data-testid="theme-toggle-btn"]').click();
-    await expect(authedPage.locator('html')).toHaveAttribute('data-theme', 'light');
-    await authedPage.reload();
-    await expect(authedPage.locator('html')).toHaveAttribute('data-theme', 'light');
-    // Each test gets a fresh browser context (no storageState reuse configured in
-    // playwright.config.ts/fixtures.ts), so this persisted 'light' value in
-    // localStorage cannot leak into any other test — no reset needed here.
+    await expect(authedPage.locator('[data-testid="theme-toggle-btn"]')).toHaveCount(0);
+    // Nothing sets the theme attribute any more; the dark tokens live on bare :root.
+    const themeAttribute = ['data', 'theme'].join('-');
+    await expect(authedPage.locator('html')).not.toHaveAttribute(themeAttribute, /.*/);
   });
 
   // This test needs to deterministically observe zero runs, but the suite shares one
