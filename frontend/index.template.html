@@ -277,8 +277,8 @@
             <div class="flex gap-1 text-xs">
               <template x-for="f in ['ALL','PENDING','ACCEPTED','REJECTED']" :key="f">
                 <button @click="mismatchStatusFilter = f"
-                        class="px-2 py-1 rounded border text-xs transition-colors"
-                        :class="mismatchStatusFilter === f ? 'bg-indigo-500 text-white border-indigo-500' : 'text-slate-600 border-slate-200 hover:bg-slate-50'"
+                        class="sub-tab text-xs"
+                        :class="mismatchStatusFilter === f ? 'active' : ''"
                         x-text="f">
                 </button>
               </template>

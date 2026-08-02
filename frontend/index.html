@@ -441,7 +441,7 @@
           </div>
         </template>
         <template x-if="diagnosticsData && diagnosticsData.recent_logs && diagnosticsData.recent_logs.length">
-          <pre class="text-xs bg-slate-950 text-slate-100 rounded p-3 overflow-auto max-h-64" x-text="diagnosticsData.recent_logs.join('\n')"></pre>
+          <pre class="text-xs bg-slate-50 text-slate-900 rounded p-3 overflow-auto max-h-64" x-text="diagnosticsData.recent_logs.join('\n')"></pre>
         </template>
       </div>
     </template>
@@ -854,9 +854,9 @@
     </div>
     <div class="flex items-center gap-3">
       <div class="flex rounded-lg border border-slate-200 overflow-hidden">
-        <button @click="launchSubTab='jobs'" :class="launchSubTab==='jobs' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Jobs</button>
-        <button @click="launchSubTab='selections'; loadJobSelections()" :class="launchSubTab==='selections' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Job Selections</button>
-        <button @click="launchSubTab='schedules'; loadSchedules(); loadJobSelections()" :class="launchSubTab==='schedules' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" class="px-4 py-1.5 text-sm font-medium transition-colors">Schedules</button>
+        <button @click="launchSubTab='jobs'" class="sub-tab" :class="launchSubTab==='jobs' ? 'active' : ''">Jobs</button>
+        <button @click="launchSubTab='selections'; loadJobSelections()" class="sub-tab" :class="launchSubTab==='selections' ? 'active' : ''">Job Selections</button>
+        <button @click="launchSubTab='schedules'; loadSchedules(); loadJobSelections()" class="sub-tab" :class="launchSubTab==='schedules' ? 'active' : ''">Schedules</button>
       </div>
       <template x-if="launchSubTab==='jobs'">
         <label class="toggle-wrap">
@@ -1077,7 +1077,7 @@
 
     <div class="flex gap-2 py-1.5 border-b bg-slate-50 text-xs mb-2 -mx-0 px-1">
       <button @click="selectAllJobs()" class="btn-link btn-sm text-slate-600">Select All</button>
-      <span class="text-slate-300">|</span>
+      <span class="text-slate-400">|</span>
       <button @click="selectNoneJobs()" class="btn-link btn-sm text-slate-600">Select None</button>
     </div>
 
@@ -1099,7 +1099,7 @@
                       'bg-emerald-500': getJobLastStatus(job) === 'passed',
                       'bg-rose-500': getJobLastStatus(job) === 'failed',
                       'bg-amber-400 animate-pulse': getJobLastStatus(job) === 'running',
-                      'bg-slate-300': !getJobLastStatus(job)
+                      'bg-slate-400': !getJobLastStatus(job)
                     }">
               </span>
               <span class="font-medium text-slate-800 truncate" x-text="job.name"></span>
@@ -6059,8 +6059,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <div class="flex gap-1 text-xs">
               <template x-for="f in ['ALL','PENDING','ACCEPTED','REJECTED']" :key="f">
                 <button @click="mismatchStatusFilter = f"
-                        class="px-2 py-1 rounded border text-xs transition-colors"
-                        :class="mismatchStatusFilter === f ? 'bg-indigo-500 text-white border-indigo-500' : 'text-slate-600 border-slate-200 hover:bg-slate-50'"
+                        class="sub-tab text-xs"
+                        :class="mismatchStatusFilter === f ? 'active' : ''"
                         x-text="f">
                 </button>
               </template>
