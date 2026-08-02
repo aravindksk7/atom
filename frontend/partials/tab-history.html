@@ -199,13 +199,18 @@
                             <template x-if="expandedMismatches[r.id].length === 0">
                               <tr><td colspan="8" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
                             </template>
+                            <!-- Rendering matches the HTML report, the Compare tab and the
+                                 Differences Explorer: red marks the side that is wrong, not
+                                 the side a value came from, so this table and the report
+                                 downloaded beside it read the same. Only a decision
+                                 (accepted) tints the row. See features/diff-render.js. -->
                             <template x-for="m in expandedMismatches[r.id]" :key="m.id">
-                              <tr :class="(m.accepted ? 'diff-accepted ' : '') + (m.mismatch_type === 'missing_in_target' ? 'diff-missing-target' : m.mismatch_type === 'missing_in_source' ? 'diff-missing-source' : 'diff-value')">
-                                <td><span class="diff-type-badge" x-text="m.mismatch_type || 'value'"></span></td>
+                              <tr :class="m.accepted ? 'diff-accepted' : ''">
+                                <td><span class="badge" :class="isPresenceType(m.mismatch_type) ? 'badge-rose' : 'badge-amber'" x-text="m.mismatch_type || 'value'"></span></td>
                                 <td class="font-mono text-xs" x-text="m.key_values ? JSON.stringify(m.key_values) : '—'"></td>
                                 <td class="font-mono text-xs" x-text="m.column_name || '—'"></td>
-                                <td class="diff-src" x-text="m.source_value ?? '∅'"></td>
-                                <td class="diff-tgt" x-text="m.target_value ?? '∅'"></td>
+                                <td class="font-mono text-xs" x-html="renderSrc(m.source_value, m.target_value, m.mismatch_type)"></td>
+                                <td class="font-mono text-xs" x-html="renderTgt(m.source_value, m.target_value, m.mismatch_type)"></td>
                                 <td class="text-xs font-mono" x-text="m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) : '—'"></td>
                                 <td>
                                   <template x-if="m.accepted">

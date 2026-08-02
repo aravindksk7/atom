@@ -255,7 +255,9 @@ class TestMultiFilePairKey:
 
     def test_load_all_injection_builds_the_same_chip(self, tmp_path):
         html = _render(_make_suite(), tmp_path)
-        builder = html.split("function buildMismatchRow")[1][:1600]
+        # the whole function body, not a fixed-width window -- the slice used to
+        # cut the assertions off whenever the builder grew a line
+        builder = html.split("function buildMismatchRow")[1].split("\n  function ")[0]
 
         assert "diffPairLabel(row.key_values)" in builder
         assert "diffKeyWithoutPair(row.key_values)" in builder
@@ -628,3 +630,34 @@ class TestSeverityColorCoding:
         assert "isPresenceType" in html
         assert "renderPresence" in html
         assert "badge-fail" in html.split("function mismatchTypeBadgeClass")[1][:400]
+
+
+class TestNullValues:
+    """A null value is an absence, and both the Web UI and the report mark it as
+    one. The report renders rows twice -- once server-side, then again in the
+    browser from the row's data attributes -- so the absence has to survive the
+    round trip through an attribute, which can only hold strings."""
+
+    def _row(self, html):
+        import re
+        return re.search(r"<tr data-mismatch.*?</tr>", html, re.S).group(0)
+
+    def test_a_null_value_renders_as_the_null_marker(self, tmp_path):
+        html = _render(_make_suite([_make_mm("amount", "7", None)]), tmp_path)
+
+        assert '<span class="null-val">NULL</span>' in self._row(html)
+
+    def test_the_null_survives_the_client_side_re_render(self, tmp_path):
+        html = _render(_make_suite([_make_mm("amount", "7", None)]), tmp_path)
+
+        # flagged on the row, because data-tgt="" cannot say which of "absent"
+        # and "empty" it means...
+        assert 'data-tgt-null="1"' in self._row(html)
+        # ...and honoured when the browser re-renders the value panels.
+        assert "tr.dataset.tgtNull ? null : tr.dataset.tgt" in html
+
+    def test_a_present_value_is_not_flagged_as_null(self, tmp_path):
+        row = self._row(_render(_make_suite([_make_mm("amount", "7", "8")]), tmp_path))
+
+        assert "data-src-null" not in row
+        assert "data-tgt-null" not in row

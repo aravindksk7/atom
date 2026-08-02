@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +78,12 @@ def _json_text(value: Any) -> str:
 
 
 def _cell_text(value: Any) -> str:
+    """A missing cell exports as blank, never as the string "nan" -- pandas' sentinel
+    is an absence, and spelling it out invents a value the source never held."""
+    if value is None or value is pd.NaT:
+        return ""
+    if isinstance(value, float) and math.isnan(value):
+        return ""
     return csv_safe(value)
 
 
@@ -395,6 +402,46 @@ def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path
         return writer.row_count
 
 
+TRIAGE_FIELDS = (
+    "accepted", "accepted_by", "accepted_at", "accepted_note",
+    "rejected", "rejected_by", "rejected_at", "rejected_note",
+)
+
+
+def _triage_token(value: Any) -> str:
+    """One key component rendered so a value read back from a CSV still matches the
+    JSON-stored one -- pandas hands back 9.0 where the run stored 9."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _triage_key(test_name: Any, column_name: Any, key_values: Any) -> str:
+    """Identity of a difference row across a recompute: which test it came from,
+    which column drifted, and the row key."""
+    key = (
+        {str(name): _triage_token(value) for name, value in key_values.items()}
+        if isinstance(key_values, dict) else {}
+    )
+    return json.dumps([str(test_name or ""), str(column_name or ""), key], sort_keys=True)
+
+
+def stored_triage_by_row(run: TestRun) -> dict[str, dict[str, Any]]:
+    """Accept/reject decisions from the run's stored details, keyed by row identity.
+
+    The full report rebuilds its rows from a recompute, which knows nothing about
+    triage -- without this the download paints every decided row as untouched.
+    """
+    triage: dict[str, dict[str, Any]] = {}
+    for result in run.results:
+        for mismatch in result.mismatches:
+            if not (mismatch.accepted or mismatch.rejected):
+                continue
+            key = _triage_key(result.query_name, mismatch.column_name, mismatch.key_values)
+            triage[key] = {field: getattr(mismatch, field) for field in TRIAGE_FIELDS}
+    return triage
+
+
 def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
     """Recompute the run's complete difference set and render it into a single,
     self-contained HTML report at `path` -- no live API calls needed to view the
@@ -407,6 +454,7 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
     tmp_path = path.with_suffix(".rows.jsonl")
     row_count = write_recomputed_differences(db, run, "json", tmp_path)
 
+    triage = stored_triage_by_row(run)
     rows_by_test: dict[str, list[dict[str, Any]]] = {}
     with tmp_path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -420,12 +468,16 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
                     key_values = json.loads(key_values)
                 except (TypeError, ValueError):
                     key_values = {}
-            rows_by_test.setdefault(row.get("test_name") or "", []).append({
+            test_name = row.get("test_name") or ""
+            rows_by_test.setdefault(test_name, []).append({
                 "column_name": row.get("column_name"),
                 "mismatch_type": row.get("mismatch_type"),
                 "key_values": key_values,
-                "source_value": row.get("source_value"),
-                "target_value": row.get("target_value"),
+                # A blank cell is an absent value, and the report renders absence as
+                # a NULL marker rather than as an empty panel.
+                "source_value": row.get("source_value") or None,
+                "target_value": row.get("target_value") or None,
+                **triage.get(_triage_key(test_name, row.get("column_name"), key_values), {}),
             })
     tmp_path.unlink(missing_ok=True)
 

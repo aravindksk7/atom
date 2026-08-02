@@ -731,21 +731,6 @@ button:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.diff-missing-target { background: #fff7ed; }
-.diff-missing-source { background: #f0fdf4; }
-.diff-value          { background: #fffbeb; }
-.diff-src { color: #dc2626; font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; }
-.diff-tgt { color: #16a34a; font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; }
-.diff-type-badge {
-  display: inline-block;
-  padding: 0.1rem 0.45rem;
-  border-radius: 0.25rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  background: #e2e8f0;
-  color: #475569;
-  white-space: nowrap;
-}
 
 /* =========================================================
    Compare runs
@@ -1508,15 +1493,13 @@ select {
   background: transparent;
   border-color: var(--line);
 }
-.compare-row-regressed,
-.diff-missing-target {
+.compare-row-regressed {
   background: rgba(251,113,133,0.10);
 }
 .compare-row-regressed:hover {
   background: rgba(251,113,133,0.16);
 }
 .compare-row-improved,
-.diff-missing-source,
 .diff-accepted,
 .diff-accepted td {
   background: rgba(52,211,153,0.10) !important;
@@ -1524,15 +1507,6 @@ select {
 }
 .compare-row-improved:hover {
   background: rgba(52,211,153,0.16);
-}
-.diff-value {
-  background: rgba(251,191,36,0.10);
-}
-.diff-src { color: #fda4af; }
-.diff-tgt { color: #86efac; }
-.diff-type-badge {
-  background: rgba(255,255,255,0.08);
-  color: var(--text-soft);
 }
 
 .compare-chip,

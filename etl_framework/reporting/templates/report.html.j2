@@ -510,6 +510,11 @@
                     data-pair="{{ pair_label }}"
                     data-src="{{ mm.source_value if mm.source_value is not none else '' }}"
                     data-tgt="{{ mm.target_value if mm.target_value is not none else '' }}"
+                    {# A missing value and an empty one both flatten to "" in a data
+                       attribute, so flag absence separately or the client-side diff
+                       re-render cannot tell them apart and drops the NULL marker. #}
+                    {% if mm.source_value is none %}data-src-null="1"{% endif %}
+                    {% if mm.target_value is none %}data-tgt-null="1"{% endif %}
                     data-accepted="{{ 'true' if mm.accepted else 'false' }}"
                     data-rejected="{{ 'true' if mm.rejected else 'false' }}">
                   <td><span class="badge {% if mm.mismatch_type in ('value_diff', 'value_mismatch') %}badge-amber{% elif is_presence %}badge-fail{% else %}badge-gray{% endif %}">{{ mm.mismatch_type }}</span></td>
@@ -522,13 +527,13 @@
                       <div class="diff-panel diff-panel-src{% if src_absent %} diff-panel-absent{% endif %}">
                         <span class="diff-panel-label">{{ suite.source_env }}</span>
                         <span class="diff-panel-val" data-role="src-diff"
-                              data-raw="{{ mm.source_value if mm.source_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if src_absent else 'present' }}">{{ '∅ absent' if src_absent else '● present' }}</span>{% else %}{{ mm.source_value if mm.source_value is not none else 'NULL' }}{% endif %}</span>
+                              data-raw="{{ mm.source_value if mm.source_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if src_absent else 'present' }}">{{ '∅ absent' if src_absent else '● present' }}</span>{% elif mm.source_value is none %}<span class="null-val">NULL</span>{% else %}{{ mm.source_value }}{% endif %}</span>
                         <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.src)" title="Copy source value">⎘</button>
                       </div>
                       <div class="diff-panel diff-panel-tgt{% if tgt_absent %} diff-panel-absent{% endif %}">
                         <span class="diff-panel-label">{{ suite.target_env }}</span>
                         <span class="diff-panel-val" data-role="tgt-diff"
-                              data-raw="{{ mm.target_value if mm.target_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if tgt_absent else 'present' }}">{{ '∅ absent' if tgt_absent else '● present' }}</span>{% else %}{{ mm.target_value if mm.target_value is not none else 'NULL' }}{% endif %}</span>
+                              data-raw="{{ mm.target_value if mm.target_value is not none else '' }}">{% if is_presence %}<span class="presence-{{ 'absent' if tgt_absent else 'present' }}">{{ '∅ absent' if tgt_absent else '● present' }}</span>{% elif mm.target_value is none %}<span class="null-val">NULL</span>{% else %}{{ mm.target_value }}{% endif %}</span>
                         <button class="copy-btn" onclick="copyVal(this, this.closest('tr').dataset.tgt)" title="Copy target value">⎘</button>
                       </div>
                     </div>
@@ -765,7 +770,11 @@
   // ── Apply diff to rendered mismatch rows ─────────────────────────────────
   function applyDiff() {
     document.querySelectorAll('tr[data-mismatch]').forEach(function(tr) {
-      var src = tr.dataset.src, tgt = tr.dataset.tgt, type = tr.dataset.type;
+      // A data attribute cannot hold null, so an absent value arrives as "" and
+      // would render as a blank panel. The flags put the null back.
+      var src = tr.dataset.srcNull ? null : tr.dataset.src;
+      var tgt = tr.dataset.tgtNull ? null : tr.dataset.tgt;
+      var type = tr.dataset.type;
       tr.querySelectorAll('[data-role="src-diff"]').forEach(function(el){ el.innerHTML = renderSrc(src,tgt,type); });
       tr.querySelectorAll('[data-role="tgt-diff"]').forEach(function(el){ el.innerHTML = renderTgt(src,tgt,type); });
       applyPanelSeverity(tr, type, src, tgt);
@@ -1031,8 +1040,12 @@
     tr.dataset.type = row.mismatch_type || '';
     tr.dataset.key = typeof row.key_values === 'string' ? row.key_values : JSON.stringify(row.key_values || {});
     tr.dataset.pair = diffPairLabel(row.key_values);
-    tr.dataset.src = row.source_value || '';
-    tr.dataset.tgt = row.target_value || '';
+    tr.dataset.src = row.source_value == null ? '' : String(row.source_value);
+    tr.dataset.tgt = row.target_value == null ? '' : String(row.target_value);
+    // Same absence flags the server-rendered rows carry, so a row loaded later
+    // renders its NULLs the same way as one that came with the page.
+    if (row.source_value == null || row.source_value === '') tr.dataset.srcNull = '1';
+    if (row.target_value == null || row.target_value === '') tr.dataset.tgtNull = '1';
     // The recompute export has no accepted/rejected field (DIFFERENCE_FIELDS doesn't carry it) —
     // carry forward decision state from the rows this injection is about to replace, matched by
     // column+type+key, so re-loading a test doesn't silently undo already-decided rows.

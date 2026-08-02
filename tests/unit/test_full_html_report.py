@@ -341,3 +341,131 @@ def test_write_full_html_report_real_recompute_renders_every_row_untruncated(tmp
     assert html.count("<tr data-mismatch") == n_diffs
     assert "load-all-btn-global" not in html
     assert "truncation-note" not in html
+
+
+def test_write_full_html_report_carries_accepted_and_rejected_triage(tmp_path, monkeypatch):
+    """Accepting or rejecting a mismatch is a decision the Web UI paints green/red.
+    The full report rebuilds its rows from the recompute, so that triage has to be
+    re-attached from the stored details or the download shows every row as untouched.
+    """
+    import re
+    from html import unescape
+
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository.models import MismatchDetail, TestRun
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path,))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text("id,amount\n1,100\n2,2\n9,9\n", encoding="utf-8")
+    tgt.write_text("id,amount\n1,101\n2,2\n11,11\n", encoding="utf-8")
+
+    request = {"file_a_path": str(src), "file_b_path": str(tgt), "key_columns": ["id"]}
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-full-html-triage",
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "recon_file", "request": request},
+        )
+        tr = repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="Run / File A",
+            source_env="dev", target_env="prod",
+            source_row_count=3, target_row_count=3, matched_count=1,
+            missing_in_target_count=1, missing_in_source_count=1, value_mismatch_count=1,
+            mismatches=[], status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        ))
+        repo.add_mismatch_details(tr.id, [
+            MismatchRecord(key_values={"id": 1}, column_name="amount", source_value="100",
+                           target_value="101", mismatch_type="value_diff",
+                           delta=1.0, relative_delta=None),
+            MismatchRecord(key_values={"id": 9}, column_name="<row>", source_value="present",
+                           target_value="missing", mismatch_type="missing_in_target",
+                           delta=None, relative_delta=None),
+        ])
+        db.commit()
+        details = {d.column_name: d for d in db.query(MismatchDetail).all()}
+        details["amount"].accepted = True
+        details["amount"].accepted_by = "qa"
+        details["amount"].accepted_note = "known FX rounding"
+        details["<row>"].rejected = True
+        details["<row>"].rejected_by = "qa"
+        details["<row>"].rejected_note = "source feed was late"
+        db.commit()
+        run_id = run.run_id
+
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        out_path = tmp_path / "report_full.html"
+        de.write_full_html_report(db, run, out_path)
+
+    html = out_path.read_text(encoding="utf-8")
+
+    rows = re.findall(r"<tr data-mismatch.*?</tr>", html, re.S)
+    accepted_row = next(r for r in rows if '{"id": 1}' in unescape(r))
+    rejected_row = next(r for r in rows if '{"id": 9}' in unescape(r))
+    assert 'data-accepted="true"' in accepted_row
+    assert 'data-rejected="true"' in rejected_row
+
+    # ...and the decision is spelled out in its own tinted note row, as the
+    # capped report does.
+    assert "known FX rounding" in html
+    assert "source feed was late" in html
+    assert html.count('<td colspan="5" class="accepted-note">') == 1
+    assert html.count('<td colspan="5" class="rejected-note">') == 1
+
+
+def test_write_full_html_report_renders_an_empty_cell_as_the_null_marker(tmp_path, monkeypatch):
+    """A blank cell comes back from the recompute as pandas' NaN. Rendered raw it
+    reads as the literal string "nan" -- a value the source never contained -- where
+    the Web UI shows a greyed NULL marker."""
+    import re
+    from html import unescape
+
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository.models import TestRun
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path,))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text("id,amount\n1,100\n3,7\n", encoding="utf-8")
+    tgt.write_text("id,amount\n1,100\n3,\n", encoding="utf-8")
+
+    request = {"file_a_path": str(src), "file_b_path": str(tgt), "key_columns": ["id"]}
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-full-html-null",
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"compare_request_type": "recon_file", "request": request},
+        )
+        repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="Run / File A",
+            source_env="dev", target_env="prod",
+            source_row_count=2, target_row_count=2, matched_count=1,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=1,
+            mismatches=[], status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        ))
+        run_id = run.run_id
+
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        out_path = tmp_path / "report_full.html"
+        de.write_full_html_report(db, run, out_path)
+
+    html = out_path.read_text(encoding="utf-8")
+    row = next(r for r in re.findall(r"<tr data-mismatch.*?</tr>", html, re.S)
+               if '{"id": 3}' in unescape(r))
+
+    assert '<span class="null-val">NULL</span>' in row
+    assert "nan" not in row
