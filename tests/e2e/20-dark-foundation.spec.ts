@@ -120,4 +120,26 @@ test.describe('20 dark foundation', () => {
     await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
     expect(helpRequests).toHaveLength(1);
   });
+
+  test('hidden tabs are not in the DOM', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    // Home is active; the Logs tab body must not exist yet.
+    await expect(authedPage.locator('[data-testid="global-logs-panel"]')).toHaveCount(0);
+
+    await authedPage.locator('[data-testid="nav-tab-logs"]').click();
+    await expect(authedPage.locator('[data-testid="global-logs-panel"]')).toHaveCount(1);
+
+    await authedPage.locator('[data-testid="nav-tab-home"]').click();
+    await expect(authedPage.locator('[data-testid="global-logs-panel"]')).toHaveCount(0);
+  });
+
+  test.fixme('boot produces no Alpine expression errors', async ({ authedPage }) => {
+    const errors: string[] = [];
+    authedPage.on('console', (m) => {
+      if (/Alpine Expression Error/.test(m.text())) errors.push(m.text());
+    });
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="home-view"]').waitFor();
+    expect(errors).toEqual([]);
+  });
 });

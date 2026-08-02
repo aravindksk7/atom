@@ -5869,7 +5869,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      TAB - GLOBAL LOGS
      ==================================================================== -->
-<div x-show="currentView === 'logs'" x-cloak>
+<template x-if="currentView === 'logs'"><div data-testid="global-logs-panel">
   <div class="section-header">
     <div>
       <div class="section-title">Logs</div>
@@ -5931,7 +5931,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </template>
   </div>
-</div>
+</div></template>
 
 
 </main><!-- end .main-content -->
