@@ -842,7 +842,7 @@
      TAB 2 – JOB LAUNCHER
      ==================================================================== -->
 <!-- Partial name is historical: this tab's currentView identity is 'jobs', not 'launch'. See features/launch.js. -->
-<div x-show="currentView === 'jobs'" x-cloak>
+<template x-if="currentView === 'jobs'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Job Launcher</div>
@@ -2291,7 +2291,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
   </div>
 
-</div>
+</div></template>
 
 
 <!-- ====================================================================
