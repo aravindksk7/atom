@@ -1,4 +1,4 @@
-<div x-show="currentView === 'scheduler-reports'" x-cloak data-testid="scheduler-reports-tab">
+<template x-if="currentView === 'scheduler-reports'"><div data-testid="scheduler-reports-tab">
   <div class="section-header">
     <div>
       <div class="section-title">Scheduler Reports</div>
@@ -104,4 +104,4 @@
       <div class="flex gap-2 justify-end"><button class="btn-secondary" @click="schedulerReportEditing = null">Cancel</button><button class="btn-primary" @click="schedulerReportSaveEdit()">Save</button></div>
     </div>
   </div>
-</div>
+</div></template>

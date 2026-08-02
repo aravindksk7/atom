@@ -108,4 +108,32 @@ test.describe('16 scheduler statistics', () => {
     const statsCard = authedPage.locator('.section-card').filter({ hasText: 'Scheduler Statistics' });
     await expect(statsCard).toContainText('stats failed');
   });
+
+  test('Scheduler Reports outcome chart re-renders after navigating away and back', async ({ authedPage }) => {
+    await authedPage.route('**/api/scheduler-reports/summary**', async (route) => {
+      await route.fulfill({ json: { scheduler: { running: true }, summary: { success_rate: 50, failed: 1, error: 0 }, performance: { report_query_ms: 8 }, warnings: [] } });
+    });
+    await authedPage.route('**/api/scheduler-reports/grid**', async (route) => {
+      await route.fulfill({ json: { rows: [], warnings: [] } });
+    });
+    await authedPage.route('**/api/scheduler-reports/timeline**', async (route) => {
+      await route.fulfill({ json: { segments: [], warnings: [] } });
+    });
+    await authedPage.route('**/api/scheduler-reports/metrics**', async (route) => {
+      await route.fulfill({ json: { outcomes: [{ status: 'PASSED', count: 1 }, { status: 'FAILED', count: 1 }], warnings: [] } });
+    });
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-scheduler-reports"]').click();
+    await expect(authedPage.locator('#scheduler-report-outcomes-chart')).toBeVisible();
+
+    await authedPage.locator('[data-testid="nav-tab-home"]').click();
+    await expect(authedPage.locator('#scheduler-report-outcomes-chart')).toHaveCount(0);
+
+    await authedPage.locator('[data-testid="nav-tab-scheduler-reports"]').click();
+    const painted = await authedPage.locator('#scheduler-report-outcomes-chart').evaluate(
+      (c: HTMLCanvasElement) => c.width > 0 && c.height > 0,
+    );
+    expect(painted).toBe(true);
+  });
 });
