@@ -6149,7 +6149,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 <!-- ====================================================================
      TAB 8 - CONTRACTS
      ==================================================================== -->
-<div x-show="currentView === 'contracts'" x-cloak>
+<template x-if="currentView === 'contracts'"><div>
   <div class="section-header">
     <div>
       <div class="section-title">Data Contracts</div>
@@ -6319,7 +6319,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       Select a contract to view details
     </div>
   </div>
-</div>
+</div></template>
 
 <!-- Contract create/edit modal -->
 <template x-if="showContractModal">
