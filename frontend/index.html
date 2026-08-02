@@ -93,7 +93,7 @@
 <!-- ====================================================================
      TAB 0 – HOME / OVERVIEW
      ==================================================================== -->
-<div x-show="currentView === 'home'" x-cloak data-testid="home-view">
+<template x-if="currentView === 'home'"><div data-testid="home-view">
   <div class="section-header">
     <div>
       <div class="section-title">Overview</div>
@@ -168,7 +168,7 @@
       <button x-show="storedToken" class="text-indigo-500 hover:underline text-sm" @click="goToTokenManagement()">Manage →</button>
     </div>
   </div>
-</div>
+</div></template>
 
 <!-- ====================================================================
      TAB 1 – CONFIG EDITOR
