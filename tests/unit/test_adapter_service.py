@@ -306,38 +306,213 @@ def _assert_adhoc_dest(dest):
     assert dest.name.startswith("adhoc_")
 
 
+def _fake_response(payload: bytes, status: int = 200, content_type: str = "application/json"):
+    """A real `requests.Response`, so the exchange capture sees real attributes.
+
+    `capture_exchange` reads `.request.headers`, `.elapsed`, `.history` and
+    `.headers`; a MagicMock would let a typo in any of those pass unnoticed.
+    """
+    import requests
+    from datetime import timedelta
+
+    resp = requests.Response()
+    resp.status_code = status
+    resp._content = payload
+    resp.headers["Content-Type"] = content_type
+    resp.url = "https://api.example.com/orders"
+    resp.elapsed = timedelta(milliseconds=12)
+    request = requests.PreparedRequest()
+    request.prepare(
+        method="GET",
+        url="https://api.example.com/orders",
+        headers={"Accept": "application/json", "Authorization": "Bearer topsecret"},
+    )
+    resp.request = request
+    resp.history = []
+    return resp
+
+
+def _one_page_client(payload: bytes, **response_kwargs):
+    """A stand-in for APIEndpointClient that fires `on_response` for one page."""
+    import pandas as pd
+
+    client = MagicMock()
+
+    def fetch_dataframe(max_pages=None, on_response=None):
+        if on_response is not None:
+            on_response(payload, 1, _fake_response(payload, **response_kwargs))
+        return pd.DataFrame({"id": [1]})
+
+    client.fetch_dataframe.side_effect = fetch_dataframe
+    return client
+
+
+def _failing_client(payload: bytes, **response_kwargs):
+    """Fires `on_response` with the offending response, then raises like the client does."""
+    from etl_framework.exceptions import APIRequestError
+
+    client = MagicMock()
+
+    def fetch_dataframe(max_pages=None, on_response=None):
+        if on_response is not None:
+            on_response(payload, 1, _fake_response(payload, **response_kwargs))
+        raise APIRequestError(
+            url="https://api.example.com/orders",
+            http_status=502,
+            message="Cannot parse API response as json",
+        )
+
+    client.fetch_dataframe.side_effect = fetch_dataframe
+    return client
+
+
 def test_test_api_endpoint_sinks_responses_to_adhoc_dir(service, mock_config_repo):
     mock_config_repo.get.return_value = _api_saved_config()
 
     with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
          patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
         mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _one_page_client(b'[{"id": 1}]')
         result = service.test_api_endpoint(config_id=7, endpoint_name="orders")
 
     assert result.ok is True
     kwargs = MockClient.return_value.fetch_dataframe.call_args.kwargs
     assert kwargs["max_pages"] == 1
-    assert kwargs["on_response"] is _sentinel_sink
+    assert callable(kwargs["on_response"])
     dest, endpoint_name = mock_build_sink.call_args.args
     assert endpoint_name == "orders"
     _assert_adhoc_dest(dest)
 
 
 def test_preview_api_endpoint_sinks_responses_to_adhoc_dir(service, mock_config_repo):
-    import pandas as pd
-
     mock_config_repo.get.return_value = _api_saved_config()
 
     with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
          patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
-        MockClient.return_value.fetch_dataframe.return_value = pd.DataFrame({"id": [1, 2]})
         mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _one_page_client(b'[{"id": 1}]')
         out = service.preview_api_endpoint(config_id=7, endpoint_name="orders", limit=10)
 
     assert out["columns"] == ["id"]
     kwargs = MockClient.return_value.fetch_dataframe.call_args.kwargs
     assert kwargs["max_pages"] == 1
-    assert kwargs["on_response"] is _sentinel_sink
+    assert callable(kwargs["on_response"])
     dest, endpoint_name = mock_build_sink.call_args.args
     assert endpoint_name == "orders"
     _assert_adhoc_dest(dest)
+
+
+# ---------------------------------------------------------------------------
+# REST API endpoints - request/response exchange
+# ---------------------------------------------------------------------------
+
+
+def test_api_sinks_fan_out_stores_bytes_and_captures_exchange(
+    service, mock_config_repo, monkeypatch, tmp_path
+):
+    """One pull must feed BOTH observers: the artifact store and the inspector.
+
+    Half of this feature is worthless on its own - bytes on disk the user
+    cannot see, or an exchange with no artifact behind it.
+    """
+    monkeypatch.setattr("api.services.api_artifact.UPLOAD_ROOT", tmp_path)
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient:
+        MockClient.return_value = _one_page_client(b'[{"id": 1}]')
+        result = service.test_api_endpoint(config_id=7, endpoint_name="orders")
+
+    written = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert len(written) == 1, "the artifact sink did not write the response"
+    assert written[0].read_bytes() == b'[{"id": 1}]'
+
+    assert result.exchange is not None, "the exchange sink did not capture the response"
+    assert result.exchange["response"]["status"] == 200
+    assert result.exchange["request"]["method"] == "GET"
+
+
+def test_test_api_endpoint_exchange_round_trips_through_the_schema(service, mock_config_repo):
+    from api.schemas import AdapterTestOut
+
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _one_page_client(b'[{"id": 1}]')
+        result = service.test_api_endpoint(config_id=7, endpoint_name="orders")
+
+    assert isinstance(result, AdapterTestOut)
+    payload = result.model_dump()
+    assert payload["exchange"]["response"]["status"] == 200
+    assert payload["exchange"]["request"]["url"].startswith("https://api.example.com/orders")
+    # Redaction is by header name, and must have caught this one.
+    assert "topsecret" not in str(payload["exchange"]["request"]["headers"])
+
+
+def test_test_api_endpoint_returns_the_exchange_on_failure(service, mock_config_repo):
+    """The failing pull is the one a user needs to see."""
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _failing_client(
+            b"<html>proxy interstitial</html>", status=502, content_type="text/html"
+        )
+        result = service.test_api_endpoint(config_id=7, endpoint_name="orders")
+
+    assert result.ok is False
+    assert result.exchange is not None
+    assert result.exchange["response"]["status"] == 502
+    assert "proxy interstitial" in result.exchange["response"]["body"]
+
+
+def test_test_api_endpoint_exchange_is_none_when_the_endpoint_does_not_resolve(
+    service, mock_config_repo
+):
+    """`seen` must exist before the try, or the handler raises NameError."""
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    result = service.test_api_endpoint(config_id=7, endpoint_name="nope")
+
+    assert result.ok is False
+    assert result.exchange is None
+
+
+def test_preview_api_endpoint_returns_the_exchange_on_success(service, mock_config_repo):
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _one_page_client(b'[{"id": 1}]')
+        out = service.preview_api_endpoint(config_id=7, endpoint_name="orders", limit=10)
+
+    assert out["columns"] == ["id"]
+    assert out["exchange"]["response"]["status"] == 200
+
+
+def test_preview_api_endpoint_failure_detail_carries_message_and_exchange(
+    service, mock_config_repo
+):
+    from fastapi import HTTPException
+
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _sentinel_sink
+        MockClient.return_value = _failing_client(
+            b"<html>proxy interstitial</html>", status=502, content_type="text/html"
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            service.preview_api_endpoint(config_id=7, endpoint_name="orders", limit=10)
+
+    assert exc_info.value.status_code == 502
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    # `apiErrorMessage` in the frontend reads detail.message; keep it a string.
+    assert "Cannot parse API response as json" in detail["message"]
+    assert detail["exchange"]["response"]["status"] == 502
+    assert detail["exchange"]["response"]["content_type"] == "text/html"

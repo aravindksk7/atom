@@ -11,6 +11,7 @@ from requests import exceptions as requests_exc
 
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut
 from api.services.api_artifact import adhoc_artifact_dir, build_api_response_sink
+from api.services.api_exchange import capture_exchange
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
@@ -106,24 +107,49 @@ class AdapterService:
     # REST API endpoints
     # ------------------------------------------------------------------
 
+    def _api_sinks(self, entry, config_id: int, endpoint_name: str):
+        """Both observers for one pull: one stores bytes, one builds the exchange."""
+        store = build_api_response_sink(
+            adhoc_artifact_dir(config_id, endpoint_name), endpoint_name
+        )
+        capture, seen = capture_exchange(entry)
+
+        def fan_out(raw_bytes, page_index, response):
+            store(raw_bytes, page_index, response)
+            capture(raw_bytes, page_index, response)
+
+        return fan_out, seen
+
     def test_api_endpoint(self, config_id: int, endpoint_name: str) -> AdapterTestOut:
         t0 = time.monotonic()
+        # Initialised before the try so the handlers can read it even when
+        # `_get_api_endpoint` raised before a sink was ever built.
+        seen: list[dict] = []
         try:
             entry = self._get_api_endpoint(config_id, endpoint_name)
+            on_response, seen = self._api_sinks(entry, config_id, endpoint_name)
             APIEndpointClient(entry).fetch_dataframe(
                 max_pages=1,
-                on_response=build_api_response_sink(
-                    adhoc_artifact_dir(config_id, endpoint_name), endpoint_name
-                ),
+                on_response=on_response,
             )
             latency_ms = int((time.monotonic() - t0) * 1000)
-            return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
+            return AdapterTestOut(
+                ok=True,
+                message="Connection successful",
+                latency_ms=latency_ms,
+                exchange=seen[0] if seen else None,
+            )
         except HTTPException:
             raise
         except ValueError as exc:
             return AdapterTestOut(ok=False, message=str(exc), latency_ms=0)
         except Exception as exc:
-            return AdapterTestOut(ok=False, message=_friendly_error(exc), latency_ms=0)
+            return AdapterTestOut(
+                ok=False,
+                message=_friendly_error(exc),
+                latency_ms=0,
+                exchange=seen[0] if seen else None,
+            )
 
     def preview_api_endpoint(self, config_id: int, endpoint_name: str, limit: int) -> dict:
         import json
@@ -131,18 +157,30 @@ class AdapterService:
             entry = self._get_api_endpoint(config_id, endpoint_name)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        on_response, seen = self._api_sinks(entry, config_id, endpoint_name)
         try:
             df = APIEndpointClient(entry).fetch_dataframe(
                 max_pages=1,
-                on_response=build_api_response_sink(
-                    adhoc_artifact_dir(config_id, endpoint_name), endpoint_name
-                ),
+                on_response=on_response,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+            # `detail` is a dict rather than a string so the failing exchange
+            # travels with the error. `apiErrorMessage` in the frontend already
+            # prefers `detail.message`, so the message the user sees is unchanged.
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": _friendly_error(exc),
+                    "exchange": seen[0] if seen else None,
+                },
+            ) from exc
         df = df.head(max(1, min(200, limit)))
         rows = json.loads(df.to_json(orient="values", date_format="iso"))
-        return {"columns": list(df.columns), "rows": rows}
+        return {
+            "columns": list(df.columns),
+            "rows": rows,
+            "exchange": seen[0] if seen else None,
+        }
 
     # ------------------------------------------------------------------
     # SAP BO

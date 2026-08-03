@@ -675,6 +675,10 @@ class AdapterTestOut(BaseModel):
     ok: bool
     message: str
     latency_ms: int = 0
+    # REST-API-only: the redacted request/response pair the config UI's
+    # inspector renders. Optional so the SAP BO, database and AWS adapters
+    # that share this schema keep emitting exactly what they emit today.
+    exchange: dict | None = None
 
 
 class AutomicJobStatusOut(BaseModel):
