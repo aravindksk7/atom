@@ -597,3 +597,82 @@ def test_column_stats_api_sources_reach_the_adhoc_directory():
     assert len(dests) == 2
     assert all(dest.name.startswith("adhoc_") for dest in dests)
     assert names == ["orders_a", "orders_b"]
+
+
+def test_api_source_store_responses_false_passes_no_sink():
+    """store_responses=False must opt out of storage entirely, not pick a directory."""
+    import pandas as pd
+    from api.schemas import SourceConfig
+    from api.services.compare_service import CompareService
+
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders_a")
+    mock_client = MagicMock()
+    mock_client.fetch_dataframe.return_value = pd.DataFrame({"id": [1]})
+
+    with patch("etl_framework.rest_api.client.APIEndpointClient", return_value=mock_client), \
+         patch("api.services.compare_service.build_api_response_sink") as mock_build_sink:
+        CompareService(MagicMock(), _api_config_repo())._load_api_source(
+            src, store_responses=False
+        )
+
+    assert mock_client.fetch_dataframe.call_args.kwargs["on_response"] is None
+    mock_build_sink.assert_not_called()
+
+
+class _RecordingAPIClient:
+    """Stands in for APIEndpointClient, invoking on_response as the real one does.
+
+    Without this the sink is never called and an artifact test would pass
+    vacuously no matter what the production code decided.
+    """
+
+    def __init__(self, entry):
+        self._entry = entry
+
+    def fetch_dataframe(self, max_pages=None, on_response=None):
+        import pandas as pd
+
+        if on_response is not None:
+            response = SimpleNamespace(headers={"Content-Type": "application/json"})
+            on_response(b'[{"id": 1, "amount": 10}]', 1, response)
+        return pd.DataFrame({"id": [1], "amount": [10]})
+
+
+def test_bo_compare_export_repull_writes_no_artifacts(tmp_path, monkeypatch):
+    """The export re-pull must store nothing: the run already persisted those bytes.
+
+    Drives the real _write_bo_compare against a temp artifact root. The fake
+    client calls on_response exactly like the real client, so any sink the
+    production code builds does leave a file behind.
+    """
+    from api.services import api_artifact
+    from api.services.difference_export import _write_bo_compare
+    from etl_framework.repository.repository import ConfigRepository
+
+    artifact_root = tmp_path / "uploads"
+    artifact_root.mkdir()
+    monkeypatch.setattr(api_artifact, "UPLOAD_ROOT", artifact_root)
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cfg = ConfigRepository(db).create(
+            "api-export-cfg",
+            "dev",
+            {"api_endpoints": {"orders": {"base_url": "https://api.example.com/orders"}}},
+        )
+        payload = {
+            "source_a": {"source_type": "api", "config_id": cfg.id, "api_endpoint_name": "orders"},
+            "source_b": {"source_type": "api", "config_id": cfg.id, "api_endpoint_name": "orders"},
+            "key_columns": ["id"],
+        }
+
+        with patch("etl_framework.rest_api.client.APIEndpointClient", _RecordingAPIClient):
+            _write_bo_compare(db, payload, MagicMock())
+
+    assert list(artifact_root.iterdir()) == []

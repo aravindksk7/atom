@@ -219,6 +219,8 @@ class CompareService:
         fallback_doc_id: str | None,
         fallback_report_id: str | None,
         run_id: str | None = None,
+        *,
+        store_responses: bool = True,
     ):
         if src.source_type == "live":
             doc_id = src.doc_id or fallback_doc_id
@@ -257,14 +259,20 @@ class CompareService:
             finally:
                 client.logout()
         if src.source_type == "api":
-            return self._load_api_source(src, run_id)
+            return self._load_api_source(src, run_id, store_responses=store_responses)
         return read_tabular(
             path=src.file_path,
             content_b64=src.file_content_b64,
             file_name=src.file_name,
         )
 
-    def _load_api_source(self, src, run_id: str | None = None) -> pd.DataFrame:
+    def _load_api_source(
+        self,
+        src,
+        run_id: str | None = None,
+        *,
+        store_responses: bool = True,
+    ) -> pd.DataFrame:
         cfg = self._config_repo.get(src.config_id)
         if cfg is None:
             raise HTTPException(status_code=404, detail="Config not found")
@@ -275,15 +283,20 @@ class CompareService:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         endpoint_name = src.api_endpoint_name or "endpoint"
-        # A run_id of None means "no run behind this pull" (column stats), not
-        # "store nothing" — it selects the ad-hoc directory instead.
-        dest = (
-            run_artifact_dir(run_id) if run_id
-            else adhoc_artifact_dir(src.config_id, endpoint_name)
-        )
-        return APIEndpointClient(entry).fetch_dataframe(
-            on_response=build_api_response_sink(dest, endpoint_name),
-        )
+        # Two separate decisions, so two separate parameters. `store_responses`
+        # says whether to keep the bytes at all; `run_id` only picks where they
+        # go once we have decided to keep them. A run_id of None means "no run
+        # behind this pull" (column stats) and selects the ad-hoc directory —
+        # it never means "store nothing", which is what store_responses=False
+        # is for. Opting out builds no sink and derives no destination.
+        sink = None
+        if store_responses:
+            dest = (
+                run_artifact_dir(run_id) if run_id
+                else adhoc_artifact_dir(src.config_id, endpoint_name)
+            )
+            sink = build_api_response_sink(dest, endpoint_name)
+        return APIEndpointClient(entry).fetch_dataframe(on_response=sink)
 
     @staticmethod
     def _infer_key_columns(df_a, df_b) -> list[str]:
