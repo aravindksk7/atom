@@ -66,3 +66,58 @@ def test_safe_filename_result_cannot_escape_destination_directory(tmp_path, raw)
 )
 def test_safe_filename_defuses_windows_reserved_device_names(raw, expected):
     assert safe_filename(raw, "fallback.dat") == expected
+
+
+from unittest.mock import MagicMock
+
+from api.services.api_artifact import artifact_filename
+
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _resp(content_type="application/json", disposition=None):
+    resp = MagicMock()
+    headers = {"Content-Type": content_type}
+    if disposition is not None:
+        headers["Content-Disposition"] = disposition
+    resp.headers = headers
+    return resp
+
+
+def test_filename_from_content_type_json():
+    assert artifact_filename(_resp(), "orders", 1) == "orders_p1.json"
+
+
+def test_filename_from_content_type_csv():
+    assert artifact_filename(_resp("text/csv"), "orders", 2) == "orders_p2.csv"
+
+
+def test_filename_from_content_type_xlsx():
+    assert artifact_filename(_resp(_XLSX), "orders", 1) == "orders_p1.xlsx"
+
+
+def test_filename_unknown_content_type_is_bin():
+    assert artifact_filename(_resp("application/octet-stream"), "orders", 1) == "orders_p1.bin"
+
+
+def test_filename_ignores_charset_parameter():
+    assert artifact_filename(_resp("application/json; charset=utf-8"), "orders", 1) == "orders_p1.json"
+
+
+def test_content_disposition_filename_wins():
+    resp = _resp(_XLSX, 'attachment; filename="Q3 report.xlsx"')
+    assert artifact_filename(resp, "orders", 1) == "Q3_report.xlsx"
+
+
+def test_content_disposition_traversal_is_neutralised():
+    resp = _resp("application/json", 'attachment; filename="../../../etc/passwd"')
+    assert artifact_filename(resp, "orders", 1) == "passwd"
+
+
+def test_content_disposition_absolute_windows_path_is_neutralised():
+    resp = _resp("application/json", r'attachment; filename="C:\Windows\evil.dll"')
+    assert artifact_filename(resp, "orders", 1) == "evil.dll"
+
+
+def test_endpoint_name_with_separators_is_neutralised():
+    assert artifact_filename(_resp(), "../../orders", 1) == "orders_p1.json"
