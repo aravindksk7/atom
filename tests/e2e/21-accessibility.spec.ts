@@ -515,10 +515,12 @@ test.describe('21 accessibility', () => {
     await authedPage.locator('[data-testid="nav-tab-contracts"]').click();
     await authedPage.evaluate(() => {
       const app = window.Alpine.$data(document.body);
+      app.contractsLoading = false;
       app.contracts = [{ name: 'contract_a11y', source_job: 'orders', owner: 'team@example.com', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' }];
       app.contractStatusMap = { contract_a11y: { status: 'OK' } };
       app.selectContract = (contract) => { app.selectedContract = contract; };
     });
+    await waitForAlpineFlush(authedPage);
     await authedPage.locator('[data-testid="contract-row-contract_a11y"]').focus();
     await authedPage.keyboard.press('Enter');
     await expect(authedPage.evaluate(() => window.Alpine.$data(document.body).selectedContract.name)).resolves.toBe('contract_a11y');
