@@ -262,6 +262,17 @@ def test_sink_skips_over_cap_payload(tmp_path, monkeypatch, caplog):
     assert "cap" in caplog.text.lower()
 
 
+def test_sink_over_cap_does_not_create_the_directory(tmp_path, monkeypatch):
+    """Cap check must run before mkdir: an over-cap pull leaves nothing behind,
+    not an empty directory. tmp_path itself already exists, so this must use a
+    nested path or the assertion is blind to the ordering."""
+    monkeypatch.setattr(api_artifact, "RUN_DATA_ARTIFACT_MAX_BYTES", 4)
+    dest = tmp_path / "nested" / "dir"
+    sink = build_api_response_sink(dest, "orders")
+    sink(b"way too long", 1, _resp())
+    assert not dest.exists()
+
+
 def test_sink_swallows_write_errors(tmp_path, monkeypatch):
     sink = build_api_response_sink(tmp_path, "orders")
 
