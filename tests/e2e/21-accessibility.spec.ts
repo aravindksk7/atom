@@ -468,6 +468,95 @@ test.describe('21 accessibility', () => {
     }
   });
 
+  // The `config` dialog case above opens the config modal with `apiEndpoints: []`,
+  // so the REST-API endpoint form - and the request/response inspector inside it -
+  // renders in no other scan in this file. Without this test the inspector sits
+  // entirely outside the gate.
+  test('the API endpoint request/response inspector has no WCAG violations', async ({ authedPage }) => {
+    const openInspector = async (status: number) => {
+      await authedPage.goto('/');
+      await authedPage.locator('[data-testid="nav-tab-config"]').click();
+      await authedPage.locator('[data-testid="config-new-btn"]').click();
+      await authedPage.evaluate((responseStatus) => {
+        const app = window.Alpine.$data(document.body);
+        app.configModal.id = 4242;
+        app.addApiEndpoint();
+        const ep = app.configModal.apiEndpoints[0];
+        ep.expanded = true;
+        ep.exchange = {
+          request: {
+            method: 'GET',
+            url: 'https://api.example.com/orders?limit=1',
+            headers: { Accept: 'application/json', Authorization: '<31 chars, redacted>' },
+            body: null,
+            truncated: true,
+          },
+          response: {
+            status: responseStatus,
+            elapsed_ms: 41,
+            bytes: 88,
+            content_type: 'text/html',
+            redirects: 2,
+            headers: { 'Content-Type': 'text/html' },
+            body: '<html>proxy interstitial</html>',
+            truncated: true,
+            binary: false,
+          },
+        };
+        ep.exchangeOpen = true;
+      }, status);
+      await waitForAlpineFlush(authedPage);
+      await expect(authedPage.locator('[data-testid="api-exchange-panel-0"]')).toBeVisible();
+    };
+
+    // Both status colourings, so neither badge's contrast escapes the scan.
+    await test.step('failed pull (4xx/5xx badge)', async () => {
+      await openInspector(502);
+      await runAxe(authedPage);
+    });
+    await test.step('successful pull (2xx badge)', async () => {
+      await openInspector(200);
+      await runAxe(authedPage);
+    });
+  });
+
+  test('the inspector disclosure is keyboard-operable and reports its expanded state', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-config"]').click();
+    await authedPage.locator('[data-testid="config-new-btn"]').click();
+    await authedPage.evaluate(() => {
+      const app = window.Alpine.$data(document.body);
+      app.configModal.id = 4242;
+      app.addApiEndpoint();
+      const ep = app.configModal.apiEndpoints[0];
+      ep.expanded = true;
+      ep.exchange = {
+        request: { method: 'GET', url: 'https://api.example.com/orders', headers: {}, body: null, truncated: false },
+        response: {
+          status: 502, elapsed_ms: 4, bytes: 3, content_type: 'text/html',
+          redirects: 0, headers: {}, body: 'nope', truncated: false, binary: false,
+        },
+      };
+    });
+    await waitForAlpineFlush(authedPage);
+
+    const toggle = authedPage.locator('[data-testid="api-exchange-toggle-0"]');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expectVisibleFocusIndicator(authedPage, '[data-testid="api-exchange-toggle-0"]');
+    await authedPage.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(authedPage.locator('[data-testid="api-exchange-panel-0"]')).toBeVisible();
+
+    // The status is legible as text, not by colour alone.
+    await expect(authedPage.locator('[data-testid="api-exchange-status-0"]')).toContainText('502');
+
+    // Every control in the panel carries an accessible name.
+    const unnamed = await authedPage.locator('[data-testid="api-exchange-panel-0"] button').evaluateAll((buttons) =>
+      buttons.filter((b) => !(b.getAttribute('aria-label') || b.textContent || '').trim()).length
+    );
+    expect(unnamed).toBe(0);
+  });
+
   test('keyboard reachability covers native controls and former non-focusable click handlers', async ({ authedPage }) => {
     await authedPage.goto('/');
 
