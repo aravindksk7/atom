@@ -330,3 +330,105 @@ def test_fetch_dataframe_max_pages_override_wins_over_entry_default():
     with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
         df = client.fetch_dataframe(max_pages=1)
     assert len(df) == 1
+
+
+import requests
+
+
+def _record_sink():
+    seen = []
+
+    def sink(raw_bytes, page_number, response):
+        seen.append((raw_bytes, page_number, response.status_code))
+
+    return sink, seen
+
+
+def test_sink_fires_on_success():
+    client = APIEndpointClient(_entry())
+    sink, seen = _record_sink()
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+        client.fetch_dataframe(on_response=sink)
+    assert len(seen) == 1
+    assert seen[0][1] == 1
+
+
+def test_sink_fires_before_the_status_check():
+    """A 500 body is the most valuable one to keep; _request raises on it."""
+    client = APIEndpointClient(_entry())
+    sink, seen = _record_sink()
+    with patch.object(client._session, "request", return_value=_fake_response(status_code=500, text="boom")):
+        with pytest.raises(APIRequestError):
+            client.fetch_dataframe(on_response=sink)
+    assert [status for _, _, status in seen] == [500]
+    assert seen[0][0] == b"boom"
+
+
+def test_sink_fires_when_json_parsing_fails():
+    client = APIEndpointClient(_entry())
+    sink, seen = _record_sink()
+    with patch.object(client._session, "request", return_value=_fake_response(text="<html>nope</html>")):
+        with pytest.raises(APIRequestError):
+            client.fetch_dataframe(on_response=sink)
+    assert len(seen) == 1  # exactly once per response: no double-fire, no miss
+    assert seen[0][0] == b"<html>nope</html>"
+
+
+def test_sink_does_not_fire_when_no_response_exists():
+    client = APIEndpointClient(_entry())
+    sink, seen = _record_sink()
+    with patch.object(client._session, "request", side_effect=requests.exceptions.ConnectionError("no route")):
+        with pytest.raises(APIRequestError):
+            client.fetch_dataframe(on_response=sink)
+    assert seen == []
+
+
+def test_sink_numbers_pages_for_cursor_pagination():
+    entry = _entry(pagination_type="cursor", pagination_cursor_path="next", json_root_path="rows")
+    client = APIEndpointClient(entry)
+    sink, seen = _record_sink()
+    first = _fake_response(json_data={"next": "abc", "rows": []})
+    second = _fake_response(json_data={"rows": []})
+    with patch.object(client._session, "request", side_effect=[first, second]):
+        client.fetch_dataframe(on_response=sink)
+    assert [page for _, page, _ in seen] == [1, 2]
+
+
+def test_sink_numbers_pages_for_page_pagination():
+    entry = _entry(pagination_type="page", pagination_page_size=2, pagination_max_pages=10)
+    client = APIEndpointClient(entry)
+    sink, seen = _record_sink()
+    captured_params = []
+    pages = [
+        _fake_response(json_data=[{"id": 1}, {"id": 2}]),
+        _fake_response(json_data=[{"id": 3}, {"id": 4}]),
+        _fake_response(json_data=[{"id": 5}]),
+    ]
+
+    def fake_request(method, url, **kwargs):
+        captured_params.append(dict(kwargs["params"]))
+        return pages[len(captured_params) - 1]
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        client.fetch_dataframe(on_response=sink)
+    assert [page for _, page, _ in seen] == [1, 2, 3]
+    assert [p["page"] for p in captured_params] == [1, 2, 3]
+    assert [p["limit"] for p in captured_params] == [2, 2, 2]
+
+
+def test_a_broken_sink_cannot_break_a_pull():
+    client = APIEndpointClient(_entry())
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("sink is broken")
+
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+        df = client.fetch_dataframe(on_response=boom)
+    assert len(df) == 1
+
+
+def test_omitting_the_sink_keeps_the_old_behaviour():
+    client = APIEndpointClient(_entry())
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+        df = client.fetch_dataframe()
+    assert len(df) == 1

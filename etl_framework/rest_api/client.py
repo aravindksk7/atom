@@ -16,13 +16,25 @@ class APIEndpointClient:
         self._session = requests.Session()
         self._sap_bo_token: str | None = None
 
-    def fetch_dataframe(self, max_pages: int | None = None) -> pd.DataFrame:
+    def fetch_dataframe(self, max_pages: int | None = None, on_response=None) -> pd.DataFrame:
+        """Fetch every page of the endpoint and return them as one DataFrame.
+
+        `on_response`, when given, is called once per HTTP response received as
+        `on_response(raw_bytes, page_index, response)`, where `page_index`
+        counts responses from 1 regardless of pagination style. It is invoked
+        from inside `_request` *before* the error-status check, so an error
+        response is handed over too — that body is the whole point, since
+        `_request` raises on 4xx/5xx and would otherwise discard it. The
+        callback is an observer only: any exception it raises is swallowed and
+        never fails the pull.
+        """
         entry = self._entry
         page_cap = max_pages if max_pages is not None else entry.pagination_max_pages
         frames: list[pd.DataFrame] = []
         query_params = dict(entry.query_params)
         url = entry.base_url
-        page_number = 1
+        page_number = 1  # the value sent as the page query param ("page" pagination only)
+        page_index = 1  # counts responses received, for any pagination style
 
         try:
             for _ in range(page_cap):
@@ -30,7 +42,8 @@ class APIEndpointClient:
                     query_params[entry.pagination_page_param] = page_number
                     query_params[entry.pagination_size_param] = entry.pagination_page_size
 
-                response = self._request(url, query_params)
+                response = self._request(url, query_params, page_index=page_index, on_response=on_response)
+                page_index += 1
                 frame = self._parse_response(response)
                 frames.append(frame)
 
@@ -132,7 +145,13 @@ class APIEndpointClient:
         finally:
             self._sap_bo_token = None
 
-    def _request(self, url: str, query_params: dict) -> requests.Response:
+    def _request(
+        self,
+        url: str,
+        query_params: dict,
+        page_index: int = 1,
+        on_response=None,
+    ) -> requests.Response:
         entry = self._entry
         kwargs = self._auth_kwargs()
         try:
@@ -147,6 +166,13 @@ class APIEndpointClient:
             )
         except requests.exceptions.RequestException as exc:
             raise APIRequestError(url=url, http_status=None, message=str(exc)) from exc
+        # Before the status check on purpose: an error response body is the
+        # most useful one to keep, and raising first would discard it.
+        if on_response is not None:
+            try:
+                on_response(response.content, page_index, response)
+            except Exception:  # noqa: BLE001 - an observer cannot break a pull
+                pass
         if response.status_code >= 400:
             body = response.text[:1000] if response.text else ""
             raise APIRequestError(url=url, http_status=response.status_code, message=body)
