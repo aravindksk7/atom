@@ -75,3 +75,68 @@ def test_undecodable_text_body_falls_back_to_replacement():
 def test_empty_body_is_empty_string_not_none():
     body, truncated, binary = render_body(b"", "application/json")
     assert body == ""
+
+
+from unittest.mock import MagicMock
+
+from api.services.api_exchange import capture_exchange
+
+
+def _response(status=200, body=b'{"a":1}', content_type="application/json",
+              req_body=b'{"filter":"recent"}', req_headers=None):
+    request = MagicMock()
+    request.method = "POST"
+    request.url = "https://api.example.com/v1/orders/search?region=us"
+    request.headers = req_headers if req_headers is not None else {"Content-Type": "application/json"}
+    request.body = req_body
+
+    resp = MagicMock()
+    resp.request = request
+    resp.status_code = status
+    resp.content = body
+    resp.headers = {"Content-Type": content_type}
+    resp.history = []
+    elapsed = MagicMock()
+    elapsed.total_seconds.return_value = 0.412
+    resp.elapsed = elapsed
+    return resp
+
+
+def test_capture_records_request_and_response():
+    sink, seen = capture_exchange(_entry())
+    sink(b'{"a":1}', 1, _response())
+    assert len(seen) == 1
+    exchange = seen[0]
+    assert exchange["request"]["method"] == "POST"
+    assert exchange["request"]["url"].endswith("?region=us")
+    assert exchange["request"]["body"] == '{"filter":"recent"}'
+    assert exchange["response"]["status"] == 200
+    assert exchange["response"]["elapsed_ms"] == 412
+    assert exchange["response"]["bytes"] == 7
+
+
+def test_capture_records_a_missing_request_body_as_null():
+    """The dropped-body case: this is what makes it visible."""
+    sink, seen = capture_exchange(_entry())
+    sink(b"{}", 1, _response(req_body=None))
+    assert seen[0]["request"]["body"] is None
+
+
+def test_capture_redacts_request_headers():
+    sink, seen = capture_exchange(_entry())
+    sink(b"{}", 1, _response(req_headers={"Authorization": "Bearer abcdefghijkl"}))
+    assert seen[0]["request"]["headers"]["Authorization"].startswith("<")
+
+
+def test_capture_counts_redirects():
+    resp = _response()
+    resp.history = [MagicMock(), MagicMock()]
+    sink, seen = capture_exchange(_entry())
+    sink(b"{}", 1, resp)
+    assert seen[0]["response"]["redirects"] == 2
+
+
+def test_capture_never_raises_on_a_malformed_response():
+    sink, seen = capture_exchange(_entry())
+    sink(b"{}", 1, object())  # no .request, no .headers
+    assert seen == []
