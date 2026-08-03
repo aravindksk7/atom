@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from api.services.upload_store import safe_filename, unique_path
@@ -224,3 +226,57 @@ def test_run_dir_is_direct_child_of_upload_root():
     path = run_artifact_dir("run-abc")
     assert path.parent == UPLOAD_ROOT
     assert path.name == "run-abc"
+
+
+from api.services import api_artifact
+from api.services.api_artifact import build_api_response_sink
+
+
+def test_sink_writes_the_bytes(tmp_path):
+    sink = build_api_response_sink(tmp_path, "orders")
+    sink(b'{"a":1}', 1, _resp())
+    assert (tmp_path / "orders_p1.json").read_bytes() == b'{"a":1}'
+
+
+def test_sink_creates_the_directory(tmp_path):
+    dest = tmp_path / "nested" / "dir"
+    sink = build_api_response_sink(dest, "orders")
+    sink(b"{}", 1, _resp())
+    assert (dest / "orders_p1.json").exists()
+
+
+def test_sink_suffixes_on_collision(tmp_path):
+    sink = build_api_response_sink(tmp_path, "orders")
+    sink(b"a", 1, _resp())
+    sink(b"b", 1, _resp())
+    assert (tmp_path / "orders_p1.json").read_bytes() == b"a"
+    assert (tmp_path / "orders_p1_2.json").read_bytes() == b"b"
+
+
+def test_sink_skips_over_cap_payload(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(api_artifact, "RUN_DATA_ARTIFACT_MAX_BYTES", 4)
+    sink = build_api_response_sink(tmp_path, "orders")
+    with caplog.at_level("WARNING"):
+        sink(b"way too long", 1, _resp())
+    assert list(tmp_path.iterdir()) == []
+    assert "cap" in caplog.text.lower()
+
+
+def test_sink_swallows_write_errors(tmp_path, monkeypatch):
+    sink = build_api_response_sink(tmp_path, "orders")
+
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_bytes", boom)
+    sink(b"{}", 1, _resp())  # must not raise
+
+
+def test_sink_swallows_directory_errors(tmp_path, monkeypatch):
+    sink = build_api_response_sink(tmp_path / "x", "orders")
+
+    def boom(*args, **kwargs):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    sink(b"{}", 1, _resp())  # must not raise

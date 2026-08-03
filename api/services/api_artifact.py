@@ -169,3 +169,32 @@ def adhoc_artifact_dir(config_id: int, endpoint_name: str, now: datetime | None 
     return UPLOAD_ROOT / safe_filename(
         f"adhoc_{int(config_id)}_{safe_endpoint}_{stamp}", f"adhoc_{stamp}"
     )
+
+
+def build_api_response_sink(dest_dir: Path, endpoint_name: str) -> Callable:
+    """A callback the HTTP client invokes per response, writing it to disk.
+
+    Best-effort by contract: over-cap payloads are skipped and every error is
+    swallowed. A pull that already succeeded must never fail because a file
+    could not be written.
+    """
+    def sink(raw_bytes: bytes, page_number: int, response) -> None:
+        try:
+            if len(raw_bytes) > RUN_DATA_ARTIFACT_MAX_BYTES:
+                logger.warning(
+                    "API response for %s page %d is %d bytes, past the %d-byte cap "
+                    "— not persisted",
+                    endpoint_name, page_number, len(raw_bytes),
+                    RUN_DATA_ARTIFACT_MAX_BYTES,
+                )
+                return
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            path = unique_path(dest_dir, artifact_filename(response, endpoint_name, page_number))
+            path.write_bytes(raw_bytes)
+        except Exception:  # noqa: BLE001 - storage must never break a pull
+            logger.warning(
+                "Could not persist API response for %s page %d",
+                endpoint_name, page_number, exc_info=True,
+            )
+
+    return sink
