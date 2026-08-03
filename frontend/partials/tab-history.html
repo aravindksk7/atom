@@ -871,7 +871,7 @@
           </thead>
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
-              <tr class="cursor-pointer" tabindex="0" role="button" @click="viewRunDetail(run.run_id)" @keydown.enter="viewRunDetail(run.run_id)" @keydown.space.prevent="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
+              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
                 <td class="text-xs text-slate-500">
                   <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
@@ -885,8 +885,8 @@
                   <span class="text-amber-500 font-semibold" x-text="run.slow"></span>
                 </td>
                 <td class="flex gap-2">
-                  <button @click.stop="viewRunDetail(run.run_id)" class="text-indigo-500 hover:underline text-xs">View →</button>
-                  <button @click.stop="deleteRun(run.run_id)" class="text-rose-500 hover:underline text-xs">Delete</button>
+                  <button @click.stop="viewRunDetail(run.run_id)" class="text-indigo-500 hover:underline text-xs" :aria-label="'View run ' + runLabel(run)">View →</button>
+                  <button @click.stop="deleteRun(run.run_id)" class="text-rose-500 hover:underline text-xs" :aria-label="'Delete run ' + runLabel(run)">Delete</button>
                 </td>
               </tr>
             </template>
