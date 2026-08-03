@@ -58,10 +58,16 @@ reports/uploads/<run_id>/
 ```
 
 Raw pages preserve fidelity for forensics. The assembled frame is written once
-and is the **only** path recorded as the run's `data_artifact_path`, which keeps
-the single-artifact rule in `resolve_row_diffable_artifact` intact — that
-function returns `None` for a run with more than one artifact path, so recording
-each page would silently make API runs undiffable.
+per source as a single re-readable CSV.
+
+**No `data_artifact_path` is recorded by any call site in this design.** Every
+run-scoped API pull that exists today is one of *two* sources — the
+`api_reconciliation` job pulls a source and a target, and a compare pulls A and
+B. `resolve_row_diffable_artifact` returns `None` unless a run has exactly one
+artifact path, so recording one side would either misrepresent what the run
+consumed or silently make the run undiffable. The assembled CSV is written and
+discoverable on disk; wiring it to `data_artifact_path` waits for a
+single-source API run to exist, and is deliberately not invented here.
 
 ### Filenames
 
