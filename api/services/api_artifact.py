@@ -1,13 +1,13 @@
 """Persist raw REST API endpoint responses under the server's artifact root.
 
 The HTTP client itself stays filesystem-agnostic: `etl_framework/` must not
-import `api/services/`. This module builds the callback the client invokes per
-response, so layout, size caps and retention stay in the layer that owns them.
+import `api/services/`. This module derives the artifact filename for a
+response today; a later task adds the callback the client invokes to
+actually write it, where layout, size caps and retention live.
 """
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -38,9 +38,49 @@ _EXT_BY_CONTENT_TYPE = {
 #   filename=value          (a quoted-string or a token; RFC 2183/6266 legacy form)
 #   filename*=ext-value      (RFC 5987: charset'language'percent-encoded-value)
 # filename* takes precedence when present and parseable (RFC 6266 section 4.3).
-_FILENAME_STAR_RE = re.compile(r"filename\*\s*=\s*([^;]+)", re.IGNORECASE)
-_FILENAME_QUOTED_RE = re.compile(r'filename(?!\*)\s*=\s*"([^"]*)"', re.IGNORECASE)
-_FILENAME_UNQUOTED_RE = re.compile(r"filename(?!\*)\s*=\s*([^;\s]+)", re.IGNORECASE)
+#
+# A regex .search() over the whole header can't implement this correctly: it
+# has no notion of "parameter boundary" (so a vendor param like
+# `original-filename` gets matched as if it were `filename`) and no notion of
+# quote state (so a ';' or "filename*=" embedded inside a quoted value looks
+# like a real delimiter/parameter). A small left-to-right tokenizer that
+# tracks quote state fixes both by construction.
+
+
+def _iter_disposition_params(raw: str):
+    """Yield (name, value) pairs from a Content-Disposition header.
+
+    Splits on ';' only when not inside a double-quoted value, so a ';'
+    embedded in a quoted filename is data, not a delimiter. The leading
+    disposition-type token (e.g. "attachment", "inline") is skipped.
+    Whitespace around '=' is tolerated; a quoted value has its surrounding
+    quotes stripped (no backslash-escape processing — real servers don't use
+    it here, and everything downstream still goes through `safe_filename`).
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    for ch in raw:
+        if ch == '"':
+            in_quotes = not in_quotes
+            current.append(ch)
+        elif ch == ";" and not in_quotes:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    segments.append("".join(current))
+
+    for segment in segments[1:]:  # segments[0] is the disposition type
+        if "=" not in segment:
+            continue
+        name, _, value = segment.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        if name:
+            yield name, value
 
 
 def _decode_extended_value(ext_value: str) -> str | None:
@@ -48,8 +88,11 @@ def _decode_extended_value(ext_value: str) -> str | None:
 
     Returns None on any parse or decode failure — an unknown charset or a
     malformed value must fall back to the plain `filename`, never raise and
-    break the pull.
+    break the pull. Guarantee holds for `str` input, which is all this ever
+    receives from `_iter_disposition_params`.
     """
+    if not isinstance(ext_value, str):
+        return None
     parts = ext_value.strip().split("'", 2)
     if len(parts) != 3:
         return None
@@ -62,29 +105,30 @@ def _decode_extended_value(ext_value: str) -> str | None:
     return decoded or None
 
 
-def _plain_filename(raw: str) -> str | None:
-    match = _FILENAME_QUOTED_RE.search(raw)
-    if match:
-        return match.group(1)
-    match = _FILENAME_UNQUOTED_RE.search(raw)
-    return match.group(1).strip() if match else None
-
-
 def _disposition_filename(response) -> str | None:
     """Filename from Content-Disposition, honoring RFC 6266 precedence.
 
     `filename*` (percent-encoded, with an explicit charset) wins over the
     plain `filename` when present and decodable; a malformed or
     unrecognised-charset `filename*` falls back to the plain `filename`
-    rather than being treated as absent-and-fatal.
+    rather than being treated as absent-and-fatal. Parameter names are
+    matched case-insensitively. On a duplicate parameter, the first
+    occurrence wins.
     """
     raw = (getattr(response, "headers", None) or {}).get("Content-Disposition") or ""
-    star_match = _FILENAME_STAR_RE.search(raw)
-    if star_match:
-        decoded = _decode_extended_value(star_match.group(1))
+    star_value: str | None = None
+    plain_value: str | None = None
+    for name, value in _iter_disposition_params(raw):
+        lname = name.lower()
+        if lname == "filename*" and star_value is None:
+            star_value = value
+        elif lname == "filename" and plain_value is None:
+            plain_value = value
+    if star_value is not None:
+        decoded = _decode_extended_value(star_value)
         if decoded is not None:
             return decoded
-    return _plain_filename(raw)
+    return plain_value
 
 
 def _extension_for(response) -> str:

@@ -166,3 +166,35 @@ def test_disposition_malformed_extended_value_falls_back_to_plain_filename():
 def test_disposition_inline_has_no_filename():
     resp = _resp(disposition="inline")
     assert _disposition_filename(resp) is None
+
+
+# Regression coverage for a bug in an earlier regex-based implementation: an
+# unanchored .search() over the whole header let a vendor param that merely
+# *ends* in "filename" hijack the match, and quote state wasn't tracked, so
+# a "filename*=" embedded inside a quoted value was mistaken for a real
+# parameter. The tokenizer-based parser fixes both by construction.
+def test_disposition_vendor_param_ending_in_filename_does_not_hijack():
+    resp = _resp(disposition='attachment; original-filename="wrong.txt"; filename="right.pdf"')
+    assert _disposition_filename(resp) == "right.pdf"
+
+
+def test_disposition_filename_star_inside_quoted_value_is_literal_data():
+    resp = _resp(disposition="attachment; filename=\"x; filename*=UTF-8''y\"")
+    assert _disposition_filename(resp) == "x; filename*=UTF-8''y"
+
+
+def test_disposition_param_name_is_case_insensitive():
+    resp = _resp(disposition="attachment; FILENAME*=UTF-8''caps.csv")
+    assert _disposition_filename(resp) == "caps.csv"
+    resp2 = _resp(disposition='attachment; Filename="Mixed.csv"')
+    assert _disposition_filename(resp2) == "Mixed.csv"
+
+
+def test_disposition_tolerates_whitespace_around_equals():
+    resp = _resp(disposition='attachment; filename = "x.csv"')
+    assert _disposition_filename(resp) == "x.csv"
+
+
+def test_disposition_duplicate_filename_first_wins():
+    resp = _resp(disposition='attachment; filename="first.csv"; filename="second.csv"')
+    assert _disposition_filename(resp) == "first.csv"
