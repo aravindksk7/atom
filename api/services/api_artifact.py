@@ -151,3 +151,21 @@ def artifact_filename(response, endpoint_name: str, page_number: int) -> str:
         f"{safe_endpoint}_p{page_number}{_extension_for(response)}",
         f"page_p{page_number}.bin",
     )
+
+
+def run_artifact_dir(run_id: str) -> Path:
+    return UPLOAD_ROOT / safe_filename(run_id, "run")
+
+
+def adhoc_artifact_dir(config_id: int, endpoint_name: str, now: datetime | None = None) -> Path:
+    """Directory for a pull with no run behind it (Test, Preview, column stats).
+
+    Deliberately a direct child of UPLOAD_ROOT: `cleanup_expired_uploads`
+    iterates direct children only, so this is swept by the existing retention
+    with no new code.
+    """
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    safe_endpoint = safe_filename(endpoint_name, "endpoint")
+    return UPLOAD_ROOT / safe_filename(
+        f"adhoc_{int(config_id)}_{safe_endpoint}_{stamp}", f"adhoc_{stamp}"
+    )

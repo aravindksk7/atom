@@ -198,3 +198,29 @@ def test_disposition_tolerates_whitespace_around_equals():
 def test_disposition_duplicate_filename_first_wins():
     resp = _resp(disposition='attachment; filename="first.csv"; filename="second.csv"')
     assert _disposition_filename(resp) == "first.csv"
+
+
+from datetime import datetime, timezone
+
+from api.services.api_artifact import adhoc_artifact_dir, run_artifact_dir
+from api.services.upload_store import UPLOAD_ROOT
+
+_WHEN = datetime(2026, 8, 3, 21, 14, 8, tzinfo=timezone.utc)
+
+
+def test_adhoc_dir_is_direct_child_of_upload_root():
+    path = adhoc_artifact_dir(3, "orders", now=_WHEN)
+    assert path.parent == UPLOAD_ROOT
+    assert path.name == "adhoc_3_orders_20260803T211408Z"
+
+
+def test_adhoc_dir_neutralises_endpoint_name():
+    path = adhoc_artifact_dir(3, "../../evil", now=_WHEN)
+    assert path.parent == UPLOAD_ROOT
+    assert ".." not in path.name
+
+
+def test_run_dir_is_direct_child_of_upload_root():
+    path = run_artifact_dir("run-abc")
+    assert path.parent == UPLOAD_ROOT
+    assert path.name == "run-abc"
