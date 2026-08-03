@@ -22,18 +22,49 @@ RUN_DATA_ARTIFACT_MAX_BYTES = int(
 ) * 1024 * 1024
 
 
+# Windows treats these device stems as reserved regardless of extension or
+# case (NUL.txt, com1.dat, ... all resolve to the device). Path.exists() is
+# always True for them and writes silently go nowhere instead of raising.
+_WINDOWS_RESERVED_STEMS = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
 def safe_filename(name: str | None, fallback: str) -> str:
+    """Return a bare, filesystem-safe basename derived from `name`.
+
+    This is a security boundary for untrusted, remote-supplied names (e.g.
+    an uploaded file name or a Content-Disposition header from a remote
+    server): the result contains no path separators or drive/UNC syntax,
+    is restricted to `[A-Za-z0-9._-]`, is at most 160 characters, and
+    Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) are
+    defused with a leading underscore so they can never resolve to a device
+    file. Falls back to `fallback` if nothing usable survives sanitization.
+    """
     raw = Path(name or fallback).name or fallback
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
-    return (safe or fallback)[:160]
+    safe = safe or fallback
+    stem = safe.split(".", 1)[0]
+    if stem.upper() in _WINDOWS_RESERVED_STEMS:
+        safe = f"_{safe}"
+    return safe[:160]
 
 
-# Kept so any external caller of the old private name keeps working.
+# Precautionary alias in case something outside this module still imports
+# the old private name; no current caller depends on it.
 _safe_filename = safe_filename
 
 
 def unique_path(directory: Path, name: str) -> Path:
-    """A path under `directory` that does not exist yet, suffixing _2, _3, ..."""
+    """A path under `directory` that does not exist yet, suffixing _2, _3, ...
+
+    This only checks existence at call time (TOCTOU): a concurrent writer
+    could create the returned path between this check and when the caller
+    writes to it. Callers needing a hard guarantee must use an exclusive
+    create (e.g. open with O_EXCL) rather than relying on this alone.
+    """
     path = directory / name
     if not path.exists():
         return path
