@@ -1,8 +1,11 @@
 from __future__ import annotations
+
+import logging
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+import requests
 
 from etl_framework.config.models import ApiEndpointEntry
 from etl_framework.exceptions import APIRequestError
@@ -332,14 +335,11 @@ def test_fetch_dataframe_max_pages_override_wins_over_entry_default():
     assert len(df) == 1
 
 
-import requests
-
-
 def _record_sink():
     seen = []
 
-    def sink(raw_bytes, page_number, response):
-        seen.append((raw_bytes, page_number, response.status_code))
+    def sink(raw_bytes, page_index, response):
+        seen.append((raw_bytes, page_index, response.status_code))
 
     return sink, seen
 
@@ -364,7 +364,7 @@ def test_sink_fires_before_the_status_check():
     assert seen[0][0] == b"boom"
 
 
-def test_sink_fires_when_json_parsing_fails():
+def test_sink_fires_exactly_once_when_json_parsing_fails():
     client = APIEndpointClient(_entry())
     sink, seen = _record_sink()
     with patch.object(client._session, "request", return_value=_fake_response(text="<html>nope</html>")):
@@ -380,7 +380,14 @@ def test_sink_does_not_fire_when_no_response_exists():
     with patch.object(client._session, "request", side_effect=requests.exceptions.ConnectionError("no route")):
         with pytest.raises(APIRequestError):
             client.fetch_dataframe(on_response=sink)
-    assert seen == []
+    assert seen == []  # nothing was received, so there is nothing to hand over
+
+    # The same client and sink must still fire on a pull that does get a
+    # response. Without this, the assertion above is satisfied by a callback
+    # that is never invoked at all, and pins nothing.
+    with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+        client.fetch_dataframe(on_response=sink)
+    assert [status for _, _, status in seen] == [200]
 
 
 def test_sink_numbers_pages_for_cursor_pagination():
@@ -425,6 +432,24 @@ def test_a_broken_sink_cannot_break_a_pull():
     with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
         df = client.fetch_dataframe(on_response=boom)
     assert len(df) == 1
+
+
+def test_a_broken_sink_is_logged_rather_than_swallowed_silently(caplog):
+    """A sink with the wrong arity would otherwise drop every response mutely."""
+    client = APIEndpointClient(_entry())
+
+    def two_args_only(raw_bytes, page_index):  # arity mismatch: raises TypeError
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="etl_framework.rest_api.client"):
+        with patch.object(client._session, "request", return_value=_fake_response(json_data=[{"id": 1}])):
+            df = client.fetch_dataframe(on_response=two_args_only)
+
+    assert len(df) == 1
+    records = [r for r in caplog.records if r.name == "etl_framework.rest_api.client"]
+    assert len(records) == 1
+    assert "not captured" in records[0].getMessage()
+    assert records[0].exc_info is not None  # the traceback is what makes it diagnosable
 
 
 def test_omitting_the_sink_keeps_the_old_behaviour():

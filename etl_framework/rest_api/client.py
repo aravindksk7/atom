@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -8,6 +9,8 @@ import requests
 
 from etl_framework.config.models import ApiEndpointEntry
 from etl_framework.exceptions import APIRequestError
+
+logger = logging.getLogger("etl_framework.rest_api.client")
 
 
 class APIEndpointClient:
@@ -25,8 +28,16 @@ class APIEndpointClient:
         from inside `_request` *before* the error-status check, so an error
         response is handed over too — that body is the whole point, since
         `_request` raises on 4xx/5xx and would otherwise discard it. The
-        callback is an observer only: any exception it raises is swallowed and
-        never fails the pull.
+        callback is an observer only: any exception it raises is logged at
+        warning and swallowed, and never fails the pull.
+
+        The third argument is credential-bearing. It is the live
+        `requests.Response`, so `response.request.headers` carries whatever
+        `_auth_kwargs` built — `Authorization: Bearer …`, the configured
+        api-key header, `X-SAP-LogonToken`, or the `Authorization: Basic …`
+        requests derives from the auth tuple — and `response.request.body` may
+        carry more. A consumer that persists or surfaces anything beyond the
+        response's own headers and body must redact those first.
         """
         entry = self._entry
         page_cap = max_pages if max_pages is not None else entry.pagination_max_pages
@@ -172,7 +183,10 @@ class APIEndpointClient:
             try:
                 on_response(response.content, page_index, response)
             except Exception:  # noqa: BLE001 - an observer cannot break a pull
-                pass
+                logger.warning(
+                    "on_response sink raised; this response was not captured",
+                    exc_info=True,
+                )
         if response.status_code >= 400:
             body = response.text[:1000] if response.text else ""
             raise APIRequestError(url=url, http_status=response.status_code, message=body)
