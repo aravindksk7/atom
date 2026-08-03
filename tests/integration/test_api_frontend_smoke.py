@@ -71,10 +71,10 @@ def test_frontend_api_run_lifecycle_smoke(client):
     frontend = client.get("/")
     assert frontend.status_code == 200
     assert "ETL Test Framework" in frontend.text
-    assert "Validate Configuration" in frontend.text
-    assert "DB Password" in frontend.text
-    assert "Run Health Check" in frontend.text
-    assert "Add Job" in frontend.text
+    assert "Import YAML" in frontend.text
+    assert "Security — Users &amp; API Access" in frontend.text
+    assert "Settings" in frontend.text
+    assert "+ New Job" in frontend.text
     assert "Execution Sequence" in frontend.text
     assert "Comparison Backend" in frontend.text
     assert "Pass with actions" in frontend.text

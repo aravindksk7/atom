@@ -9,13 +9,13 @@
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run &amp; Test</div>
     <div class="flex gap-3 flex-wrap">
-      <select data-testid="diff-run-select" x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1">
+      <select data-testid="diff-run-select" x-model="diffRunId" @change="selectDifferenceRun(diffRunId)" class="field-input field-select flex-1" aria-label="diff run select">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="runLabel(run) + ' [' + run.status + ']'"></option>
         </template>
       </select>
-      <select data-testid="diff-test-select" x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1">
+      <select data-testid="diff-test-select" x-model="diffResultId" @change="selectDifferenceResult(diffResultId)" :disabled="!diffTestOptions.length" class="field-input field-select flex-1" aria-label="diff test select">
         <option value="">— Choose test —</option>
         <template x-for="t in diffTestOptions" :key="t.id">
           <option :value="t.id" x-text="t.query_name + ' (' + t.total_issues + ' issues)'"></option>
@@ -74,24 +74,24 @@
 
       <div class="card mb-4">
         <div class="flex gap-2 flex-wrap items-center">
-          <input data-testid="diff-search-input" x-model="diffSearch" @input.debounce.300ms="applyDifferenceFilters()" class="field-input flex-1" placeholder="Search key values, column, source/target…" style="min-width:220px">
-          <select data-testid="diff-column-select" x-model="diffColumn" @change="applyDifferenceFilters()" class="field-input field-select">
+          <input data-testid="diff-search-input" x-model="diffSearch" @input.debounce.300ms="applyDifferenceFilters()" class="field-input flex-1" placeholder="Search key values, column, source/target…" style="min-width:220px" aria-label="search key values column source target">
+          <select data-testid="diff-column-select" x-model="diffColumn" @change="applyDifferenceFilters()" class="field-input field-select" aria-label="diff column select">
             <option value="">All columns</option>
             <template x-for="c in diffColumnOptions" :key="c"><option :value="c" x-text="c"></option></template>
           </select>
-          <select data-testid="diff-type-select" x-model="diffType" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-type-select" x-model="diffType" @change="applyDifferenceFilters()" class="field-input field-select" aria-label="diff type select">
             <option value="">All types</option>
             <option value="value_diff">Value diff</option>
             <option value="missing_in_target">Missing →</option>
             <option value="missing_in_source">Missing ←</option>
           </select>
-          <select data-testid="diff-status-select" x-model="diffStatus" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-status-select" x-model="diffStatus" @change="applyDifferenceFilters()" class="field-input field-select" aria-label="diff status select">
             <option value="">All statuses</option>
             <option value="pending">Pending only</option>
             <option value="accepted">Accepted only</option>
             <option value="rejected">Rejected only</option>
           </select>
-          <select data-testid="diff-sort-select" x-model="diffSort" @change="applyDifferenceFilters()" class="field-input field-select">
+          <select data-testid="diff-sort-select" x-model="diffSort" @change="applyDifferenceFilters()" class="field-input field-select" aria-label="diff sort select">
             <option value="id">Default order</option>
             <option value="column">Sort by column</option>
             <option value="mismatch_type">Sort by type</option>
@@ -102,8 +102,8 @@
       </div>
 
       <div class="card overflow-hidden p-0">
-        <table data-testid="diff-results-table" class="data-table">
-          <thead><tr><th>Type</th><th>Column</th><th>Key Values</th><th>Source</th><th>Target</th><th>Status</th></tr></thead>
+        <table data-testid="diff-results-table" class="data-table" aria-label="differences table 1">
+          <thead><tr><th scope="col">Type</th><th scope="col">Column</th><th scope="col">Key Values</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Status</th></tr></thead>
           <tbody>
             <template x-if="diffLoading">
               <tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>

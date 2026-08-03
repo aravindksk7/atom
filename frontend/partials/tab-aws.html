@@ -14,8 +14,8 @@
   </div>
 
   <div class="card mb-4">
-    <label class="field-label">Config</label>
-    <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select">
+    <label  class="field-label" for="a11y-aws-config">Config</label>
+    <select x-model="awsConfigId" class="field-input field-select" data-testid="aws-config-select" id="a11y-aws-config">
       <option value="">— Select —</option>
       <template x-for="cfg in configs" :key="cfg.id">
         <option :value="cfg.id" x-text="cfg.name"></option>
@@ -32,8 +32,8 @@
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Format</label>
-          <select x-model="awsFmt" class="field-input field-select" data-testid="aws-fmt-select">
+          <label  class="field-label" for="a11y-aws-format">Format</label>
+          <select x-model="awsFmt" class="field-input field-select" data-testid="aws-fmt-select" id="a11y-aws-format">
             <option value="csv">csv</option>
             <option value="json">json</option>
             <option value="parquet">parquet</option>
@@ -44,23 +44,23 @@
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Bucket</label>
-          <input x-model="awsBucket" class="field-input" placeholder="my-bucket" data-testid="aws-bucket-input" />
+          <label  class="field-label" for="a11y-aws-bucket">Bucket</label>
+          <input x-model="awsBucket" class="field-input" placeholder="my-bucket" data-testid="aws-bucket-input" id="a11y-aws-bucket" />
         </div>
         <div>
-          <label class="field-label">Key</label>
-          <input x-model="awsKey" class="field-input" placeholder="data/part-0.parquet" data-testid="aws-key-input" />
+          <label  class="field-label" for="a11y-aws-key">Key</label>
+          <input x-model="awsKey" class="field-input" placeholder="data/part-0.parquet" data-testid="aws-key-input" id="a11y-aws-key" />
         </div>
       </div>
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Prefix</label>
-          <input x-model="awsPrefix" class="field-input" placeholder="table/" data-testid="aws-prefix-input" />
+          <label  class="field-label" for="a11y-aws-prefix">Prefix</label>
+          <input x-model="awsPrefix" class="field-input" placeholder="table/" data-testid="aws-prefix-input" id="a11y-aws-prefix" />
         </div>
         <div>
-          <label class="field-label">Expected Schema (JSON, optional)</label>
-          <input x-model="awsExpectedSchemaRaw" class="field-input" placeholder='{"id":"int64"}' data-testid="aws-expected-schema-input" />
+          <label  class="field-label" for="a11y-aws-expected-schema-json-optional">Expected Schema (JSON, optional)</label>
+          <input x-model="awsExpectedSchemaRaw" class="field-input" placeholder='{"id":"int64"}' data-testid="aws-expected-schema-input" id="a11y-aws-expected-schema-json-optional" />
         </div>
       </div>
 
@@ -68,28 +68,28 @@
         <div class="font-semibold text-slate-700 mb-2">Create tracked S3 job</div>
         <div class="grid-2 mb-3">
           <div>
-            <label class="field-label">Job Name (optional)</label>
-            <input x-model="awsJobName" class="field-input" placeholder="auto-generated from S3 path" data-testid="aws-job-name-input" />
+            <label  class="field-label" for="a11y-aws-job-name-optional">Job Name (optional)</label>
+            <input x-model="awsJobName" class="field-input" placeholder="auto-generated from S3 path" data-testid="aws-job-name-input" id="a11y-aws-job-name-optional" />
           </div>
           <div>
-            <label class="field-label">Expected Partition Columns</label>
-            <input x-model="awsExpectedColumnsRaw" class="field-input" placeholder="dt, region" data-testid="aws-expected-columns-input" />
-          </div>
-        </div>
-        <div class="grid-2 mb-3">
-          <div>
-            <label class="field-label">Min Rows</label>
-            <input x-model="awsMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-min-rows-input" />
-          </div>
-          <div>
-            <label class="field-label">Max Rows</label>
-            <input x-model="awsMaxRows" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-max-rows-input" />
+            <label  class="field-label" for="a11y-aws-expected-partition-columns">Expected Partition Columns</label>
+            <input x-model="awsExpectedColumnsRaw" class="field-input" placeholder="dt, region" data-testid="aws-expected-columns-input" id="a11y-aws-expected-partition-columns" />
           </div>
         </div>
         <div class="grid-2 mb-3">
           <div>
-            <label class="field-label">Min Partitions</label>
-            <input x-model="awsMinPartitions" type="number" min="0" class="field-input" placeholder="1" data-testid="aws-min-partitions-input" />
+            <label  class="field-label" for="a11y-aws-min-rows">Min Rows</label>
+            <input x-model="awsMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-min-rows-input" id="a11y-aws-min-rows" />
+          </div>
+          <div>
+            <label  class="field-label" for="a11y-aws-max-rows">Max Rows</label>
+            <input x-model="awsMaxRows" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-max-rows-input" id="a11y-aws-max-rows" />
+          </div>
+        </div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label  class="field-label" for="a11y-aws-min-partitions">Min Partitions</label>
+            <input x-model="awsMinPartitions" type="number" min="0" class="field-input" placeholder="1" data-testid="aws-min-partitions-input" id="a11y-aws-min-partitions" />
           </div>
         </div>
         <div class="flex gap-2 flex-wrap mb-2">
@@ -126,13 +126,13 @@
       <div x-show="awsResult" data-testid="aws-result">
         <template x-if="awsResult && awsResult.kind === 'metadata'">
           <div class="overflow-x-auto">
-            <table class="results-table text-sm">
+            <table class="results-table text-sm" aria-label="aws table 1">
               <tbody>
-                <tr><th>Size (bytes)</th><td x-text="awsResult.data.size_bytes"></td></tr>
-                <tr><th>Content type</th><td x-text="awsResult.data.content_type"></td></tr>
-                <tr><th>Storage class</th><td x-text="awsResult.data.storage_class"></td></tr>
-                <tr><th>ETag</th><td x-text="awsResult.data.etag"></td></tr>
-                <tr><th>Last modified</th><td x-text="awsResult.data.last_modified"></td></tr>
+                <tr><th scope="col">Size (bytes)</th><td x-text="awsResult.data.size_bytes"></td></tr>
+                <tr><th scope="col">Content type</th><td x-text="awsResult.data.content_type"></td></tr>
+                <tr><th scope="col">Storage class</th><td x-text="awsResult.data.storage_class"></td></tr>
+                <tr><th scope="col">ETag</th><td x-text="awsResult.data.etag"></td></tr>
+                <tr><th scope="col">Last modified</th><td x-text="awsResult.data.last_modified"></td></tr>
               </tbody>
             </table>
           </div>
@@ -147,13 +147,13 @@
 
         <template x-if="awsResult && awsResult.kind === 'partitions'">
           <div class="overflow-x-auto">
-            <table class="results-table text-xs">
+            <table class="results-table text-xs" aria-label="aws table 2">
               <thead>
                 <tr>
                   <template x-for="col in awsResult.data.columns" :key="col">
-                    <th x-text="col"></th>
+                    <th x-text="col" scope="col"></th>
                   </template>
-                  <th>objects</th>
+                  <th scope="col">objects</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,20 +187,20 @@
         <span class="badge badge-blue">Catalog Compare</span>
       </div>
       <div class="grid-2 mb-3">
-        <div><label class="field-label">Source Database</label><input x-model="awsGlueSourceDatabase" class="field-input" data-testid="aws-glue-source-database-input" /></div>
-        <div><label class="field-label">Source Table</label><input x-model="awsGlueSourceTable" class="field-input" data-testid="aws-glue-source-table-input" /></div>
+        <div><label  class="field-label" for="a11y-aws-source-database">Source Database</label><input x-model="awsGlueSourceDatabase" class="field-input" data-testid="aws-glue-source-database-input" id="a11y-aws-source-database" /></div>
+        <div><label  class="field-label" for="a11y-aws-source-table">Source Table</label><input x-model="awsGlueSourceTable" class="field-input" data-testid="aws-glue-source-table-input" id="a11y-aws-source-table" /></div>
       </div>
       <div class="grid-2 mb-3">
-        <div><label class="field-label">Target Database</label><input x-model="awsGlueTargetDatabase" class="field-input" data-testid="aws-glue-target-database-input" /></div>
-        <div><label class="field-label">Target Table</label><input x-model="awsGlueTargetTable" class="field-input" data-testid="aws-glue-target-table-input" /></div>
+        <div><label  class="field-label" for="a11y-aws-target-database">Target Database</label><input x-model="awsGlueTargetDatabase" class="field-input" data-testid="aws-glue-target-database-input" id="a11y-aws-target-database" /></div>
+        <div><label  class="field-label" for="a11y-aws-target-table">Target Table</label><input x-model="awsGlueTargetTable" class="field-input" data-testid="aws-glue-target-table-input" id="a11y-aws-target-table" /></div>
       </div>
       <div class="flex gap-4 text-sm mb-3">
-        <label><input type="checkbox" x-model="awsGlueCompareLocation" data-testid="aws-glue-compare-location-checkbox" /> Compare location</label>
-        <label><input type="checkbox" x-model="awsGlueCompareFormats" data-testid="aws-glue-compare-formats-checkbox" /> Compare formats</label>
-        <label><input type="checkbox" x-model="awsGlueComparePartitions" data-testid="aws-glue-compare-partitions-checkbox" /> Compare partitions</label>
+        <label><input type="checkbox" x-model="awsGlueCompareLocation" data-testid="aws-glue-compare-location-checkbox" aria-label="aws glue compare location checkbox" /> Compare location</label>
+        <label><input type="checkbox" x-model="awsGlueCompareFormats" data-testid="aws-glue-compare-formats-checkbox" aria-label="aws glue compare formats checkbox" /> Compare formats</label>
+        <label><input type="checkbox" x-model="awsGlueComparePartitions" data-testid="aws-glue-compare-partitions-checkbox" aria-label="aws glue compare partitions checkbox" /> Compare partitions</label>
       </div>
       <div class="grid-2 mb-3">
-        <div><label class="field-label">Job Name (optional)</label><input x-model="awsGlueJobName" class="field-input" data-testid="aws-glue-job-name-input" /></div>
+        <div><label  class="field-label" for="a11y-aws-job-name-optional-2">Job Name (optional)</label><input x-model="awsGlueJobName" class="field-input" data-testid="aws-glue-job-name-input" id="a11y-aws-job-name-optional-2" /></div>
       </div>
       <div class="flex gap-2 flex-wrap mb-3">
         <button @click="awsGlueCompareTables()" :disabled="awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable" class="btn-primary" data-testid="aws-glue-compare-btn">Compare Glue Catalog Tables</button>
@@ -231,44 +231,44 @@
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Database (optional)</label>
-          <input x-model="awsAthenaDatabase" class="field-input" placeholder="analytics" data-testid="aws-athena-database-input" />
+          <label  class="field-label" for="a11y-aws-database-optional">Database (optional)</label>
+          <input x-model="awsAthenaDatabase" class="field-input" placeholder="analytics" data-testid="aws-athena-database-input" id="a11y-aws-database-optional" />
         </div>
         <div>
-          <label class="field-label">Workgroup (optional)</label>
-          <input x-model="awsAthenaWorkgroup" class="field-input" placeholder="primary" data-testid="aws-athena-workgroup-input" />
+          <label  class="field-label" for="a11y-aws-workgroup-optional">Workgroup (optional)</label>
+          <input x-model="awsAthenaWorkgroup" class="field-input" placeholder="primary" data-testid="aws-athena-workgroup-input" id="a11y-aws-workgroup-optional" />
         </div>
       </div>
 
       <div class="mb-3">
-        <label class="field-label">SQL Query</label>
-        <textarea x-model="awsAthenaQuery" rows="5" class="field-input" placeholder="select * from table limit 100" data-testid="aws-athena-query-input"></textarea>
+        <label  class="field-label" for="a11y-aws-sql-query">SQL Query</label>
+        <textarea x-model="awsAthenaQuery" rows="5" class="field-input" placeholder="select * from table limit 100" data-testid="aws-athena-query-input" id="a11y-aws-sql-query"></textarea>
       </div>
 
       <div class="mb-3">
-        <label class="field-label">Output Location</label>
-        <input x-model="awsAthenaOutputLocation" class="field-input" placeholder="s3://bucket/athena-results/" data-testid="aws-athena-output-location-input" />
+        <label  class="field-label" for="a11y-aws-output-location">Output Location</label>
+        <input x-model="awsAthenaOutputLocation" class="field-input" placeholder="s3://bucket/athena-results/" data-testid="aws-athena-output-location-input" id="a11y-aws-output-location" />
       </div>
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Max Rows</label>
-          <input x-model="awsAthenaMaxRows" type="number" min="1" class="field-input" placeholder="100" data-testid="aws-athena-max-rows-input" />
+          <label  class="field-label" for="a11y-aws-max-rows-2">Max Rows</label>
+          <input x-model="awsAthenaMaxRows" type="number" min="1" class="field-input" placeholder="100" data-testid="aws-athena-max-rows-input" id="a11y-aws-max-rows-2" />
         </div>
         <div>
-          <label class="field-label">Job Name (optional)</label>
-          <input x-model="awsAthenaJobName" class="field-input" placeholder="auto-generated from database" data-testid="aws-athena-job-name-input" />
+          <label  class="field-label" for="a11y-aws-job-name-optional-3">Job Name (optional)</label>
+          <input x-model="awsAthenaJobName" class="field-input" placeholder="auto-generated from database" data-testid="aws-athena-job-name-input" id="a11y-aws-job-name-optional-3" />
         </div>
       </div>
 
       <div class="grid-2 mb-3">
         <div>
-          <label class="field-label">Min Rows Assertion</label>
-          <input x-model="awsAthenaMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-athena-min-rows-input" />
+          <label  class="field-label" for="a11y-aws-min-rows-assertion">Min Rows Assertion</label>
+          <input x-model="awsAthenaMinRows" type="number" min="0" class="field-input" placeholder="0" data-testid="aws-athena-min-rows-input" id="a11y-aws-min-rows-assertion" />
         </div>
         <div>
-          <label class="field-label">Max Rows Assertion</label>
-          <input x-model="awsAthenaMaxRowsAssert" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-athena-max-rows-assert-input" />
+          <label  class="field-label" for="a11y-aws-max-rows-assertion">Max Rows Assertion</label>
+          <input x-model="awsAthenaMaxRowsAssert" type="number" min="0" class="field-input" placeholder="1000000" data-testid="aws-athena-max-rows-assert-input" id="a11y-aws-max-rows-assertion" />
         </div>
       </div>
 

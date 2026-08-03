@@ -38,18 +38,18 @@
     <div class="section-header" style="padding: 0.75rem 1rem 0;">
       <div class="section-title" style="font-size: 0.9375rem;">Recent Activity</div>
     </div>
-    <table class="data-table" data-testid="home-recent-runs-table">
+    <table class="data-table" data-testid="home-recent-runs-table" aria-label="home table 1">
       <thead>
         <tr>
-          <th>Run ID</th>
-          <th>Status</th>
-          <th>Environments</th>
-          <th>Started</th>
+          <th scope="col">Run ID</th>
+          <th scope="col">Status</th>
+          <th scope="col">Environments</th>
+          <th scope="col">Started</th>
         </tr>
       </thead>
       <tbody>
         <template x-for="run in homeRecentRuns" :key="run.run_id">
-          <tr class="cursor-pointer" @click="onTabEnter('history'); viewRunDetail(run.run_id)" :data-testid="'home-recent-run-row-' + run.run_id">
+          <tr class="cursor-pointer" tabindex="0" role="button" @click="onTabEnter('history'); viewRunDetail(run.run_id)" @keydown.enter="onTabEnter('history'); viewRunDetail(run.run_id)" @keydown.space.prevent="onTabEnter('history'); viewRunDetail(run.run_id)" :data-testid="'home-recent-run-row-' + run.run_id">
             <td class="font-mono text-xs text-slate-500" x-text="run.run_id.substring(0,8)+'…'"></td>
             <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
             <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>

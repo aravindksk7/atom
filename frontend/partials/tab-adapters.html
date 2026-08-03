@@ -17,8 +17,8 @@
         </div>
         <div class="grid-2 mb-3">
           <div>
-            <label class="field-label">Config</label>
-            <select x-model="boConfigId" class="field-input field-select" data-testid="bo-config-select">
+            <label  class="field-label" for="a11y-adapters-config">Config</label>
+            <select x-model="boConfigId" class="field-input field-select" data-testid="bo-config-select" id="a11y-adapters-config">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -54,13 +54,13 @@
         </div>
         <div class="mb-3">
           <input x-model="boFilterQuery" class="field-input" placeholder="Search documents and reports…"
-                 data-testid="bo-doc-search-input" />
+                 data-testid="bo-doc-search-input" aria-label="search documents and reports" />
           <p class="text-xs text-muted mt-1">Matches document name/folder/id, and report names once a document has been expanded.</p>
         </div>
         <div class="mb-3">
-          <label class="field-label">Ran on date</label>
+          <label  class="field-label" for="a11y-adapters-ran-on-date">Ran on date</label>
           <input type="date" x-model="boRanOnDate" @change="loadBORanOnDocIds()" class="field-input"
-                 data-testid="bo-doc-ran-on-input" />
+                 data-testid="bo-doc-ran-on-input" id="a11y-adapters-ran-on-date" />
           <template x-if="boRanOnDate && !boRanOnSupported">
             <p class="text-xs text-rose-600 mt-1">Run-date filtering isn't available against this SAP BO server.</p>
           </template>
@@ -89,14 +89,14 @@
                 <template x-if="(boReportParams[doc.id] || []).length > 0">
                   <div class="px-3 py-1 space-y-1">
                     <div class="text-muted text-xs">Prompts</div>
-                    <template x-for="p in (boReportParams[doc.id] || [])" :key="p.id">
-                      <label class="field-label block">
+                    <template x-for="(p, promptIdx) in (boReportParams[doc.id] || [])" :key="p.id">
+                      <label class="field-label block" :for="`bo-report-prompt-${doc.id}-${promptIdx}`">
                         <span x-text="(p.name || ('Prompt ' + p.id)) + (p.mandatory ? ' *' : '')"></span>
                         <input x-show="p.type === 'DateTime'" type="date"
-                               x-model="boParamValues[doc.id][p.id]" class="field-input" />
+                               x-model="boParamValues[doc.id][p.id]" class="field-input" :id="`bo-report-prompt-${doc.id}-${promptIdx}`" />
                         <input x-show="p.type !== 'DateTime'" type="text"
                                x-model="boParamValues[doc.id][p.id]" class="field-input"
-                               :placeholder="p.type" />
+                               :placeholder="p.type" :id="`bo-report-prompt-${doc.id}-${promptIdx}`" />
                       </label>
                     </template>
                   </div>
@@ -136,8 +136,8 @@
         </div>
         <div class="grid-2 mb-3">
           <div>
-            <label class="field-label">Config</label>
-            <select x-model="automicConfigId" class="field-input field-select" data-testid="automic-config-select">
+            <label  class="field-label" for="a11y-adapters-config-3">Config</label>
+            <select x-model="automicConfigId" class="field-input field-select" data-testid="automic-config-select" aria-label="automic config select" id="a11y-adapters-config-3">
               <option value="">— Select —</option>
               <template x-for="cfg in configs" :key="cfg.id">
                 <option :value="cfg.id" x-text="cfg.name"></option>
@@ -145,15 +145,15 @@
             </select>
           </div>
           <div>
-            <label class="field-label">Lookup Type</label>
-            <select x-model="automicIdType" class="field-input field-select" data-testid="automic-lookup-type-select">
+            <label  class="field-label" for="a11y-adapters-lookup-type">Lookup Type</label>
+            <select x-model="automicIdType" class="field-input field-select" data-testid="automic-lookup-type-select" id="a11y-adapters-lookup-type">
               <option value="job_name">Job Name</option>
               <option value="run_id">Run ID</option>
             </select>
           </div>
         </div>
         <div class="flex gap-2">
-          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" data-testid="automic-identifier-input" />
+          <input x-model="automicIdentifier" class="field-input" :placeholder="automicIdType === 'run_id' ? 'e.g. RUN_42' : 'e.g. ETL_NIGHTLY'" data-testid="automic-identifier-input" aria-label="automicidtype run id e g run 42 e g etl nightly" />
           <button @click="lookupAutomic()" :disabled="!automicConfigId || !automicIdentifier || automicLoading" class="btn-primary flex-shrink-0" data-testid="automic-lookup-btn">
             <span x-show="!automicLoading">Lookup</span>
             <span x-show="automicLoading">…</span>
@@ -188,14 +188,14 @@
 
   <!-- Import Jobs from File panel -->
   <div x-show="currentView === 'adapters'" class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="fileImportOpen = !fileImportOpen">
+    <button type="button" class="card-toggle" @click="fileImportOpen = !fileImportOpen" :aria-expanded="fileImportOpen.toString()">
       <div class="font-semibold text-slate-700">📂 Import Jobs from File</div>
       <span class="text-muted text-sm" x-text="fileImportOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="fileImportOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Upload a <strong>.json</strong> array or <strong>.csv</strong> file. CSV columns: <code>name, job_type, job_name, run_id, tags, description</code> — <code>job_type</code> defaults to <code>automic_job</code>.</p>
-        <input type="file" accept=".json,.csv" @change="onFileSelected($event)" class="field-input" />
+        <input type="file" accept=".json,.csv" @change="onFileSelected($event)" class="field-input" aria-label="input" />
         <template x-if="fileImportErrors.length > 0">
           <div class="space-y-1">
             <template x-for="err in fileImportErrors" :key="err">
@@ -212,8 +212,8 @@
               </template>
             </div>
             <div class="overflow-x-auto">
-              <table class="results-table text-xs">
-                <thead><tr><th>Name</th><th>Type</th><th>Tags</th></tr></thead>
+              <table class="results-table text-xs" aria-label="adapters table 1">
+                <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Tags</th></tr></thead>
                 <tbody>
                   <template x-for="(job, idx) in fileImportJobs" :key="idx">
                     <tr :class="!job.name ? 'bg-rose-50' : ''">
@@ -239,10 +239,10 @@
 
   <!-- Browse & Import from Automic panel -->
   <div x-show="currentView === 'adapters'" class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="browseAutomicOpen = !browseAutomicOpen">
+    <button type="button" class="card-toggle" @click="browseAutomicOpen = !browseAutomicOpen" :aria-expanded="browseAutomicOpen.toString()">
       <div class="font-semibold text-slate-700">🔍 Browse &amp; Import from Automic</div>
       <span class="text-muted text-sm" x-text="browseAutomicOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="browseAutomicOpen">
       <div class="mt-3 space-y-3">
         <template x-if="!configs.length">
@@ -252,8 +252,8 @@
           <div class="space-y-3">
             <div class="grid-2">
               <div>
-                <label class="field-label">Config</label>
-                <select x-model="browseAutomicConfigId" class="field-input field-select">
+                <label  class="field-label" for="a11y-adapters-config-2">Config</label>
+                <select x-model="browseAutomicConfigId" class="field-input field-select" id="a11y-adapters-config-2">
                   <option value="">— Select —</option>
                   <template x-for="cfg in configs" :key="cfg.id">
                     <option :value="cfg.id" x-text="cfg.name"></option>
@@ -261,8 +261,8 @@
                 </select>
               </div>
               <div>
-                <label class="field-label">Filter</label>
-                <input x-model="browseAutomicFilter" class="field-input" placeholder="e.g. ETL_*" @keydown.enter="searchAutomic()" />
+                <label  class="field-label" for="a11y-adapters-filter">Filter</label>
+                <input x-model="browseAutomicFilter" class="field-input" placeholder="e.g. ETL_*" @keydown.enter="searchAutomic()" id="a11y-adapters-filter" />
               </div>
             </div>
             <div class="flex justify-end">
@@ -277,18 +277,18 @@
             <template x-if="browseAutomicResults.length > 0">
               <div>
                 <div class="overflow-x-auto">
-                  <table class="results-table text-xs">
+                  <table class="results-table text-xs" aria-label="adapters table 2">
                     <thead>
                       <tr>
-                        <th><input type="checkbox" :checked="isBrowseAllSelected()" @change="toggleSelectAll()" /></th>
-                        <th>Job Name</th>
-                        <th>Status</th>
+                        <th scope="col"><input type="checkbox" :checked="isBrowseAllSelected()" @change="toggleSelectAll()" aria-label="Select all browsed Automic jobs" /></th>
+                        <th scope="col">Job Name</th>
+                        <th scope="col">Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       <template x-for="job in browseAutomicResults" :key="job.name">
                         <tr>
-                          <td><input type="checkbox" :checked="browseAutomicSelected.includes(job.name)" @change="toggleBrowseSelection(job.name)" /></td>
+                          <td><input type="checkbox" :checked="browseAutomicSelected.includes(job.name)" @change="toggleBrowseSelection(job.name)" :aria-label="'Select Automic job ' + job.name" /></td>
                           <td class="font-mono" x-text="job.name"></td>
                           <td><span class="badge" x-text="job.status"></span></td>
                         </tr>
@@ -313,14 +313,14 @@
 
   <!-- Add BO Job modal -->
   <div x-show="showBOJobModal" x-cloak class="modal-backdrop" @click.self="showBOJobModal = false">
-    <div class="modal-box w-full max-w-lg">
-      <h2 class="text-lg font-bold mb-4">Add SAP BO Report as Job</h2>
+    <div x-ref="boJobDialog" class="modal-box w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="boJobDialogTitle">
+      <h2 id="boJobDialogTitle" class="text-lg font-bold mb-4">Add SAP BO Report as Job</h2>
       <div class="space-y-3">
-        <div><label class="field-label">Job Name *</label><input x-model="boJobForm.name" class="field-input" /></div>
-        <div><label class="field-label">Display Title</label><input x-model="boJobForm.title" class="field-input" /></div>
-        <div><label class="field-label">Key Columns (comma-separated)</label><input x-model="boJobForm.key_columns_raw" class="field-input" /></div>
-        <div><label class="field-label">Download Format</label>
-          <select x-model="boJobForm.format" class="field-input field-select">
+        <div><label  class="field-label" for="a11y-adapters-job-name">Job Name *</label><input x-model="boJobForm.name" class="field-input" id="a11y-adapters-job-name" /></div>
+        <div><label  class="field-label" for="a11y-adapters-display-title">Display Title</label><input x-model="boJobForm.title" class="field-input" id="a11y-adapters-display-title" /></div>
+        <div><label  class="field-label" for="a11y-adapters-key-columns-comma-separated">Key Columns (comma-separated)</label><input x-model="boJobForm.key_columns_raw" class="field-input" id="a11y-adapters-key-columns-comma-separated" /></div>
+        <div><label  class="field-label" for="a11y-adapters-download-format">Download Format</label>
+          <select x-model="boJobForm.format" class="field-input field-select" id="a11y-adapters-download-format">
             <option value="xlsx">XLSX</option><option value="pdf">PDF</option><option value="csv">CSV</option>
           </select>
         </div>

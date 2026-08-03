@@ -15,13 +15,13 @@
   </div>
 
   <div class="card scheduler-report-filters mb-4">
-    <select class="field-input field-select" x-model.number="schedulerReportFilters.days" @change="loadSchedulerReports()">
+    <select class="field-input field-select" x-model.number="schedulerReportFilters.days" @change="loadSchedulerReports()" aria-label="schedulerreportfilters days">
       <option :value="7">Last 7 days</option>
       <option :value="30">Last 30 days</option>
       <option :value="90">Last 90 days</option>
     </select>
-    <input class="field-input" x-model.debounce.300ms="schedulerReportFilters.job" @input="loadSchedulerReports()" placeholder="Filter by job or schedule" />
-    <select class="field-input field-select" x-model="schedulerReportFilters.status" @change="loadSchedulerReports()">
+    <input class="field-input" x-model.debounce.300ms="schedulerReportFilters.job" @input="loadSchedulerReports()" placeholder="Filter by job or schedule" aria-label="filter by job or schedule" />
+    <select class="field-input field-select" x-model="schedulerReportFilters.status" @change="loadSchedulerReports()" aria-label="schedulerreportfilters status">
       <option value="">All statuses</option>
       <option value="PASSED">Passed</option>
       <option value="FAILED">Failed</option>
@@ -29,7 +29,7 @@
       <option value="CANCELLED">Cancelled</option>
       <option value="BLOCKED">Blocked</option>
     </select>
-    <input class="field-input" type="number" x-model="schedulerReportFilters.exitCode" @input.debounce.300ms="loadSchedulerReports()" placeholder="Exit code" />
+    <input class="field-input" type="number" x-model="schedulerReportFilters.exitCode" @input.debounce.300ms="loadSchedulerReports()" placeholder="Exit code" aria-label="exit code" />
   </div>
 
   <template x-if="schedulerReportError">
@@ -52,8 +52,8 @@
   <div class="card mb-4">
     <div class="font-semibold mb-3">Live Status Grid</div>
     <div class="table-scroll">
-      <table class="data-table">
-        <thead><tr><th>Schedule</th><th>Status</th><th>Enabled</th><th>Cron</th><th>Next Run</th><th>Duration</th><th>Exit</th><th>Actions</th></tr></thead>
+      <table class="data-table" aria-label="scheduler reports table 1">
+        <thead><tr><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Enabled</th><th scope="col">Cron</th><th scope="col">Next Run</th><th scope="col">Duration</th><th scope="col">Exit</th><th scope="col">Actions</th></tr></thead>
         <tbody>
           <template x-for="row in schedulerReportGrid" :key="row.schedule_id">
             <tr>
@@ -99,12 +99,12 @@
        and x-show keeps the subtree mounted, so the x-model bindings below would
        keep dereferencing null and log an Alpine expression error per field. -->
   <template x-if="schedulerReportEditing">
-    <div class="modal-backdrop" @click.self="schedulerReportEditing = null">
-      <div class="modal-box" role="dialog" aria-modal="true">
-        <div class="drawer-header"><div class="drawer-title">Edit Schedule</div><button class="drawer-close" @click="schedulerReportEditing = null">x</button></div>
-        <label class="field-label">Cron expression</label>
-        <input class="field-input mb-3" x-model="schedulerReportEditing.cron_expr" />
-        <label class="inline-flex items-center gap-2 mb-4"><input type="checkbox" x-model="schedulerReportEditing.enabled" /> Enabled</label>
+      <div class="modal-backdrop" @click.self="schedulerReportEditing = null">
+       <div class="modal-box" x-ref="schedulerReportDialog" role="dialog" aria-modal="true" aria-labelledby="schedulerReportDialogTitle">
+        <div class="drawer-header"><div id="schedulerReportDialogTitle" class="drawer-title">Edit Schedule</div><button class="drawer-close" aria-label="Close edit schedule" @click="schedulerReportEditing = null">x</button></div>
+        <label  class="field-label" for="a11y-scheduler-reports-cron-expression">Cron expression</label>
+        <input class="field-input mb-3" x-model="schedulerReportEditing.cron_expr" id="a11y-scheduler-reports-cron-expression" />
+        <label class="inline-flex items-center gap-2 mb-4"><input type="checkbox" x-model="schedulerReportEditing.enabled" aria-label="schedulerreportediting enabled" /> Enabled</label>
         <div class="flex gap-2 justify-end"><button class="btn-secondary" @click="schedulerReportEditing = null">Cancel</button><button class="btn-primary" @click="schedulerReportSaveEdit()">Save</button></div>
       </div>
     </div>

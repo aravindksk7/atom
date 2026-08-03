@@ -73,6 +73,7 @@
         }
 
         if (e.key === 'Escape') {
+          if (document.activeElement && document.activeElement.closest('[role="dialog"]')) return;
           if (this.showingHelp) { this.showingHelp = false; return; }
           if (this.showJobModal) { this.showJobModal = false; return; }
           if (this.showCompareTemplatePanel) { this.showCompareTemplatePanel = false; return; }

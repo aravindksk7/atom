@@ -11,8 +11,6 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="app-shell" x-data="app()" x-init="init()">
-<span class="sr-only">Validate Configuration Run Health Check Add Job Execution Sequence</span>
-
 <aside class="sidebar" :class="sidebarCollapsed ? 'is-collapsed' : ''" data-testid="app-sidebar">
   <div class="sidebar-brand">
     <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -56,7 +54,7 @@
      ============================================================ -->
 <nav class="top-nav">
   <div class="top-nav-inner">
-    <span class="page-title" x-text="currentTabLabel"></span>
+    <h1 class="page-title" x-text="currentTabLabel"></h1>
     <div class="flex items-center gap-3 ml-auto">
       <span class="text-xs" :class="apiOk ? 'text-emerald-500' : 'text-rose-400'" x-text="apiOk ? '● Connected' : '● Offline'"></span>
     </div>
@@ -158,8 +156,8 @@
 <!-- ====================================================================
      AUTH SETUP MODAL
      ==================================================================== -->
-<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()" @keydown.escape.window="closeAuthModal()">
-  <div class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()">
+  <div x-ref="authDialog" class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <div class="auth-modal-header">
       <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
       <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
@@ -169,7 +167,7 @@
       <div class="auth-path-label">Create Initial Administrator</div>
       <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
       <div class="auth-row">
-        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" />
+        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" aria-label="administrator name" />
         <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
       </div>
     </div>
@@ -198,7 +196,7 @@
       <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
       <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
       <div class="auth-row">
-        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" />
+        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" aria-label="token" />
         <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
       </div>
     </div>
@@ -216,10 +214,10 @@
 <template x-if="drawer.show">
   <div>
     <div class="drawer-backdrop" @click="drawer.show = false"></div>
-    <div class="drawer-panel">
+    <div x-ref="drawerDialog" class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerDialogTitle">
       <div class="drawer-header">
-        <div class="drawer-title" x-text="'Mismatches · ' + (drawer.result ? drawer.result.query_name : '')"></div>
-        <button class="drawer-close" @click="drawer.show = false">✕</button>
+        <div id="drawerDialogTitle" class="drawer-title" x-text="'Mismatches · ' + (drawer.result ? drawer.result.query_name : '')"></div>
+        <button class="drawer-close" @click="drawer.show = false" aria-label="Close mismatch details">✕</button>
       </div>
       <div class="drawer-body">
         <div x-show="drawer.result" class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-3">
@@ -241,16 +239,16 @@
               <div class="text-xs text-muted font-semibold">All columns</div>
               <input x-model="columnStatFilters[columnStatKey('drawer', drawer.result)]"
                      class="field-input text-xs py-1 max-w-48"
-                     placeholder="Filter columns" />
+                     placeholder="Filter columns" aria-label="filter columns" />
             </div>
             <div class="overflow-auto max-h-48">
-              <table class="mismatch-diff-table">
+              <table class="mismatch-diff-table" aria-label="index template table 1">
                 <thead>
                   <tr>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer">Column</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer">Compared</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer">Match %</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -325,7 +323,7 @@
                     <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
                     <template x-if="acceptForms[m.id]?.open">
                       <div class="accept-form-inline">
-                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" aria-label="reason" />
                         <button @click="submitAccept(drawer.runId, drawer.result.id, m.id)" class="btn-accept-confirm">Save</button>
                         <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
                       </div>
@@ -351,9 +349,9 @@
 <!-- ====================================================================
      TOAST STACK
      ==================================================================== -->
-<div class="toast-stack">
+<div class="toast-stack" role="status" aria-live="polite">
   <template x-for="(t, i) in toasts" :key="t.id">
-    <div class="toast" :class="['toast-'+t.type, t.fading ? 'fade-out' : '']">
+    <div class="toast" :role="t.type === 'error' ? 'alert' : null" :class="['toast-'+t.type, t.fading ? 'fade-out' : '']">
       <span class="toast-icon" x-text="t.type === 'success' ? '✓' : t.type === 'error' ? '✗' : '⚠'"></span>
       <div class="toast-body">
         <div class="toast-title" x-text="t.title"></div>
@@ -372,32 +370,32 @@
 <!-- Contract create/edit modal -->
 <template x-if="showContractModal">
   <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
-    <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
-      <div class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></div>
+    <div x-ref="contractDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="contractDialogTitle">
+      <h2 id="contractDialogTitle" class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></h2>
       <div class="space-y-3">
         <div>
-          <label class="field-label">Name</label>
-          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" />
+          <label  class="field-label" for="a11y-index-template-name">Name</label>
+          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" id="a11y-index-template-name" />
         </div>
         <div>
-          <label class="field-label">Source Job</label>
-          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" />
+          <label  class="field-label" for="a11y-index-template-source-job">Source Job</label>
+          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" id="a11y-index-template-source-job" />
         </div>
         <div>
-          <label class="field-label">Owner (email)</label>
-          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" />
+          <label  class="field-label" for="a11y-index-template-owner-email">Owner (email)</label>
+          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" id="a11y-index-template-owner-email" />
         </div>
         <div>
-          <label class="field-label">SLA Hours</label>
-          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" />
+          <label  class="field-label" for="a11y-index-template-sla-hours">SLA Hours</label>
+          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" id="a11y-index-template-sla-hours" />
         </div>
         <div>
-          <label class="field-label">Consumers (comma-separated)</label>
-          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" />
+          <label  class="field-label" for="a11y-index-template-consumers-comma-separated">Consumers (comma-separated)</label>
+          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" id="a11y-index-template-consumers-comma-separated" />
         </div>
         <div>
-          <label class="field-label">Breach Severity</label>
-          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select">
+          <label  class="field-label" for="a11y-index-template-breach-severity">Breach Severity</label>
+          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select" id="a11y-index-template-breach-severity">
             <option value="error">Error</option>
             <option value="warn">Warn</option>
           </select>
@@ -415,10 +413,10 @@
 <template x-if="showingHelp">
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
        @click.self="showingHelp = false">
-    <div class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+    <div x-ref="helpDialog" class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="helpDialogTitle">
       <div class="flex justify-between items-start mb-3">
-        <h3 class="text-base font-semibold text-slate-900" x-text="helpTitle"></h3>
-        <button @click="showingHelp = false" class="text-slate-400 hover:text-slate-600 ml-4">
+        <h3 id="helpDialogTitle" class="text-base font-semibold text-slate-900" x-text="helpTitle"></h3>
+        <button @click="showingHelp = false" class="text-slate-400 hover:text-slate-600 ml-4" aria-label="Close help">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
@@ -455,25 +453,25 @@
 
     <template x-if="bulkDecisionForm.open">
       <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeBulkDecisionForm()">
-        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div x-ref="bulkDecisionDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="bulkDecisionDialogTitle">
           <div class="flex items-center justify-between mb-4">
-            <div class="text-base font-semibold text-slate-900"
-                 x-text="bulkDecisionForm.mode === 'bulk-accept' ? 'Accept all mismatches' : 'Bulk pass with actions'"></div>
-            <button @click="closeBulkDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+            <h2 id="bulkDecisionDialogTitle" class="text-base font-semibold text-slate-900"
+                 x-text="bulkDecisionForm.mode === 'bulk-accept' ? 'Accept all mismatches' : 'Bulk pass with actions'"></h2>
+            <button @click="closeBulkDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="Close bulk decision">&times;</button>
           </div>
           <div class="space-y-3">
             <template x-if="bulkDecisionForm.mode === 'bulk-accept'">
               <div>
-                <label class="field-label">Accept reason (applied to all selected mismatches)</label>
+                <label  class="field-label" for="a11y-index-template-accept-reason-applied-to-all-selected-mismatches">Accept reason (applied to all selected mismatches)</label>
                 <textarea x-model="bulkDecisionForm.note" maxlength="1000" rows="3"
-                          class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+                          class="field-input" placeholder="e.g. rounding diff within tolerance" id="a11y-index-template-accept-reason-applied-to-all-selected-mismatches"></textarea>
               </div>
             </template>
             <template x-if="bulkDecisionForm.mode === 'bulk-override'">
               <div>
-                <label class="field-label">Agreed actions (applied to all selected tests)</label>
+                <label  class="field-label" for="a11y-index-template-agreed-actions-applied-to-all-selected-tests">Agreed actions (applied to all selected tests)</label>
                 <textarea x-model="bulkDecisionForm.note" maxlength="4000" rows="4"
-                          class="field-input" placeholder="Describe the agreed actions required to accept these failed outcomes"></textarea>
+                          class="field-input" placeholder="Describe the agreed actions required to accept these failed outcomes" id="a11y-index-template-agreed-actions-applied-to-all-selected-tests"></textarea>
               </div>
             </template>
             <div class="flex gap-2 justify-end pt-2">
@@ -491,17 +489,17 @@
 
     <template x-if="mismatchDecisionForm.open">
       <div data-testid="decision-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="closeMismatchDecisionForm()">
-        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div x-ref="mismatchDecisionDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="mismatchDecisionDialogTitle">
           <div class="flex items-center justify-between mb-4">
-            <div class="text-base font-semibold text-slate-900"
-                 x-text="(mismatchDecisionForm.decision === 'accept' ? 'Accept' : 'Reject') + ' matching mismatches'"></div>
-            <button @click="closeMismatchDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+            <h2 id="mismatchDecisionDialogTitle" class="text-base font-semibold text-slate-900"
+                 x-text="(mismatchDecisionForm.decision === 'accept' ? 'Accept' : 'Reject') + ' matching mismatches'"></h2>
+            <button @click="closeMismatchDecisionForm()" class="text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="Close mismatch decision">&times;</button>
           </div>
           <div class="space-y-3">
             <div>
-              <label class="field-label" x-text="'Reason (applied to every matching mismatch)'"></label>
+              <label  class="field-label" x-text="'Reason (applied to every matching mismatch)'" for="a11y-index-template-field"></label>
               <textarea data-testid="decision-modal-note-textarea" x-model="mismatchDecisionForm.note" maxlength="1000" rows="3"
-                        class="field-input" placeholder="e.g. rounding diff within tolerance"></textarea>
+                        class="field-input" placeholder="e.g. rounding diff within tolerance" id="a11y-index-template-field"></textarea>
             </div>
             <div class="flex gap-2 justify-end pt-2">
               <button data-testid="decision-modal-cancel-btn" @click="closeMismatchDecisionForm()" class="btn-secondary">Cancel</button>

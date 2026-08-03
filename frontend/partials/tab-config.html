@@ -101,11 +101,11 @@
                           </template>
                           <template x-if="schemaTablePreviews[tbl.schema + '.' + tbl.table] && typeof schemaTablePreviews[tbl.schema + '.' + tbl.table] === 'object'">
                             <div class="overflow-x-auto border rounded" style="max-height:200px;overflow-y:auto">
-                              <table class="data-table text-xs">
+                              <table class="data-table text-xs" aria-label="config table 1">
                                 <thead>
                                   <tr>
                                     <template x-for="col in schemaTablePreviews[tbl.schema + '.' + tbl.table].columns" :key="col">
-                                      <th x-text="col"></th>
+                                      <th x-text="col" scope="col"></th>
                                     </template>
                                   </tr>
                                 </thead>
@@ -136,14 +136,14 @@
 
   <!-- YAML Import card -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="yamlImportOpen = !yamlImportOpen">
+    <button type="button" class="card-toggle" @click="yamlImportOpen = !yamlImportOpen" :aria-expanded="yamlImportOpen.toString()">
       <div class="font-semibold text-slate-700">Import YAML</div>
       <span class="text-muted text-sm" x-text="yamlImportOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="yamlImportOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Paste a YAML block defining one or more named environments. Each top-level key becomes a saved config.</p>
-        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405" data-testid="config-yaml-textarea"></textarea>
+        <textarea x-model="yamlImportText" rows="8" class="field-input font-mono text-xs" placeholder="dev:&#10;  db_host: sql-dev.internal&#10;  db_port: 1433&#10;  bo_url: http://bo-dev:6405" data-testid="config-yaml-textarea" aria-label="dev 10 db host sql dev internal 10 db port 1433 10 bo url http bo dev 6405"></textarea>
         <div class="flex justify-end">
           <button :disabled="!yamlImportText.trim() || yamlImporting" class="btn-primary" @click="importYaml()" data-testid="config-yaml-import-btn">
             <span x-show="!yamlImporting">Import</span>
@@ -156,15 +156,15 @@
 
   <!-- Security – API Tokens -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" data-testid="security-card-header" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()">
+    <button type="button" class="card-toggle" data-testid="security-card-header" @click="securityOpen = !securityOpen; if(securityOpen) loadTokens()" :aria-expanded="securityOpen.toString()">
       <div class="font-semibold text-slate-700">🔑 Security — Users &amp; API Access</div>
       <span class="text-muted text-sm" x-text="securityOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="securityOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Each user receives a personal bearer token. Administrators can create and revoke standard-user or administrator access.</p>
         <div class="flex items-center gap-2">
-          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" data-testid="security-token-input" placeholder="Paste token here to authenticate…" />
+          <input type="password" :value="storedToken" @change="setStoredToken($event.target.value)" class="field-input flex-1" data-testid="security-token-input" placeholder="Paste token here to authenticate…" aria-label="paste token here to authenticate" />
           <span class="badge text-xs" :class="activeTokenIsAdmin ? 'badge-blue' : 'badge-gray'" x-text="activeTokenIsAdmin ? 'Administrator' : 'Standard user'"></span>
         </div>
         <div class="flex justify-between items-center">
@@ -174,19 +174,19 @@
         <template x-if="showCreateToken && activeTokenIsAdmin">
           <div class="grid gap-2 md:grid-cols-4 items-end">
             <div class="md:col-span-2">
-              <label class="field-label">User / service name</label>
-              <input x-model="newTokenName" class="field-input" data-testid="security-new-token-name-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" />
+              <label  class="field-label" for="a11y-config-user-service-name">User / service name</label>
+              <input x-model="newTokenName" class="field-input" data-testid="security-new-token-name-input" placeholder="e.g. jane.smith or ci-pipeline" @keydown.enter="createToken()" id="a11y-config-user-service-name" />
             </div>
             <div>
-              <label class="field-label">Role</label>
-              <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select">
+              <label  class="field-label" for="a11y-config-role">Role</label>
+              <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select" id="a11y-config-role">
                 <option value="user">Standard user</option>
                 <option value="admin">Administrator</option>
               </select>
             </div>
             <div>
-              <label class="field-label">Expires (optional)</label>
-              <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" />
+              <label  class="field-label" for="a11y-config-expires-optional">Expires (optional)</label>
+              <input x-model="newTokenExpiresAt" type="datetime-local" class="field-input" id="a11y-config-expires-optional" />
             </div>
             <button @click="createToken()" :disabled="!newTokenName.trim()" class="btn-primary btn-sm md:col-span-4" data-testid="security-create-access-btn">Create Access</button>
           </div>
@@ -224,16 +224,16 @@
 
   <!-- Diagnostics – Support Bundle -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="diagnosticsOpen = !diagnosticsOpen; if(diagnosticsOpen && !diagnosticsData) loadDiagnostics()">
+    <button type="button" class="card-toggle" @click="diagnosticsOpen = !diagnosticsOpen; if(diagnosticsOpen && !diagnosticsData) loadDiagnostics()" :aria-expanded="diagnosticsOpen.toString()">
       <div class="font-semibold text-slate-700">Diagnostics — Support Bundle</div>
       <span class="text-muted text-sm" x-text="diagnosticsOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="diagnosticsOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">Collect runtime, package, database, and optional recent log details for troubleshooting.</p>
         <div class="flex items-center justify-between gap-3">
           <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-            <input type="checkbox" class="rounded" x-model="diagnosticsIncludeLogs" /> Include recent logs
+            <input type="checkbox" class="rounded" x-model="diagnosticsIncludeLogs" aria-label="diagnosticsincludelogs" /> Include recent logs
           </label>
           <button @click="loadDiagnostics()" class="btn-secondary btn-sm" :disabled="diagnosticsLoading">
             <span x-show="!diagnosticsLoading">Refresh Diagnostics</span>
@@ -270,10 +270,10 @@
 
   <!-- Regional – App-wide Timezone -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="timezoneOpen = !timezoneOpen">
+    <button type="button" class="card-toggle" @click="timezoneOpen = !timezoneOpen" :aria-expanded="timezoneOpen.toString()">
       <div class="font-semibold text-slate-700">🌐 Regional — Timezone</div>
       <span class="text-muted text-sm" x-text="timezoneOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="timezoneOpen">
       <div class="mt-3 space-y-3">
         <p class="text-muted text-sm">All timestamps across the dashboard, run history, and generated reports are shown in this timezone. Scheduled runs also fire according to it — a cron expression of <code>0 9 * * *</code> means 9am in this zone.</p>
@@ -282,7 +282,7 @@
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
-            <select x-model="timezoneDraft" class="field-input field-select flex-1">
+            <select x-model="timezoneDraft" class="field-input field-select flex-1" aria-label="timezonedraft">
               <template x-for="tz in timezoneOptions" :key="tz">
                 <option :value="tz" x-text="tz"></option>
               </template>
@@ -299,10 +299,10 @@
 
   <!-- Notifications – Webhook Hooks -->
   <div class="card mt-4">
-    <div class="flex items-center justify-between cursor-pointer" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()">
+    <button type="button" class="card-toggle" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()" :aria-expanded="notifOpen.toString()">
       <div class="font-semibold text-slate-700">🔔 Notifications — Webhooks</div>
       <span class="text-muted text-sm" x-text="notifOpen ? '▲ collapse' : '▼ expand'"></span>
-    </div>
+    </button>
     <template x-if="notifOpen">
       <div class="mt-3 space-y-3">
         <div class="flex justify-end">
@@ -335,25 +335,25 @@
 
   <!-- Step Release Modal -->
   <div x-show="stepReleaseModal.show" x-cloak class="modal-backdrop" @click.self="stepReleaseModal.show = false">
-    <div class="modal-box w-full max-w-md">
-      <h2 class="text-lg font-bold mb-4">Release Held Step</h2>
+    <div x-ref="stepReleaseDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="stepReleaseDialogTitle">
+      <h2 id="stepReleaseDialogTitle" class="text-lg font-bold mb-4">Release Held Step</h2>
       <div class="space-y-3">
         <div>
-          <label class="field-label">Action *</label>
+          <label  class="field-label" for="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name">Action *</label>
           <div class="flex gap-3 mt-1">
             <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="approve" /> Approve &amp; continue
+              <input type="radio" x-model="stepReleaseModal.action" value="approve" aria-label="stepreleasemodal action" /> Approve &amp; continue
             </label>
             <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="skip" /> Skip &amp; continue
+              <input type="radio" x-model="stepReleaseModal.action" value="skip" aria-label="stepreleasemodal action" /> Skip &amp; continue
             </label>
             <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="cancel" /> Cancel run
+              <input type="radio" x-model="stepReleaseModal.action" value="cancel" aria-label="stepreleasemodal action" /> Cancel run
             </label>
           </div>
         </div>
-        <div><label class="field-label">Your name *</label><input x-model="stepReleaseModal.releasedBy" class="field-input" placeholder="Alice" /></div>
-        <div><label class="field-label">Note *</label><textarea x-model="stepReleaseModal.note" class="field-input" rows="2" placeholder="Verified data looks correct…"></textarea></div>
+        <div><label class="field-label">Your name *</label><input x-model="stepReleaseModal.releasedBy" class="field-input" placeholder="Alice" id="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name" /></div>
+        <div><label  class="field-label" for="a11y-config-note">Note *</label><textarea x-model="stepReleaseModal.note" class="field-input" rows="2" placeholder="Verified data looks correct…" id="a11y-config-note"></textarea></div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="stepReleaseModal.show = false" class="btn-secondary">Cancel</button>
@@ -364,23 +364,23 @@
 
   <!-- Webhook Modal -->
   <div x-show="showHookModal" x-cloak class="modal-backdrop" @click.self="showHookModal = false">
-    <div class="modal-box w-full max-w-md">
-      <h2 class="text-lg font-bold mb-4">New Webhook</h2>
+    <div x-ref="hookDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="hookDialogTitle">
+      <h2 id="hookDialogTitle" class="text-lg font-bold mb-4">New Webhook</h2>
       <div class="space-y-3">
-        <div><label class="field-label">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" /></div>
-        <div><label class="field-label">URL *</label><input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" /></div>
+        <div><label  class="field-label" for="a11y-config-name">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" id="a11y-config-name" /></div>
+        <div><label  class="field-label" for="a11y-config-url">URL *</label><input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" id="a11y-config-url" /></div>
         <div>
-          <label class="field-label">Events *</label>
+          <label  class="field-label" for="a11y-config-events-secret-optional-for-hmac-signing">Events *</label>
           <div class="flex flex-wrap gap-2 mt-1">
             <template x-for="ev in hookEventOptions" :key="ev">
               <label class="flex items-center gap-1 text-sm cursor-pointer">
-                <input type="checkbox" class="rounded" :checked="hookModal.events.includes(ev)" @change="toggleHookEvent(ev)" />
+                <input type="checkbox" class="rounded" :checked="hookModal.events.includes(ev)" @change="toggleHookEvent(ev)" aria-label="input" />
                 <span x-text="ev"></span>
               </label>
             </template>
           </div>
         </div>
-        <div><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" /></div>
+        <div><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" id="a11y-config-events-secret-optional-for-hmac-signing" /></div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showHookModal = false" class="btn-secondary">Cancel</button>
@@ -391,17 +391,17 @@
 
   <!-- Config Modal -->
   <div x-show="showConfigModal" x-cloak class="modal-backdrop" data-testid="config-modal" @click.self="showConfigModal = false">
-    <div class="modal-box w-full max-w-2xl">
-      <h2 class="text-lg font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
+    <div x-ref="configDialog" class="modal-box w-full max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="configDialogTitle">
+      <h2 id="configDialogTitle" class="text-lg font-bold mb-4" x-text="configModal.id ? 'Edit Configuration' : 'New Configuration'"></h2>
       <div class="space-y-4">
         <div class="grid-2">
           <div>
-            <label class="field-label">Config Name *</label>
-            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" data-testid="config-modal-name-input" />
+            <label  class="field-label" for="a11y-config-config-name">Config Name *</label>
+            <input x-model="configModal.name" class="field-input" placeholder="e.g. dev-recon" data-testid="config-modal-name-input" id="a11y-config-config-name" />
           </div>
           <div>
-            <label class="field-label">Environment</label>
-            <select x-model="configModal.env_name" class="field-input field-select" data-testid="config-modal-env-select">
+            <label  class="field-label" for="a11y-config-environment">Environment</label>
+            <select x-model="configModal.env_name" class="field-input field-select" data-testid="config-modal-env-select" id="a11y-config-environment">
               <option value="dev">Dev</option>
               <option value="qa">QA</option>
               <option value="staging">Staging</option>
@@ -411,12 +411,12 @@
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" /></div>
-          <div><label class="field-label">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" /></div>
-          <div><label class="field-label">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" /></div>
-          <div><label class="field-label">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" /></div>
-          <div><label class="field-label">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" /></div>
-          <div><label class="field-label">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" /></div>
+          <div><label  class="field-label" for="a11y-config-db-host">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" id="a11y-config-db-host" /></div>
+          <div><label  class="field-label" for="a11y-config-db-port">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" id="a11y-config-db-port" /></div>
+          <div><label  class="field-label" for="a11y-config-db-name">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" id="a11y-config-db-name" /></div>
+          <div><label  class="field-label" for="a11y-config-db-user">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" id="a11y-config-db-user" /></div>
+          <div><label  class="field-label" for="a11y-config-db-password">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" id="a11y-config-db-password" /></div>
+          <div><label  class="field-label" for="a11y-config-connect-timeout-s">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" id="a11y-config-connect-timeout-s" /></div>
         </div>
         <div class="divider"></div>
         <div>
@@ -430,16 +430,16 @@
           <template x-for="(conn, idx) in configModal.connections" :key="idx">
             <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
               <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <input x-model="conn.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="connection_name" />
+                <input x-model="conn.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="connection_name" aria-label="connection name" />
                 <span class="text-xs text-slate-400 flex-1" x-text="namedConnectionSummary(conn)"></span>
                 <button @click="toggleNamedConnection(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="conn.expanded ? '▲' : '▼'"></button>
                 <button @click="removeNamedConnection(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
               </div>
               <div x-show="conn.expanded" class="p-3 grid-2">
-                <div><label class="field-label">DB Host</label><input x-model="conn.db_host" class="field-input" placeholder="inherits default" /></div>
-                <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" /></div>
-                <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" /></div>
-                <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" /></div>
+                <div><label class="field-label">DB Host</label><input x-model="conn.db_host" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
+                <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
+                <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
+                <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
               </div>
             </div>
           </template>
@@ -454,14 +454,14 @@
             <button @click="addApiEndpoint()" type="button" class="btn-secondary btn-sm text-xs">+ Add Endpoint</button>
           </div>
           <div class="mb-2">
-            <label class="field-label">Base Host (shared, optional)</label>
-            <input x-model="configModal.apiBaseHost" class="field-input" placeholder="https://api.example.com/v1" />
+            <label  class="field-label" for="a11y-config-base-host-shared-optional">Base Host (shared, optional)</label>
+            <input x-model="configModal.apiBaseHost" class="field-input" placeholder="https://api.example.com/v1" id="a11y-config-base-host-shared-optional" />
             <span class="text-xs text-slate-400">Set once, then give each endpoint below a relative Path instead of repeating the full Base URL.</span>
           </div>
           <template x-for="(ep, idx) in configModal.apiEndpoints" :key="idx">
             <div class="border border-slate-200 rounded-lg mb-2 overflow-hidden">
               <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" />
+                <input x-model="ep.name" class="field-input font-mono text-xs font-semibold py-1 px-2" style="width:140px" placeholder="endpoint_name" aria-label="endpoint name" />
                 <span class="text-xs text-slate-400 flex-1" x-text="ep.base_url || (configModal.apiBaseHost && ep.path ? configModal.apiBaseHost.replace(/\/$/, '') + '/' + ep.path.replace(/^\//, '') : 'not configured')"></span>
                 <span class="text-xs text-slate-400 uppercase" x-text="ep.method"></span>
                 <button @click="toggleApiEndpoint(idx)" type="button" class="text-slate-400 text-xs px-1" x-text="ep.expanded ? '▲' : '▼'"></button>
@@ -471,11 +471,11 @@
                 <div class="grid-2">
                   <div>
                     <label class="field-label">Base URL <span class="text-slate-400 font-normal" x-show="configModal.apiBaseHost">(leave blank to use Base Host + Path)</span></label>
-                    <input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" />
+                    <input x-model="ep.base_url" class="field-input" placeholder="https://api.example.com/v1/orders" aria-label="https api example com v1 orders" />
                   </div>
                   <div>
                     <label class="field-label">Method</label>
-                    <select x-model="ep.method" class="field-input field-select">
+                    <select x-model="ep.method" class="field-input field-select" aria-label="ep method">
                       <option value="GET">GET</option>
                       <option value="POST">POST</option>
                     </select>
@@ -483,11 +483,11 @@
                 </div>
                 <div x-show="configModal.apiBaseHost">
                   <label class="field-label">Path (appended to Base Host)</label>
-                  <input x-model="ep.path" class="field-input" placeholder="orders" />
+                  <input x-model="ep.path" class="field-input" placeholder="orders" aria-label="orders" />
                 </div>
                 <div>
                   <label class="field-label">Auth Type</label>
-                  <select x-model="ep.auth_type" class="field-input field-select">
+                  <select x-model="ep.auth_type" class="field-input field-select" aria-label="ep auth type">
                     <option value="none">None</option>
                     <option value="api_key">API Key Header</option>
                     <option value="bearer">Bearer Token</option>
@@ -497,51 +497,51 @@
                   </select>
                 </div>
                 <div x-show="ep.auth_type === 'api_key'" class="grid-2">
-                  <div><label class="field-label">Header Name</label><input x-model="ep.api_key_header" class="field-input" placeholder="X-API-Key" /></div>
-                  <div><label class="field-label">API Key</label><input x-model="ep.api_key" type="password" class="field-input" /></div>
+                  <div><label class="field-label">Header Name</label><input x-model="ep.api_key_header" class="field-input" placeholder="X-API-Key" aria-label="x api key" /></div>
+                  <div><label class="field-label">API Key</label><input x-model="ep.api_key" type="password" class="field-input" aria-label="ep api key" /></div>
                 </div>
                 <div x-show="ep.auth_type === 'bearer'">
-                  <label class="field-label">Bearer Token</label><input x-model="ep.bearer_token" type="password" class="field-input" />
+                  <label class="field-label">Bearer Token</label><input x-model="ep.bearer_token" type="password" class="field-input" aria-label="ep bearer token" />
                 </div>
                 <div x-show="ep.auth_type === 'basic'" class="grid-2">
-                  <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" /></div>
-                  <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                  <div><label class="field-label">Username</label><input x-model="ep.basic_username" class="field-input" aria-label="ep basic username" /></div>
+                  <div><label class="field-label">Password</label><input x-model="ep.basic_password" type="password" class="field-input" aria-label="ep basic password" /></div>
                 </div>
                 <div x-show="ep.auth_type === 'sap_bo_logontoken'">
-                  <label class="field-label">X-SAP-LogonToken</label><input x-model="ep.sap_bo_logon_token" type="password" class="field-input" />
+                  <label class="field-label">X-SAP-LogonToken</label><input x-model="ep.sap_bo_logon_token" type="password" class="field-input" aria-label="ep sap bo logon token" />
                 </div>
                 <div x-show="ep.auth_type === 'sap_bo_basic'" class="grid-2">
-                  <div><label class="field-label">BO Username</label><input x-model="ep.basic_username" class="field-input" /></div>
-                  <div><label class="field-label">BO Password</label><input x-model="ep.basic_password" type="password" class="field-input" /></div>
+                  <div><label class="field-label">BO Username</label><input x-model="ep.basic_username" class="field-input" aria-label="ep basic username" /></div>
+                  <div><label class="field-label">BO Password</label><input x-model="ep.basic_password" type="password" class="field-input" aria-label="ep basic password" /></div>
                   <div>
                     <label class="field-label">BO Auth Type</label>
-                    <select x-model="ep.sap_bo_auth_type" class="field-input field-select">
+                    <select x-model="ep.sap_bo_auth_type" class="field-input field-select" aria-label="ep sap bo auth type">
                       <option value="secEnterprise">Enterprise</option>
                       <option value="secWinAD">Windows AD</option>
                       <option value="secLDAP">LDAP</option>
                       <option value="secSAPR3">SAP R/3</option>
                     </select>
                   </div>
-                  <div><label class="field-label">Logon URL Override</label><input x-model="ep.sap_bo_logon_url" class="field-input" placeholder="https://bo.example.com/biprws/logon/long" /></div>
+                  <div><label class="field-label">Logon URL Override</label><input x-model="ep.sap_bo_logon_url" class="field-input" placeholder="https://bo.example.com/biprws/logon/long" aria-label="https bo example com biprws logon long" /></div>
                 </div>
                 <div class="grid-2">
-                  <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json"></textarea></div>
-                  <div><label class="field-label">Query Params (one per line, "name=value")</label><textarea x-model="ep.query_params_raw" rows="2" class="field-input font-mono text-xs" placeholder="status=active"></textarea></div>
+                  <div><label class="field-label">Headers (one per line, "Name: Value")</label><textarea x-model="ep.headers_raw" rows="2" class="field-input font-mono text-xs" placeholder="Accept: application/json" aria-label="accept application json"></textarea></div>
+                  <div><label class="field-label">Query Params (one per line, "name=value")</label><textarea x-model="ep.query_params_raw" rows="2" class="field-input font-mono text-xs" placeholder="status=active" aria-label="status active"></textarea></div>
                 </div>
                 <div x-show="ep.method === 'POST'">
                   <label class="field-label">Body (JSON)</label>
-                  <textarea x-model="ep.body_raw" rows="2" class="field-input font-mono text-xs" placeholder='{"filter": "active"}'></textarea>
+                  <textarea x-model="ep.body_raw" rows="2" class="field-input font-mono text-xs" placeholder='{"filter": "active"}' aria-label="ep body raw"></textarea>
                 </div>
                 <div class="grid-2">
-                  <div><label class="field-label">Timeout (s)</label><input x-model="ep.timeout" type="number" class="field-input" /></div>
+                  <div><label class="field-label">Timeout (s)</label><input x-model="ep.timeout" type="number" class="field-input" aria-label="ep timeout" /></div>
                   <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
-                    <input x-model="ep.verify_ssl" type="checkbox" class="rounded border-slate-300" /> Verify SSL certificate
+                    <input x-model="ep.verify_ssl" type="checkbox" class="rounded border-slate-300" aria-label="ep verify ssl" /> Verify SSL certificate
                   </label>
                 </div>
                 <div class="grid-2">
                   <div>
                     <label class="field-label">Response Format</label>
-                    <select x-model="ep.response_format" class="field-input field-select">
+                    <select x-model="ep.response_format" class="field-input field-select" aria-label="ep response format">
                       <option value="json">JSON</option>
                       <option value="csv">CSV</option>
                       <option value="xlsx">XLSX</option>
@@ -550,29 +550,29 @@
                   </div>
                   <div x-show="ep.response_format === 'json'">
                     <label class="field-label">JSON Root Path</label>
-                    <input x-model="ep.json_root_path" class="field-input" placeholder="data.items" />
+                    <input x-model="ep.json_root_path" class="field-input" placeholder="data.items" aria-label="data items" />
                   </div>
                 </div>
                 <div>
                   <label class="field-label">Pagination</label>
-                  <select x-model="ep.pagination_type" class="field-input field-select">
+                  <select x-model="ep.pagination_type" class="field-input field-select" aria-label="ep pagination type">
                     <option value="none">None</option>
                     <option value="cursor">Cursor</option>
                     <option value="page">Page / Limit</option>
                   </select>
                 </div>
                 <div x-show="ep.pagination_type === 'cursor'" class="grid-2">
-                  <div><label class="field-label">Cursor Path</label><input x-model="ep.pagination_cursor_path" class="field-input" placeholder="meta.next_cursor" /></div>
-                  <div><label class="field-label">Cursor Query Param</label><input x-model="ep.pagination_cursor_param" class="field-input" placeholder="cursor" /></div>
+                  <div><label class="field-label">Cursor Path</label><input x-model="ep.pagination_cursor_path" class="field-input" placeholder="meta.next_cursor" aria-label="meta next cursor" /></div>
+                  <div><label class="field-label">Cursor Query Param</label><input x-model="ep.pagination_cursor_param" class="field-input" placeholder="cursor" aria-label="cursor" /></div>
                 </div>
                 <div x-show="ep.pagination_type === 'page'" class="grid-2">
-                  <div><label class="field-label">Page Param</label><input x-model="ep.pagination_page_param" class="field-input" placeholder="page" /></div>
-                  <div><label class="field-label">Size Param</label><input x-model="ep.pagination_size_param" class="field-input" placeholder="limit" /></div>
-                  <div><label class="field-label">Page Size</label><input x-model="ep.pagination_page_size" type="number" class="field-input" /></div>
+                  <div><label class="field-label">Page Param</label><input x-model="ep.pagination_page_param" class="field-input" placeholder="page" aria-label="page" /></div>
+                  <div><label class="field-label">Size Param</label><input x-model="ep.pagination_size_param" class="field-input" placeholder="limit" aria-label="limit" /></div>
+                  <div><label class="field-label">Page Size</label><input x-model="ep.pagination_page_size" type="number" class="field-input" aria-label="ep pagination page size" /></div>
                 </div>
                 <div x-show="ep.pagination_type !== 'none'">
                   <label class="field-label">Max Pages</label>
-                  <input x-model="ep.pagination_max_pages" type="number" class="field-input" style="width:120px" />
+                  <input x-model="ep.pagination_max_pages" type="number" class="field-input" style="width:120px" aria-label="ep pagination max pages" />
                 </div>
                 <div class="flex items-center gap-2">
                   <button @click="testApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Test</button>
@@ -581,9 +581,9 @@
                 </div>
                 <p x-show="ep.previewError" x-text="ep.previewError" class="text-xs text-red-600"></p>
                 <div x-show="ep.previewResult" class="overflow-x-auto max-h-40 border border-slate-200 rounded">
-                  <table class="text-xs w-full">
+                  <table class="text-xs w-full" aria-label="config table 2">
                     <thead class="bg-slate-100 sticky top-0">
-                      <tr><template x-for="col in (ep.previewResult?.columns || [])" :key="col"><th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap"></th></template></tr>
+                      <tr><template x-for="col in (ep.previewResult?.columns || [])" :key="col"><th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap" scope="col"></th></template></tr>
                     </thead>
                     <tbody>
                       <template x-for="(row, ri) in (ep.previewResult?.rows || [])" :key="ri">
@@ -600,43 +600,43 @@
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" /></div>
-          <div><label class="field-label">BO User</label><input x-model="configModal.bo_user" class="field-input" /></div>
-          <div><label class="field-label">BO Password</label><input x-model="configModal.bo_password" type="password" class="field-input" /></div>
+          <div><label  class="field-label" for="a11y-config-sap-bo-url">SAP BO URL</label><input x-model="configModal.bo_url" class="field-input" placeholder="http://bi-server:6405" id="a11y-config-sap-bo-url" /></div>
+          <div><label  class="field-label" for="a11y-config-bo-user">BO User</label><input x-model="configModal.bo_user" class="field-input" id="a11y-config-bo-user" /></div>
+          <div><label  class="field-label" for="a11y-config-bo-password">BO Password</label><input x-model="configModal.bo_password" type="password" class="field-input" id="a11y-config-bo-password" /></div>
           <div>
-            <label class="field-label">BO Auth Type</label>
-            <select x-model="configModal.bo_auth_type" class="field-input">
+            <label  class="field-label" for="a11y-config-bo-auth-type">BO Auth Type</label>
+            <select x-model="configModal.bo_auth_type" class="field-input" id="a11y-config-bo-auth-type">
               <option value="secEnterprise">Enterprise</option>
               <option value="secWinAD">Windows AD (on-premises)</option>
               <option value="secLDAP">LDAP</option>
               <option value="secSAPR3">SAP R/3</option>
             </select>
           </div>
-          <div><label class="field-label">BO Timeout (s)</label><input x-model="configModal.bo_timeout" type="number" class="field-input" placeholder="60" /></div>
-          <div><label class="field-label">BO Proxy URL</label><input x-model="configModal.bo_proxy_url" class="field-input" placeholder="http://proxy.company:8080" /></div>
+          <div><label  class="field-label" for="a11y-config-bo-timeout-s">BO Timeout (s)</label><input x-model="configModal.bo_timeout" type="number" class="field-input" placeholder="60" id="a11y-config-bo-timeout-s" /></div>
+          <div><label  class="field-label" for="a11y-config-bo-proxy-url">BO Proxy URL</label><input x-model="configModal.bo_proxy_url" class="field-input" placeholder="http://proxy.company:8080" id="a11y-config-bo-proxy-url" /></div>
           <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
-            <input x-model="configModal.bo_verify_ssl" type="checkbox" class="rounded border-slate-300" />
+            <input x-model="configModal.bo_verify_ssl" type="checkbox" class="rounded border-slate-300" aria-label="configmodal bo verify ssl" />
             Verify BO SSL certificate
           </label>
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">SAP DS URL</label><input x-model="configModal.ds_url" class="field-input" placeholder="http://ds-server:8080" /></div>
-          <div><label class="field-label">DS User</label><input x-model="configModal.ds_user" class="field-input" /></div>
-          <div><label class="field-label">DS Password</label><input x-model="configModal.ds_password" type="password" class="field-input" /></div>
-          <div><label class="field-label">DS Repository</label><input x-model="configModal.ds_repository" class="field-input" placeholder="DS_REPO" /></div>
-          <div><label class="field-label">DS Timeout (s)</label><input x-model="configModal.ds_timeout" type="number" class="field-input" placeholder="60" /></div>
-          <div><label class="field-label">DS Proxy URL</label><input x-model="configModal.ds_proxy_url" class="field-input" placeholder="http://proxy.company:8080" /></div>
+          <div><label  class="field-label" for="a11y-config-sap-ds-url">SAP DS URL</label><input x-model="configModal.ds_url" class="field-input" placeholder="http://ds-server:8080" id="a11y-config-sap-ds-url" /></div>
+          <div><label  class="field-label" for="a11y-config-ds-user">DS User</label><input x-model="configModal.ds_user" class="field-input" id="a11y-config-ds-user" /></div>
+          <div><label  class="field-label" for="a11y-config-ds-password">DS Password</label><input x-model="configModal.ds_password" type="password" class="field-input" id="a11y-config-ds-password" /></div>
+          <div><label  class="field-label" for="a11y-config-ds-repository">DS Repository</label><input x-model="configModal.ds_repository" class="field-input" placeholder="DS_REPO" id="a11y-config-ds-repository" /></div>
+          <div><label  class="field-label" for="a11y-config-ds-timeout-s">DS Timeout (s)</label><input x-model="configModal.ds_timeout" type="number" class="field-input" placeholder="60" id="a11y-config-ds-timeout-s" /></div>
+          <div><label  class="field-label" for="a11y-config-ds-proxy-url">DS Proxy URL</label><input x-model="configModal.ds_proxy_url" class="field-input" placeholder="http://proxy.company:8080" id="a11y-config-ds-proxy-url" /></div>
           <label class="flex items-center gap-2 text-sm text-slate-700 mt-6">
-            <input x-model="configModal.ds_verify_ssl" type="checkbox" class="rounded border-slate-300" />
+            <input x-model="configModal.ds_verify_ssl" type="checkbox" class="rounded border-slate-300" aria-label="configmodal ds verify ssl" />
             Verify DS SSL certificate
           </label>
         </div>
         <div class="divider"></div>
         <div class="grid-2">
-          <div><label class="field-label">Automic URL</label><input x-model="configModal.automic_url" class="field-input" /></div>
-          <div><label class="field-label">Automic User</label><input x-model="configModal.automic_user" class="field-input" /></div>
-          <div><label class="field-label">Automic Password</label><input x-model="configModal.automic_password" type="password" class="field-input" /></div>
+          <div><label  class="field-label" for="a11y-config-automic-url">Automic URL</label><input x-model="configModal.automic_url" class="field-input" id="a11y-config-automic-url" /></div>
+          <div><label  class="field-label" for="a11y-config-automic-user">Automic User</label><input x-model="configModal.automic_user" class="field-input" id="a11y-config-automic-user" /></div>
+          <div><label  class="field-label" for="a11y-config-automic-password">Automic Password</label><input x-model="configModal.automic_password" type="password" class="field-input" id="a11y-config-automic-password" /></div>
         </div>
         <template x-if="configValidation">
           <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"

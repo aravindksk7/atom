@@ -16,7 +16,7 @@
           <div class="toggle-track" :class="launchSettings.use_live_connections ? 'on' : ''">
             <div class="toggle-thumb"></div>
           </div>
-          <span class="toggle-label" @click="launchSettings.use_live_connections = !launchSettings.use_live_connections">
+          <span class="toggle-label" role="button" tabindex="0" @click="launchSettings.use_live_connections = !launchSettings.use_live_connections" @keydown.enter="launchSettings.use_live_connections = !launchSettings.use_live_connections" @keydown.space.prevent="launchSettings.use_live_connections = !launchSettings.use_live_connections">
             Live Connections
           </span>
         </label>
@@ -35,22 +35,22 @@
       <div class="settings-group-label">Connection</div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <label class="field-label">Source Env</label>
-          <select x-model="launchSettings.source_env" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-source-env">Source Env</label>
+          <select x-model="launchSettings.source_env" class="field-input field-select" id="a11y-launch-source-env">
             <option value="dev">Dev</option><option value="qa">QA</option>
             <option value="staging">Staging</option><option value="prod">Prod</option>
           </select>
         </div>
         <div>
-          <label class="field-label">Target Env</label>
-          <select x-model="launchSettings.target_env" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-target-env">Target Env</label>
+          <select x-model="launchSettings.target_env" class="field-input field-select" id="a11y-launch-target-env">
             <option value="dev">Dev</option><option value="qa">QA</option>
             <option value="staging">Staging</option><option value="prod">Prod</option>
           </select>
         </div>
         <div>
-          <label class="field-label">Saved Config</label>
-          <select x-model="launchSettings.config_id" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-saved-config">Saved Config</label>
+          <select x-model="launchSettings.config_id" class="field-input field-select" id="a11y-launch-saved-config">
             <option value="">— None —</option>
             <template x-for="cfg in configs" :key="cfg.id">
               <option :value="cfg.id" x-text="savedConfigDisplay(cfg)"></option>
@@ -61,8 +61,8 @@
       <template x-if="launchConfigConnections().length > 0">
         <div class="grid grid-cols-2 gap-4 mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
           <div>
-            <label class="field-label text-emerald-700">Source Connection</label>
-            <select x-model="launchSettings.source_connection" class="field-input field-select">
+            <label  class="field-label text-emerald-700" for="a11y-launch-source-connection">Source Connection</label>
+            <select x-model="launchSettings.source_connection" class="field-input field-select" id="a11y-launch-source-connection">
               <option :value="null">— default —</option>
               <template x-for="name in launchConfigConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -70,8 +70,8 @@
             </select>
           </div>
           <div>
-            <label class="field-label text-emerald-700">Target Connection</label>
-            <select x-model="launchSettings.target_connection" class="field-input field-select">
+            <label  class="field-label text-emerald-700" for="a11y-launch-target-connection">Target Connection</label>
+            <select x-model="launchSettings.target_connection" class="field-input field-select" id="a11y-launch-target-connection">
               <option :value="null">— default —</option>
               <template x-for="name in launchConfigConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -86,19 +86,19 @@
       <div class="settings-group-label">Execution</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div>
-          <label class="field-label">Execution Mode</label>
-          <select x-model="launchSettings.execution_mode" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-execution-mode">Execution Mode</label>
+          <select x-model="launchSettings.execution_mode" class="field-input field-select" id="a11y-launch-execution-mode">
             <option value="parallel">Parallel</option>
             <option value="sequential">Sequential</option>
           </select>
         </div>
         <div>
-          <label class="field-label">Max Workers</label>
-          <input x-model="launchSettings.max_workers" type="number" min="1" class="field-input" />
+          <label  class="field-label" for="a11y-launch-max-workers">Max Workers</label>
+          <input x-model="launchSettings.max_workers" type="number" min="1" class="field-input" id="a11y-launch-max-workers" />
         </div>
         <div>
-          <label class="field-label">Max Duration (s)</label>
-          <input x-model="launchSettings.max_duration_seconds" type="number" min="0" class="field-input" />
+          <label  class="field-label" for="a11y-launch-max-duration-s">Max Duration (s)</label>
+          <input x-model="launchSettings.max_duration_seconds" type="number" min="0" class="field-input" id="a11y-launch-max-duration-s" />
         </div>
       </div>
     </div>
@@ -107,15 +107,15 @@
       <div class="settings-group-label">Comparison</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div>
-          <label class="field-label">Comparison Backend</label>
-          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select">
+          <label  class="field-label" for="a11y-launch-comparison-backend">Comparison Backend</label>
+          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select" id="a11y-launch-comparison-backend">
             <option value="pandas">Pandas</option>
             <option value="polars">Polars</option>
           </select>
         </div>
         <div>
           <div class="flex items-center gap-1 mb-1">
-            <label class="field-label mb-0">Run Profile</label>
+            <label class="field-label mb-0" for="a11y-launch-run-profile">Run Profile</label>
             <button @click="showHelp('runProfile')" class="help-btn" title="Learn more">
               <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -123,20 +123,20 @@
             </button>
           </div>
           <select x-model="launchSettings.run_profile" class="field-input field-select" data-testid="launch-run-profile-select"
-                  title="Full compares every row. Shadow samples a small fraction — cheap per-PR checks.">
+                  title="Full compares every row. Shadow samples a small fraction — cheap per-PR checks." id="a11y-launch-run-profile">
             <option value="full">Full</option>
             <option value="shadow">Shadow (sampled)</option>
           </select>
         </div>
         <div x-show="launchSettings.run_profile === 'shadow'">
-          <label class="field-label">Shadow Sample Fraction</label>
+          <label class="field-label" for="a11y-launch-shadow-sample-fraction">Shadow Sample Fraction</label>
           <input type="number" min="0" max="1" step="0.01" x-model.number="launchSettings.shadow_sample_frac"
                  class="field-input" data-testid="launch-shadow-sample-frac-input"
-                 title="Fraction of rows to sample when Run Profile is Shadow (0-1)." />
+                  title="Fraction of rows to sample when Run Profile is Shadow (0-1)." id="a11y-launch-shadow-sample-fraction" />
         </div>
         <div>
           <div class="flex items-center gap-1 mb-1">
-            <label class="field-label mb-0">Chunk Size</label>
+            <label class="field-label mb-0" for="a11y-launch-chunk-size">Chunk Size</label>
             <button @click="showHelp('chunkSize')" class="help-btn" title="Learn more">
               <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -145,25 +145,25 @@
           </div>
           <input type="number" min="0" x-model.number="launchSettings.chunk_size"
                  class="field-input"
-                 title="Number of rows to process at once. 0 disables chunking.">
+                  title="Number of rows to process at once. 0 disables chunking." id="a11y-launch-chunk-size">
         </div>
         <div>
-          <label class="field-label">Float Tolerance</label>
+          <label class="field-label" for="a11y-launch-float-tolerance">Float Tolerance</label>
           <input type="text" x-model="launchSettings.float_tolerance"
                  class="field-input font-mono text-sm"
                  placeholder="1e-9"
-                 title="Maximum allowed difference between floating-point values before flagging as a mismatch">
+                  title="Maximum allowed difference between floating-point values before flagging as a mismatch" id="a11y-launch-float-tolerance">
         </div>
         <div>
-          <label class="field-label">Mismatch Row Limit</label>
+          <label  class="field-label" for="a11y-launch-mismatch-row-limit">Mismatch Row Limit</label>
           <input type="number" min="1" x-model.number="launchSettings.mismatch_row_limit"
                  class="field-input"
-                 title="Maximum number of mismatch detail rows stored per result. Counts still include all mismatches.">
+                 title="Maximum number of mismatch detail rows stored per result. Counts still include all mismatches." id="a11y-launch-mismatch-row-limit">
         </div>
         <div>
-          <label class="field-label">Schema Mismatch</label>
+          <label  class="field-label" for="a11y-launch-schema-mismatch">Schema Mismatch</label>
           <select x-model="launchSettings.schema_mismatch_policy" class="field-input field-select"
-                  title="How to handle column count or type differences between source and target">
+                  title="How to handle column count or type differences between source and target" id="a11y-launch-schema-mismatch">
             <option value="warn">Warn</option>
             <option value="error">Error</option>
             <option value="ignore">Ignore</option>
@@ -176,29 +176,29 @@
       <div class="settings-group-label">Advanced</div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-          <input type="checkbox" class="rounded" x-model="launchSettings.health_check" /> Health gate
+          <input type="checkbox" class="rounded" x-model="launchSettings.health_check" aria-label="launchsettings health check" /> Health gate
         </label>
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-          <input type="checkbox" class="rounded" x-model="launchSettings.metrics_enabled" /> Metrics
+          <input type="checkbox" class="rounded" x-model="launchSettings.metrics_enabled" aria-label="launchsettings metrics enabled" /> Metrics
         </label>
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
                title="Treat two NULL values as equal during comparison">
-          <input type="checkbox" class="rounded" x-model="launchSettings.null_equals_null" /> NULL = NULL
+          <input type="checkbox" class="rounded" x-model="launchSettings.null_equals_null" aria-label="launchsettings null equals null" /> NULL = NULL
         </label>
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer"
                title="Use hash comparison before full value comparison to speed up processing">
-          <input type="checkbox" class="rounded" x-model="launchSettings.use_hash_precheck" /> Hash precheck
+          <input type="checkbox" class="rounded" x-model="launchSettings.use_hash_precheck" aria-label="launchsettings use hash precheck" /> Hash precheck
         </label>
       </div>
       <!-- Retry policy -->
       <div class="grid grid-cols-2 gap-4 mt-4">
         <div>
-          <label class="field-label">Max Retries (0 = off)</label>
-          <input x-model="launchSettings.max_retries" type="number" min="0" max="10" class="field-input" />
+          <label  class="field-label" for="a11y-launch-max-retries-0-off">Max Retries (0 = off)</label>
+          <input x-model="launchSettings.max_retries" type="number" min="0" max="10" class="field-input" id="a11y-launch-max-retries-0-off" />
         </div>
         <div>
-          <label class="field-label">Retry Delay (seconds)</label>
-          <input x-model="launchSettings.retry_delay_seconds" type="number" min="0" class="field-input" />
+          <label  class="field-label" for="a11y-launch-retry-delay-seconds">Retry Delay (seconds)</label>
+          <input x-model="launchSettings.retry_delay_seconds" type="number" min="0" class="field-input" id="a11y-launch-retry-delay-seconds" />
         </div>
       </div>
     </div>
@@ -221,7 +221,7 @@
                @input="shiftLastIndex = -1"
                placeholder="Search jobs by name, tags, or description..."
                class="field-input pl-8 w-full text-sm"
-               data-testid="job-search-input">
+               data-testid="job-search-input" aria-label="search jobs by name tags or description">
         <svg class="absolute left-2 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
@@ -244,7 +244,7 @@
       <template x-for="(job, $index) in filteredJobList" :key="job.name">
         <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-colors"
              :data-testid="'job-row-' + job.name">
-          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" :data-testid="'job-row-' + job.name + '-checkbox'" />
+          <input type="checkbox" class="rounded flex-shrink-0" :checked="isJobSelected(job.name)" @click="toggleJobWithShift($index, $event)" :data-testid="'job-row-' + job.name + '-checkbox'" aria-label="job row job name checkbox" />
           <label class="flex-1 min-w-0 cursor-pointer" @click.prevent="toggleJobWithShift($index, $event)">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full flex-shrink-0 inline-block"
@@ -283,9 +283,9 @@
 
   <!-- Job Modal -->
   <div x-show="showJobModal" x-cloak class="modal-backdrop" @click.self="showJobModal = false" data-testid="job-modal">
-    <div class="modal-box w-full max-w-2xl">
+    <div x-ref="jobDialog" class="modal-box w-full max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="jobDialogTitle">
       <div class="flex items-center mb-4">
-        <h2 class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
+        <h2 id="jobDialogTitle" class="text-lg font-bold" x-text="jobModalEditing ? 'Edit Job' : 'New Job'"></h2>
         <button @click="showSaveTemplatePrompt = !showSaveTemplatePrompt"
                 class="btn-outline btn-sm ml-auto text-xs">
           Save as Template
@@ -296,7 +296,7 @@
         <input type="text"
                x-model="jobTemplateName"
                placeholder="Template name..."
-               class="field-input text-sm flex-1">
+               class="field-input text-sm flex-1" aria-label="template name">
         <button @click="saveJobAsTemplate()" class="btn-primary btn-sm text-sm">Save</button>
         <button @click="showSaveTemplatePrompt = false" class="btn-outline btn-sm text-sm">Cancel</button>
       </div>
@@ -304,7 +304,7 @@
       <template x-if="jobTemplates && jobTemplates.length > 0">
         <div class="mb-3">
           <select @change="loadJobTemplate($event.target.value); $event.target.value=''"
-                  class="field-input text-sm">
+                  class="field-input text-sm" aria-label="select">
             <option value="">-- Use template --</option>
             <template x-for="tmpl in jobTemplates" :key="tmpl.name">
               <option :value="tmpl.name" x-text="tmpl.name"></option>
@@ -326,16 +326,16 @@
 
       <div x-show="jobModalTab === 'basic'" class="space-y-3">
         <div>
-          <label class="field-label">Job Name *</label>
-          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" data-testid="job-modal-name-input" />
+          <label  class="field-label" for="a11y-launch-job-name">Job Name *</label>
+          <input x-model="jobModal.name" class="field-input" :disabled="jobModalEditing" placeholder="orders_reconciliation" data-testid="job-modal-name-input" id="a11y-launch-job-name" />
         </div>
         <div>
-          <label class="field-label">Description</label>
-          <input x-model="jobModal.description" class="field-input" />
+          <label  class="field-label" for="a11y-launch-description">Description</label>
+          <input x-model="jobModal.description" class="field-input" id="a11y-launch-description" />
         </div>
         <div>
-          <label class="field-label">Job Type</label>
-          <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select">
+          <label  class="field-label" for="a11y-launch-job-type">Job Type</label>
+          <select x-model="jobModal.job_type" class="field-input field-select" data-testid="job-modal-type-select" id="a11y-launch-job-type">
             <option value="reconciliation">reconciliation</option>
             <option value="bo_report">bo_report</option>
             <option value="bo_job">bo_job</option>
@@ -350,8 +350,8 @@
           </select>
         </div>
         <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
-          <label class="field-label">Input Source</label>
-          <select x-model="jobModal.source_mode" class="field-input field-select" data-testid="job-modal-source-mode-select">
+          <label  class="field-label" for="a11y-launch-input-source">Input Source</label>
+          <select x-model="jobModal.source_mode" class="field-input field-select" data-testid="job-modal-source-mode-select" id="a11y-launch-input-source">
             <option value="sql">SQL Query</option>
             <option value="files">Files</option>
             <option value="bo_live">Live BO Report</option>
@@ -359,17 +359,17 @@
           </select>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" class="rounded" x-model="jobModal.enabled" /> Enabled
+          <input type="checkbox" class="rounded" x-model="jobModal.enabled" aria-label="jobmodal enabled" /> Enabled
         </label>
       </div>
 
       <div x-show="jobModalTab === 'settings'" class="space-y-3">
         <div x-show="jobModal.job_type === 'reconciliation' && !['files', 'bo_live'].includes(jobModal.source_mode)">
-          <label class="field-label">SQL Query</label>
+          <label  class="field-label" for="a11y-launch-sql-query">SQL Query</label>
           <textarea x-model="jobModal.query" rows="4" class="field-input font-mono text-xs"
                     placeholder="SELECT * FROM orders WHERE date = :run_date"
                     @input="validateJobModal()"
-                    data-testid="job-modal-query-textarea"></textarea>
+                    data-testid="job-modal-query-textarea" id="a11y-launch-sql-query"></textarea>
           <p x-show="jobModalValidation && jobModalValidation.sql"
              class="text-xs mt-1"
              :class="jobModalValidation && jobModalValidation.sql && jobModalValidation.sql.startsWith('✓') ? 'text-emerald-600' : 'text-amber-600'"
@@ -385,7 +385,7 @@
           <div class="mt-3 border border-slate-200 rounded-lg overflow-hidden">
             <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
               <span class="text-xs font-medium text-slate-600">Preview against config</span>
-              <input type="number" x-model="jobModal.previewConfigId" class="field-input text-xs w-24 py-0.5" placeholder="Config ID" />
+              <input type="number" x-model="jobModal.previewConfigId" class="field-input text-xs w-24 py-0.5" placeholder="Config ID" aria-label="config id" />
               <button @click="previewJobQuery()"
                       :disabled="jobModal.previewLoading || !jobModal.query?.trim()"
                       class="btn-sm btn-secondary text-xs px-3 py-1 disabled:opacity-40">
@@ -395,11 +395,11 @@
             </div>
             <p x-show="jobModal.previewError" x-text="jobModal.previewError" class="text-xs text-red-600 px-3 py-2"></p>
             <div x-show="jobModal.previewResult" class="overflow-x-auto max-h-48">
-              <table class="text-xs w-full">
+              <table class="text-xs w-full" aria-label="launch table 1">
                 <thead class="bg-slate-100 sticky top-0">
                   <tr>
                     <template x-for="col in (jobModal.previewResult?.columns || [])" :key="col">
-                      <th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap border-r border-slate-200 last:border-r-0"></th>
+                      <th x-text="col" class="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap border-r border-slate-200 last:border-r-0" scope="col"></th>
                     </template>
                   </tr>
                 </thead>
@@ -423,39 +423,39 @@
              class="border border-slate-200 rounded-lg p-3">
           <div class="grid-2">
             <div>
-              <label class="field-label" x-text="jobModal.job_type === 'reconciliation' ? 'Source File Path' : 'Input File Path'"></label>
-              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" data-testid="job-modal-source-file-path-input" />
+              <label  class="field-label" x-text="jobModal.job_type === 'reconciliation' ? 'Source File Path' : 'Input File Path'" for="a11y-launch-field"></label>
+              <input x-model="jobModal.source_file_path" class="field-input" placeholder="C:\temp\source.csv" data-testid="job-modal-source-file-path-input" id="a11y-launch-field" />
             </div>
             <div x-show="jobModal.job_type === 'reconciliation'">
-              <label class="field-label">Target File Path</label>
-              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" data-testid="job-modal-target-file-path-input" />
+              <label  class="field-label" for="a11y-launch-target-file-path">Target File Path</label>
+              <input x-model="jobModal.target_file_path" class="field-input" placeholder="C:\temp\target.csv" data-testid="job-modal-target-file-path-input" id="a11y-launch-target-file-path" />
             </div>
             <div>
-              <label class="field-label">Source Label</label>
-              <input x-model="jobModal.source_file_label" class="field-input" placeholder="Source file" />
+              <label  class="field-label" for="a11y-launch-source-label">Source Label</label>
+              <input x-model="jobModal.source_file_label" class="field-input" placeholder="Source file" id="a11y-launch-source-label" />
             </div>
             <div x-show="jobModal.job_type === 'reconciliation'">
-              <label class="field-label">Target Label</label>
-              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Target file" />
+              <label  class="field-label" for="a11y-launch-target-label">Target Label</label>
+              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Target file" id="a11y-launch-target-label" />
             </div>
           </div>
         </div>
         <div x-show="['reconciliation','bo_report','api_reconciliation'].includes(jobModal.job_type)">
-          <label class="field-label">Key Columns (comma-separated)</label>
-          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" />
+          <label  class="field-label" for="a11y-launch-key-columns-comma-separated">Key Columns (comma-separated)</label>
+          <input x-model="jobModal.key_columns_raw" class="field-input" placeholder="id" @input="validateJobModal()" data-testid="job-modal-key-columns-input" id="a11y-launch-key-columns-comma-separated" />
         </div>
         <div x-show="jobModal.job_type === 'bo_report' || (jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'bo_live')" class="grid-2">
           <div>
-            <label class="field-label">BO Document ID</label>
-            <input x-model="jobModal.bo_report_id" class="field-input" placeholder="101" />
+            <label  class="field-label" for="a11y-launch-bo-document-id">BO Document ID</label>
+            <input x-model="jobModal.bo_report_id" class="field-input" placeholder="101" id="a11y-launch-bo-document-id" />
           </div>
           <div>
-            <label class="field-label">BO Report/Page ID</label>
-            <input x-model="jobModal.bo_page_id" class="field-input" placeholder="1" />
+            <label  class="field-label" for="a11y-launch-bo-report-page-id">BO Report/Page ID</label>
+            <input x-model="jobModal.bo_page_id" class="field-input" placeholder="1" id="a11y-launch-bo-report-page-id" />
           </div>
           <div>
-            <label class="field-label">Format</label>
-            <select x-model="jobModal.bo_format" class="field-input field-select">
+            <label  class="field-label" for="a11y-launch-format">Format</label>
+            <select x-model="jobModal.bo_format" class="field-input field-select" id="a11y-launch-format">
               <option value="xlsx">xlsx</option>
               <option value="csv">csv</option>
               <option value="pdf">pdf</option>
@@ -464,7 +464,7 @@
         </div>
         <div x-show="boPromptsApplicable()" data-testid="job-modal-bo-params">
           <div class="flex items-center justify-between mb-1">
-            <label class="field-label mb-0">Report Parameters</label>
+            <label  class="field-label mb-0" for="a11y-launch-report-parameters-load-from-report-add-parameter-0-datetime-string-path-upload-target-file-path-prod-snapshot">Report Parameters</label>
             <div class="flex gap-2">
               <button @click="loadBoParametersFromDocument()" data-testid="job-modal-bo-params-load-btn"
                       class="btn-secondary btn-sm text-xs">Load from report</button>
@@ -476,12 +476,12 @@
               <template x-for="(param, idx) in jobModal.bo_parameters" :key="idx">
                 <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
                   <span x-show="param.name" class="text-xs text-slate-600 py-1 w-28 truncate" x-text="param.name"></span>
-                  <input x-model.number="param.id" type="number" class="field-input text-xs py-1 flex-shrink-0 w-24" placeholder="ID" />
-                  <select x-model="param.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-36">
+                  <input x-model.number="param.id" type="number" class="field-input text-xs py-1 flex-shrink-0 w-24" placeholder="ID" aria-label="id" />
+                  <select x-model="param.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-36" aria-label="param type">
                     <option value="DateTime">DateTime</option>
                     <option value="String">String</option>
                   </select>
-                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'" class="field-input text-xs py-1 flex-1" placeholder="Value" />
+                  <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'" class="field-input text-xs py-1 flex-1" placeholder="Value" aria-label="value" />
                   <button @click="removeBoParameter(idx)" class="btn-danger btn-sm text-xs py-1 px-2">✕</button>
                 </div>
               </template>
@@ -503,19 +503,19 @@
               <label class="field-label">Target File Path (prod snapshot)</label>
               <input x-model="jobModal.target_file_path" class="field-input"
                      placeholder="C:\snapshots\prod_report.xlsx"
-                     data-testid="job-modal-bo-live-target-path-input" />
+                     data-testid="job-modal-bo-live-target-path-input" id="a11y-launch-report-parameters-load-from-report-add-parameter-0-datetime-string-path-upload-target-file-path-prod-snapshot" />
             </div>
             <div x-show="jobModal.target_source_mode === 'upload'">
-              <label class="field-label">Target File Upload (prod snapshot)</label>
+              <label  class="field-label" for="a11y-launch-target-file-upload-prod-snapshot">Target File Upload (prod snapshot)</label>
               <input type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt"
                      @change="handleJobTargetFileUpload($event)" class="field-input"
-                     data-testid="job-modal-bo-live-target-upload-input" />
+                     data-testid="job-modal-bo-live-target-upload-input" id="a11y-launch-target-file-upload-prod-snapshot" />
               <p x-show="jobModal.target_file_name" class="text-xs text-slate-500 mt-1"
                  x-text="'Selected: ' + jobModal.target_file_name"></p>
             </div>
             <div>
-              <label class="field-label">Target Label</label>
-              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Prod snapshot" />
+              <label  class="field-label" for="a11y-launch-target-label-2">Target Label</label>
+              <input x-model="jobModal.target_file_label" class="field-input" placeholder="Prod snapshot" id="a11y-launch-target-label-2" />
             </div>
           </div>
         </div>
@@ -523,15 +523,15 @@
              class="border border-slate-200 rounded-lg p-3 space-y-3">
           <div class="grid-2">
             <div>
-              <label class="field-label">Strategy</label>
-              <select x-model="jobModal.mf_strategy" class="field-input field-select" data-testid="job-modal-mf-strategy-select">
+              <label  class="field-label" for="a11y-launch-strategy">Strategy</label>
+              <select x-model="jobModal.mf_strategy" class="field-input field-select" data-testid="job-modal-mf-strategy-select" id="a11y-launch-strategy">
                 <option value="explicit">Explicit (match on tokens)</option>
                 <option value="automated">Automated (guess by similarity)</option>
               </select>
             </div>
             <div>
-              <label class="field-label">Unmatched Policy</label>
-              <select x-model="jobModal.mf_unmatched_policy" class="field-input field-select">
+              <label  class="field-label" for="a11y-launch-unmatched-policy">Unmatched Policy</label>
+              <select x-model="jobModal.mf_unmatched_policy" class="field-input field-select" id="a11y-launch-unmatched-policy">
                 <option value="fail">Fail job</option>
                 <option value="warn">Warn and proceed</option>
                 <option value="ignore">Ignore silently</option>
@@ -539,58 +539,58 @@
             </div>
           </div>
           <div x-show="jobModal.mf_strategy === 'explicit'">
-            <label class="field-label">Match On (comma-separated tokens)</label>
+            <label  class="field-label" for="a11y-launch-match-on-comma-separated-tokens">Match On (comma-separated tokens)</label>
             <input x-model="jobModal.mf_match_on_raw" class="field-input" placeholder="region, date"
-                   data-testid="job-modal-mf-match-on-input" />
+                   data-testid="job-modal-mf-match-on-input" id="a11y-launch-match-on-comma-separated-tokens" />
           </div>
           <div x-show="jobModal.mf_strategy === 'automated'" class="grid-2">
             <div>
-              <label class="field-label">Similarity Threshold</label>
+              <label  class="field-label" for="a11y-launch-similarity-threshold">Similarity Threshold</label>
               <input x-model="jobModal.mf_similarity_threshold" type="number" min="0" max="1" step="0.05"
-                     class="field-input" placeholder="0.7" />
+                     class="field-input" placeholder="0.7" id="a11y-launch-similarity-threshold" />
             </div>
             <div class="flex items-end gap-3">
               <label class="flex items-center gap-1 text-xs">
-                <input type="checkbox" x-model="jobModal.mf_signal_filename" class="rounded" /> filename
+                <input type="checkbox" x-model="jobModal.mf_signal_filename" class="rounded" aria-label="jobmodal mf signal filename" /> filename
               </label>
               <label class="flex items-center gap-1 text-xs">
-                <input type="checkbox" x-model="jobModal.mf_signal_columns" class="rounded" /> columns
+                <input type="checkbox" x-model="jobModal.mf_signal_columns" class="rounded" aria-label="jobmodal mf signal columns" /> columns
               </label>
               <label class="flex items-center gap-1 text-xs">
-                <input type="checkbox" x-model="jobModal.mf_signal_rowcount" class="rounded" /> row count
+                <input type="checkbox" x-model="jobModal.mf_signal_rowcount" class="rounded" aria-label="jobmodal mf signal rowcount" /> row count
               </label>
             </div>
           </div>
           <div class="border-t border-slate-200 pt-3">
             <p class="text-xs font-medium text-slate-500 mb-2">Source</p>
             <div class="grid-2">
-              <select x-model="jobModal.mf_source_kind" class="field-input field-select" data-testid="job-modal-mf-source-kind-select">
+              <select x-model="jobModal.mf_source_kind" class="field-input field-select" data-testid="job-modal-mf-source-kind-select" aria-label="job modal mf source kind select">
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
               </select>
               <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix"
-                     data-testid="job-modal-mf-source-root-input" />
+                     data-testid="job-modal-mf-source-root-input" aria-label="spool exports or s3 bucket prefix" />
               <input x-model="jobModal.mf_source_pattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
-                     data-testid="job-modal-mf-source-pattern-input" />
+                     data-testid="job-modal-mf-source-pattern-input" aria-label="sales region date y m d csv" />
               <input x-model="jobModal.mf_source_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
-                     x-show="jobModal.mf_source_kind !== 'local'" />
+                     x-show="jobModal.mf_source_kind !== 'local'" aria-label="credentials ref s3 sftp only" />
               <input x-model="jobModal.mf_source_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
-                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-access-key-input" />
+                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-access-key-input" aria-label="aws access key id preview only" />
               <input x-model="jobModal.mf_source_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
-                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-secret-key-input" />
+                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-secret-key-input" aria-label="aws secret access key preview only" />
               <input x-model="jobModal.mf_source_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
-                     x-show="jobModal.mf_source_kind === 's3'" />
+                     x-show="jobModal.mf_source_kind === 's3'" aria-label="region optional" />
               <input x-model="jobModal.mf_source_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
-                     x-show="jobModal.mf_source_kind === 's3'" />
+                     x-show="jobModal.mf_source_kind === 's3'" aria-label="endpoint url optional" />
               <input x-model="jobModal.mf_source_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
-                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-host-input" />
+                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-host-input" aria-label="sftp host preview only" />
               <input x-model="jobModal.mf_source_preview_creds.port" class="field-input" placeholder="Port (default 22)"
-                     x-show="jobModal.mf_source_kind === 'sftp'" />
+                     x-show="jobModal.mf_source_kind === 'sftp'" aria-label="port default 22" />
               <input x-model="jobModal.mf_source_preview_creds.username" class="field-input" placeholder="Username"
-                     x-show="jobModal.mf_source_kind === 'sftp'" />
+                     x-show="jobModal.mf_source_kind === 'sftp'" aria-label="username" />
               <input x-model="jobModal.mf_source_preview_creds.password" type="password" class="field-input" placeholder="Password"
-                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-password-input" />
+                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-password-input" aria-label="password" />
             </div>
             <p x-show="jobModal.mf_source_kind !== 'local'" class="text-xs text-slate-400 mt-1">
               Credentials above are used only for Preview Mapping and are never saved with the job.
@@ -599,33 +599,33 @@
           <div class="border-t border-slate-200 pt-3">
             <p class="text-xs font-medium text-slate-500 mb-2">Target</p>
             <div class="grid-2">
-              <select x-model="jobModal.mf_target_kind" class="field-input field-select" data-testid="job-modal-mf-target-kind-select">
+              <select x-model="jobModal.mf_target_kind" class="field-input field-select" data-testid="job-modal-mf-target-kind-select" aria-label="job modal mf target kind select">
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
               </select>
               <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix"
-                     data-testid="job-modal-mf-target-root-input" />
+                     data-testid="job-modal-mf-target-root-input" aria-label="exports finance or s3 bucket prefix" />
               <input x-model="jobModal.mf_target_pattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
-                     data-testid="job-modal-mf-target-pattern-input" />
+                     data-testid="job-modal-mf-target-pattern-input" aria-label="financials region date y m d dat" />
               <input x-model="jobModal.mf_target_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
-                     x-show="jobModal.mf_target_kind !== 'local'" />
+                     x-show="jobModal.mf_target_kind !== 'local'" aria-label="credentials ref s3 sftp only" />
               <input x-model="jobModal.mf_target_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
-                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-access-key-input" />
+                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-access-key-input" aria-label="aws access key id preview only" />
               <input x-model="jobModal.mf_target_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
-                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-secret-key-input" />
+                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-secret-key-input" aria-label="aws secret access key preview only" />
               <input x-model="jobModal.mf_target_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
-                     x-show="jobModal.mf_target_kind === 's3'" />
+                     x-show="jobModal.mf_target_kind === 's3'" aria-label="region optional" />
               <input x-model="jobModal.mf_target_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
-                     x-show="jobModal.mf_target_kind === 's3'" />
+                     x-show="jobModal.mf_target_kind === 's3'" aria-label="endpoint url optional" />
               <input x-model="jobModal.mf_target_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
-                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-host-input" />
+                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-host-input" aria-label="sftp host preview only" />
               <input x-model="jobModal.mf_target_preview_creds.port" class="field-input" placeholder="Port (default 22)"
-                     x-show="jobModal.mf_target_kind === 'sftp'" />
+                     x-show="jobModal.mf_target_kind === 'sftp'" aria-label="port default 22" />
               <input x-model="jobModal.mf_target_preview_creds.username" class="field-input" placeholder="Username"
-                     x-show="jobModal.mf_target_kind === 'sftp'" />
+                     x-show="jobModal.mf_target_kind === 'sftp'" aria-label="username" />
               <input x-model="jobModal.mf_target_preview_creds.password" type="password" class="field-input" placeholder="Password"
-                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-password-input" />
+                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-password-input" aria-label="password" />
             </div>
             <p x-show="jobModal.mf_target_kind !== 'local'" class="text-xs text-slate-400 mt-1">
               Credentials above are used only for Preview Mapping and are never saved with the job.
@@ -662,62 +662,62 @@
         </div>
         <div x-show="jobModal.job_type === 'automic_job'" class="grid-2">
           <div>
-            <label class="field-label">Automic Job Name</label>
-            <input x-model="jobModal.automic_job_name" class="field-input" placeholder="ETL_NIGHTLY_LOAD" />
+            <label  class="field-label" for="a11y-launch-automic-job-name">Automic Job Name</label>
+            <input x-model="jobModal.automic_job_name" class="field-input" placeholder="ETL_NIGHTLY_LOAD" id="a11y-launch-automic-job-name" />
           </div>
           <div>
-            <label class="field-label">Automic Run ID</label>
-            <input x-model="jobModal.automic_run_id" class="field-input" placeholder="RUN_42" />
+            <label  class="field-label" for="a11y-launch-automic-run-id">Automic Run ID</label>
+            <input x-model="jobModal.automic_run_id" class="field-input" placeholder="RUN_42" id="a11y-launch-automic-run-id" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'bo_job'" class="grid-2">
           <div>
-            <label class="field-label">BO Object ID (CUID)</label>
-            <input x-model="jobModal.bo_job_object_id" class="field-input" placeholder="3001" data-testid="job-modal-bo-job-object-id-input" />
+            <label  class="field-label" for="a11y-launch-bo-object-id-cuid">BO Object ID (CUID)</label>
+            <input x-model="jobModal.bo_job_object_id" class="field-input" placeholder="3001" data-testid="job-modal-bo-job-object-id-input" id="a11y-launch-bo-object-id-cuid" />
           </div>
           <div>
-            <label class="field-label">Schedule Params (JSON, optional)</label>
-            <input x-model="jobModal.bo_job_schedule_params_raw" class="field-input font-mono text-xs" placeholder='{"prompt_values": {"region": "EMEA"}}' />
+            <label  class="field-label" for="a11y-launch-schedule-params-json-optional">Schedule Params (JSON, optional)</label>
+            <input x-model="jobModal.bo_job_schedule_params_raw" class="field-input font-mono text-xs" placeholder='{"prompt_values": {"region": "EMEA"}}' id="a11y-launch-schedule-params-json-optional" />
           </div>
           <div>
-            <label class="field-label">Poll Interval (seconds)</label>
-            <input x-model="jobModal.bo_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" />
+            <label  class="field-label" for="a11y-launch-poll-interval-seconds">Poll Interval (seconds)</label>
+            <input x-model="jobModal.bo_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" id="a11y-launch-poll-interval-seconds" />
           </div>
           <div>
-            <label class="field-label">Timeout (seconds)</label>
-            <input x-model="jobModal.bo_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" />
+            <label  class="field-label" for="a11y-launch-timeout-seconds">Timeout (seconds)</label>
+            <input x-model="jobModal.bo_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" id="a11y-launch-timeout-seconds" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'ds_job'" class="grid-2">
           <div>
-            <label class="field-label">DS Job Name</label>
-            <input x-model="jobModal.ds_job_name" class="field-input" placeholder="DS_NIGHTLY_LOAD" data-testid="job-modal-ds-job-name-input" />
+            <label  class="field-label" for="a11y-launch-ds-job-name">DS Job Name</label>
+            <input x-model="jobModal.ds_job_name" class="field-input" placeholder="DS_NIGHTLY_LOAD" data-testid="job-modal-ds-job-name-input" id="a11y-launch-ds-job-name" />
           </div>
           <div>
-            <label class="field-label">Repository (optional, falls back to config)</label>
-            <input x-model="jobModal.ds_job_repository" class="field-input" placeholder="DS_REPO" />
+            <label  class="field-label" for="a11y-launch-repository-optional-falls-back-to-config">Repository (optional, falls back to config)</label>
+            <input x-model="jobModal.ds_job_repository" class="field-input" placeholder="DS_REPO" id="a11y-launch-repository-optional-falls-back-to-config" />
           </div>
           <div>
-            <label class="field-label">Job Params (JSON, optional)</label>
-            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' />
+            <label  class="field-label" for="a11y-launch-job-params-json-optional">Job Params (JSON, optional)</label>
+            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' id="a11y-launch-job-params-json-optional" />
           </div>
           <div>
-            <label class="field-label">Poll Interval (seconds)</label>
-            <input x-model="jobModal.ds_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" />
+            <label  class="field-label" for="a11y-launch-poll-interval-seconds-2">Poll Interval (seconds)</label>
+            <input x-model="jobModal.ds_job_poll_interval_s" type="number" min="1" class="field-input" placeholder="5" id="a11y-launch-poll-interval-seconds-2" />
           </div>
           <div>
-            <label class="field-label">Timeout (seconds)</label>
-            <input x-model="jobModal.ds_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" />
+            <label  class="field-label" for="a11y-launch-timeout-seconds-2">Timeout (seconds)</label>
+            <input x-model="jobModal.ds_job_timeout_s" type="number" min="1" class="field-input" placeholder="600" id="a11y-launch-timeout-seconds-2" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'api_reconciliation'" class="grid-2">
           <div>
-            <label class="field-label">Source API Endpoint</label>
-            <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" />
+            <label  class="field-label" for="a11y-launch-source-api-endpoint">Source API Endpoint</label>
+            <input x-model="jobModal.api_source_endpoint" class="field-input" placeholder="orders_api" id="a11y-launch-source-api-endpoint" />
           </div>
           <div>
-            <label class="field-label">Target API Endpoint <span class="text-slate-400 font-normal">(optional — leave blank to compare later)</span></label>
-            <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" />
+            <label  class="field-label" for="a11y-launch-target-api-endpoint-optional-leave-blank-to-compare-later">Target API Endpoint <span class="text-slate-400 font-normal">(optional — leave blank to compare later)</span></label>
+            <input x-model="jobModal.api_target_endpoint" class="field-input" placeholder="orders_api_v2" id="a11y-launch-target-api-endpoint-optional-leave-blank-to-compare-later" />
           </div>
           <p class="text-xs text-slate-400 col-span-2">
             Endpoint names must match entries in the api_endpoints section of whichever config is selected when this job runs.
@@ -726,60 +726,60 @@
         </div>
         <div x-show="jobModal.job_type === 'dbt_artifact'" class="grid-2">
           <div>
-            <label class="field-label">manifest.json path</label>
-            <input x-model="jobModal.dbt_manifest_path" class="field-input" placeholder="target/manifest.json" />
+            <label  class="field-label" for="a11y-launch-manifest-json-path">manifest.json path</label>
+            <input x-model="jobModal.dbt_manifest_path" class="field-input" placeholder="target/manifest.json" id="a11y-launch-manifest-json-path" />
           </div>
           <div>
-            <label class="field-label">run_results.json path</label>
-            <input x-model="jobModal.dbt_run_results_path" class="field-input" placeholder="target/run_results.json" />
+            <label  class="field-label" for="a11y-launch-run-results-json-path">run_results.json path</label>
+            <input x-model="jobModal.dbt_run_results_path" class="field-input" placeholder="target/run_results.json" id="a11y-launch-run-results-json-path" />
           </div>
         </div>
         <!-- Freshness params -->
         <div x-show="jobModal.job_type === 'freshness'" class="space-y-3">
           <div x-show="jobModal.source_mode !== 'files'">
-            <label class="field-label">SQL Query (must return a timestamp column)</label>
+            <label  class="field-label" for="a11y-launch-sql-query-must-return-a-timestamp-column">SQL Query (must return a timestamp column)</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
-                      placeholder="SELECT MAX(created_at) as ts FROM orders"></textarea>
+                      placeholder="SELECT MAX(created_at) as ts FROM orders" id="a11y-launch-sql-query-must-return-a-timestamp-column"></textarea>
           </div>
           <div class="grid-2">
             <div>
-              <label class="field-label">Timestamp Column Name</label>
-              <input x-model="jobModal.freshness_ts_col" class="field-input" placeholder="ts" />
+              <label  class="field-label" for="a11y-launch-timestamp-column-name">Timestamp Column Name</label>
+              <input x-model="jobModal.freshness_ts_col" class="field-input" placeholder="ts" id="a11y-launch-timestamp-column-name" />
             </div>
             <div>
-              <label class="field-label">Max Age (hours)</label>
-              <input type="number" x-model="jobModal.freshness_max_hours" class="field-input" placeholder="24" min="0" step="0.5" />
+              <label  class="field-label" for="a11y-launch-max-age-hours">Max Age (hours)</label>
+              <input type="number" x-model="jobModal.freshness_max_hours" class="field-input" placeholder="24" min="0" step="0.5" id="a11y-launch-max-age-hours" />
             </div>
           </div>
         </div>
         <!-- Profile params -->
         <div x-show="jobModal.job_type === 'profile'" class="space-y-3">
           <div x-show="jobModal.source_mode !== 'files'">
-            <label class="field-label">SQL Query</label>
+            <label  class="field-label" for="a11y-launch-sql-query-2">SQL Query</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
-                      placeholder="SELECT * FROM orders"></textarea>
+                      placeholder="SELECT * FROM orders" id="a11y-launch-sql-query-2"></textarea>
           </div>
           <div class="grid-2">
             <div>
-              <label class="field-label">Columns (comma-separated, blank = all)</label>
-              <input x-model="jobModal.profile_columns" class="field-input" placeholder="amount, status, created_at" />
+              <label  class="field-label" for="a11y-launch-columns-comma-separated-blank-all">Columns (comma-separated, blank = all)</label>
+              <input x-model="jobModal.profile_columns" class="field-input" placeholder="amount, status, created_at" id="a11y-launch-columns-comma-separated-blank-all" />
             </div>
             <div>
-              <label class="field-label">Drift Threshold %</label>
-              <input type="number" x-model="jobModal.profile_drift_pct" class="field-input" placeholder="20" min="0" max="100" />
+              <label  class="field-label" for="a11y-launch-drift-threshold">Drift Threshold %</label>
+              <input type="number" x-model="jobModal.profile_drift_pct" class="field-input" placeholder="20" min="0" max="100" id="a11y-launch-drift-threshold" />
             </div>
           </div>
         </div>
         <!-- Schema Snapshot params -->
         <div x-show="jobModal.job_type === 'schema_snapshot'" class="space-y-3">
           <div x-show="jobModal.source_mode !== 'files'">
-            <label class="field-label">SQL Query (schema is captured from the result columns)</label>
+            <label  class="field-label" for="a11y-launch-sql-query-schema-is-captured-from-the-result-columns">SQL Query (schema is captured from the result columns)</label>
             <textarea x-model="jobModal.query" rows="3" class="field-input font-mono text-xs"
-                      placeholder="SELECT * FROM orders LIMIT 0"></textarea>
+                      placeholder="SELECT * FROM orders LIMIT 0" id="a11y-launch-sql-query-schema-is-captured-from-the-result-columns"></textarea>
           </div>
           <div>
-            <label class="field-label">Environment</label>
-            <select x-model="jobModal.snapshot_environment" class="field-input field-select">
+            <label  class="field-label" for="a11y-launch-environment">Environment</label>
+            <select x-model="jobModal.snapshot_environment" class="field-input field-select" id="a11y-launch-environment">
               <option value="source">source</option>
               <option value="target">target</option>
               <option value="both">both</option>
@@ -790,42 +790,42 @@
         <div x-show="jobModal.job_type === 'cross_job_assertion'" class="space-y-3">
           <div class="grid-2">
             <div>
-              <label class="field-label">Source Job Name</label>
-              <input x-model="jobModal.cja_source_job" class="field-input" placeholder="orders_profile" />
+              <label  class="field-label" for="a11y-launch-source-job-name">Source Job Name</label>
+              <input x-model="jobModal.cja_source_job" class="field-input" placeholder="orders_profile" id="a11y-launch-source-job-name" />
             </div>
             <div>
-              <label class="field-label">Source Metric</label>
-              <select x-model="jobModal.cja_source_metric" class="field-input field-select">
+              <label  class="field-label" for="a11y-launch-source-metric">Source Metric</label>
+              <select x-model="jobModal.cja_source_metric" class="field-input field-select" id="a11y-launch-source-metric">
                 <option value="count">count</option>
                 <option value="distinct_count">distinct_count</option>
               </select>
             </div>
             <div>
-              <label class="field-label">Source Column</label>
-              <input x-model="jobModal.cja_source_col" class="field-input" placeholder="amount" />
+              <label  class="field-label" for="a11y-launch-source-column">Source Column</label>
+              <input x-model="jobModal.cja_source_col" class="field-input" placeholder="amount" id="a11y-launch-source-column" />
             </div>
             <div>
-              <label class="field-label">Target Job Name</label>
-              <input x-model="jobModal.cja_target_job" class="field-input" placeholder="payments_profile" />
+              <label  class="field-label" for="a11y-launch-target-job-name">Target Job Name</label>
+              <input x-model="jobModal.cja_target_job" class="field-input" placeholder="payments_profile" id="a11y-launch-target-job-name" />
             </div>
             <div>
-              <label class="field-label">Target Metric</label>
-              <select x-model="jobModal.cja_target_metric" class="field-input field-select">
+              <label  class="field-label" for="a11y-launch-target-metric">Target Metric</label>
+              <select x-model="jobModal.cja_target_metric" class="field-input field-select" id="a11y-launch-target-metric">
                 <option value="count">count</option>
                 <option value="distinct_count">distinct_count</option>
               </select>
             </div>
             <div>
-              <label class="field-label">Target Column</label>
-              <input x-model="jobModal.cja_target_col" class="field-input" placeholder="total" />
+              <label  class="field-label" for="a11y-launch-target-column">Target Column</label>
+              <input x-model="jobModal.cja_target_col" class="field-input" placeholder="total" id="a11y-launch-target-column" />
             </div>
             <div>
-              <label class="field-label">Tolerance</label>
-              <input type="number" x-model="jobModal.cja_tolerance" class="field-input" placeholder="0" min="0" />
+              <label  class="field-label" for="a11y-launch-tolerance">Tolerance</label>
+              <input type="number" x-model="jobModal.cja_tolerance" class="field-input" placeholder="0" min="0" id="a11y-launch-tolerance" />
             </div>
             <div>
-              <label class="field-label">Tolerance Type</label>
-              <select x-model="jobModal.cja_tolerance_type" class="field-input field-select">
+              <label  class="field-label" for="a11y-launch-tolerance-type">Tolerance Type</label>
+              <select x-model="jobModal.cja_tolerance_type" class="field-input field-select" id="a11y-launch-tolerance-type">
                 <option value="absolute">absolute</option>
                 <option value="percent">percent</option>
               </select>
@@ -851,8 +851,8 @@
 
       <div x-show="jobModalTab === 'deps'" class="space-y-3">
         <div>
-          <label class="field-label">Depends On (comma-separated job names)</label>
-          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" data-testid="job-modal-depends-on-input" />
+          <label  class="field-label" for="a11y-launch-depends-on-comma-separated-job-names">Depends On (comma-separated job names)</label>
+          <input x-model="jobModal.depends_on_raw" class="field-input" placeholder="upstream_job_1, upstream_job_2" @input="validateJobModal()" data-testid="job-modal-depends-on-input" id="a11y-launch-depends-on-comma-separated-job-names" />
           <p x-show="jobModalValidation && jobModalValidation.dependencies"
              class="text-xs mt-1 text-amber-600"
              x-text="jobModalValidation && jobModalValidation.dependencies ? jobModalValidation.dependencies : ''">
@@ -865,7 +865,7 @@
           <div class="flex items-center gap-2 mb-3">
             <label class="text-sm text-slate-500">Template:</label>
             <select @change="applyDqTemplate($event.target.value); $event.target.value=''"
-                    class="field-input text-sm flex-1">
+                    class="field-input text-sm flex-1" aria-label="select">
               <option value="">-- Apply template --</option>
               <template x-for="tmpl in dqRuleTemplates" :key="tmpl.name">
                 <option :value="tmpl.name" x-text="tmpl.name"></option>
@@ -873,14 +873,14 @@
             </select>
           </div>
           <div class="flex items-center justify-between mb-1">
-            <label class="field-label mb-0">Data Quality Rules</label>
+            <label  class="field-label mb-0" for="a11y-launch-data-quality-rules-add-rule-0-not-null-unique-row-count-min-row-count-max-row-count-between-column-mean-between-match-regex-custom-sql-completeness-ratio-distinct-count-between-column-sum-between-column-std-dev-between-column-percentile-column-type-check-column-value-between-cross-column-consistency-pii-mask-check-no-whitespace-referential-check-custom-sql-assert-outlier-zscore-outlier-iqr-outlier-grubbs-distribution-ks-test-distribution-chi-square-distribution-anderson-darling-hypothesis-test-proportion-anomaly-detection-sigma-int-float-date-uuid-lt-lt-gt-gt-inner-outer-normal-uniform-exp-error-warn-no-rules-job-will-skip-dq-checks-dq-rules-only-apply-to-reconciliation-jobs-tags-comma-separated">Data Quality Rules</label>
             <button @click="addDQRule()" class="btn-secondary btn-sm text-xs">+ Add Rule</button>
           </div>
           <template x-if="jobModal.rules && jobModal.rules.length > 0">
             <div class="space-y-2 mt-1">
               <template x-for="(rule, idx) in jobModal.rules" :key="idx">
                 <div class="flex items-start gap-2 p-2 rounded border border-slate-200 bg-slate-50">
-                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-44">
+                  <select x-model="rule.type" class="field-input field-select text-xs py-1 flex-shrink-0 w-44" aria-label="rule type">
                     <option value="not_null">not_null</option>
                     <option value="unique">unique</option>
                     <option value="row_count_min">row_count_min</option>
@@ -910,21 +910,21 @@
                     <option value="hypothesis_test_proportion">hypothesis_test_proportion</option>
                     <option value="anomaly_detection_sigma">anomaly_detection_sigma</option>
                   </select>
-                  <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" />
+                  <input x-model="rule.column" class="field-input text-xs py-1 flex-1" placeholder="column" aria-label="column" />
                   <template x-if="['row_count_min','row_count_max','row_count_between','column_mean_between','completeness_ratio','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between','custom_sql_assert'].includes(rule.type)">
-                    <input x-model="rule.min_value" type="number" class="field-input text-xs py-1 w-20" placeholder="min" />
+                    <input x-model="rule.min_value" type="number" class="field-input text-xs py-1 w-20" placeholder="min" aria-label="min" />
                   </template>
                   <template x-if="['row_count_max','row_count_between','column_mean_between','distinct_count_between','column_sum_between','column_std_dev_between','column_percentile','column_value_between'].includes(rule.type)">
-                    <input x-model="rule.max_value" type="number" class="field-input text-xs py-1 w-20" placeholder="max" />
+                    <input x-model="rule.max_value" type="number" class="field-input text-xs py-1 w-20" placeholder="max" aria-label="max" />
                   </template>
                   <template x-if="['match_regex','pii_mask_check'].includes(rule.type)">
-                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="regex pattern" />
+                    <input x-model="rule.pattern" class="field-input text-xs py-1 flex-1" placeholder="regex pattern" aria-label="regex pattern" />
                   </template>
                   <template x-if="rule.type === 'column_percentile'">
-                    <input x-model="rule.percentile" type="number" class="field-input text-xs py-1 w-16" placeholder="p%" min="1" max="99" />
+                    <input x-model="rule.percentile" type="number" class="field-input text-xs py-1 w-16" placeholder="p%" min="1" max="99" aria-label="p" />
                   </template>
                   <template x-if="rule.type === 'column_type_check'">
-                    <select x-model="rule.expected_type" class="field-input field-select text-xs py-1 w-24">
+                    <select x-model="rule.expected_type" class="field-input field-select text-xs py-1 w-24" aria-label="rule expected type">
                       <option value="int">int</option>
                       <option value="float">float</option>
                       <option value="date">date</option>
@@ -932,10 +932,10 @@
                     </select>
                   </template>
                   <template x-if="rule.type === 'cross_column_consistency'">
-                    <input x-model="rule.column_b" class="field-input text-xs py-1 w-24" placeholder="column B" />
+                    <input x-model="rule.column_b" class="field-input text-xs py-1 w-24" placeholder="column B" aria-label="column b" />
                   </template>
                   <template x-if="['cross_column_consistency','custom_sql_assert'].includes(rule.type)">
-                    <select x-model="rule.operator" class="field-input field-select text-xs py-1 w-16">
+                    <select x-model="rule.operator" class="field-input field-select text-xs py-1 w-16" aria-label="rule operator">
                       <option value="&lt;=">&lt;=</option>
                       <option value="&lt;">&lt;</option>
                       <option value="&gt;=">&gt;=</option>
@@ -947,43 +947,43 @@
                     <input x-model="rule.lookup_query" class="field-input text-xs py-1 flex-1" placeholder="SELECT id FROM ref_table" />
                   </template>
                   <template x-if="['outlier_zscore','outlier_grubbs','anomaly_detection_sigma'].includes(rule.type)">
-                    <input x-model="rule.threshold" type="number" step="any" class="field-input text-xs py-1 w-20" :placeholder="rule.type === 'outlier_grubbs' ? 'alpha' : 'threshold'" />
+                    <input x-model="rule.threshold" type="number" step="any" class="field-input text-xs py-1 w-20" :placeholder="rule.type === 'outlier_grubbs' ? 'alpha' : 'threshold'" aria-label="rule type outlier grubbs alpha threshold" />
                   </template>
                   <template x-if="rule.type === 'outlier_iqr'">
-                    <input x-model="rule.iqr_multiplier" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="IQR x" />
+                    <input x-model="rule.iqr_multiplier" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="IQR x" aria-label="iqr x" />
                   </template>
                   <template x-if="rule.type === 'outlier_iqr'">
-                    <select x-model="rule.fence_type" class="field-input field-select text-xs py-1 w-20">
+                    <select x-model="rule.fence_type" class="field-input field-select text-xs py-1 w-20" aria-label="rule fence type">
                       <option value="inner">inner</option>
                       <option value="outer">outer</option>
                     </select>
                   </template>
                   <template x-if="['distribution_ks_test','distribution_chi_square','distribution_anderson_darling','hypothesis_test_proportion'].includes(rule.type)">
-                    <input x-model="rule.alpha" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="alpha" />
+                    <input x-model="rule.alpha" type="number" step="any" class="field-input text-xs py-1 w-20" placeholder="alpha" aria-label="alpha" />
                   </template>
                   <template x-if="rule.type === 'distribution_ks_test'">
-                    <select x-model="rule.distribution" class="field-input field-select text-xs py-1 w-24">
+                    <select x-model="rule.distribution" class="field-input field-select text-xs py-1 w-24" aria-label="rule distribution">
                       <option value="normal">normal</option>
                       <option value="uniform">uniform</option>
                       <option value="exp">exp</option>
                     </select>
                   </template>
                   <template x-if="rule.type === 'distribution_chi_square'">
-                    <input x-model="rule.bins" type="number" min="1" class="field-input text-xs py-1 w-16" placeholder="bins" />
+                    <input x-model="rule.bins" type="number" min="1" class="field-input text-xs py-1 w-16" placeholder="bins" aria-label="bins" />
                   </template>
                   <template x-if="rule.type === 'distribution_chi_square'">
-                    <input x-model="rule.expected_frequencies_raw" class="field-input text-xs py-1 flex-1" placeholder="expected frequencies: 10,20,30" />
+                    <input x-model="rule.expected_frequencies_raw" class="field-input text-xs py-1 flex-1" placeholder="expected frequencies: 10,20,30" aria-label="expected frequencies 10 20 30" />
                   </template>
                   <template x-if="rule.type === 'hypothesis_test_proportion'">
-                    <input x-model="rule.condition" class="field-input text-xs py-1 w-24" placeholder="value" />
+                    <input x-model="rule.condition" class="field-input text-xs py-1 w-24" placeholder="value" aria-label="value" />
                   </template>
                   <template x-if="rule.type === 'hypothesis_test_proportion'">
-                    <input x-model="rule.expected_proportion" type="number" step="any" min="0" max="1" class="field-input text-xs py-1 w-20" placeholder="ratio" />
+                    <input x-model="rule.expected_proportion" type="number" step="any" min="0" max="1" class="field-input text-xs py-1 w-20" placeholder="ratio" aria-label="ratio" />
                   </template>
                   <template x-if="rule.type === 'anomaly_detection_sigma'">
-                    <input x-model="rule.window" type="number" min="2" class="field-input text-xs py-1 w-16" placeholder="window" />
+                    <input x-model="rule.window" type="number" min="2" class="field-input text-xs py-1 w-16" placeholder="window" aria-label="window" />
                   </template>
-                  <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20">
+                  <select x-model="rule.severity" class="field-input field-select text-xs py-1 w-20" aria-label="rule severity">
                     <option value="error">error</option>
                     <option value="warn">warn</option>
                   </select>
@@ -1004,7 +1004,7 @@
       <div x-show="jobModalTab === 'tags'" class="space-y-3">
         <div>
           <label class="field-label">Tags (comma-separated)</label>
-          <input x-model="jobModal.tags_raw" class="field-input" placeholder="daily, finance" />
+          <input x-model="jobModal.tags_raw" class="field-input" placeholder="daily, finance" id="a11y-launch-data-quality-rules-add-rule-0-not-null-unique-row-count-min-row-count-max-row-count-between-column-mean-between-match-regex-custom-sql-completeness-ratio-distinct-count-between-column-sum-between-column-std-dev-between-column-percentile-column-type-check-column-value-between-cross-column-consistency-pii-mask-check-no-whitespace-referential-check-custom-sql-assert-outlier-zscore-outlier-iqr-outlier-grubbs-distribution-ks-test-distribution-chi-square-distribution-anderson-darling-hypothesis-test-proportion-anomaly-detection-sigma-int-float-date-uuid-lt-lt-gt-gt-inner-outer-normal-uniform-exp-error-warn-no-rules-job-will-skip-dq-checks-dq-rules-only-apply-to-reconciliation-jobs-tags-comma-separated" />
         </div>
       </div>
 
@@ -1012,37 +1012,37 @@
       <div x-show="jobModalTab === 'conditions'" class="space-y-3">
         <div class="grid-2">
           <div>
-            <label class="field-label">Min Source Row Count</label>
-            <input type="number" min="0" x-model="jobModal.pass_min_row_count" class="field-input" placeholder="e.g. 1 (blank = skip)" />
+            <label  class="field-label" for="a11y-launch-min-source-row-count">Min Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_min_row_count" class="field-input" placeholder="e.g. 1 (blank = skip)" id="a11y-launch-min-source-row-count" />
           </div>
           <div>
-            <label class="field-label">Max Source Row Count</label>
-            <input type="number" min="0" x-model="jobModal.pass_max_row_count" class="field-input" placeholder="e.g. 1000000 (blank = skip)" />
+            <label  class="field-label" for="a11y-launch-max-source-row-count">Max Source Row Count</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_row_count" class="field-input" placeholder="e.g. 1000000 (blank = skip)" id="a11y-launch-max-source-row-count" />
           </div>
           <div>
-            <label class="field-label">Max Value Mismatches</label>
-            <input type="number" min="0" x-model="jobModal.pass_max_value_mismatches" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+            <label  class="field-label" for="a11y-launch-max-value-mismatches">Max Value Mismatches</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_value_mismatches" class="field-input" placeholder="e.g. 0 (blank = skip)" id="a11y-launch-max-value-mismatches" />
           </div>
           <div>
-            <label class="field-label">Max Missing in Target</label>
-            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_target" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+            <label  class="field-label" for="a11y-launch-max-missing-in-target">Max Missing in Target</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_target" class="field-input" placeholder="e.g. 0 (blank = skip)" id="a11y-launch-max-missing-in-target" />
           </div>
           <div>
-            <label class="field-label">Max Missing in Source</label>
-            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_source" class="field-input" placeholder="e.g. 0 (blank = skip)" />
+            <label  class="field-label" for="a11y-launch-max-missing-in-source">Max Missing in Source</label>
+            <input type="number" min="0" x-model="jobModal.pass_max_missing_in_source" class="field-input" placeholder="e.g. 0 (blank = skip)" id="a11y-launch-max-missing-in-source" />
           </div>
           <div>
-            <label class="field-label">Required Status (comma-sep)</label>
-            <input type="text" x-model="jobModal.pass_require_status" class="field-input" placeholder="PASSED" />
+            <label  class="field-label" for="a11y-launch-required-status-comma-sep">Required Status (comma-sep)</label>
+            <input type="text" x-model="jobModal.pass_require_status" class="field-input" placeholder="PASSED" id="a11y-launch-required-status-comma-sep" />
           </div>
         </div>
         <div x-show="jobModal.job_type === 'reconciliation'">
-          <label class="field-label">Pass SQL <span class="text-muted text-xs font-normal">(runs against source after reconciliation)</span></label>
+          <label  class="field-label" for="a11y-launch-pass-sql-runs-against-source-after-reconciliation">Pass SQL <span class="text-muted text-xs font-normal">(runs against source after reconciliation)</span></label>
           <textarea x-model="jobModal.pass_sql" rows="3" class="field-input font-mono text-xs"
-                    placeholder="SELECT 1 WHERE EXISTS (SELECT 1 FROM orders WHERE status = 'ok')"></textarea>
+                    placeholder="SELECT 1 WHERE EXISTS (SELECT 1 FROM orders WHERE status = 'ok')" id="a11y-launch-pass-sql-runs-against-source-after-reconciliation"></textarea>
           <div class="mt-2">
-            <label class="field-label text-xs">Pass SQL Mode</label>
-            <select x-model="jobModal.pass_sql_mode" class="field-input field-select text-sm">
+            <label  class="field-label text-xs" for="a11y-launch-pass-sql-mode">Pass SQL Mode</label>
+            <select x-model="jobModal.pass_sql_mode" class="field-input field-select text-sm" id="a11y-launch-pass-sql-mode">
               <option value="rows_mean_pass">Rows returned → PASS (assert good state exists)</option>
               <option value="rows_mean_fail">Rows returned → FAIL (assert no bad rows exist)</option>
             </select>
@@ -1117,44 +1117,44 @@
           <!-- Expandable step settings -->
           <div x-show="stepSettingsOpen[name]" class="ml-6 mt-1 mb-2 p-3 rounded-lg bg-slate-100 border border-slate-200 space-y-2 text-sm">
             <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" class="rounded" x-model="getStepCfg(name).hold_after" />
+              <input type="checkbox" class="rounded" x-model="getStepCfg(name).hold_after" aria-label="getstepcfg name hold after" />
               <span class="font-medium">Hold after this step</span>
               <span class="text-muted text-xs">(pause sequence and wait for approval)</span>
             </label>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="field-label text-xs">Delay before next step (s)</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).wait_seconds" placeholder="0" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).wait_seconds" placeholder="0" aria-label="0" />
               </div>
               <div>
                 <label class="field-label text-xs">Max mismatches (condition)</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_mismatch_count" placeholder="unlimited" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_mismatch_count" placeholder="unlimited" aria-label="unlimited" />
               </div>
             </div>
             <div>
               <label class="field-label text-xs">Required prior status (comma-sep, e.g. PASSED)</label>
-              <input type="text" class="field-input text-sm py-1" x-model="getStepCfg(name).require_status" placeholder="PASSED" />
+              <input type="text" class="field-input text-sm py-1" x-model="getStepCfg(name).require_status" placeholder="PASSED" aria-label="passed" />
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="field-label text-xs">Min source row count</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).min_row_count" placeholder="blank = skip" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).min_row_count" placeholder="blank = skip" aria-label="blank skip" />
               </div>
               <div>
                 <label class="field-label text-xs">Max source row count</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_row_count" placeholder="blank = skip" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_row_count" placeholder="blank = skip" aria-label="blank skip" />
               </div>
               <div>
                 <label class="field-label text-xs">Max value mismatches</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_value_mismatches" placeholder="blank = skip" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_value_mismatches" placeholder="blank = skip" aria-label="blank skip" />
               </div>
               <div>
                 <label class="field-label text-xs">Max missing in target</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_target" placeholder="blank = skip" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_target" placeholder="blank = skip" aria-label="blank skip" />
               </div>
               <div>
                 <label class="field-label text-xs">Max missing in source</label>
-                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_source" placeholder="blank = skip" />
+                <input type="number" min="0" class="field-input text-sm py-1" x-model="getStepCfg(name).max_missing_in_source" placeholder="blank = skip" aria-label="blank skip" />
               </div>
             </div>
           </div>
@@ -1208,18 +1208,18 @@
 
   <!-- Job Selection Modal -->
   <div x-show="showSelectionModal" x-cloak class="modal-backdrop" @click.self="showSelectionModal = false">
-    <div class="modal-box w-full max-w-2xl">
-      <h2 class="text-lg font-bold mb-4" x-text="selectionModalEditing ? 'Edit Job Selection' : 'New Job Selection'"></h2>
+    <div class="modal-box w-full max-w-2xl" x-ref="selectionDialog" role="dialog" aria-modal="true" aria-labelledby="selectionModalTitle">
+      <h2 id="selectionModalTitle" class="text-lg font-bold mb-4" x-text="selectionModalEditing ? 'Edit Job Selection' : 'New Job Selection'"></h2>
       <div class="space-y-3">
-        <div><label class="field-label">Name *</label><input x-model="selectionModal.name" class="field-input" :disabled="selectionModalEditing" placeholder="nightly-set" /></div>
-        <div><label class="field-label">Description</label><input x-model="selectionModal.description" class="field-input" /></div>
-        <div><label class="field-label">Tags (comma-separated)</label><input x-model="selectionModal.tags" class="field-input" placeholder="daily, orders" /></div>
+        <div><label  class="field-label" for="a11y-launch-name">Name *</label><input x-model="selectionModal.name" class="field-input" :disabled="selectionModalEditing" placeholder="nightly-set" id="a11y-launch-name" /></div>
+        <div><label  class="field-label" for="a11y-launch-description-2">Description</label><input x-model="selectionModal.description" class="field-input" id="a11y-launch-description-2" /></div>
+        <div><label  class="field-label" for="a11y-launch-tags-comma-separated">Tags (comma-separated)</label><input x-model="selectionModal.tags" class="field-input" placeholder="daily, orders" id="a11y-launch-tags-comma-separated" /></div>
         <div>
-          <label class="field-label">Jobs</label>
+          <label  class="field-label" for="a11y-launch-jobs-cancel-save-launch-job-selection-source-env">Jobs</label>
           <div class="border rounded-lg max-h-64 overflow-y-auto">
             <template x-for="job in filteredJobList" :key="job.name">
               <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" class="rounded" :checked="isSelectionJobChecked(job.name)" @change="toggleSelectionJob(job.name)" />
+                <input type="checkbox" class="rounded" :checked="isSelectionJobChecked(job.name)" @change="toggleSelectionJob(job.name)" aria-label="input" />
                 <span class="text-sm" x-text="job.name"></span>
               </label>
             </template>
@@ -1235,19 +1235,19 @@
 
   <!-- Launch Selection Modal -->
   <div x-show="showLaunchSelectionModal" x-cloak class="modal-backdrop" @click.self="showLaunchSelectionModal = false">
-    <div class="modal-box w-full max-w-md">
-      <h2 class="text-lg font-bold mb-4">Launch Job Selection</h2>
+    <div class="modal-box w-full max-w-md" x-ref="launchSelectionDialog" role="dialog" aria-modal="true" aria-labelledby="launchSelectionModalTitle">
+      <h2 id="launchSelectionModalTitle" class="text-lg font-bold mb-4">Launch Job Selection</h2>
       <div class="space-y-3">
         <div>
           <label class="field-label">Source Env</label>
-          <select x-model="launchSelectionModal.source_env" class="field-input field-select">
+          <select x-model="launchSelectionModal.source_env" class="field-input field-select" id="a11y-launch-jobs-cancel-save-launch-job-selection-source-env">
             <option value="dev">Dev</option><option value="qa">QA</option>
             <option value="staging">Staging</option><option value="prod">Prod</option>
           </select>
         </div>
         <div>
-          <label class="field-label">Target Env (leave blank for single-environment jobs)</label>
-          <select x-model="launchSelectionModal.target_env" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-target-env-leave-blank-for-single-environment-jobs">Target Env (leave blank for single-environment jobs)</label>
+          <select x-model="launchSelectionModal.target_env" class="field-input field-select" id="a11y-launch-target-env-leave-blank-for-single-environment-jobs">
             <option value="">— None —</option>
             <option value="dev">Dev</option><option value="qa">QA</option>
             <option value="staging">Staging</option><option value="prod">Prod</option>
@@ -1263,8 +1263,8 @@
 
   <!-- CI/CD Integration Modal -->
   <div x-show="showCiIntegrationModal" x-cloak class="modal-backdrop" @click.self="showCiIntegrationModal = false">
-    <div class="modal-box w-full max-w-2xl">
-      <h2 class="text-lg font-bold mb-4">CI/CD Integration — <span x-text="ciIntegrationModal.selectionName"></span></h2>
+    <div class="modal-box w-full max-w-2xl" x-ref="ciIntegrationDialog" role="dialog" aria-modal="true" aria-labelledby="ciIntegrationModalTitle">
+      <h2 id="ciIntegrationModalTitle" class="text-lg font-bold mb-4">CI/CD Integration — <span x-text="ciIntegrationModal.selectionName"></span></h2>
       <div class="space-y-3 text-sm">
         <div>
           <div class="label">STEP 1 — Create an API token</div>
@@ -1289,8 +1289,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <!-- Selection Run History / Compare-Pairing Modal -->
   <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
-    <div class="modal-box w-full max-w-2xl">
-      <h2 class="text-lg font-bold mb-4" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></h2>
+    <div class="modal-box w-full max-w-2xl" x-ref="selectionRunsDialog" role="dialog" aria-modal="true" aria-labelledby="selectionRunsModalTitle">
+      <h2 id="selectionRunsModalTitle" class="text-lg font-bold mb-4" x-text="selectionRunsPanel ? ('Run History — ' + selectionRunsPanel.name) : 'Run History'"></h2>
       <div>
         <div class="text-muted text-xs mb-2">Pick exactly two runs to compare (any environment, any time).</div>
         <template x-if="selectionRuns.length === 0">
@@ -1299,7 +1299,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="space-y-1 max-h-80 overflow-y-auto">
           <template x-for="run in selectionRuns" :key="run.run_id">
             <label class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200">
-              <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" />
+              <input type="checkbox" class="rounded" :checked="isCompareRunSelected(run.run_id)" @change="toggleCompareRunSelection(run.run_id)" aria-label="input" />
               <span class="font-mono text-xs text-slate-600" x-text="run.run_id"></span>
               <span class="badge text-xs" x-text="run.status"></span>
               <span class="text-muted text-xs" x-text="run.started_at ? fmtDate(run.started_at) : ''"></span>
@@ -1409,29 +1409,29 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <!-- Schedule Modal -->
   <div x-show="showScheduleModal" x-cloak class="modal-backdrop" @click.self="showScheduleModal = false">
-    <div class="modal-box w-full max-w-md">
-      <h2 class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
+    <div x-ref="scheduleDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="scheduleDialogTitle">
+      <h2 id="scheduleDialogTitle" class="text-lg font-bold mb-4" x-text="scheduleModalEditing ? 'Edit Schedule' : 'New Schedule'"></h2>
       <div class="space-y-3">
-        <div><label class="field-label">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" /></div>
-        <div><label class="field-label">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily (times in <span x-text="appTimezone"></span>)</div></div>
+        <div><label  class="field-label" for="a11y-launch-schedule-name">Schedule Name *</label><input x-model="scheduleModal.name" class="field-input" :disabled="scheduleModalEditing" placeholder="nightly-recon" id="a11y-launch-schedule-name" /></div>
+        <div><label  class="field-label" for="a11y-launch-cron-expression">Cron Expression *</label><input x-model="scheduleModal.cron_expr" class="field-input font-mono" placeholder="0 6 * * *" id="a11y-launch-cron-expression" /><div class="text-xs text-muted mt-1">Format: min hour dom month dow — e.g. <code>0 6 * * *</code> = 6am daily (times in <span x-text="appTimezone"></span>)</div></div>
         <div class="grid-2">
           <div>
-            <label class="field-label">Source Env</label>
-            <select x-model="scheduleModal.source_env" class="field-input field-select">
+            <label  class="field-label" for="a11y-launch-source-env-2">Source Env</label>
+            <select x-model="scheduleModal.source_env" class="field-input field-select" id="a11y-launch-source-env-2">
               <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
             </select>
           </div>
           <div>
-            <label class="field-label">Target Env</label>
-            <select x-model="scheduleModal.target_env" class="field-input field-select">
+            <label  class="field-label" for="a11y-launch-target-env-2">Target Env</label>
+            <select x-model="scheduleModal.target_env" class="field-input field-select" id="a11y-launch-target-env-2">
               <option value="">— None —</option>
               <option value="dev">Dev</option><option value="qa">QA</option><option value="staging">Staging</option><option value="prod">Prod</option>
             </select>
           </div>
         </div>
         <div>
-          <label class="field-label">Job Selection *</label>
-          <select x-model="scheduleModal.selection_id" class="field-input field-select">
+          <label  class="field-label" for="a11y-launch-job-selection">Job Selection *</label>
+          <select x-model="scheduleModal.selection_id" class="field-input field-select" id="a11y-launch-job-selection">
             <option value="">— Select —</option>
             <template x-for="sel in jobSelections" :key="sel.id">
               <option :value="sel.id" x-text="sel.name + ' (v' + sel.latest_version + ', ' + sel.job_count + ' jobs)'"></option>
@@ -1439,7 +1439,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </select>
           <div class="text-xs text-amber-600" x-show="jobSelections.length === 0">You need at least one Job Selection first — create one in the Job Selections tab.</div>
         </div>
-        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" /> Enabled</label>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" aria-label="schedulemodal enabled" /> Enabled</label>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showScheduleModal = false" class="btn-secondary">Cancel</button>

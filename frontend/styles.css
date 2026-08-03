@@ -82,9 +82,35 @@ body {
   height: 1rem;
 }
 
-button:focus-visible {
+.card-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible,
+[role="button"]:focus-visible,
+.sidebar-nav-item:focus-visible,
+.sub-tab:focus-visible,
+.help-nav-item:focus-visible,
+.drawer-close:focus-visible,
+.cursor-pointer:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+th.cursor-pointer:focus-visible {
+  outline-offset: -2px;
 }
 
 /* =========================================================
@@ -2067,19 +2093,19 @@ mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2p
   border-radius: 0.3rem;
   color: #fff;
 }
-.help-where-label { background: var(--blue); }
+.help-where-label { background: #2563eb; }
 .help-callout.tip {
   background: rgba(52, 211, 153, 0.10);
   border: 1px solid rgba(52, 211, 153, 0.32);
   color: var(--text-soft);
 }
-.help-callout.tip .help-callout-label { background: var(--emerald); }
+.help-callout.tip .help-callout-label { background: #047857; }
 .help-callout.warn {
   background: rgba(251, 113, 133, 0.10);
   border: 1px solid rgba(251, 113, 133, 0.32);
   color: var(--text-soft);
 }
-.help-callout.warn .help-callout-label { background: var(--rose); }
+.help-callout.warn .help-callout-label { background: #be123c; }
 .help-empty {
   padding: 2rem;
   text-align: center;

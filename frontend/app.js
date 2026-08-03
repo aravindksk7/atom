@@ -354,6 +354,7 @@ function _appRaw() {
       });
       narrow.addEventListener('change', (e) => applyWidth(e.matches));
       applyWidth(narrow.matches);
+      this.initDialogFocusWatchers();
       this.storedTokenValue = normalizeToken(sessionStorage.getItem('etl_token'));
       await this.loadAuthSetupStatus();
       if (this.storedTokenValue) sessionStorage.setItem('etl_token', this.storedTokenValue);
@@ -386,6 +387,100 @@ function _appRaw() {
       this.$watch('sqlConfigA', () => { this.sqlConnectionA = null; });
       this.$watch('sqlConfigB', () => { this.sqlConnectionB = null; });
       this._applyDeepLink();
+    },
+
+    initDialogFocusWatchers() {
+      const dialogs = [
+        ['showAuthModal', 'authDialog', () => this.closeAuthModal()],
+        ['drawer.show', 'drawerDialog', () => { this.drawer.show = false; }],
+        ['showContractModal', 'contractDialog', () => { this.showContractModal = false; }],
+        ['showingHelp', 'helpDialog', () => { this.showingHelp = false; }],
+        ['bulkDecisionForm.open', 'bulkDecisionDialog', () => this.closeBulkDecisionForm()],
+        ['mismatchDecisionForm.open', 'mismatchDecisionDialog', () => this.closeMismatchDecisionForm()],
+        ['showConfigModal', 'configDialog', () => { this.showConfigModal = false; }],
+        ['showHookModal', 'hookDialog', () => { this.showHookModal = false; }],
+        ['stepReleaseModal.show', 'stepReleaseDialog', () => { this.stepReleaseModal.show = false; }],
+        ['showJobModal', 'jobDialog', () => { this.showJobModal = false; }],
+        ['showScheduleModal', 'scheduleDialog', () => { this.showScheduleModal = false; }],
+        ['showBOJobModal', 'boJobDialog', () => { this.showBOJobModal = false; }],
+        ['showSelectionModal', 'selectionDialog', () => { this.showSelectionModal = false; }],
+        ['showLaunchSelectionModal', 'launchSelectionDialog', () => { this.showLaunchSelectionModal = false; }],
+        ['showCiIntegrationModal', 'ciIntegrationDialog', () => { this.showCiIntegrationModal = false; }],
+        ['showSelectionRunsModal', 'selectionRunsDialog', () => { this.showSelectionRunsModal = false; }],
+        ['schedulerReportEditing', 'schedulerReportDialog', () => { this.schedulerReportEditing = null; }],
+      ];
+      dialogs.forEach(([state, ref, closeFn]) => {
+        this._dialogFocus = this._dialogFocus || {};
+        const dialogState = this._dialogFocus[ref] || (this._dialogFocus[ref] = {});
+        dialogState.state = state;
+        this.$watch(state, (open) => this.syncDialogFocus(ref, open, closeFn));
+      });
+    },
+
+    syncDialogFocus(refName, isOpen, closeFn) {
+      this._dialogFocus = this._dialogFocus || {};
+      const state = this._dialogFocus[refName] || (this._dialogFocus[refName] = {});
+      if (isOpen) {
+        state.trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        this.$nextTick(() => {
+          const dialog = this.$refs && this.$refs[refName];
+          if (!dialog) return;
+          state.cleanup?.();
+          state.cleanup = this.setupDialogFocusTrap(dialog, closeFn);
+        });
+        return;
+      }
+      state.cleanup?.();
+      state.cleanup = null;
+      this.$nextTick(() => this.restoreDialogFocus(state.trigger));
+    },
+
+    setupDialogFocusTrap(dialog, closeFn) {
+      const focusableSelector = [
+        'a[href]', 'button:not([disabled])', 'textarea:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])', 'select:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])'
+      ].join(',');
+      const getFocusable = () => Array.from(dialog.querySelectorAll(focusableSelector))
+        .filter((el) => el instanceof HTMLElement && !el.hasAttribute('disabled') && el.offsetParent !== null);
+      if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+      const focusables = getFocusable();
+      (focusables[0] || dialog).focus({ preventScroll: true });
+      const onKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          closeFn();
+          return;
+        }
+        if (e.key !== 'Tab') return;
+        const items = getFocusable();
+        if (!items.length) {
+          e.preventDefault();
+          dialog.focus({ preventScroll: true });
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+      dialog.addEventListener('keydown', onKeyDown);
+      return () => dialog.removeEventListener('keydown', onKeyDown);
+    },
+
+    restoreDialogFocus(trigger) {
+      if (trigger && trigger.isConnected && typeof trigger.focus === 'function') {
+        trigger.focus({ preventScroll: true });
+        return;
+      }
+      if (!document.body.hasAttribute('tabindex')) document.body.setAttribute('tabindex', '-1');
+      document.body.focus({ preventScroll: true });
     },
 
     // ===========================================================

@@ -70,7 +70,7 @@
             </button>
             <div class="flex gap-1 items-center">
               <input readonly :value="badgeUrl(selectedRun.run_id)"
-                     class="field-input text-xs py-1 flex-1 font-mono bg-slate-50" />
+                     class="field-input text-xs py-1 flex-1 font-mono bg-slate-50" aria-label="input" />
               <button @click="copyBadgeUrl(selectedRun.run_id)" class="btn-secondary btn-sm text-xs px-2">Copy</button>
             </div>
           </div>
@@ -91,21 +91,21 @@
             </div>
           </div>
         </template>
-        <table class="data-table">
+        <table class="data-table" aria-label="history table 1">
           <thead>
             <tr>
-              <th class="w-10">
+              <th class="w-10" scope="col">
                 <input type="checkbox" @change="$el.checked ? selectAllResults() : deselectAllResults()"
-                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length > 0" />
+                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length  aria-label="input"> 0" />
               </th>
-              <th>Test Name</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th>Files</th>
-              <th>Src Rows</th>
-              <th>Tgt Rows</th>
-              <th>Mismatches</th>
-              <th></th>
+              <th scope="col">Test Name</th>
+              <th scope="col">Status</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Files</th>
+              <th scope="col">Src Rows</th>
+              <th scope="col">Tgt Rows</th>
+              <th scope="col">Mismatches</th>
+              <th scope="col"></th>
             </tr>
           </thead>
           <template x-for="r in selectedRun.results" :key="r.id">
@@ -159,7 +159,7 @@
                     <template x-if="outcomeOverrideForms[r.id]?.open">
                       <div class="flex gap-2 items-start">
                         <textarea x-model="outcomeOverrideForms[r.id].reason" maxlength="4000" rows="2"
-                                  class="field-input flex-1" placeholder="Describe the agreed actions required to accept this failed outcome"></textarea>
+                                  class="field-input flex-1" placeholder="Describe the agreed actions required to accept this failed outcome" aria-label="describe the agreed actions required to accept this failed outcome"></textarea>
                         <button @click="passWithAgreedActions(selectedRun.run_id, r)"
                                 :disabled="outcomeOverrideForms[r.id].saving"
                                 class="btn-primary btn-sm">Save pass</button>
@@ -183,16 +183,16 @@
                                 class="text-xs text-slate-400 ml-2"
                                 x-text="mismatchBreakdownText(r)"></span>
                         </div>
-                        <table class="mismatch-diff-table">
+                        <table class="mismatch-diff-table" aria-label="history table 2">
                           <thead>
                             <tr>
-                              <th>Type</th>
-                              <th>Row Key</th>
-                              <th>Column</th>
-                              <th>Source Value</th>
-                              <th>Target Value</th>
-                              <th>Delta</th>
-                              <th>Decision</th>
+                              <th scope="col">Type</th>
+                              <th scope="col">Row Key</th>
+                              <th scope="col">Column</th>
+                              <th scope="col">Source Value</th>
+                              <th scope="col">Target Value</th>
+                              <th scope="col">Delta</th>
+                              <th scope="col">Decision</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -221,7 +221,7 @@
                                       <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
                                       <template x-if="acceptForms[m.id]?.open">
                                         <div class="accept-form-inline">
-                                          <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" />
+                                          <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" aria-label="reason" />
                                           <button @click="submitAccept(selectedRun.run_id, r.id, m.id)" class="btn-accept-confirm">Save</button>
                                           <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
                                         </div>
@@ -249,16 +249,16 @@
                             <div class="text-xs text-muted font-semibold">All columns</div>
                             <input x-model="columnStatFilters[columnStatKey('history', r)]"
                                    class="field-input text-xs py-1 max-w-48"
-                                   placeholder="Filter columns" />
+                                   placeholder="Filter columns" aria-label="filter columns" />
                           </div>
                           <div class="overflow-auto max-h-48 border border-slate-100 rounded">
-                            <table class="mismatch-diff-table">
+                            <table class="mismatch-diff-table" aria-label="history table 3">
                               <thead>
                                 <tr>
-                                  <th @click="setColumnStatSort('history', r, 'column')" class="cursor-pointer">Column</th>
-                                  <th @click="setColumnStatSort('history', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
-                                  <th @click="setColumnStatSort('history', r, 'compared_rows')" class="cursor-pointer">Compared</th>
-                                  <th @click="setColumnStatSort('history', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                  <th @click="setColumnStatSort('history', r, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
+                                  <th @click="setColumnStatSort('history', r, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
+                                  <th @click="setColumnStatSort('history', r, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
+                                  <th @click="setColumnStatSort('history', r, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -335,11 +335,11 @@
                         <div class="mismatch-expand-header">
                           <span x-text="'Rows read from source — showing ' + (r.sample_rows || []).length + ' of ' + (r.source_row_count ?? (r.sample_rows || []).length)"></span>
                         </div>
-                        <table class="mismatch-diff-table">
+                        <table class="mismatch-diff-table" aria-label="history table 4">
                           <thead>
                             <tr>
                               <template x-for="col in sampleRowColumns(r.sample_rows)" :key="col">
-                                <th x-text="col"></th>
+                                <th x-text="col" scope="col"></th>
                               </template>
                             </tr>
                           </thead>
@@ -387,8 +387,8 @@
           <div class="font-semibold text-slate-700 mb-3">Metric Trends</div>
           <div class="grid grid-cols-3 gap-3 mb-3">
             <div>
-              <label class="field-label">Job Name</label>
-              <select x-model="trendsJobName" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-job-name">Job Name</label>
+              <select x-model="trendsJobName" class="field-input field-select" id="a11y-history-job-name">
                 <option value="">— Select job —</option>
                 <template x-for="job in jobs" :key="job.name">
                   <option :value="job.name" x-text="job.name"></option>
@@ -396,8 +396,8 @@
               </select>
             </div>
             <div>
-              <label class="field-label">Metric</label>
-              <select x-model="trendsMetric" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-metric">Metric</label>
+              <select x-model="trendsMetric" class="field-input field-select" id="a11y-history-metric">
                 <option value="mismatch_rate">mismatch_rate</option>
                 <option value="row_count_delta">row_count_delta</option>
                 <option value="duration_seconds">duration_seconds</option>
@@ -405,8 +405,8 @@
               </select>
             </div>
             <div>
-              <label class="field-label">Window (days)</label>
-              <input x-model="trendsWindow" type="number" min="7" max="365" class="field-input" />
+              <label  class="field-label" for="a11y-history-window-days">Window (days)</label>
+              <input x-model="trendsWindow" type="number" min="7" max="365" class="field-input" id="a11y-history-window-days" />
             </div>
           </div>
           <button @click="loadTrends()" :disabled="!trendsJobName || trendsLoading" class="btn-primary btn-sm mb-3">
@@ -462,12 +462,12 @@
         <div class="card mb-4">
           <div class="flex flex-wrap gap-2 items-end mb-3">
             <div>
-              <label class="field-label">Resource Type</label>
-              <input x-model="auditFilterResourceType" class="field-input" placeholder="run, job, config" />
+              <label  class="field-label" for="a11y-history-resource-type">Resource Type</label>
+              <input x-model="auditFilterResourceType" class="field-input" placeholder="run, job, config" id="a11y-history-resource-type" />
             </div>
             <div>
-              <label class="field-label">Resource ID</label>
-              <input x-model="auditFilterResourceId" class="field-input" placeholder="optional" />
+              <label  class="field-label" for="a11y-history-resource-id">Resource ID</label>
+              <input x-model="auditFilterResourceId" class="field-input" placeholder="optional" id="a11y-history-resource-id" />
             </div>
             <button @click="loadAudit()" :disabled="auditLoading" class="btn-secondary btn-sm">
               <span x-show="!auditLoading">Refresh</span>
@@ -481,14 +481,14 @@
           </template>
           <template x-if="auditEvents.length > 0">
             <div class="overflow-auto">
-              <table class="data-table">
+              <table class="data-table" aria-label="history table 5">
                 <thead>
                   <tr>
-                    <th>Time</th>
-                    <th>Actor</th>
-                    <th>Action</th>
-                    <th>Resource</th>
-                    <th>Diff</th>
+                    <th scope="col">Time</th>
+                    <th scope="col">Actor</th>
+                    <th scope="col">Action</th>
+                    <th scope="col">Resource</th>
+                    <th scope="col">Diff</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -514,8 +514,8 @@
           <div class="font-semibold text-slate-700 mb-3">Column Profile</div>
           <div class="flex flex-wrap gap-2 items-end mb-3">
             <div>
-              <label class="field-label">Job Name</label>
-              <select x-model="profileJobName" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-job-name-2">Job Name</label>
+              <select x-model="profileJobName" class="field-input field-select" id="a11y-history-job-name-2">
                 <option value="">— Select job —</option>
                 <template x-for="job in jobs" :key="job.name">
                   <option :value="job.name" x-text="job.name"></option>
@@ -533,21 +533,21 @@
           </template>
           <template x-if="profileData && profileData.length > 0">
             <div class="overflow-auto">
-              <table class="data-table">
+              <table class="data-table" aria-label="history table 6">
                 <thead>
                   <tr>
-                    <th>Column</th>
-                    <th>Null Rate</th>
-                    <th>Distinct</th>
-                    <th>Min</th>
-                    <th>Max</th>
-                    <th>Mean</th>
-                    <th>Std Dev</th>
-                    <th>p25</th>
-                    <th>p50</th>
-                    <th>p75</th>
-                    <th>p95</th>
-                    <th>Captured</th>
+                    <th scope="col">Column</th>
+                    <th scope="col">Null Rate</th>
+                    <th scope="col">Distinct</th>
+                    <th scope="col">Min</th>
+                    <th scope="col">Max</th>
+                    <th scope="col">Mean</th>
+                    <th scope="col">Std Dev</th>
+                    <th scope="col">p25</th>
+                    <th scope="col">p50</th>
+                    <th scope="col">p75</th>
+                    <th scope="col">p95</th>
+                    <th scope="col">Captured</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -586,8 +586,8 @@
           <div class="font-semibold text-slate-700 mb-3">Schema Snapshot History</div>
           <div class="flex flex-wrap gap-2 items-end mb-3">
             <div>
-              <label class="field-label">Job Name</label>
-              <select x-model="schemaJobName" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-job-name-3">Job Name</label>
+              <select x-model="schemaJobName" class="field-input field-select" id="a11y-history-job-name-3">
                 <option value="">— Select job —</option>
                 <template x-for="job in jobs" :key="job.name">
                   <option :value="job.name" x-text="job.name"></option>
@@ -595,8 +595,8 @@
               </select>
             </div>
             <div>
-              <label class="field-label">Environment</label>
-              <select x-model="schemaEnvironment" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-environment">Environment</label>
+              <select x-model="schemaEnvironment" class="field-input field-select" id="a11y-history-environment">
                 <option value="source">source</option>
                 <option value="target">target</option>
                 <option value="both">both</option>
@@ -656,7 +656,7 @@
             </div>
           </template>
           <label class="flex items-center gap-1 text-xs text-muted ml-auto">
-            <input type="checkbox" x-model="coverageGapsOnly"> Gaps only
+            <input type="checkbox" x-model="coverageGapsOnly" aria-label="coveragegapsonly"> Gaps only
           </label>
           <button @click="coverageData=null; loadCoverage()" class="btn-secondary btn-sm text-xs">Refresh</button>
         </div>
@@ -709,7 +709,7 @@
       <div class="section-header mb-4">
         <div class="section-title">Run History</div>
         <div class="flex flex-wrap gap-2 items-center">
-          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter">
+          <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter" aria-label="history status filter">
             <option value="">All statuses</option>
             <option value="PENDING">PENDING</option>
             <option value="RUNNING">RUNNING</option>
@@ -717,7 +717,7 @@
             <option value="FAILED">FAILED</option>
             <option value="ERROR">ERROR</option>
           </select>
-          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter">
+          <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter" aria-label="history runtype filter">
             <option value="">All types</option>
             <option value="reconciliation">reconciliation</option>
             <option value="bo_comparison">bo_comparison</option>
@@ -737,8 +737,8 @@
           <div class="font-semibold text-slate-700 mb-3">Compare Two Runs</div>
           <div class="flex gap-3 mb-3 flex-wrap">
             <div class="flex-1" style="min-width:200px">
-              <label class="field-label">Run A (baseline)</label>
-              <select x-model="compareRunA" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-run-a-baseline">Run A (baseline)</label>
+              <select x-model="compareRunA" class="field-input field-select" id="a11y-history-run-a-baseline">
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
@@ -748,8 +748,8 @@
               </select>
             </div>
             <div class="flex-1" style="min-width:200px">
-              <label class="field-label">Run B (target)</label>
-              <select x-model="compareRunB" class="field-input field-select">
+              <label  class="field-label" for="a11y-history-run-b-target">Run B (target)</label>
+              <select x-model="compareRunB" class="field-input field-select" id="a11y-history-run-b-target">
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
@@ -858,20 +858,20 @@
         </div>
       </template>
       <div class="card overflow-hidden">
-        <table class="data-table">
+        <table class="data-table" aria-label="history table 7">
           <thead>
             <tr>
-              <th>Run ID</th>
-              <th>Status</th>
-              <th>Environments</th>
-              <th>Started</th>
-              <th>P / F / S</th>
-              <th></th>
+              <th scope="col">Run ID</th>
+              <th scope="col">Status</th>
+              <th scope="col">Environments</th>
+              <th scope="col">Started</th>
+              <th scope="col">P / F / S</th>
+              <th scope="col"></th>
             </tr>
           </thead>
           <tbody>
             <template x-for="run in runs" :key="run.run_id">
-              <tr class="cursor-pointer" @click="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
+              <tr class="cursor-pointer" tabindex="0" role="button" @click="viewRunDetail(run.run_id)" @keydown.enter="viewRunDetail(run.run_id)" @keydown.space.prevent="viewRunDetail(run.run_id)" :data-testid="'history-run-row-' + run.run_id">
                 <td class="text-xs text-slate-500">
                   <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>

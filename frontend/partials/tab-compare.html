@@ -18,7 +18,7 @@
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
     <select data-testid="compare-template-load-select" @change="loadCompareTemplate($event.target.value)"
             class="field-input text-sm flex-1"
-            x-model="activeCompareTemplate">
+            x-model="activeCompareTemplate" aria-label="compare template load select">
       <option value="">-- Load template --</option>
       <optgroup label="Built-in">
         <template x-for="tmpl in predefinedCompareTemplates" :key="tmpl.name">
@@ -37,7 +37,7 @@
     </button>
   </div>
   <div x-show="showCompareTemplatePanel" class="p-3 border-b flex gap-2 mb-4">
-    <input data-testid="compare-template-name-input" type="text" x-model="newCompareTemplateName" placeholder="Template name..." class="field-input text-sm flex-1">
+    <input data-testid="compare-template-name-input" type="text" x-model="newCompareTemplateName" placeholder="Template name..." class="field-input text-sm flex-1" aria-label="template name">
     <button data-testid="compare-template-save-btn" @click="saveCompareTemplate()" class="btn-primary btn-sm text-sm">Save</button>
     <button data-testid="compare-template-cancel-btn" @click="showCompareTemplatePanel = false" class="btn-outline btn-sm text-sm">Cancel</button>
   </div>
@@ -57,24 +57,24 @@
           <button data-testid="compare-bo-source-a-mode-upload" @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-a-mode-api" @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
-        <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" />
+        <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
         <template x-if="boSourceAType === 'live'">
           <div class="space-y-2">
-            <select data-testid="compare-bo-source-a-config-select" x-model="boSourceA.configId" @change="loadCompareBODocuments('a')" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-config-select" x-model="boSourceA.configId" @change="loadCompareBODocuments('a')" class="field-input field-select" aria-label="compare bo source a config select">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select data-testid="compare-bo-source-a-doc-select" x-model="boSourceA.docId" @change="loadCompareBOReports('a')" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-doc-select" x-model="boSourceA.docId" @change="loadCompareBOReports('a')" class="field-input field-select" aria-label="compare bo source a doc select">
               <option value="">Select document</option>
               <template x-for="(d, boDocsAIdx) in boDocsA" :key="d.id ? 'doc-' + d.id : 'doc-idx-' + boDocsAIdx"><option :value="d.id" x-text="d.name"></option></template>
             </select>
-            <select data-testid="compare-bo-source-a-report-select" x-model="boSourceA.reportId" class="field-input field-select">
+            <select data-testid="compare-bo-source-a-report-select" x-model="boSourceA.reportId" class="field-input field-select" aria-label="compare bo source a report select">
               <option value="">Select report</option>
               <template x-for="(r, boReportsAIdx) in boReportsA" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsAIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
             <div data-testid="compare-bo-source-a-params" x-show="boSourceA.parameters && boSourceA.parameters.length > 0" class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="field-label mb-0">Report Prompts</label>
+                <label  class="field-label mb-0" for="a11y-compare-report-prompts-reload-select-config-select-endpoint-vs-source-b-live-path-upload-api-select-config-select-document-select-report-0-class-space-y-2-report-prompts-reload-select-config-select-endpoint-key-columns">Report Prompts</label>
                 <button @click="loadCompareBOParameters('a')" class="btn-secondary btn-sm text-xs">Reload</button>
               </div>
               <template x-for="(param, idx) in boSourceA.parameters" :key="'pa-' + idx">
@@ -82,25 +82,25 @@
                   <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
                         :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
                   <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
-                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" aria-label="param type" />
                 </div>
               </template>
             </div>
           </div>
         </template>
         <template x-if="boSourceAType === 'path'">
-          <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" />
+          <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
-          <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" />
+          <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" aria-label="compare bo source a upload input" />
         </template>
         <template x-if="boSourceAType === 'api'">
           <div class="space-y-2">
-            <select x-model="boSourceA.configId" class="field-input field-select">
+            <select x-model="boSourceA.configId" class="field-input field-select" aria-label="bosourcea configid">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select x-model="boSourceA.endpointName" class="field-input field-select">
+            <select x-model="boSourceA.endpointName" class="field-input field-select" aria-label="bosourcea endpointname">
               <option value="">Select endpoint</option>
               <template x-for="name in configApiEndpointNames(boSourceA.configId)" :key="name"><option :value="name" x-text="name"></option></template>
             </select>
@@ -118,18 +118,18 @@
           <button data-testid="compare-bo-source-b-mode-upload" @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-b-mode-api" @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
-        <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" />
+        <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
         <template x-if="boSourceBType === 'live'">
           <div class="space-y-2">
-            <select data-testid="compare-bo-source-b-config-select" x-model="boSourceB.configId" @change="loadCompareBODocuments('b')" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-config-select" x-model="boSourceB.configId" @change="loadCompareBODocuments('b')" class="field-input field-select" aria-label="compare bo source b config select">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select data-testid="compare-bo-source-b-doc-select" x-model="boSourceB.docId" @change="loadCompareBOReports('b')" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-doc-select" x-model="boSourceB.docId" @change="loadCompareBOReports('b')" class="field-input field-select" aria-label="compare bo source b doc select">
               <option value="">Select document</option>
               <template x-for="(d, boDocsBIdx) in boDocsB" :key="d.id ? 'doc-' + d.id : 'doc-idx-' + boDocsBIdx"><option :value="d.id" x-text="d.name"></option></template>
             </select>
-            <select data-testid="compare-bo-source-b-report-select" x-model="boSourceB.reportId" class="field-input field-select">
+            <select data-testid="compare-bo-source-b-report-select" x-model="boSourceB.reportId" class="field-input field-select" aria-label="compare bo source b report select">
               <option value="">Select report</option>
               <template x-for="(r, boReportsBIdx) in boReportsB" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsBIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
@@ -143,25 +143,25 @@
                   <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"
                         :title="param.name + ' (id ' + param.id + ', ' + param.type + ')'"></span>
                   <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
-                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                         class="field-input text-xs py-1 flex-1" :placeholder="param.type" aria-label="param type" />
                 </div>
               </template>
             </div>
           </div>
         </template>
         <template x-if="boSourceBType === 'path'">
-          <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" />
+          <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
-          <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" />
+          <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" aria-label="compare bo source b upload input" />
         </template>
         <template x-if="boSourceBType === 'api'">
           <div class="space-y-2">
-            <select x-model="boSourceB.configId" class="field-input field-select">
+            <select x-model="boSourceB.configId" class="field-input field-select" aria-label="bosourceb configid">
               <option value="">Select config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <select x-model="boSourceB.endpointName" class="field-input field-select">
+            <select x-model="boSourceB.endpointName" class="field-input field-select" aria-label="bosourceb endpointname">
               <option value="">Select endpoint</option>
               <template x-for="name in configApiEndpointNames(boSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
             </select>
@@ -174,11 +174,11 @@
       <div class="grid-2 mb-3">
         <div>
           <label class="field-label">Key columns</label>
-          <input data-testid="compare-bo-key-columns-input" x-model="boKeyColumns" class="field-input" placeholder="id, account_id" />
+          <input data-testid="compare-bo-key-columns-input" x-model="boKeyColumns" class="field-input" placeholder="id, account_id" id="a11y-compare-report-prompts-reload-select-config-select-endpoint-vs-source-b-live-path-upload-api-select-config-select-document-select-report-0-class-space-y-2-report-prompts-reload-select-config-select-endpoint-key-columns" />
         </div>
         <div>
-          <label class="field-label">Exclude columns</label>
-          <input data-testid="compare-bo-exclude-columns-input" x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" />
+          <label  class="field-label" for="a11y-compare-exclude-columns">Exclude columns</label>
+          <input data-testid="compare-bo-exclude-columns-input" x-model="boExcludeColumns" class="field-input" placeholder="last_updated, batch_id" id="a11y-compare-exclude-columns" />
         </div>
       </div>
       <!-- Advanced Options accordion -->
@@ -190,40 +190,40 @@
         </button>
         <div data-testid="compare-bo-advanced-panel" x-show="boAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
           <div>
-            <label class="field-label">Backend</label>
-            <select data-testid="compare-bo-backend-select" x-model="boBackend" class="field-input">
+            <label  class="field-label" for="a11y-compare-backend">Backend</label>
+            <select data-testid="compare-bo-backend-select" x-model="boBackend" class="field-input" id="a11y-compare-backend">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
               <option value="duckdb">duckdb</option>
             </select>
           </div>
           <div>
-            <label class="field-label">Float Tolerance</label>
-            <input data-testid="compare-bo-float-tolerance-input" x-model="boFloatTolerance" class="field-input" placeholder="1e-9" />
+            <label  class="field-label" for="a11y-compare-float-tolerance">Float Tolerance</label>
+            <input data-testid="compare-bo-float-tolerance-input" x-model="boFloatTolerance" class="field-input" placeholder="1e-9" id="a11y-compare-float-tolerance" />
           </div>
           <div>
-            <label class="field-label">Datetime Tolerance (s)</label>
-            <input data-testid="compare-bo-datetime-tolerance-input" x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+            <label  class="field-label" for="a11y-compare-datetime-tolerance-s">Datetime Tolerance (s)</label>
+            <input data-testid="compare-bo-datetime-tolerance-input" x-model="boDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" id="a11y-compare-datetime-tolerance-s" />
           </div>
           <div>
-            <label class="field-label">Mismatch Row Limit</label>
-            <input data-testid="compare-bo-mismatch-row-limit-input" x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+            <label  class="field-label" for="a11y-compare-mismatch-row-limit">Mismatch Row Limit</label>
+            <input data-testid="compare-bo-mismatch-row-limit-input" x-model.number="boMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" id="a11y-compare-mismatch-row-limit" />
           </div>
           <div>
-            <label class="field-label">Sample Fraction (0–1)</label>
-            <input data-testid="compare-bo-sample-frac-input" x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" />
+            <label  class="field-label" for="a11y-compare-sample-fraction-0-1">Sample Fraction (0–1)</label>
+            <input data-testid="compare-bo-sample-frac-input" x-model="boSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" id="a11y-compare-sample-fraction-0-1" />
           </div>
           <div class="col-span-2">
-            <label class="field-label">Per-column tolerances (col:val, …)</label>
-            <input data-testid="compare-bo-column-tolerances-input" x-model="boColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+            <label  class="field-label" for="a11y-compare-per-column-tolerances-col-val">Per-column tolerances (col:val, …)</label>
+            <input data-testid="compare-bo-column-tolerances-input" x-model="boColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" id="a11y-compare-per-column-tolerances-col-val" />
           </div>
           <div>
-            <label class="field-label">Case-insensitive columns</label>
-            <input data-testid="compare-bo-case-insensitive-input" x-model="boCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+            <label  class="field-label" for="a11y-compare-case-insensitive-columns">Case-insensitive columns</label>
+            <input data-testid="compare-bo-case-insensitive-input" x-model="boCaseInsensitiveColumns" class="field-input" placeholder="name, status" id="a11y-compare-case-insensitive-columns" />
           </div>
           <div>
-            <label class="field-label">Whitespace-normalize columns</label>
-            <input data-testid="compare-bo-whitespace-normalize-input" x-model="boWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+            <label  class="field-label" for="a11y-compare-whitespace-normalize-columns">Whitespace-normalize columns</label>
+            <input data-testid="compare-bo-whitespace-normalize-input" x-model="boWhitespaceNormalizeColumns" class="field-input" placeholder="description" id="a11y-compare-whitespace-normalize-columns" />
           </div>
           <div class="col-span-2 flex items-center gap-2 mt-1">
             <input data-testid="compare-bo-parallel-columns-checkbox" type="checkbox" x-model="boParallelColumns" id="boParallelCols" class="rounded" />
@@ -233,7 +233,7 @@
       </div>
       <div class="flex items-center gap-4 mb-3">
         <label class="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" x-model="boSaveAsBaseline" class="rounded">
+          <input type="checkbox" x-model="boSaveAsBaseline" class="rounded" aria-label="bosaveasbaseline">
           <span>Save as Baseline when complete</span>
         </label>
         <button data-testid="compare-bo-swap-btn" @click="swapCompareSides()" class="btn-outline btn-sm ml-auto" title="Swap Source A and Source B">
@@ -274,7 +274,7 @@
         <div x-show="showMismatchChart" class="mb-4 p-3 border rounded bg-white">
           <div class="flex items-center gap-2 mb-2">
             <span class="text-xs font-medium">Chart by:</span>
-            <select x-model="mismatchChartType" class="field-input text-xs py-0.5 px-2">
+            <select x-model="mismatchChartType" class="field-input text-xs py-0.5 px-2" aria-label="mismatchcharttype">
               <option value="column">Column</option>
               <option value="sourceValue">Source Value</option>
               <option value="targetValue">Target Value</option>
@@ -290,14 +290,14 @@
           <span class="compare-chip chip-regressed" x-show="(boCompareResult.failed || 0) > 0" x-text="boCompareResult.failed + ' failed'"></span>
         </div>
         <template x-if="boCompareResult.results && boCompareResult.results.length">
-          <table data-testid="compare-bo-results-table" class="data-table">
-            <thead><tr><th>Test</th><th>Status</th><th>Mismatches</th><th>Duration</th><th></th></tr></thead>
+          <table data-testid="compare-bo-results-table" class="data-table" aria-label="compare table 1">
+            <thead><tr><th scope="col">Test</th><th scope="col">Status</th><th scope="col">Mismatches</th><th scope="col">Duration</th><th scope="col"></th></tr></thead>
             <tbody>
               <template x-for="r in boCompareResult.results" :key="r.id">
               <tr>
                   <td>
                     <input type="checkbox" @click.stop="$event.target.checked = !$event.target.checked; toggleResultSelection(r.id)"
-                           :checked="isResultSelected(r.id)" />
+                           :checked="isResultSelected(r.id)" aria-label="input" />
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
@@ -326,7 +326,7 @@
         <input data-testid="compare-recon-quick-checkbox" type="checkbox"
                :checked="quickCompareMode"
                @change="quickCompareMode ? disableQuickCompare() : enableQuickCompare()"
-               class="rounded">
+               class="rounded" aria-label="compare recon quick checkbox">
         <span class="font-medium">Quick Compare Mode</span>
       </label>
       <span class="text-xs text-slate-500">Auto-selects last successful run as Source A</span>
@@ -347,27 +347,27 @@
       <div class="compare-source-grid">
         <div class="card compare-source-card">
           <div class="compare-card-title">Environment A</div>
-          <select data-testid="compare-recon-dualenv-config-a-select" x-model="dualEnvConfigA" class="field-input field-select mb-2">
+          <select data-testid="compare-recon-dualenv-config-a-select" x-model="dualEnvConfigA" class="field-input field-select mb-2" aria-label="compare recon dualenv config a select">
             <option value="">Select config</option>
             <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
           </select>
-          <input x-model="dualEnvSourceEnvA" class="field-input mb-2" placeholder="Source env label" />
-          <input x-model="dualEnvTargetEnvA" class="field-input" placeholder="Target env label" />
+          <input x-model="dualEnvSourceEnvA" class="field-input mb-2" placeholder="Source env label" aria-label="source env label" />
+          <input x-model="dualEnvTargetEnvA" class="field-input" placeholder="Target env label" aria-label="target env label" />
         </div>
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
           <div class="compare-card-title">Environment B</div>
-          <select data-testid="compare-recon-dualenv-config-b-select" x-model="dualEnvConfigB" class="field-input field-select mb-2">
+          <select data-testid="compare-recon-dualenv-config-b-select" x-model="dualEnvConfigB" class="field-input field-select mb-2" aria-label="compare recon dualenv config b select">
             <option value="">Select config</option>
             <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
           </select>
-          <input x-model="dualEnvSourceEnvB" class="field-input mb-2" placeholder="Source env label" />
-          <input x-model="dualEnvTargetEnvB" class="field-input" placeholder="Target env label" />
+          <input x-model="dualEnvSourceEnvB" class="field-input mb-2" placeholder="Source env label" aria-label="source env label" />
+          <input x-model="dualEnvTargetEnvB" class="field-input" placeholder="Target env label" aria-label="target env label" />
         </div>
       </div>
       <div class="card">
-        <label class="field-label">Jobs to run</label>
-        <select data-testid="compare-recon-dualenv-jobs-select" x-model="dualEnvJobs" multiple class="field-input field-select compare-multi-select mb-3">
+        <label  class="field-label" for="a11y-compare-jobs-to-run">Jobs to run</label>
+        <select data-testid="compare-recon-dualenv-jobs-select" x-model="dualEnvJobs" multiple class="field-input field-select compare-multi-select mb-3" id="a11y-compare-jobs-to-run">
           <template x-for="j in jobs" :key="j.name"><option :value="j.name" x-text="j.name"></option></template>
         </select>
         <button data-testid="compare-recon-dualenv-launch-btn" @click="launchDualEnv()" :disabled="dualEnvLoading" class="btn-primary">
@@ -415,15 +415,15 @@
           <div data-testid="compare-recon-dualenv-pairs-empty" class="text-muted text-sm">No past pairs found. Click Refresh to load.</div>
         </template>
         <template x-if="pastPairs.length > 0">
-          <table class="data-table">
+          <table class="data-table" aria-label="compare table 2">
             <thead>
               <tr>
-                <th>Pair ID</th>
-                <th>Run A</th>
-                <th>Status A</th>
-                <th>Run B</th>
-                <th>Status B</th>
-                <th></th>
+                <th scope="col">Pair ID</th>
+                <th scope="col">Run A</th>
+                <th scope="col">Status A</th>
+                <th scope="col">Run B</th>
+                <th scope="col">Status B</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -453,7 +453,7 @@
       <div class="compare-source-grid">
         <div class="card compare-source-card">
           <div class="compare-card-title">Source A</div>
-          <input x-model="fileLabelA" class="field-input mb-2" placeholder="Source A label" />
+          <input x-model="fileLabelA" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
           <div class="mode-row mb-3">
             <button data-testid="compare-file-source-a-mode-run" @click="fileSourceAType = 'run'" :class="fileSourceAType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
             <button data-testid="compare-file-source-a-mode-path" @click="fileSourceAType = 'path'" :class="fileSourceAType === 'path' ? 'pill active' : 'pill'">Server Path</button>
@@ -462,7 +462,7 @@
           <template x-if="fileSourceAType === 'run'">
             <div>
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
-              <select data-testid="compare-file-source-a-run-select" x-model="fileRunIdA" class="field-input field-select mt-1">
+              <select data-testid="compare-file-source-a-run-select" x-model="fileRunIdA" class="field-input field-select mt-1" aria-label="compare file source a run select">
                 <option value="">Select run</option>
                 <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
                   <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
@@ -471,11 +471,11 @@
             </div>
           </template>
           <template x-if="fileSourceAType === 'path'">
-            <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" />
+            <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" aria-label="c reports run a html" />
           </template>
           <template x-if="fileSourceAType === 'upload'">
             <div>
-              <input data-testid="compare-file-source-a-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" />
+              <input data-testid="compare-file-source-a-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'a')" class="field-input" aria-label="compare file source a upload input" />
               <div x-show="fileB64A" class="text-xs text-emerald-500 mt-1" x-text="fileNameA ? fileNameA + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -483,7 +483,7 @@
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
           <div class="compare-card-title">Source B</div>
-          <input x-model="fileLabelB" class="field-input mb-2" placeholder="Source B label" />
+          <input x-model="fileLabelB" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
           <div class="mode-row mb-3">
             <button data-testid="compare-file-source-b-mode-run" @click="fileSourceBType = 'run'" :class="fileSourceBType === 'run' ? 'pill active' : 'pill'">Stored Run</button>
             <button data-testid="compare-file-source-b-mode-path" @click="fileSourceBType = 'path'" :class="fileSourceBType === 'path' ? 'pill active' : 'pill'">Server Path</button>
@@ -492,7 +492,7 @@
           <template x-if="fileSourceBType === 'run'">
             <div>
               <span class="text-xs text-slate-400 ml-1">most recent first</span>
-              <select data-testid="compare-file-source-b-run-select" x-model="fileRunIdB" class="field-input field-select mt-1">
+              <select data-testid="compare-file-source-b-run-select" x-model="fileRunIdB" class="field-input field-select mt-1" aria-label="compare file source b run select">
                 <option value="">Select run</option>
                 <template x-for="run in sortRunsForDisplay(runs)" :key="run.run_id">
                   <option :value="run.run_id" x-text="run.run_id.substring(0, 8) + '… [' + run.status + '] ' + fmtDate(run.started_at)"></option>
@@ -501,11 +501,11 @@
             </div>
           </template>
           <template x-if="fileSourceBType === 'path'">
-            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" />
+            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" aria-label="c reports production html" />
           </template>
           <template x-if="fileSourceBType === 'upload'">
             <div>
-              <input data-testid="compare-file-source-b-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" />
+              <input data-testid="compare-file-source-b-upload-input" type="file" accept=".html,.htm,.csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleReconFileUpload($event, 'b')" class="field-input" aria-label="compare file source b upload input" />
               <div x-show="fileB64B" class="text-xs text-emerald-500 mt-1" x-text="fileNameB ? fileNameB + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
@@ -514,12 +514,12 @@
       <div class="card space-y-3">
         <div class="grid-2">
           <div>
-            <label class="field-label">Key Columns <span class="text-slate-400 font-normal">(comma-separated, tabular files only)</span></label>
-            <input x-model="fileCompareKeyColumns" class="field-input" placeholder="id, order_id" />
+            <label  class="field-label" for="a11y-compare-key-columns-comma-separated-tabular-files-only">Key Columns <span class="text-slate-400 font-normal">(comma-separated, tabular files only)</span></label>
+            <input x-model="fileCompareKeyColumns" class="field-input" placeholder="id, order_id" id="a11y-compare-key-columns-comma-separated-tabular-files-only" />
           </div>
           <div>
-            <label class="field-label">Exclude Columns</label>
-            <input x-model="fileCompareExcludeColumns" class="field-input" placeholder="sequence_number, updated_at, etl_ts" />
+            <label  class="field-label" for="a11y-compare-exclude-columns-2">Exclude Columns</label>
+            <input x-model="fileCompareExcludeColumns" class="field-input" placeholder="sequence_number, updated_at, etl_ts" id="a11y-compare-exclude-columns-2" />
           </div>
         </div>
         <!-- Advanced Options accordion -->
@@ -531,40 +531,40 @@
           </button>
           <div data-testid="compare-file-advanced-panel" x-show="fileAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
             <div>
-              <label class="field-label">Backend</label>
-              <select x-model="fileBackend" class="field-input">
+              <label  class="field-label" for="a11y-compare-backend-2">Backend</label>
+              <select x-model="fileBackend" class="field-input" id="a11y-compare-backend-2">
                 <option value="pandas">pandas</option>
                 <option value="polars">polars</option>
                 <option value="duckdb">duckdb</option>
               </select>
             </div>
             <div>
-              <label class="field-label">Float Tolerance</label>
-              <input x-model="fileFloatTolerance" class="field-input" placeholder="1e-9" />
+              <label  class="field-label" for="a11y-compare-float-tolerance-2">Float Tolerance</label>
+              <input x-model="fileFloatTolerance" class="field-input" placeholder="1e-9" id="a11y-compare-float-tolerance-2" />
             </div>
             <div>
-              <label class="field-label">Datetime Tolerance (s)</label>
-              <input x-model="fileDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+              <label  class="field-label" for="a11y-compare-datetime-tolerance-s-2">Datetime Tolerance (s)</label>
+              <input x-model="fileDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" id="a11y-compare-datetime-tolerance-s-2" />
             </div>
             <div>
-              <label class="field-label">Mismatch Row Limit</label>
-              <input x-model.number="fileMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+              <label  class="field-label" for="a11y-compare-mismatch-row-limit-2">Mismatch Row Limit</label>
+              <input x-model.number="fileMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" id="a11y-compare-mismatch-row-limit-2" />
             </div>
             <div>
-              <label class="field-label">Sample Fraction (0–1)</label>
-              <input x-model="fileSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
+              <label  class="field-label" for="a11y-compare-sample-fraction-0-1-2">Sample Fraction (0–1)</label>
+              <input x-model="fileSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" id="a11y-compare-sample-fraction-0-1-2" />
             </div>
             <div class="col-span-2">
-              <label class="field-label">Per-column tolerances (col:val, …)</label>
-              <input x-model="fileColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+              <label  class="field-label" for="a11y-compare-per-column-tolerances-col-val-2">Per-column tolerances (col:val, …)</label>
+              <input x-model="fileColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" id="a11y-compare-per-column-tolerances-col-val-2" />
             </div>
             <div>
-              <label class="field-label">Case-insensitive columns</label>
-              <input x-model="fileCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+              <label  class="field-label" for="a11y-compare-case-insensitive-columns-2">Case-insensitive columns</label>
+              <input x-model="fileCaseInsensitiveColumns" class="field-input" placeholder="name, status" id="a11y-compare-case-insensitive-columns-2" />
             </div>
             <div>
-              <label class="field-label">Whitespace-normalize columns</label>
-              <input x-model="fileWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+              <label  class="field-label" for="a11y-compare-whitespace-normalize-columns-2">Whitespace-normalize columns</label>
+              <input x-model="fileWhitespaceNormalizeColumns" class="field-input" placeholder="description" id="a11y-compare-whitespace-normalize-columns-2" />
             </div>
             <div class="col-span-2 flex items-center gap-2 mt-1">
               <input type="checkbox" x-model="fileParallelColumns" id="fileParallelCols" class="rounded" />
@@ -609,9 +609,11 @@
             <div class="space-y-1">
               <template x-for="r in fileCompareResult.results" :key="r.id">
                 <div class="border border-slate-200 rounded-lg overflow-hidden">
-                  <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
+                  <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none" tabindex="0" role="button"
                        :data-testid="'compare-file-row-' + r.query_name"
-                       @click="r.status !== 'PASSED' && toggleFileDiff(r)">
+                       @click="r.status !== 'PASSED' && toggleFileDiff(r)"
+                       @keydown.enter="r.status !== 'PASSED' && toggleFileDiff(r)"
+                       @keydown.space.prevent="r.status !== 'PASSED' && toggleFileDiff(r)">
                     <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
                     <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
                     <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
@@ -642,16 +644,16 @@
                             <div class="text-xs text-muted font-semibold">All columns</div>
                             <input x-model="columnStatFilters[columnStatKey('file', r)]"
                                    class="field-input text-xs py-1 max-w-48"
-                                   placeholder="Filter columns" />
+                                   placeholder="Filter columns" aria-label="filter columns" />
                           </div>
                           <div class="overflow-auto max-h-48 border border-slate-100 rounded">
-                            <table class="mismatch-diff-table">
+                            <table class="mismatch-diff-table" aria-label="compare table 3">
                               <thead>
                                 <tr>
-                                  <th @click="setColumnStatSort('file', r, 'column')" class="cursor-pointer">Column</th>
-                                  <th @click="setColumnStatSort('file', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
-                                  <th @click="setColumnStatSort('file', r, 'compared_rows')" class="cursor-pointer">Compared</th>
-                                  <th @click="setColumnStatSort('file', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                  <th @click="setColumnStatSort('file', r, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
+                                  <th @click="setColumnStatSort('file', r, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
+                                  <th @click="setColumnStatSort('file', r, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
+                                  <th @click="setColumnStatSort('file', r, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -672,13 +674,13 @@
                         </div>
                         <!-- Filter bar -->
                         <div class="diff-filter-bar" x-show="(fileExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
-                          <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
+                          <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type" aria-label="filedifffilter r query name type col search type">
                             <option value="">All types</option>
                             <option value="value_diff">Value diff</option>
                             <option value="missing_in_target">Missing →</option>
                             <option value="missing_in_source">Missing ←</option>
                           </select>
-                          <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col">
+                          <select x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col" aria-label="filedifffilter r query name type col search col">
                             <option value="">All columns</option>
                             <template x-for="item in colSummary(fileExpandedDiffs[r.query_name]?.data)" :key="item.col">
                               <option :value="item.col" x-text="item.col"></option>
@@ -688,21 +690,21 @@
                                  x-model="(fileDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
                                  placeholder="Search every field… try col:amount or -type:missing"
                                  title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
-                                 class="diff-filter-search">
+                                 class="diff-filter-search" aria-label="search every field try col amount or type missing">
                           <span class="diff-filter-count"
                                 x-text="filteredDetailLabel(fileExpandedDiffs[r.query_name]?.data||[], r.query_name, fileDiffFilter, r)">
                           </span>
                         </div>
                         <div class="overflow-x-auto max-h-64">
-                          <table class="text-xs w-full">
+                          <table class="text-xs w-full" aria-label="compare table 4">
                             <thead class="bg-slate-100 sticky top-0">
                               <tr>
-                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Key</th>
-                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Column</th>
-                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Source</th>
-                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Target</th>
-                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200">Delta</th>
-                                <th class="px-2 py-1 text-left text-slate-600">Type</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200" scope="col">Key</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200" scope="col">Column</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200" scope="col">Source</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200" scope="col">Target</th>
+                                <th class="px-2 py-1 text-left text-slate-600 border-r border-slate-200" scope="col">Delta</th>
+                                <th class="px-2 py-1 text-left text-slate-600" scope="col">Type</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -767,16 +769,16 @@
     <div class="compare-source-grid">
       <div class="card compare-source-card">
         <div class="compare-card-title">Source A</div>
-        <input x-model="sqlLabelA" class="field-input mb-2" placeholder="Source A label" />
-        <label class="field-label">Config</label>
-        <select data-testid="compare-sql-config-a-select" x-model="sqlConfigA" class="field-input field-select mb-3">
+        <input x-model="sqlLabelA" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
+        <label  class="field-label" for="a11y-compare-config">Config</label>
+        <select data-testid="compare-sql-config-a-select" x-model="sqlConfigA" class="field-input field-select mb-3" id="a11y-compare-config">
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
         <template x-if="sqlConfigAConnections().length > 0">
           <div class="mb-3">
-            <label class="field-label">Connection</label>
-            <select data-testid="compare-sql-connection-a-select" x-model="sqlConnectionA" class="field-input field-select">
+            <label  class="field-label" for="a11y-compare-connection">Connection</label>
+            <select data-testid="compare-sql-connection-a-select" x-model="sqlConnectionA" class="field-input field-select" id="a11y-compare-connection">
               <option :value="null">— default —</option>
               <template x-for="name in sqlConfigAConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -784,24 +786,24 @@
             </select>
           </div>
         </template>
-        <label class="field-label">SQL Query</label>
-        <textarea data-testid="compare-sql-query-a-textarea" x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+        <label  class="field-label" for="a11y-compare-sql-query">SQL Query</label>
+        <textarea data-testid="compare-sql-query-a-textarea" x-model="sqlQueryA" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..." id="a11y-compare-sql-query"></textarea>
       </div>
 
       <div class="vs-divider">VS</div>
 
       <div class="card compare-source-card">
         <div class="compare-card-title">Source B</div>
-        <input x-model="sqlLabelB" class="field-input mb-2" placeholder="Source B label" />
-        <label class="field-label">Config</label>
-        <select data-testid="compare-sql-config-b-select" x-model="sqlConfigB" class="field-input field-select mb-3">
+        <input x-model="sqlLabelB" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
+        <label  class="field-label" for="a11y-compare-config-2">Config</label>
+        <select data-testid="compare-sql-config-b-select" x-model="sqlConfigB" class="field-input field-select mb-3" id="a11y-compare-config-2">
           <option value="">Select config</option>
           <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
         </select>
         <template x-if="sqlConfigBConnections().length > 0">
           <div class="mb-3">
-            <label class="field-label">Connection</label>
-            <select data-testid="compare-sql-connection-b-select" x-model="sqlConnectionB" class="field-input field-select">
+            <label  class="field-label" for="a11y-compare-connection-2">Connection</label>
+            <select data-testid="compare-sql-connection-b-select" x-model="sqlConnectionB" class="field-input field-select" id="a11y-compare-connection-2">
               <option :value="null">— default —</option>
               <template x-for="name in sqlConfigBConnections()" :key="name">
                 <option :value="name" x-text="name"></option>
@@ -809,20 +811,20 @@
             </select>
           </div>
         </template>
-        <label class="field-label">SQL Query</label>
-        <textarea data-testid="compare-sql-query-b-textarea" x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..."></textarea>
+        <label  class="field-label" for="a11y-compare-sql-query-2">SQL Query</label>
+        <textarea data-testid="compare-sql-query-b-textarea" x-model="sqlQueryB" rows="6" class="field-input font-mono text-xs" placeholder="SELECT * FROM my_table WHERE ..." id="a11y-compare-sql-query-2"></textarea>
       </div>
     </div>
 
     <div class="card space-y-3">
       <div class="grid-2">
         <div>
-          <label class="field-label">Key Columns <span class="text-slate-400 font-normal">(comma-separated; auto-inferred if blank)</span></label>
-          <input x-model="sqlKeyColumns" class="field-input" placeholder="id, account_id" />
+          <label  class="field-label" for="a11y-compare-key-columns-comma-separated-auto-inferred-if-blank">Key Columns <span class="text-slate-400 font-normal">(comma-separated; auto-inferred if blank)</span></label>
+          <input x-model="sqlKeyColumns" class="field-input" placeholder="id, account_id" id="a11y-compare-key-columns-comma-separated-auto-inferred-if-blank" />
         </div>
         <div>
-          <label class="field-label">Exclude Columns</label>
-          <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" />
+          <label  class="field-label" for="a11y-compare-exclude-columns-3">Exclude Columns</label>
+          <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" id="a11y-compare-exclude-columns-3" />
         </div>
       </div>
       <!-- Advanced Options accordion -->
@@ -834,40 +836,40 @@
         </button>
         <div data-testid="compare-sql-advanced-panel" x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
           <div>
-            <label class="field-label">Backend</label>
-            <select x-model="sqlBackend" class="field-input">
+            <label  class="field-label" for="a11y-compare-backend-3">Backend</label>
+            <select x-model="sqlBackend" class="field-input" id="a11y-compare-backend-3">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
               <option value="duckdb">duckdb</option>
             </select>
           </div>
           <div>
-            <label class="field-label">Float Tolerance</label>
-            <input x-model="sqlFloatTolerance" class="field-input" placeholder="1e-9" />
+            <label  class="field-label" for="a11y-compare-float-tolerance-3">Float Tolerance</label>
+            <input x-model="sqlFloatTolerance" class="field-input" placeholder="1e-9" id="a11y-compare-float-tolerance-3" />
           </div>
           <div>
-            <label class="field-label">Datetime Tolerance (s)</label>
-            <input x-model="sqlDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" />
+            <label  class="field-label" for="a11y-compare-datetime-tolerance-s-3">Datetime Tolerance (s)</label>
+            <input x-model="sqlDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" id="a11y-compare-datetime-tolerance-s-3" />
           </div>
           <div>
-            <label class="field-label">Mismatch Row Limit</label>
-            <input x-model.number="sqlMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" />
+            <label  class="field-label" for="a11y-compare-mismatch-row-limit-3">Mismatch Row Limit</label>
+            <input x-model.number="sqlMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" id="a11y-compare-mismatch-row-limit-3" />
           </div>
           <div>
-            <label class="field-label">Sample Fraction (0–1)</label>
-            <input x-model="sqlSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" />
+            <label  class="field-label" for="a11y-compare-sample-fraction-0-1-3">Sample Fraction (0–1)</label>
+            <input x-model="sqlSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0" id="a11y-compare-sample-fraction-0-1-3" />
           </div>
           <div class="col-span-2">
-            <label class="field-label">Per-column tolerances (col:val, …)</label>
-            <input x-model="sqlColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" />
+            <label  class="field-label" for="a11y-compare-per-column-tolerances-col-val-3">Per-column tolerances (col:val, …)</label>
+            <input x-model="sqlColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" id="a11y-compare-per-column-tolerances-col-val-3" />
           </div>
           <div>
-            <label class="field-label">Case-insensitive columns</label>
-            <input x-model="sqlCaseInsensitiveColumns" class="field-input" placeholder="name, status" />
+            <label  class="field-label" for="a11y-compare-case-insensitive-columns-3">Case-insensitive columns</label>
+            <input x-model="sqlCaseInsensitiveColumns" class="field-input" placeholder="name, status" id="a11y-compare-case-insensitive-columns-3" />
           </div>
           <div>
-            <label class="field-label">Whitespace-normalize columns</label>
-            <input x-model="sqlWhitespaceNormalizeColumns" class="field-input" placeholder="description" />
+            <label  class="field-label" for="a11y-compare-whitespace-normalize-columns-3">Whitespace-normalize columns</label>
+            <input x-model="sqlWhitespaceNormalizeColumns" class="field-input" placeholder="description" id="a11y-compare-whitespace-normalize-columns-3" />
           </div>
           <div class="col-span-2 flex items-center gap-2 mt-1">
             <input type="checkbox" x-model="sqlParallelColumns" id="sqlParallelCols" class="rounded" />
@@ -906,9 +908,11 @@
           <div class="space-y-1">
             <template x-for="r in sqlCompareResult.results" :key="r.id">
               <div class="border border-slate-200 rounded-lg overflow-hidden">
-                <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none"
-                     :data-testid="'compare-sql-row-' + r.query_name"
-                     @click="r.status !== 'PASSED' && toggleSQLDiff(r)">
+                <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 cursor-pointer select-none" tabindex="0" role="button"
+                      :data-testid="'compare-sql-row-' + r.query_name"
+                      @click="r.status !== 'PASSED' && toggleSQLDiff(r)"
+                      @keydown.enter="r.status !== 'PASSED' && toggleSQLDiff(r)"
+                      @keydown.space.prevent="r.status !== 'PASSED' && toggleSQLDiff(r)">
                   <span class="font-mono text-xs flex-1 text-slate-700" x-text="r.query_name"></span>
                   <span class="text-xs text-slate-500" x-text="'A: ' + (r.source_row_count ?? '—') + '  B: ' + (r.target_row_count ?? '—')"></span>
                   <span class="text-xs text-slate-400" x-show="r.value_mismatch_count || r.missing_in_target_count || r.missing_in_source_count"
@@ -938,16 +942,16 @@
                           <div class="text-xs text-muted font-semibold">All columns</div>
                           <input x-model="columnStatFilters[columnStatKey('sql', r)]"
                                  class="field-input text-xs py-1 max-w-48"
-                                 placeholder="Filter columns" />
+                                 placeholder="Filter columns" aria-label="filter columns" />
                         </div>
                         <div class="overflow-auto max-h-48 border border-slate-100 rounded">
-                          <table class="mismatch-diff-table">
+                          <table class="mismatch-diff-table" aria-label="compare table 5">
                             <thead>
                               <tr>
-                                <th @click="setColumnStatSort('sql', r, 'column')" class="cursor-pointer">Column</th>
-                                <th @click="setColumnStatSort('sql', r, 'mismatch_count')" class="cursor-pointer">Mismatches</th>
-                                <th @click="setColumnStatSort('sql', r, 'compared_rows')" class="cursor-pointer">Compared</th>
-                                <th @click="setColumnStatSort('sql', r, 'match_pct')" class="cursor-pointer">Match %</th>
+                                <th @click="setColumnStatSort('sql', r, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
+                                <th @click="setColumnStatSort('sql', r, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
+                                <th @click="setColumnStatSort('sql', r, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
+                                <th @click="setColumnStatSort('sql', r, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -968,13 +972,13 @@
                       </div>
                       <!-- Filter bar -->
                       <div class="diff-filter-bar" x-show="(sqlExpandedDiffs[r.query_name]?.data?.length || 0) > 1">
-                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type">
+                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).type" aria-label="sqldifffilter r query name type col search type">
                           <option value="">All types</option>
                           <option value="value_diff">Value diff</option>
                           <option value="missing_in_target">Missing →</option>
                           <option value="missing_in_source">Missing ←</option>
                         </select>
-                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col">
+                        <select x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).col" aria-label="sqldifffilter r query name type col search col">
                           <option value="">All columns</option>
                           <template x-for="item in colSummary(sqlExpandedDiffs[r.query_name]?.data)" :key="item.col">
                             <option :value="item.col" x-text="item.col"></option>
@@ -984,22 +988,22 @@
                                x-model="(sqlDiffFilter[r.query_name] ??= {type:'',col:'',search:''}).search"
                                placeholder="Search every field… try col:amount or -type:missing"
                                title="Terms AND together. col:amount &#183; type:missing &#183; key:1042 &#183; src:NULL &#183; tgt:0 &#183; val:abc &#183; &quot;two words&quot; &#183; -exclude"
-                               class="diff-filter-search">
+                               class="diff-filter-search" aria-label="search every field try col amount or type missing">
                         <span class="diff-filter-count"
                               x-text="filteredDetailLabel(sqlExpandedDiffs[r.query_name]?.data||[], r.query_name, sqlDiffFilter, r)">
                         </span>
                       </div>
                       <!-- Diff table -->
                       <div class="overflow-x-auto max-h-64">
-                        <table class="text-xs w-full">
+                        <table class="text-xs w-full" aria-label="compare table 6">
                           <thead class="bg-slate-100 sticky top-0">
                             <tr>
-                              <th class="px-2 py-1 text-left text-slate-600">Key</th>
-                              <th class="px-2 py-1 text-left text-slate-600">Column</th>
-                              <th class="px-2 py-1 text-left text-slate-600">Source</th>
-                              <th class="px-2 py-1 text-left text-slate-600">Target</th>
-                              <th class="px-2 py-1 text-left text-slate-600">Delta</th>
-                              <th class="px-2 py-1 text-left text-slate-600">Type</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Key</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Column</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Source</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Target</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Delta</th>
+                              <th class="px-2 py-1 text-left text-slate-600" scope="col">Type</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1065,9 +1069,9 @@
       <div class="compare-source-grid">
         <div class="card compare-source-card">
           <div class="compare-card-title">Source A</div>
-          <input x-model="colStatsSourceA.label" class="field-input mb-2" placeholder="Source A label" />
-          <label class="field-label">Source type</label>
-          <select data-testid="compare-colstats-source-a-type-select" x-model="colStatsSourceAType" class="field-input field-select mb-2">
+          <input x-model="colStatsSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
+          <label  class="field-label" for="a11y-compare-source-type">Source type</label>
+          <select data-testid="compare-colstats-source-a-type-select" x-model="colStatsSourceAType" class="field-input field-select mb-2" id="a11y-compare-source-type">
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
@@ -1075,21 +1079,21 @@
           </select>
           <template x-if="colStatsSourceAType === 'upload'">
             <div>
-              <input data-testid="compare-colstats-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" />
+              <input data-testid="compare-colstats-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a', 'colStats')" class="field-input" aria-label="compare colstats source a upload input" />
               <div x-show="colStatsSourceA.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceA.fileName ? colStatsSourceA.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
           <template x-if="colStatsSourceAType === 'path'">
-            <input x-model="colStatsSourceA.filePath" class="field-input" placeholder="/path/to/file.csv" />
+            <input x-model="colStatsSourceA.filePath" class="field-input" placeholder="/path/to/file.csv" aria-label="path to file csv" />
           </template>
           <template x-if="colStatsSourceAType === 'live'">
             <div class="space-y-2">
-              <select x-model="colStatsSourceA.configId" class="field-input field-select">
+              <select x-model="colStatsSourceA.configId" class="field-input field-select" aria-label="colstatssourcea configid">
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" />
-              <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" />
+              <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" aria-label="document id" />
+              <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" aria-label="report id" />
               <button data-testid="compare-colstats-source-a-load-prompts-btn"
                       @click="loadBOSourceParameters(colStatsSourceA)" class="btn-secondary btn-sm text-xs">Load prompts</button>
               <div data-testid="compare-colstats-source-a-params" x-show="colStatsSourceA.parameters && colStatsSourceA.parameters.length > 0" class="space-y-2">
@@ -1097,7 +1101,7 @@
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
                     <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
-                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" aria-label="param type" />
                   </div>
                 </template>
               </div>
@@ -1105,11 +1109,11 @@
           </template>
           <template x-if="colStatsSourceAType === 'api'">
             <div class="space-y-2">
-              <select x-model="colStatsSourceA.configId" class="field-input field-select">
+              <select x-model="colStatsSourceA.configId" class="field-input field-select" aria-label="colstatssourcea configid">
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <select x-model="colStatsSourceA.endpointName" class="field-input field-select">
+              <select x-model="colStatsSourceA.endpointName" class="field-input field-select" aria-label="colstatssourcea endpointname">
                 <option value="">Select endpoint</option>
                 <template x-for="name in configApiEndpointNames(colStatsSourceA.configId)" :key="name"><option :value="name" x-text="name"></option></template>
               </select>
@@ -1119,9 +1123,9 @@
         <div class="vs-divider">VS</div>
         <div class="card compare-source-card">
           <div class="compare-card-title">Source B</div>
-          <input x-model="colStatsSourceB.label" class="field-input mb-2" placeholder="Source B label" />
-          <label class="field-label">Source type</label>
-          <select data-testid="compare-colstats-source-b-type-select" x-model="colStatsSourceBType" class="field-input field-select mb-2">
+          <input x-model="colStatsSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
+          <label  class="field-label" for="a11y-compare-source-type-2">Source type</label>
+          <select data-testid="compare-colstats-source-b-type-select" x-model="colStatsSourceBType" class="field-input field-select mb-2" id="a11y-compare-source-type-2">
             <option value="upload">Upload file</option>
             <option value="live">Live BO</option>
             <option value="path">File path</option>
@@ -1129,21 +1133,21 @@
           </select>
           <template x-if="colStatsSourceBType === 'upload'">
             <div>
-              <input data-testid="compare-colstats-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" />
+              <input data-testid="compare-colstats-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b', 'colStats')" class="field-input" aria-label="compare colstats source b upload input" />
               <div x-show="colStatsSourceB.fileB64" class="text-xs text-emerald-500 mt-1" x-text="colStatsSourceB.fileName ? colStatsSourceB.fileName + ' loaded' : 'File loaded'"></div>
             </div>
           </template>
           <template x-if="colStatsSourceBType === 'path'">
-            <input x-model="colStatsSourceB.filePath" class="field-input" placeholder="/path/to/file.csv" />
+            <input x-model="colStatsSourceB.filePath" class="field-input" placeholder="/path/to/file.csv" aria-label="path to file csv" />
           </template>
           <template x-if="colStatsSourceBType === 'live'">
             <div class="space-y-2">
-              <select x-model="colStatsSourceB.configId" class="field-input field-select">
+              <select x-model="colStatsSourceB.configId" class="field-input field-select" aria-label="colstatssourceb configid">
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" />
-              <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" />
+              <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" aria-label="document id" />
+              <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" aria-label="report id" />
               <button data-testid="compare-colstats-source-b-load-prompts-btn"
                       @click="loadBOSourceParameters(colStatsSourceB)" class="btn-secondary btn-sm text-xs">Load prompts</button>
               <div data-testid="compare-colstats-source-b-params" x-show="colStatsSourceB.parameters && colStatsSourceB.parameters.length > 0" class="space-y-2">
@@ -1151,7 +1155,7 @@
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-600 w-32 truncate" x-text="param.name || ('#' + param.id)"></span>
                     <input x-model="param.value" :type="param.type === 'DateTime' ? 'date' : 'text'"
-                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" />
+                           class="field-input text-xs py-1 flex-1" :placeholder="param.type" aria-label="param type" />
                   </div>
                 </template>
               </div>
@@ -1159,11 +1163,11 @@
           </template>
           <template x-if="colStatsSourceBType === 'api'">
             <div class="space-y-2">
-              <select x-model="colStatsSourceB.configId" class="field-input field-select">
+              <select x-model="colStatsSourceB.configId" class="field-input field-select" aria-label="colstatssourceb configid">
                 <option value="">Select config</option>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
-              <select x-model="colStatsSourceB.endpointName" class="field-input field-select">
+              <select x-model="colStatsSourceB.endpointName" class="field-input field-select" aria-label="colstatssourceb endpointname">
                 <option value="">Select endpoint</option>
                 <template x-for="name in configApiEndpointNames(colStatsSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
               </select>
@@ -1173,16 +1177,16 @@
       </div>
       <div class="grid-2 mt-3">
         <div>
-          <label class="field-label">Query/Report name</label>
-          <input data-testid="compare-colstats-query-name-input" x-model="colStatsQueryName" class="field-input" placeholder="stats_compare" />
+          <label  class="field-label" for="a11y-compare-query-report-name">Query/Report name</label>
+          <input data-testid="compare-colstats-query-name-input" x-model="colStatsQueryName" class="field-input" placeholder="stats_compare" id="a11y-compare-query-report-name" />
         </div>
         <div>
-          <label class="field-label">Float Tolerance</label>
-          <input data-testid="compare-colstats-float-tol-input" x-model="colStatsFloatTol" class="field-input" placeholder="1e-9" />
+          <label  class="field-label" for="a11y-compare-float-tolerance-4">Float Tolerance</label>
+          <input data-testid="compare-colstats-float-tol-input" x-model="colStatsFloatTol" class="field-input" placeholder="1e-9" id="a11y-compare-float-tolerance-4" />
         </div>
         <div>
-          <label class="field-label">Row Count Tolerance</label>
-          <input data-testid="compare-colstats-row-count-tol-input" x-model="colStatsRowCountTol" type="number" min="0" class="field-input" placeholder="0" />
+          <label  class="field-label" for="a11y-compare-row-count-tolerance">Row Count Tolerance</label>
+          <input data-testid="compare-colstats-row-count-tol-input" x-model="colStatsRowCountTol" type="number" min="0" class="field-input" placeholder="0" id="a11y-compare-row-count-tolerance" />
         </div>
       </div>
       <button data-testid="compare-colstats-run-btn" @click="runColumnStats()" :disabled="colStatsLoading" class="btn-primary mt-3">
@@ -1202,8 +1206,8 @@
           <p class="text-xs text-emerald-600">All column statistics match within tolerance.</p>
         </template>
         <template x-if="colStatsResult.has_diffs">
-          <table class="data-table text-xs">
-            <thead><tr><th>Column</th><th>Metric</th><th x-text="colStatsResult.source_env || 'Source'"></th><th x-text="colStatsResult.target_env || 'Target'"></th><th>Delta</th></tr></thead>
+          <table class="data-table text-xs" aria-label="compare table 7">
+            <thead><tr><th scope="col">Column</th><th scope="col">Metric</th><th x-text="colStatsResult.source_env || 'Source'" scope="col"></th><th x-text="colStatsResult.target_env || 'Target'" scope="col"></th><th scope="col">Delta</th></tr></thead>
             <tbody>
               <template x-for="d in colStatsResult.diffs" :key="d.column + '_' + d.metric">
                 <tr>
@@ -1228,18 +1232,18 @@
       <p class="text-xs text-slate-500 mb-4">Compare the mismatch sets from two stored runs to identify regressions (new issues), resolved issues, and persistent mismatches.</p>
       <div class="grid-2">
         <div>
-          <label class="field-label">Run A (baseline)</label>
-          <input data-testid="compare-mmdiff-run-a-input" x-model="mismatchDiffRunIdA" class="field-input font-mono text-xs" placeholder="run UUID" />
-          <input x-model="mismatchDiffRunLabelA" class="field-input mt-1 text-xs" placeholder="Label (e.g. Yesterday)" />
+          <label  class="field-label" for="a11y-compare-run-a-baseline">Run A (baseline)</label>
+          <input data-testid="compare-mmdiff-run-a-input" x-model="mismatchDiffRunIdA" class="field-input font-mono text-xs" placeholder="run UUID" id="a11y-compare-run-a-baseline" />
+          <input x-model="mismatchDiffRunLabelA" class="field-input mt-1 text-xs" placeholder="Label (e.g. Yesterday)" aria-label="label e g yesterday" />
         </div>
         <div>
-          <label class="field-label">Run B (current)</label>
-          <input data-testid="compare-mmdiff-run-b-input" x-model="mismatchDiffRunIdB" class="field-input font-mono text-xs" placeholder="run UUID" />
-          <input x-model="mismatchDiffRunLabelB" class="field-input mt-1 text-xs" placeholder="Label (e.g. Today)" />
+          <label  class="field-label" for="a11y-compare-run-b-current">Run B (current)</label>
+          <input data-testid="compare-mmdiff-run-b-input" x-model="mismatchDiffRunIdB" class="field-input font-mono text-xs" placeholder="run UUID" id="a11y-compare-run-b-current" />
+          <input x-model="mismatchDiffRunLabelB" class="field-input mt-1 text-xs" placeholder="Label (e.g. Today)" aria-label="label e g today" />
         </div>
         <div class="col-span-2 mt-2">
-          <label class="field-label">Filter by query name <span class="text-slate-400 font-normal">(optional)</span></label>
-          <input data-testid="compare-mmdiff-query-filter-input" x-model="mismatchDiffQueryName" class="field-input" placeholder="Leave blank to diff all queries" />
+          <label  class="field-label" for="a11y-compare-filter-by-query-name-optional">Filter by query name <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input data-testid="compare-mmdiff-query-filter-input" x-model="mismatchDiffQueryName" class="field-input" placeholder="Leave blank to diff all queries" id="a11y-compare-filter-by-query-name-optional" />
         </div>
       </div>
       <button data-testid="compare-mmdiff-run-btn" @click="runMismatchDiff()" :disabled="mismatchDiffLoading" class="btn-primary mt-3">
@@ -1272,8 +1276,8 @@
         <template x-if="mismatchDiffResult.new.length">
           <div>
             <div class="text-xs font-semibold text-red-600 mb-1">New Regressions</div>
-            <table class="data-table text-xs">
-              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th><th>Delta</th></tr></thead>
+            <table class="data-table text-xs" aria-label="compare table 8">
+              <thead><tr><th scope="col">Column</th><th scope="col">Key</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Delta</th></tr></thead>
               <tbody>
                 <template x-for="(m, idx) in mismatchDiffResult.new.slice(0, mismatchDiffVisible.new)" :key="idx">
                   <tr>
@@ -1295,8 +1299,8 @@
         <template x-if="mismatchDiffResult.resolved.length">
           <div>
             <div class="text-xs font-semibold text-emerald-600 mb-1">Resolved Mismatches</div>
-            <table class="data-table text-xs">
-              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th></tr></thead>
+            <table class="data-table text-xs" aria-label="compare table 9">
+              <thead><tr><th scope="col">Column</th><th scope="col">Key</th><th scope="col">Source</th><th scope="col">Target</th></tr></thead>
               <tbody>
                 <template x-for="(m, idx) in mismatchDiffResult.resolved.slice(0, mismatchDiffVisible.resolved)" :key="idx">
                   <tr>
@@ -1317,8 +1321,8 @@
         <template x-if="mismatchDiffResult.persistent.length">
           <div>
             <div class="text-xs font-semibold text-amber-600 mb-1">Persistent Mismatches</div>
-            <table class="data-table text-xs">
-              <thead><tr><th>Column</th><th>Key</th><th>Source</th><th>Target</th><th>Delta</th></tr></thead>
+            <table class="data-table text-xs" aria-label="compare table 10">
+              <thead><tr><th scope="col">Column</th><th scope="col">Key</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Delta</th></tr></thead>
               <tbody>
                 <template x-for="(m, idx) in mismatchDiffResult.persistent.slice(0, mismatchDiffVisible.persistent)" :key="idx">
                   <tr>
@@ -1344,25 +1348,25 @@
   <div x-show="compareSubTab === 'multi_file'" class="space-y-4">
     <div class="grid-2">
       <div>
-        <label class="field-label">Label A</label>
-        <input x-model="mfCompareLabelA" class="field-input" placeholder="Source A" />
+        <label  class="field-label" for="a11y-compare-label-a">Label A</label>
+        <input x-model="mfCompareLabelA" class="field-input" placeholder="Source A" id="a11y-compare-label-a" />
       </div>
       <div>
-        <label class="field-label">Label B</label>
-        <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" />
+        <label  class="field-label" for="a11y-compare-label-b">Label B</label>
+        <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" id="a11y-compare-label-b" />
       </div>
     </div>
     <div class="grid-2">
       <div>
-        <label class="field-label">Strategy</label>
-        <select x-model="mfCompareStrategy" class="field-input field-select" data-testid="compare-mf-strategy-select">
+        <label  class="field-label" for="a11y-compare-strategy">Strategy</label>
+        <select x-model="mfCompareStrategy" class="field-input field-select" data-testid="compare-mf-strategy-select" id="a11y-compare-strategy">
           <option value="explicit">Explicit (match on tokens)</option>
           <option value="automated">Automated (guess by similarity)</option>
         </select>
       </div>
       <div>
-        <label class="field-label">Unmatched Policy</label>
-        <select x-model="mfCompareUnmatchedPolicy" class="field-input field-select">
+        <label  class="field-label" for="a11y-compare-unmatched-policy">Unmatched Policy</label>
+        <select x-model="mfCompareUnmatchedPolicy" class="field-input field-select" id="a11y-compare-unmatched-policy">
           <option value="fail">Fail</option>
           <option value="warn">Warn and proceed</option>
           <option value="ignore">Ignore silently</option>
@@ -1370,35 +1374,35 @@
       </div>
     </div>
     <div x-show="mfCompareStrategy === 'explicit'">
-      <label class="field-label">Match On (comma-separated tokens)</label>
+      <label  class="field-label" for="a11y-compare-match-on-comma-separated-tokens">Match On (comma-separated tokens)</label>
       <input x-model="mfCompareMatchOnRaw" class="field-input" placeholder="region, date"
-             data-testid="compare-mf-match-on-input" />
+             data-testid="compare-mf-match-on-input" id="a11y-compare-match-on-comma-separated-tokens" />
     </div>
     <div x-show="mfCompareStrategy === 'automated'" class="grid-2">
       <div>
-        <label class="field-label">Similarity Threshold</label>
-        <input x-model="mfCompareSimilarityThreshold" type="number" min="0" max="1" step="0.05" class="field-input" placeholder="0.7" />
+        <label  class="field-label" for="a11y-compare-similarity-threshold">Similarity Threshold</label>
+        <input x-model="mfCompareSimilarityThreshold" type="number" min="0" max="1" step="0.05" class="field-input" placeholder="0.7" id="a11y-compare-similarity-threshold" />
       </div>
       <div class="flex items-end gap-3">
         <label class="flex items-center gap-1 text-xs">
-          <input type="checkbox" x-model="mfCompareSignalFilename" class="rounded" /> filename
+          <input type="checkbox" x-model="mfCompareSignalFilename" class="rounded" aria-label="mfcomparesignalfilename" /> filename
         </label>
         <label class="flex items-center gap-1 text-xs">
-          <input type="checkbox" x-model="mfCompareSignalColumns" class="rounded" /> columns
+          <input type="checkbox" x-model="mfCompareSignalColumns" class="rounded" aria-label="mfcomparesignalcolumns" /> columns
         </label>
         <label class="flex items-center gap-1 text-xs">
-          <input type="checkbox" x-model="mfCompareSignalRowcount" class="rounded" /> row count
+          <input type="checkbox" x-model="mfCompareSignalRowcount" class="rounded" aria-label="mfcomparesignalrowcount" /> row count
         </label>
       </div>
     </div>
     <div class="grid-2">
       <div>
-        <label class="field-label">Key Columns (comma-separated)</label>
-        <input x-model="mfCompareKeyColumns" class="field-input" placeholder="id" data-testid="compare-mf-key-columns-input" />
+        <label  class="field-label" for="a11y-compare-key-columns-comma-separated">Key Columns (comma-separated)</label>
+        <input x-model="mfCompareKeyColumns" class="field-input" placeholder="id" data-testid="compare-mf-key-columns-input" id="a11y-compare-key-columns-comma-separated" />
       </div>
       <div>
-        <label class="field-label">Exclude Columns (comma-separated)</label>
-        <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" />
+        <label  class="field-label" for="a11y-compare-exclude-columns-comma-separated">Exclude Columns (comma-separated)</label>
+        <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" id="a11y-compare-exclude-columns-comma-separated" />
       </div>
     </div>
     <div class="border-t border-slate-200 pt-3">
@@ -1406,9 +1410,9 @@
       <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Files are parsed as CSV, Excel, JSON, XML, TSV, or delimited text when supported by the parser.</p>
       <div class="grid-2">
         <input x-model="mfCompareSourceRoot" class="field-input" placeholder="/spool/exports/source"
-               data-testid="compare-mf-source-root-input" />
+               data-testid="compare-mf-source-root-input" aria-label="spool exports source" />
         <input x-model="mfCompareSourcePattern" class="field-input" placeholder="sales_{region}_{batch:num}_{date:%Y%m%d}.xlsx"
-               data-testid="compare-mf-source-pattern-input" />
+               data-testid="compare-mf-source-pattern-input" aria-label="sales region batch num date y m d xlsx" />
       </div>
     </div>
     <div class="border-t border-slate-200 pt-3">
@@ -1416,9 +1420,9 @@
       <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Target files may use different names from source files as long as shared tokens match.</p>
       <div class="grid-2">
         <input x-model="mfCompareTargetRoot" class="field-input" placeholder="/spool/exports/target"
-               data-testid="compare-mf-target-root-input" />
+               data-testid="compare-mf-target-root-input" aria-label="spool exports target" />
         <input x-model="mfCompareTargetPattern" class="field-input" placeholder="financials-{region}-B{batch:num}-{date:%Y%m%d}.json"
-               data-testid="compare-mf-target-pattern-input" />
+               data-testid="compare-mf-target-pattern-input" aria-label="financials region b batch num date y m d json" />
       </div>
     </div>
     <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>

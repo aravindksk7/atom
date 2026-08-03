@@ -9,7 +9,7 @@
   <div class="card mb-4">
     <div class="font-semibold text-slate-700 mb-3">Select a Run</div>
     <div class="flex gap-3">
-      <select data-testid="reports-run-select" x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1">
+      <select data-testid="reports-run-select" x-model="reportRunId" @change="resetReportArtifacts()" class="field-input field-select flex-1" aria-label="reports run select">
         <option value="">— Choose run —</option>
         <template x-for="run in runs" :key="run.run_id">
           <option :value="run.run_id" x-text="run.run_id.substring(0,8) + '… [' + run.status + ']'"></option>
@@ -59,8 +59,8 @@
             <div class="metric-card metric-violet"><div class="metric-label">Duration</div><div class="metric-value" x-text="(reportMetrics.total_duration_seconds || 0).toFixed(3) + 's'"></div></div>
           </div>
           <div class="card overflow-hidden p-0">
-            <table class="data-table">
-              <thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Files</th><th>Source Rows</th><th>Target Rows</th><th>Issues</th><th></th></tr></thead>
+            <table class="data-table" aria-label="reports table 1">
+              <thead><tr><th scope="col">Test</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Files</th><th scope="col">Source Rows</th><th scope="col">Target Rows</th><th scope="col">Issues</th><th scope="col"></th></tr></thead>
               <tbody>
                 <template x-if="!reportMetrics.tests || reportMetrics.tests.length === 0">
                   <tr><td colspan="9" class="text-center text-muted py-4">No per-test metrics were recorded.</td></tr>
@@ -102,7 +102,7 @@
             class="field-input"
             data-testid="reports-logs-search-input"
             placeholder="Search logs… (live)"
-          />
+          aria-label="search logs live" />
           <div class="flex gap-2 flex-wrap items-center">
             <button class="level-chip" :class="logFilterLevel === '' ? 'chip-active-ALL' : ''" @click="logFilterLevel = ''" data-testid="reports-logs-level-ALL">ALL</button>
             <button class="level-chip" :class="logFilterLevel === 'ERROR' ? 'chip-active-ERROR' : ''" @click="logFilterLevel = logFilterLevel === 'ERROR' ? '' : 'ERROR'" data-testid="reports-logs-level-ERROR">ERROR</button>
@@ -130,7 +130,7 @@
       <!-- Log list -->
       <template x-if="!allLogEventsLoading && allLogEvents.length > 0">
         <div class="card p-0 overflow-hidden">
-          <div class="log-list">
+          <div class="log-list" tabindex="0" aria-label="Run log events">
             <template x-if="filteredLogEvents().length === 0">
               <div class="empty-state"><div class="empty-state-title">No events match the current filter.</div></div>
             </template>
