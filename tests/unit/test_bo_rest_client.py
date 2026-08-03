@@ -973,7 +973,7 @@ def test_download_report_warns_and_probes_dataproviders_when_no_data_rows(
             result = authenticated_client.download_report("DOC1", "RPT2", "xlsx")
 
     assert result == export.content
-    assert "no data rows" in caplog.text
+    assert "collecting diagnostics" in caplog.text
     assert "DP0" in caplog.text
     urls = [call[0][0] for call in mock_get.call_args_list]
     assert any(u.endswith("/documents/DOC1/dataproviders") for u in urls)
@@ -1009,6 +1009,54 @@ def test_blank_export_probes_occurrence_zero_before_and_after_opening(
     assert occ_positions[0] < open_position < occ_positions[1]
     assert "occurence-0-cold" in caplog.text
     assert "occurence-0-after-open" in caplog.text
+
+
+def test_download_report_logs_cell_preview_so_layout_rows_are_recognisable(
+    authenticated_client, caplog
+):
+    """A row count cannot tell "17 rows of data" from "17 rows of title, filter
+    summary and column headers over an empty table" — the exact shape the
+    on-premises server returned (rows=17, no data). The cell text can."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = _xlsx_with_rows(3)
+    mock_response.headers = {}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "cell preview" in caplog.text
+    assert "v0" in caplog.text and "v2" in caplog.text
+
+
+def test_download_report_previews_csv_lines(authenticated_client, caplog):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"date,sku\n2026-07-29,A100\n"
+    mock_response.headers = {}
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "csv")
+    assert "date,sku" in caplog.text
+
+
+def test_export_diagnostics_can_be_forced_by_env_var(authenticated_client, monkeypatch):
+    """The blank export on this deployment reports rows=17, so no row-count
+    threshold fires on it without also firing on healthy pulls. Make the probes
+    switchable on for a debugging run instead of guessing a threshold."""
+    monkeypatch.setenv("ATOM_BO_EXPORT_DIAGNOSTICS", "1")
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    probe.text = "{}"
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4) as mock_get:
+        authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert any(u.endswith("/occurences/0") for u in urls)
+    assert any(u.endswith("/dataproviders") for u in urls)
 
 
 def test_download_report_does_not_probe_when_export_has_data(authenticated_client):

@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import re
 import time
 import zipfile
@@ -69,6 +70,44 @@ def _count_export_rows(data: bytes, format: str) -> int | None:
                 return None
             xml = archive.read(sheets[0]).decode("utf-8", "replace")
             return xml.count("<row ") + xml.count("<row>")
+    except Exception:  # noqa: BLE001 - diagnostics must not break the download
+        return None
+
+
+_XLSX_TEXT = re.compile(r"<t[^>]*>(.*?)</t>", re.DOTALL)
+
+
+def _preview_export_text(data: bytes, format: str, limit: int = 40) -> str | None:
+    """First few cell strings in an export, or None when not previewable.
+
+    A row count alone can't distinguish "17 rows of data" from "17 rows of
+    report title, filter summary and column headers with an empty table" —
+    which is exactly the shape this deployment returns. The cell text can, and
+    it costs one already-downloaded byte string to read.
+    """
+    if not data:
+        return None
+    if format == "csv":
+        lines = [ln for ln in data.decode("utf-8", "replace").splitlines() if ln.strip()]
+        return " | ".join(lines[:5]) if lines else None
+    if format != "xlsx" or data[:2] != b"PK":
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = archive.namelist()
+            texts: list[str] = []
+            # Shared strings hold every distinct string in the workbook; inline
+            # strings live in the sheet itself. Real exports use one or other.
+            for member in ("xl/sharedStrings.xml", *sorted(
+                n for n in names if n.startswith("xl/worksheets/sheet")
+            )):
+                if member not in names:
+                    continue
+                xml = archive.read(member).decode("utf-8", "replace")
+                texts.extend(t.strip() for t in _XLSX_TEXT.findall(xml) if t.strip())
+                if texts:
+                    break
+            return " | ".join(texts[:limit]) if texts else None
     except Exception:  # noqa: BLE001 - diagnostics must not break the download
         return None
 
@@ -793,15 +832,25 @@ class BORestClient:
             (response.headers or {}).get("Content-Type"),
             len(response.content), "unknown" if rows is None else rows,
         )
-        # A header-only export is the on-premises blank-report symptom: the
-        # report layout exports fine while its data providers never ran. The
-        # export itself can't tell which, so dump the document's data-provider
-        # state while the session is still open.
-        if rows is not None and rows <= 1:
+        preview = _preview_export_text(response.content, format)
+        if preview:
+            logger.info(
+                "SAP BO export doc=%s report=%s cell preview: %s",
+                doc_id, report_id, preview[:1200],
+            )
+        # A row count cannot recognise this deployment's blank export: a WebI
+        # sheet carries title, filter-summary and column-header rows even with
+        # an empty table, so the observed data-less pull still reported
+        # rows=17. Only a human comparing the preview above against the report
+        # can currently say "that is layout, not data" — so the probes are
+        # opt-in via ATOM_BO_EXPORT_DIAGNOSTICS rather than guarded by a
+        # threshold that would either miss this case or fire on healthy pulls.
+        forced = bool(os.environ.get("ATOM_BO_EXPORT_DIAGNOSTICS"))
+        if forced or (rows is not None and rows <= 1):
             logger.warning(
-                "SAP BO export doc=%s report=%s returned the report layout but "
-                "no data rows (rows=%s, bytes=%d). Collecting diagnostics.",
-                doc_id, report_id, rows, len(response.content),
+                "SAP BO export doc=%s report=%s collecting diagnostics "
+                "(rows=%s, bytes=%d, forced=%s).",
+                doc_id, report_id, rows, len(response.content), forced,
             )
             self._log_blank_export_diagnostics(doc_id)
         return response.content
