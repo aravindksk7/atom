@@ -42,3 +42,36 @@ def test_ordinary_headers_pass_through():
 def test_short_secret_does_not_leak_the_whole_value():
     out = redact_headers({"Authorization": "abc"}, _entry())
     assert "abc" not in out["Authorization"]
+
+
+from api.services.api_exchange import BODY_LIMIT, render_body
+
+
+def test_text_body_passes_through():
+    body, truncated, binary = render_body(b'{"a":1}', "application/json")
+    assert body == '{"a":1}'
+    assert truncated is False
+    assert binary is False
+
+
+def test_long_body_is_truncated():
+    body, truncated, binary = render_body(b"x" * (BODY_LIMIT + 100), "text/plain")
+    assert len(body) == BODY_LIMIT
+    assert truncated is True
+
+
+def test_binary_body_is_hex_not_decoded():
+    body, truncated, binary = render_body(b"\x89PNG\r\n\x1a\n", "image/png")
+    assert binary is True
+    assert body.startswith("89504e47")
+
+
+def test_undecodable_text_body_falls_back_to_replacement():
+    body, truncated, binary = render_body(b"\xff\xfe bad", "text/plain")
+    assert binary is False
+    assert "�" in body
+
+
+def test_empty_body_is_empty_string_not_none():
+    body, truncated, binary = render_body(b"", "application/json")
+    assert body == ""

@@ -37,3 +37,21 @@ def redact_headers(headers, entry) -> dict:
         key: (_mask(value) if key.lower() in secret else value)
         for key, value in (headers or {}).items()
     }
+
+
+def _is_textual(content_type: str) -> bool:
+    base = (content_type or "").split(";")[0].strip().lower()
+    return any(base.startswith(prefix) for prefix in _TEXTUAL_CONTENT_TYPES)
+
+
+def render_body(raw: bytes, content_type: str) -> tuple[str, bool, bool]:
+    """Return (body_text, truncated, binary) for display.
+
+    A non-textual content type is never decoded: it is shown as hex, so a PNG
+    or an xlsx cannot produce a screenful of mojibake.
+    """
+    raw = raw or b""
+    if not _is_textual(content_type):
+        return raw[:BINARY_PREVIEW_BYTES].hex(), len(raw) > BINARY_PREVIEW_BYTES, True
+    text = raw.decode("utf-8", "replace")
+    return text[:BODY_LIMIT], len(text) > BODY_LIMIT, False
