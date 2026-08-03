@@ -140,3 +140,73 @@ def test_capture_never_raises_on_a_malformed_response():
     sink, seen = capture_exchange(_entry())
     sink(b"{}", 1, object())  # no .request, no .headers
     assert seen == []
+
+
+import logging
+
+
+def test_free_form_secret_header_is_redacted():
+    """The gap the allowlist left open: a secret under a name nobody enumerated."""
+    out = redact_headers({"X-Client-Secret": "HUNTER2-SECRET-VALUE"}, _entry())
+    assert "HUNTER2" not in out["X-Client-Secret"]
+    assert out["X-Client-Secret"].startswith("<")
+
+
+def test_version_header_is_not_redacted():
+    out = redact_headers({"X-Api-Version": "2026-08-01"}, _entry())
+    assert out["X-Api-Version"] == "2026-08-01"
+
+
+def test_idempotency_key_is_redacted_as_an_accepted_false_positive():
+    """Not a credential, but 'key' matches. Over-redaction is the deliberate trade."""
+    out = redact_headers({"Idempotency-Key": "abc123def456"}, _entry())
+    assert out["Idempotency-Key"].startswith("<")
+
+
+def test_pattern_match_is_case_insensitive():
+    out = redact_headers({"X-SESSION-ID": "sessionvalue99"}, _entry())
+    assert out["X-SESSION-ID"].startswith("<")
+
+
+def test_comparison_relevant_headers_stay_visible():
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
+        "User-Agent": "python-requests/2.31.0",
+        "Content-Length": "19",
+    }
+    assert redact_headers(headers, _entry()) == headers
+
+
+class _ExplodingResponse:
+    """Valid until `elapsed`, so it fails deeper in the sink than `object()` does."""
+
+    def __init__(self):
+        self.request = _response().request
+        self.status_code = 200
+        self.content = b"{}"
+        self.headers = {"Content-Type": "application/json"}
+        self.history = []
+
+    @property
+    def elapsed(self):
+        raise RuntimeError("elapsed blew up")
+
+
+def test_capture_logs_a_traceback_instead_of_swallowing_silently(caplog):
+    sink, seen = capture_exchange(_entry())
+    with caplog.at_level(logging.WARNING, logger="api.services.api_exchange"):
+        sink(b"{}", 1, _ExplodingResponse())  # must not raise
+    assert seen == []
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is not None
+
+
+def test_capture_uses_raw_bytes_not_response_content():
+    """`raw_bytes` is the contract; `response.content` merely happens to match."""
+    sink, seen = capture_exchange(_entry())
+    sink(b'{"from":"raw_bytes"}', 1, _response(body=b"UNUSED"))
+    assert seen[0]["response"]["body"] == '{"from":"raw_bytes"}'
+    assert seen[0]["response"]["bytes"] == 20
