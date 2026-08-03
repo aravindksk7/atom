@@ -1336,7 +1336,7 @@ def test_column_stats_compare_api_source_type_end_to_end(client, monkeypatch):
         def __init__(self, entry):
             self._entry = entry
 
-        def fetch_dataframe(self, max_pages=None):
+        def fetch_dataframe(self, max_pages=None, on_response=None):
             if self._entry.name == "orders_a":
                 return pd.DataFrame({"id": [1, 2], "amount": [10, 20]})
             return pd.DataFrame({"id": [1, 2], "amount": [10, 25]})

@@ -14,6 +14,11 @@ from api.schemas import (
     MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
     AdvancedCompareOptions, MultiFileCompareRequest,
 )
+from api.services.api_artifact import (
+    adhoc_artifact_dir,
+    build_api_response_sink,
+    run_artifact_dir,
+)
 from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
 from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
@@ -135,8 +140,8 @@ class CompareService:
         """Execute BO comparison and persist as TestRun/TestResult/MismatchDetail."""
         try:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
-            df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id)
-            df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id)
+            df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id, run_id)
+            df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id, run_id)
             key_columns = req.key_columns
             if not key_columns:
                 try:
@@ -208,7 +213,13 @@ class CompareService:
 
         return SettingsRepository(self._db).get_timezone()
 
-    def _load_bo_source(self, src, fallback_doc_id: str | None, fallback_report_id: str | None):
+    def _load_bo_source(
+        self,
+        src,
+        fallback_doc_id: str | None,
+        fallback_report_id: str | None,
+        run_id: str | None = None,
+    ):
         if src.source_type == "live":
             doc_id = src.doc_id or fallback_doc_id
             report_id = src.report_id or fallback_report_id
@@ -246,14 +257,14 @@ class CompareService:
             finally:
                 client.logout()
         if src.source_type == "api":
-            return self._load_api_source(src)
+            return self._load_api_source(src, run_id)
         return read_tabular(
             path=src.file_path,
             content_b64=src.file_content_b64,
             file_name=src.file_name,
         )
 
-    def _load_api_source(self, src) -> pd.DataFrame:
+    def _load_api_source(self, src, run_id: str | None = None) -> pd.DataFrame:
         cfg = self._config_repo.get(src.config_id)
         if cfg is None:
             raise HTTPException(status_code=404, detail="Config not found")
@@ -263,7 +274,16 @@ class CompareService:
             entry = resolve_api_endpoint(cfg.config_json or {}, src.api_endpoint_name or "")
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return APIEndpointClient(entry).fetch_dataframe()
+        endpoint_name = src.api_endpoint_name or "endpoint"
+        # A run_id of None means "no run behind this pull" (column stats), not
+        # "store nothing" — it selects the ad-hoc directory instead.
+        dest = (
+            run_artifact_dir(run_id) if run_id
+            else adhoc_artifact_dir(src.config_id, endpoint_name)
+        )
+        return APIEndpointClient(entry).fetch_dataframe(
+            on_response=build_api_response_sink(dest, endpoint_name),
+        )
 
     @staticmethod
     def _infer_key_columns(df_a, df_b) -> list[str]:

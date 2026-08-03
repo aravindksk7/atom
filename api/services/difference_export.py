@@ -522,6 +522,9 @@ def _write_sql_compare(db: Session, payload: dict[str, Any], writer: DifferenceW
 def _write_bo_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
     req = BOCompareRequest(**payload)
     svc = CompareService(db, ConfigRepository(db))
+    # No response sink here on purpose: this re-pulls the sources from a stored
+    # payload to build an export, and those bytes were already persisted by the
+    # run that produced the payload. Storing them again is pure duplication.
     df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id)
     df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id)
     _write_tabular_differences(

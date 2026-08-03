@@ -500,3 +500,100 @@ def test_compare_multi_file_endpoint_rejects_remote_kinds_synchronously(client, 
         },
     })
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# API compare sources - response artifacts
+# ---------------------------------------------------------------------------
+
+def _api_config_repo():
+    """A config repo whose single config resolves two API endpoints."""
+    repo = MagicMock()
+    repo.get.return_value = SimpleNamespace(
+        env_name="api-dev",
+        config_json={
+            "api_endpoints": {
+                "orders_a": {"base_url": "https://a.example.com/orders"},
+                "orders_b": {"base_url": "https://b.example.com/orders"},
+            }
+        },
+    )
+    return repo
+
+
+def _api_sentinel_sink(raw_bytes, page_number, response):  # pragma: no cover - never invoked
+    return None
+
+
+def test_api_compare_source_sinks_responses_under_the_run_directory():
+    import pandas as pd
+    from api.schemas import SourceConfig
+    from api.services.compare_service import CompareService
+
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders_a")
+    mock_client = MagicMock()
+    mock_client.fetch_dataframe.return_value = pd.DataFrame({"id": [1]})
+
+    # _load_api_source imports APIEndpointClient locally at call time, so the
+    # module attribute is what gets picked up - not a compare_service name.
+    with patch("etl_framework.rest_api.client.APIEndpointClient", return_value=mock_client), \
+         patch("api.services.compare_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _api_sentinel_sink
+        CompareService(MagicMock(), _api_config_repo())._load_api_source(src, "run-abc")
+
+    assert mock_client.fetch_dataframe.call_args.kwargs["on_response"] is _api_sentinel_sink
+    dest, endpoint_name = mock_build_sink.call_args.args
+    assert dest.name == "run-abc"
+    assert endpoint_name == "orders_a"
+
+
+def test_api_compare_source_without_run_id_sinks_to_adhoc_dir():
+    import pandas as pd
+    from api.schemas import SourceConfig
+    from api.services.compare_service import CompareService
+    from api.services.upload_store import UPLOAD_ROOT
+
+    src = SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders_a")
+    mock_client = MagicMock()
+    mock_client.fetch_dataframe.return_value = pd.DataFrame({"id": [1]})
+
+    with patch("etl_framework.rest_api.client.APIEndpointClient", return_value=mock_client), \
+         patch("api.services.compare_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _api_sentinel_sink
+        CompareService(MagicMock(), _api_config_repo())._load_api_source(src)
+
+    assert mock_client.fetch_dataframe.call_args.kwargs["on_response"] is _api_sentinel_sink
+    dest, endpoint_name = mock_build_sink.call_args.args
+    assert dest.parent == UPLOAD_ROOT
+    assert dest.name.startswith("adhoc_")
+    assert endpoint_name == "orders_a"
+
+
+def test_column_stats_api_sources_reach_the_adhoc_directory():
+    """run_column_stats has no run behind it, so both sides must land in adhoc_*.
+
+    Traced rather than assumed: run_column_stats calls _load_bo_source with no
+    run_id, which must forward None to _load_api_source and select the ad-hoc
+    branch for both sources.
+    """
+    import pandas as pd
+    from api.schemas import ColumnStatsRequest, SourceConfig
+    from api.services.compare_service import CompareService
+
+    req = ColumnStatsRequest(
+        source_a=SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders_a"),
+        source_b=SourceConfig(source_type="api", config_id=1, api_endpoint_name="orders_b"),
+    )
+    mock_client = MagicMock()
+    mock_client.fetch_dataframe.return_value = pd.DataFrame({"id": [1, 2], "amount": [10, 20]})
+
+    with patch("etl_framework.rest_api.client.APIEndpointClient", return_value=mock_client), \
+         patch("api.services.compare_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _api_sentinel_sink
+        CompareService(MagicMock(), _api_config_repo()).run_column_stats(req)
+
+    dests = [call.args[0] for call in mock_build_sink.call_args_list]
+    names = [call.args[1] for call in mock_build_sink.call_args_list]
+    assert len(dests) == 2
+    assert all(dest.name.startswith("adhoc_") for dest in dests)
+    assert names == ["orders_a", "orders_b"]

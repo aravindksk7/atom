@@ -372,7 +372,10 @@ def test_load_bo_source_dispatches_to_api_source():
         result = svc._load_bo_source(src, None, None)
 
     assert result is fake_df
-    MockClient.return_value.fetch_dataframe.assert_called_once_with()
+    # The api source now always carries a response sink; with no run_id behind
+    # this call it writes into an ad-hoc artifact directory.
+    MockClient.return_value.fetch_dataframe.assert_called_once()
+    assert callable(MockClient.return_value.fetch_dataframe.call_args.kwargs["on_response"])
 
 
 def test_load_api_source_404_when_config_missing():
