@@ -132,6 +132,11 @@
           previewResult: null,
           previewError: '',
           testResult: null,
+          // Declared here (not just on the blank-endpoint factory) so Alpine
+          // tracks them on endpoints loaded from a saved config too.
+          exchange: null,
+          exchangePretty: true,
+          exchangeOpen: false,
         })),
       };
       this.configValidation = null;
@@ -268,6 +273,7 @@
         pagination_cursor_param: 'cursor', pagination_page_param: 'page',
         pagination_size_param: 'limit', pagination_page_size: 100, pagination_max_pages: 50,
         expanded: true, previewResult: null, previewError: '', testResult: null,
+        exchange: null, exchangePretty: true, exchangeOpen: false,
       });
     },
 
@@ -287,8 +293,12 @@
         ep.testResult = await api('POST', '/api/adapters/rest-api/test', {
           config_id: m.id, endpoint_name: ep.name,
         });
+        ep.exchange = ep.testResult.exchange || null;
       } catch (e) {
         ep.testResult = { ok: false, message: e.message };
+        // The failing pull is the one worth inspecting, so keep whatever the
+        // server managed to capture before it gave up.
+        ep.exchange = e.detail?.exchange || null;
       }
     },
 
@@ -301,8 +311,22 @@
         ep.previewResult = await api('POST', '/api/adapters/rest-api/preview', {
           config_id: m.id, endpoint_name: ep.name, limit: 20,
         });
+        ep.exchange = ep.previewResult.exchange || null;
       } catch (e) {
         ep.previewError = e.message;
+        ep.exchange = e.detail?.exchange || null;
+      }
+    },
+
+    exchangeBody(raw, pretty) {
+      if (raw === null || raw === undefined) return '<NONE SENT>';
+      if (!pretty) return raw;
+      try {
+        return JSON.stringify(JSON.parse(raw), null, 2);
+      } catch (_) {
+        // A body that will not parse as JSON is exactly the signal being
+        // hunted here, so show it verbatim rather than erroring.
+        return raw;
       }
     },
 
