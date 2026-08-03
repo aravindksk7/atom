@@ -752,6 +752,116 @@
                   <button @click="previewApiEndpoint(idx)" type="button" class="btn-secondary btn-sm text-xs">Preview</button>
                   <span x-show="ep.testResult" :class="ep.testResult && ep.testResult.ok ? 'text-emerald-600' : 'text-red-600'" class="text-xs" x-text="ep.testResult ? ep.testResult.message : ''"></span>
                 </div>
+                <!-- Request/response inspector. An endpoint that works in Bruno and
+                     fails here reports only "Cannot parse API response as json" - no
+                     status, no content type, no body. Showing the request as actually
+                     sent next to the response as actually received turns that into a
+                     diff against Bruno rather than a guess. -->
+                <div x-show="ep.exchange" class="border border-slate-200 rounded">
+                  <button type="button"
+                          @click="ep.exchangeOpen = !ep.exchangeOpen"
+                          :aria-expanded="ep.exchangeOpen ? 'true' : 'false'"
+                          :aria-controls="'api-exchange-panel-' + idx"
+                          :data-testid="'api-exchange-toggle-' + idx"
+                          class="w-full flex items-center gap-2 flex-wrap px-2 py-1.5 text-xs text-left hover:bg-slate-50">
+                    <span class="font-medium text-slate-700">Request / response</span>
+                    <!-- Colour AND the numeric status: the signal is never colour-only. -->
+                    <span :data-testid="'api-exchange-status-' + idx"
+                          class="px-1.5 py-0.5 rounded border font-mono"
+                          :class="(ep.exchange?.response?.status || 0) >= 400 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'"
+                          x-text="'HTTP ' + (ep.exchange?.response?.status ?? '?')"></span>
+                    <span class="text-slate-500" x-text="(ep.exchange?.response?.elapsed_ms ?? 0) + ' ms'"></span>
+                    <span class="text-slate-500" x-text="(ep.exchange?.response?.bytes ?? 0) + ' bytes'"></span>
+                    <span class="text-slate-500 ml-auto" x-text="ep.exchangeOpen ? 'Hide' : 'Show'"></span>
+                  </button>
+                  <div x-show="ep.exchangeOpen"
+                       :id="'api-exchange-panel-' + idx"
+                       :data-testid="'api-exchange-panel-' + idx"
+                       class="border-t border-slate-200 p-2 space-y-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <button type="button"
+                              @click="ep.exchangePretty = !ep.exchangePretty"
+                              :aria-pressed="ep.exchangePretty ? 'true' : 'false'"
+                              :data-testid="'api-exchange-pretty-toggle-' + idx"
+                              :aria-label="ep.exchangePretty ? 'Pretty: bodies are formatted, activate to show them raw' : 'Raw: bodies are unformatted, activate to pretty-print them'"
+                              class="btn-secondary btn-sm text-xs"
+                              x-text="ep.exchangePretty ? 'Pretty' : 'Raw'"></button>
+                    </div>
+                    <!-- Say plainly what the masking does and does not cover. A user
+                         must not read "<n chars, redacted>" as proof that everything
+                         sensitive was caught, and the URL is shown verbatim by design. -->
+                    <p class="text-[11px] text-slate-500">
+                      Masked header values are redacted by name: matching is on the header
+                      name pattern only, so a credential under a name the pattern does not
+                      recognise is shown here in full. The URL is shown exactly as sent,
+                      query string included, so a credential passed as a query parameter is
+                      visible in cleartext.
+                    </p>
+                    <div :data-testid="'api-exchange-request-' + idx" class="border border-slate-200 rounded">
+                      <div class="flex items-center gap-2 flex-wrap px-2 py-1 bg-slate-50 border-b border-slate-200">
+                        <span class="text-[11px] uppercase tracking-wide font-medium text-slate-500">Request</span>
+                        <span x-show="ep.exchange?.request?.truncated" class="text-[11px] text-amber-700">body truncated</span>
+                        <button type="button"
+                                class="btn-secondary btn-sm text-xs ml-auto"
+                                aria-label="Copy the request as sent"
+                                :data-testid="'api-exchange-copy-request-' + idx"
+                                @click="navigator.clipboard.writeText(
+                                  (ep.exchange?.request?.method || '') + ' ' + (ep.exchange?.request?.url || '') + '\n' +
+                                  Object.entries(ep.exchange?.request?.headers || {}).map(([k, v]) => k + ': ' + v).join('\n') + '\n\n' +
+                                  exchangeBody(ep.exchange?.request?.body, ep.exchangePretty)
+                                ).catch(() => {})">Copy</button>
+                      </div>
+                      <div class="p-2 space-y-1">
+                        <div class="exchange-pre-wrap overflow-x-auto">
+                          <pre class="text-xs font-mono text-slate-700" x-text="(ep.exchange?.request?.method || '') + ' ' + (ep.exchange?.request?.url || '')"></pre>
+                        </div>
+                        <div class="exchange-pre-wrap overflow-x-auto">
+                          <pre class="text-xs font-mono text-slate-600" x-text="Object.entries(ep.exchange?.request?.headers || {}).map(([k, v]) => k + ': ' + v).join('\n')"></pre>
+                        </div>
+                        <!-- A request body that was never sent is the dropped-body
+                             signal, so it is called out rather than shown as blank. -->
+                        <p x-show="ep.exchange?.request?.body === null || ep.exchange?.request?.body === undefined"
+                           :data-testid="'api-exchange-request-none-' + idx"
+                           class="text-xs font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">&lt;NONE SENT&gt;</p>
+                        <div x-show="ep.exchange?.request?.body !== null && ep.exchange?.request?.body !== undefined"
+                             class="exchange-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">
+                          <pre class="text-xs font-mono text-slate-700"
+                               :data-testid="'api-exchange-request-body-' + idx"
+                               x-text="exchangeBody(ep.exchange?.request?.body, ep.exchangePretty)"></pre>
+                        </div>
+                      </div>
+                    </div>
+                    <div :data-testid="'api-exchange-response-' + idx" class="border border-slate-200 rounded">
+                      <div class="flex items-center gap-2 flex-wrap px-2 py-1 bg-slate-50 border-b border-slate-200">
+                        <span class="text-[11px] uppercase tracking-wide font-medium text-slate-500">Response</span>
+                        <span class="text-[11px] font-mono text-slate-500" x-text="ep.exchange?.response?.content_type || '(no content type)'"></span>
+                        <span x-show="ep.exchange?.response?.binary" class="text-[11px] text-slate-500">hex preview</span>
+                        <span x-show="ep.exchange?.response?.truncated" class="text-[11px] text-amber-700">body truncated</span>
+                        <span x-show="(ep.exchange?.response?.redirects || 0) > 0" class="text-[11px] text-amber-700"
+                              x-text="(ep.exchange?.response?.redirects || 0) + ' redirect(s) followed'"></span>
+                        <button type="button"
+                                class="btn-secondary btn-sm text-xs ml-auto"
+                                aria-label="Copy the response as received"
+                                :data-testid="'api-exchange-copy-response-' + idx"
+                                @click="navigator.clipboard.writeText(
+                                  'HTTP ' + (ep.exchange?.response?.status ?? '') + '\n' +
+                                  Object.entries(ep.exchange?.response?.headers || {}).map(([k, v]) => k + ': ' + v).join('\n') + '\n\n' +
+                                  exchangeBody(ep.exchange?.response?.body, ep.exchangePretty)
+                                ).catch(() => {})">Copy</button>
+                      </div>
+                      <div class="p-2 space-y-1">
+                        <div class="exchange-pre-wrap overflow-x-auto">
+                          <pre class="text-xs font-mono text-slate-600" x-text="Object.entries(ep.exchange?.response?.headers || {}).map(([k, v]) => k + ': ' + v).join('\n')"></pre>
+                        </div>
+                        <div class="exchange-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">
+                          <pre class="text-xs font-mono text-slate-700"
+                               :data-testid="'api-exchange-response-body-' + idx"
+                               x-text="exchangeBody(ep.exchange?.response?.body, ep.exchangePretty)"></pre>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <p x-show="ep.previewError" x-text="ep.previewError" class="text-xs text-red-600"></p>
                 <div x-show="ep.previewResult" class="overflow-x-auto max-h-40 border border-slate-200 rounded">
                   <table class="text-xs w-full" aria-label="config table 2">
