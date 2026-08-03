@@ -104,3 +104,43 @@ def test_build_case_api_reconciliation_not_used_without_live_connections():
     # The live-endpoint path is never taken, so the client is never constructed
     MockClient.assert_not_called()
     assert isinstance(result, ReconciliationResult)
+
+
+def _sink_a(raw_bytes, page_number, response):  # pragma: no cover - never invoked
+    return None
+
+
+def _sink_b(raw_bytes, page_number, response):  # pragma: no cover - never invoked
+    return None
+
+
+def test_build_case_api_reconciliation_sinks_both_sides_to_the_run_dir():
+    """Both endpoints' responses land in the one run directory, named apart."""
+    from api.services.api_artifact import run_artifact_dir
+
+    snapshot = {
+        "api_endpoints": {
+            "orders_a": {"base_url": "https://a.example.com/orders"},
+            "orders_b": {"base_url": "https://b.example.com/orders"},
+        }
+    }
+    ex = _executor(snapshot)
+    job = _job()
+    df = pd.DataFrame({"id": [1, 2], "amount": [10, 20]})
+
+    # run_executor imports both names inside run_job, so the defining module is
+    # what the local import resolves against.
+    with patch("etl_framework.rest_api.client.APIEndpointClient") as MockClient, \
+         patch("api.services.api_artifact.build_api_response_sink") as mock_build_sink:
+        MockClient.return_value.fetch_dataframe.side_effect = [df.copy(), df.copy()]
+        mock_build_sink.side_effect = [_sink_a, _sink_b]
+        ex._build_case(job)()
+
+    fetch_calls = MockClient.return_value.fetch_dataframe.call_args_list
+    assert len(fetch_calls) == 2
+    assert [call.kwargs["on_response"] for call in fetch_calls] == [_sink_a, _sink_b]
+
+    dests = [call.args[0] for call in mock_build_sink.call_args_list]
+    names = [call.args[1] for call in mock_build_sink.call_args_list]
+    assert dests[0] == dests[1] == run_artifact_dir("run-api-1")
+    assert names == ["orders_a", "orders_b"]

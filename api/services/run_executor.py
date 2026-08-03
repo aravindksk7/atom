@@ -1800,8 +1800,17 @@ class RunExecutor:
             src_entry = resolve_api_endpoint(endpoints_snapshot, job.params["source_api_endpoint"])
             tgt_entry = resolve_api_endpoint(endpoints_snapshot, job.params["target_api_endpoint"])
 
-            df_a = APIEndpointClient(src_entry).fetch_dataframe()
-            df_b = APIEndpointClient(tgt_entry).fetch_dataframe()
+            from api.services.api_artifact import build_api_response_sink, run_artifact_dir
+
+            run_dir = run_artifact_dir(self._run_id)
+            src_name = job.params["source_api_endpoint"]
+            tgt_name = job.params["target_api_endpoint"]
+            df_a = APIEndpointClient(src_entry).fetch_dataframe(
+                on_response=build_api_response_sink(run_dir, src_name),
+            )
+            df_b = APIEndpointClient(tgt_entry).fetch_dataframe(
+                on_response=build_api_response_sink(run_dir, tgt_name),
+            )
 
             reconciler = ReconciliationEngine(
                 source_engine=FrameEngine(df_a, self._source_env),
