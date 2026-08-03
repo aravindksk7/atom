@@ -291,3 +291,27 @@ def test_sink_swallows_directory_errors(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "mkdir", boom)
     sink(b"{}", 1, _resp())  # must not raise
+
+
+import os
+import time
+
+from api.services.upload_store import cleanup_expired_uploads
+
+
+def test_adhoc_directory_is_swept_by_existing_retention(tmp_path):
+    adhoc = tmp_path / "adhoc_3_orders_20260803T211408Z"
+    adhoc.mkdir()
+    (adhoc / "orders_p1.json").write_bytes(b"{}")
+    old = time.time() - (40 * 86400)
+    os.utime(adhoc, (old, old))
+    removed = cleanup_expired_uploads(30, root=tmp_path)
+    assert removed == 1
+    assert not adhoc.exists()
+
+
+def test_recent_adhoc_directory_survives_retention(tmp_path):
+    adhoc = tmp_path / "adhoc_3_orders_20260803T211408Z"
+    adhoc.mkdir()
+    assert cleanup_expired_uploads(30, root=tmp_path) == 0
+    assert adhoc.exists()
