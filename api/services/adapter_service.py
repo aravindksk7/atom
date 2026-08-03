@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut
+from api.services.api_artifact import adhoc_artifact_dir, build_api_response_sink
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
@@ -109,7 +110,12 @@ class AdapterService:
         t0 = time.monotonic()
         try:
             entry = self._get_api_endpoint(config_id, endpoint_name)
-            APIEndpointClient(entry).fetch_dataframe(max_pages=1)
+            APIEndpointClient(entry).fetch_dataframe(
+                max_pages=1,
+                on_response=build_api_response_sink(
+                    adhoc_artifact_dir(config_id, endpoint_name), endpoint_name
+                ),
+            )
             latency_ms = int((time.monotonic() - t0) * 1000)
             return AdapterTestOut(ok=True, message="Connection successful", latency_ms=latency_ms)
         except HTTPException:
@@ -126,7 +132,12 @@ class AdapterService:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
-            df = APIEndpointClient(entry).fetch_dataframe(max_pages=1)
+            df = APIEndpointClient(entry).fetch_dataframe(
+                max_pages=1,
+                on_response=build_api_response_sink(
+                    adhoc_artifact_dir(config_id, endpoint_name), endpoint_name
+                ),
+            )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
         df = df.head(max(1, min(200, limit)))

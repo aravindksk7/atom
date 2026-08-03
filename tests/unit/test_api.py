@@ -1237,7 +1237,7 @@ def test_rest_api_test_endpoint_success(client, monkeypatch):
         def __init__(self, entry):
             pass
 
-        def fetch_dataframe(self, max_pages=None):
+        def fetch_dataframe(self, max_pages=None, on_response=None):
             return pd.DataFrame({"id": [1, 2]})
 
     monkeypatch.setattr(adapter_service, "APIEndpointClient", _FakeClient)
@@ -1282,7 +1282,7 @@ def test_rest_api_preview_endpoint_returns_sample_rows(client, monkeypatch):
         def __init__(self, entry):
             pass
 
-        def fetch_dataframe(self, max_pages=None):
+        def fetch_dataframe(self, max_pages=None, on_response=None):
             return pd.DataFrame({"id": [1, 2, 3], "amount": [10, 20, 30]})
 
     monkeypatch.setattr(adapter_service, "APIEndpointClient", _FakeClient)

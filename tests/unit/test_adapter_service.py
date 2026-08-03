@@ -278,3 +278,66 @@ def test_lookup_automic_job_by_run_id(service):
         result = service.lookup_automic_job(1, "run-123", "run_id")
     assert result.status == "FAILED"
     MockClient.return_value.get_status_by_run_id.assert_called_once_with("run-123")
+
+
+# ---------------------------------------------------------------------------
+# REST API endpoints - response artifacts
+# ---------------------------------------------------------------------------
+
+def _api_saved_config():
+    """A saved config carrying one resolvable api_endpoints entry."""
+    cfg = _make_saved_config()
+    cfg.config_json = {
+        **cfg.config_json,
+        "api_endpoints": {"orders": {"base_url": "https://api.example.com/orders"}},
+    }
+    return cfg
+
+
+def _sentinel_sink(raw_bytes, page_number, response):  # pragma: no cover - never invoked
+    return None
+
+
+def _assert_adhoc_dest(dest):
+    """The sink must write into a direct child of UPLOAD_ROOT named adhoc_*."""
+    from api.services.upload_store import UPLOAD_ROOT
+
+    assert dest.parent == UPLOAD_ROOT
+    assert dest.name.startswith("adhoc_")
+
+
+def test_test_api_endpoint_sinks_responses_to_adhoc_dir(service, mock_config_repo):
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        mock_build_sink.return_value = _sentinel_sink
+        result = service.test_api_endpoint(config_id=7, endpoint_name="orders")
+
+    assert result.ok is True
+    kwargs = MockClient.return_value.fetch_dataframe.call_args.kwargs
+    assert kwargs["max_pages"] == 1
+    assert kwargs["on_response"] is _sentinel_sink
+    dest, endpoint_name = mock_build_sink.call_args.args
+    assert endpoint_name == "orders"
+    _assert_adhoc_dest(dest)
+
+
+def test_preview_api_endpoint_sinks_responses_to_adhoc_dir(service, mock_config_repo):
+    import pandas as pd
+
+    mock_config_repo.get.return_value = _api_saved_config()
+
+    with patch("api.services.adapter_service.APIEndpointClient") as MockClient, \
+         patch("api.services.adapter_service.build_api_response_sink") as mock_build_sink:
+        MockClient.return_value.fetch_dataframe.return_value = pd.DataFrame({"id": [1, 2]})
+        mock_build_sink.return_value = _sentinel_sink
+        out = service.preview_api_endpoint(config_id=7, endpoint_name="orders", limit=10)
+
+    assert out["columns"] == ["id"]
+    kwargs = MockClient.return_value.fetch_dataframe.call_args.kwargs
+    assert kwargs["max_pages"] == 1
+    assert kwargs["on_response"] is _sentinel_sink
+    dest, endpoint_name = mock_build_sink.call_args.args
+    assert endpoint_name == "orders"
+    _assert_adhoc_dest(dest)
