@@ -2,8 +2,8 @@
 
 The HTTP client itself stays filesystem-agnostic: `etl_framework/` must not
 import `api/services/`. This module derives the artifact filename for a
-response today; a later task adds the callback the client invokes to
-actually write it, where layout, size caps and retention live.
+response and provides `build_api_response_sink`, the callback the client
+invokes to actually write it. Layout, size caps and retention all live here.
 """
 from __future__ import annotations
 

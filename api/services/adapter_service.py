@@ -142,7 +142,12 @@ class AdapterService:
         except HTTPException:
             raise
         except ValueError as exc:
-            return AdapterTestOut(ok=False, message=str(exc), latency_ms=0)
+            return AdapterTestOut(
+                ok=False,
+                message=str(exc),
+                latency_ms=0,
+                exchange=seen[0] if seen else None,
+            )
         except Exception as exc:
             return AdapterTestOut(
                 ok=False,

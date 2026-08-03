@@ -128,10 +128,10 @@ def test_build_case_api_reconciliation_sinks_both_sides_to_the_run_dir():
     job = _job()
     df = pd.DataFrame({"id": [1, 2], "amount": [10, 20]})
 
-    # run_executor imports both names inside run_job, so the defining module is
-    # what the local import resolves against.
+    # run_executor imports both names at module level, so patch its own binding
+    # rather than the defining module's.
     with patch("etl_framework.rest_api.client.APIEndpointClient") as MockClient, \
-         patch("api.services.api_artifact.build_api_response_sink") as mock_build_sink:
+         patch("api.services.run_executor.build_api_response_sink") as mock_build_sink:
         MockClient.return_value.fetch_dataframe.side_effect = [df.copy(), df.copy()]
         mock_build_sink.side_effect = [_sink_a, _sink_b]
         ex._build_case(job)()

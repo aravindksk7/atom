@@ -52,11 +52,6 @@ def safe_filename(name: str | None, fallback: str) -> str:
     return safe[:160]
 
 
-# Precautionary alias in case something outside this module still imports
-# the old private name; no current caller depends on it.
-_safe_filename = safe_filename
-
-
 def unique_path(directory: Path, name: str) -> Path:
     """A path under `directory` that does not exist yet, suffixing _2, _3, ...
 

@@ -27,17 +27,18 @@ _ALWAYS_SECRET = {"authorization", "cookie", "set-cookie", "x-sap-logontoken"}
 # Content-Length — contain none of these substrings and stay visible.
 #
 # RESIDUAL RISK — name-pattern matching cannot be exhaustive. A user who parks a
-# credential in an arbitrarily-named header will have it displayed. These header
-# names were measured against this list and slip through in cleartext:
+# credential in an arbitrarily-named header will have it displayed. Twenty
+# plausible names were run back through `redact_headers` against the widened
+# list below; these nine still slip through in cleartext:
 #
-#   X-Client-Id, X-Signed-Blob, X-Bearer, X-Hmac, X-Nonce, X-Access, X-Jwt,
-#   X-Api-Sig, X-Csrf, X-Otp, X-Pin, X-Salt, X-Refresh, X-Sso,
-#   X-Saml-Assertion, X-Private-Cert, X-Client-Certificate, X-Bearer-Assertion,
-#   X-Tenant-Pw, X-License
+#   X-Client-Id, X-Access, X-Csrf, X-Pin, X-Salt, X-Refresh, X-Sso,
+#   X-Saml-Assertion, X-License
 #
-# (Several of those are now covered by the patterns below; the list is recorded
-# as measured, and the general point stands regardless of how far the list is
-# extended — this is mitigation, not a guarantee.)
+# The other eleven are caught (X-Signed-Blob, X-Bearer, X-Hmac, X-Nonce, X-Jwt,
+# X-Api-Sig, X-Otp, X-Private-Cert, X-Client-Certificate, X-Bearer-Assertion,
+# X-Tenant-Pw). Re-measure this list whenever the patterns change — and note
+# that the general point stands regardless of how far the list is extended:
+# this is mitigation, not a guarantee.
 _SECRET_NAME_PATTERNS = (
     "secret", "token", "key", "auth", "password", "passwd",
     "credential", "signature", "session", "cookie",

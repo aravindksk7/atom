@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
+from api.services.api_artifact import build_api_response_sink, run_artifact_dir
 from api.services.aws_athena_service import AthenaQueryFailedError, AwsAthenaService
 from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
@@ -1799,8 +1800,6 @@ class RunExecutor:
             }
             src_entry = resolve_api_endpoint(endpoints_snapshot, job.params["source_api_endpoint"])
             tgt_entry = resolve_api_endpoint(endpoints_snapshot, job.params["target_api_endpoint"])
-
-            from api.services.api_artifact import build_api_response_sink, run_artifact_dir
 
             run_dir = run_artifact_dir(self._run_id)
             src_name = job.params["source_api_endpoint"]
