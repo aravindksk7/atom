@@ -121,3 +121,48 @@ def test_content_disposition_absolute_windows_path_is_neutralised():
 
 def test_endpoint_name_with_separators_is_neutralised():
     assert artifact_filename(_resp(), "../../orders", 1) == "orders_p1.json"
+
+
+# RFC 6266 section 4.3 precedence: filename* (RFC 5987, percent-encoded, with
+# an explicit charset) wins over the plain filename when present and
+# decodable; a malformed filename* must fall back to plain rather than raise.
+from api.services.api_artifact import _disposition_filename
+
+
+def test_disposition_unquoted_filename_without_quotes():
+    resp = _resp(disposition="attachment; filename=report.csv")
+    assert _disposition_filename(resp) == "report.csv"
+
+
+def test_disposition_quoted_filename_keeps_embedded_semicolon():
+    resp = _resp(disposition='attachment; filename="a;b.csv"')
+    assert _disposition_filename(resp) == "a;b.csv"
+
+
+def test_disposition_extended_value_is_percent_decoded_then_sanitised():
+    resp = _resp(disposition="attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf")
+    assert _disposition_filename(resp) == "résumé.pdf"
+    assert artifact_filename(resp, "orders", 1) == safe_filename("résumé.pdf", "page_p1.bin")
+    assert artifact_filename(resp, "orders", 1) == "r_sum_.pdf"
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        'attachment; filename="plain.csv"; filename*=UTF-8\'\'fancy%20name.csv',
+        'attachment; filename*=UTF-8\'\'fancy%20name.csv; filename="plain.csv"',
+    ],
+)
+def test_disposition_extended_value_wins_regardless_of_header_order(disposition):
+    resp = _resp(disposition=disposition)
+    assert _disposition_filename(resp) == "fancy name.csv"
+
+
+def test_disposition_malformed_extended_value_falls_back_to_plain_filename():
+    resp = _resp(disposition="attachment; filename*=BOGUS-CHARSET''%FF%FE; filename=\"plain.csv\"")
+    assert _disposition_filename(resp) == "plain.csv"
+
+
+def test_disposition_inline_has_no_filename():
+    resp = _resp(disposition="inline")
+    assert _disposition_filename(resp) is None
