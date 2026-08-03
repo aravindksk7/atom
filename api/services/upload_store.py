@@ -22,24 +22,33 @@ RUN_DATA_ARTIFACT_MAX_BYTES = int(
 ) * 1024 * 1024
 
 
-def _safe_filename(name: str | None, fallback: str) -> str:
+def safe_filename(name: str | None, fallback: str) -> str:
     raw = Path(name or fallback).name or fallback
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
     return (safe or fallback)[:160]
 
 
+# Kept so any external caller of the old private name keeps working.
+_safe_filename = safe_filename
+
+
+def unique_path(directory: Path, name: str) -> Path:
+    """A path under `directory` that does not exist yet, suffixing _2, _3, ..."""
+    path = directory / name
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    idx = 2
+    while path.exists():
+        path = directory / f"{stem}_{idx}{suffix}"
+        idx += 1
+    return path
+
+
 def _persist_bytes(run_id: str, data: bytes, filename: str | None, fallback: str) -> str:
     run_dir = UPLOAD_ROOT / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    name = _safe_filename(filename, fallback)
-    path = run_dir / name
-    if path.exists():
-        stem = path.stem
-        suffix = path.suffix
-        idx = 2
-        while path.exists():
-            path = run_dir / f"{stem}_{idx}{suffix}"
-            idx += 1
+    path = unique_path(run_dir, safe_filename(filename, fallback))
     path.write_bytes(data)
     return str(path)
 
