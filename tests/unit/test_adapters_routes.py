@@ -215,6 +215,39 @@ def test_download_bo_report_default_format_is_xlsx(client, mock_adapter_service)
     assert fmt_value == "xlsx"
 
 
+def test_download_whole_bo_document_names_no_report(client, mock_adapter_service):
+    """SAP's primary step 5 exports the whole document — every tab in one
+    workbook. The report-scoped route can't express it: a path segment always
+    names a tab, and an empty one would export the tab called ""."""
+    mock_adapter_service.download_bo_report.return_value = b"whole doc"
+    resp = client.get("/api/adapters/sap-bo/documents/101/download?config_id=1&format=xlsx")
+    assert resp.status_code == 200
+    assert resp.content == b"whole doc"
+    assert 'filename="report_101.xlsx"' in resp.headers.get("content-disposition", "")
+    args = mock_adapter_service.download_bo_report.call_args.args
+    assert args[:3] == (1, "101", "")
+
+
+def test_download_whole_bo_document_with_parameters(client, mock_adapter_service):
+    """A prompted document has to be answerable on the whole-document route
+    too — otherwise every multi-tab export is stuck on the unprompted GET."""
+    mock_adapter_service.download_bo_report.return_value = b"whole doc"
+    with patch("api.routes.adapters.SettingsRepository") as MockSettings:
+        MockSettings.return_value.get_timezone.return_value = "Etc/GMT-1"
+        resp = client.post(
+            "/api/adapters/sap-bo/documents/124267/download?config_id=1",
+            json={
+                "format": "xlsx",
+                "parameters": [{"id": 0, "type": "DateTime", "value": "2026-06-02"}],
+            },
+        )
+    assert resp.status_code == 200
+    call = mock_adapter_service.download_bo_report.call_args
+    assert call.args[:3] == (1, "124267", "")
+    assert call.kwargs["timezone"] == "Etc/GMT-1"
+    assert call.kwargs["parameters"] == [{"id": 0, "type": "DateTime", "value": "2026-06-02"}]
+
+
 def test_get_document_parameters_route(client, mock_adapter_service):
     mock_adapter_service.get_bo_document_parameters.return_value = [
         BOParamOut(id=0, name="Start Date", type="DateTime", mandatory=True),

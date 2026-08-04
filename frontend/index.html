@@ -3531,6 +3531,28 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <template x-if="boReports[doc.id] && boReports[doc.id].length === 0">
                   <div class="text-muted text-xs px-3 py-1">No reports found</div>
                 </template>
+                <!-- SAP's whole-document export: every tab in one workbook.
+                     Only offered when there is more than one tab, since for a
+                     single-tab document it is the per-tab button already below.
+                     Hidden while a filter is active: "All tabs" ignores the
+                     filter, so next to a filtered list — or next to "No reports
+                     match" — it reads as a claim about what is on screen. -->
+                <template x-if="boReports[doc.id] && boReports[doc.id].length > 1 && !boFilterQuery">
+                  <div class="bo-report-item">
+                    <span class="text-muted text-xs">All tabs</span>
+                    <div class="flex gap-1">
+                      <button @click="downloadBOReport(doc.id, '', 'xlsx')"
+                              :aria-label="`Download every tab of ${doc.name} as XLSX`"
+                              class="btn-secondary btn-sm py-0.5">XLSX</button>
+                      <button @click="downloadBOReport(doc.id, '', 'pdf')"
+                              :aria-label="`Download every tab of ${doc.name} as PDF`"
+                              class="btn-secondary btn-sm py-0.5">PDF</button>
+                      <button @click="openAddBOJobModal(doc, null)"
+                              :aria-label="`Add a job for every tab of ${doc.name}`"
+                              class="btn-primary btn-sm py-0.5">+ Job</button>
+                    </div>
+                  </div>
+                </template>
                 <template x-if="boReports[doc.id] && boReports[doc.id].length > 0 && boFilteredReports(doc).length === 0">
                   <div class="text-muted text-xs px-3 py-1">No reports match "<span x-text="boFilterQuery"></span>"</div>
                 </template>
@@ -4574,6 +4596,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
             <select data-testid="compare-bo-source-a-report-select" x-model="boSourceA.reportId" class="field-input field-select" aria-label="compare bo source a report select">
               <option value="">Select report</option>
+              <option value="*">All tabs (whole document)</option>
               <template x-for="(r, boReportsAIdx) in boReportsA" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsAIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
             <div data-testid="compare-bo-source-a-params" x-show="boSourceA.parameters && boSourceA.parameters.length > 0" class="space-y-2">
@@ -4635,6 +4658,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
             <select data-testid="compare-bo-source-b-report-select" x-model="boSourceB.reportId" class="field-input field-select" aria-label="compare bo source b report select">
               <option value="">Select report</option>
+              <option value="*">All tabs (whole document)</option>
               <template x-for="(r, boReportsBIdx) in boReportsB" :key="r.id ? 'rep-' + r.id : 'rep-idx-' + boReportsBIdx"><option :value="r.id" x-text="r.name"></option></template>
             </select>
             <div data-testid="compare-bo-source-b-params" x-show="boSourceB.parameters && boSourceB.parameters.length > 0" class="space-y-2">
@@ -5597,7 +5621,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
               <input data-testid="compare-colstats-source-a-docid-input" x-model="colStatsSourceA.docId" class="field-input" placeholder="Document ID" aria-label="document id" />
-              <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID" aria-label="report id" />
+              <input data-testid="compare-colstats-source-a-reportid-input" x-model="colStatsSourceA.reportId" class="field-input" placeholder="Report ID (* for all tabs)" aria-label="report id" />
               <button data-testid="compare-colstats-source-a-load-prompts-btn"
                       @click="loadBOSourceParameters(colStatsSourceA)" class="btn-secondary btn-sm text-xs">Load prompts</button>
               <div data-testid="compare-colstats-source-a-params" x-show="colStatsSourceA.parameters && colStatsSourceA.parameters.length > 0" class="space-y-2">
@@ -5651,7 +5675,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
               </select>
               <input data-testid="compare-colstats-source-b-docid-input" x-model="colStatsSourceB.docId" class="field-input" placeholder="Document ID" aria-label="document id" />
-              <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID" aria-label="report id" />
+              <input data-testid="compare-colstats-source-b-reportid-input" x-model="colStatsSourceB.reportId" class="field-input" placeholder="Report ID (* for all tabs)" aria-label="report id" />
               <button data-testid="compare-colstats-source-b-load-prompts-btn"
                       @click="loadBOSourceParameters(colStatsSourceB)" class="btn-secondary btn-sm text-xs">Load prompts</button>
               <div data-testid="compare-colstats-source-b-params" x-show="colStatsSourceB.parameters && colStatsSourceB.parameters.length > 0" class="space-y-2">

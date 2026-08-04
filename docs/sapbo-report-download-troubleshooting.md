@@ -29,6 +29,77 @@ column headers and no data rows. Fixed 2026-08-04 in
 produces. The client now logs a warning whenever the answer PUT comes back
 without it — if you see that warning, the export after it will be blank.
 
+## What the client sends around those two requests
+
+SAP's published Raylight sequence brackets the pair above with two steps this
+client did not have. Both were added 2026-08-04; neither can fail a download:
+
+```
+GET  …/documents/{id}                       <- opens the document (session cache)
+PUT  …/documents/{id}/occurrences/0/parameters
+POST …/documents/{id}/parameters   body {}  <- only if the PUT did not refresh
+GET  …/documents/{id}/occurrences/0?reportIds={r}
+```
+
+- **The open** (`_open_document`) is what SAP documents before any parameter
+  write. The client had been writing straight to occurrence 0, which worked
+  only because occurrence 0 was reachable cold here — the question
+  `probe_occurrence.py` exists to settle. A deployment that refuses the open
+  logs `could not open document … to seed the session cache` and the answer PUT
+  still runs; that PUT's own error is the one that surfaces.
+- **The refresh POST** (`_trigger_parameter_refresh`) is SAP's documented
+  trigger, used here only as an escalation: it fires when the PUT came back
+  without `allDataprovidersRefreshed=true`, i.e. in the state that used to
+  export layout with no rows. It never raises — a download already headed for a
+  blank export is more useful as an inspectable empty workbook than as an
+  opaque error.
+
+One documented step is deliberately unimplemented: the document-level
+`PUT …/documents/{id}/parameters` is the resource this deployment accepts with
+200 and then ignores, so it is never written to.
+
+### Whole-document exports
+
+Naming no report exports every tab in one file — SAP's primary step 5, where
+`…/reports/{id}` is only its single-tab alternative. `reportIds` is *omitted*
+rather than sent empty, which BO would read as the tab called `""`:
+
+| Scope | UI | Route | Occurrence GET | 404 fallback |
+|---|---|---|---|---|
+| One tab | per-report **XLSX**/**PDF** | `…/documents/{id}/reports/{r}/download` | `?reportIds={r}` | `…/documents/{id}/reports/{r}` |
+| Every tab | **All tabs** row, shown when a document has >1 tab and no filter is active | `…/documents/{id}/download` | no `reportIds` | `…/documents/{id}` |
+
+A whole-document workbook is **one sheet per tab**, and
+`pd.read_excel(…)` reads only the first. Anything that turns such an export
+into a frame therefore passes `combine_sheets=True`
+([`read_tabular`](../api/services/file_source.py)), which unions every sheet —
+columns merged, blanks where a tab lacks one. It is opt-in: uploads,
+reconciliation targets and multi-file baselines have always compared sheet 1,
+and changing that silently would change what already-saved jobs compare.
+
+Whole-document is selectable everywhere a single tab is:
+
+| Surface | How to ask for it |
+|---|---|
+| Adapters tab | **All tabs** row → XLSX / PDF / **+ Job** |
+| Compare tab | report select → **All tabs (whole document)** |
+| Column stats | Report ID field → `*` |
+| Jobs (`bo_report`, `bo_live`) | omit `bo_report_id`; `report_id` (the document) stays required |
+
+The UI keeps `*` distinct from an untouched select: a blank report is still
+rejected with "Select a report", so forgetting to choose one can never quietly
+become a whole-document pull.
+
+### The occurrence path is spelled two ways
+
+BO has shipped both `occurrences` (the captured trace, and current docs) and
+the misspelled `occurences`. Both the answer PUT and the export try the
+documented spelling first and retry the other on a 404; the first non-404
+pins the spelling for the rest of that client's life, so the probe costs one
+extra request per process on an affected deployment, not per download. A 404
+from *both* still raises — the retry is for a spelling difference, not for a
+genuinely missing occurrence.
+
 Both entry points share this code, so both are fixed together:
 
 | Entry point | Path |
@@ -168,7 +239,7 @@ Read it as:
 | Observation | Meaning |
 |---|---|
 | shows a recent execution / row count | Data ran and genuinely returned nothing — go back to steps 2–5 |
-| shows no execution | The document never refreshed — check the answer PUT logged `allDataprovidersRefreshed=true` |
+| shows no execution | The document never refreshed — check the answer PUT logged `allDataprovidersRefreshed=true`, and read the refresh POST that followed it |
 
 The occurrence-0 probes that used to run here are gone: the export itself now
 reads occurrence 0, so a missing occurrence raises on the export instead of

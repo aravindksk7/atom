@@ -106,6 +106,73 @@ def test_load_bo_source_does_not_answer_when_no_prompts_given():
     client.answer_document_parameters.assert_not_called()
 
 
+def test_load_bo_source_accepts_a_whole_document_source():
+    """A live source may name a document and no report — SAP's whole-document
+    export. It used to be rejected with 422, which left the Compare tab unable
+    to use a document whose tabs are shards of one dataset."""
+    svc = _svc()
+
+    with patch("etl_framework.sap_bo.client.BORestClient") as MockBO:
+        client = MockBO.return_value
+        client.download_report.return_value = b"id,value\n1,alpha\n"
+        svc._load_bo_source(
+            SourceConfig(source_type="live", config_id=1, doc_id="101",
+                         report_id=None, format="csv"),
+            None, None,
+        )
+
+    doc_id, report_id, _fmt = client.download_report.call_args.args
+    assert (doc_id, report_id) == ("101", "")
+
+
+def test_load_bo_source_unions_every_sheet_of_a_whole_document():
+    """The export is one sheet per tab, and pandas reads only the first by
+    default — so a whole-document compare would silently diff a fraction of
+    what was asked for."""
+    svc = _svc()
+
+    with patch("etl_framework.sap_bo.client.BORestClient") as MockBO, \
+         patch("api.services.compare_service.read_tabular") as mock_read:
+        MockBO.return_value.download_report.return_value = b"xlsx"
+        mock_read.return_value = pd.DataFrame({"id": [1]})
+        svc._load_bo_source(
+            SourceConfig(source_type="live", config_id=1, doc_id="101",
+                         report_id=None, format="xlsx"),
+            None, None,
+        )
+
+    assert mock_read.call_args.kwargs["combine_sheets"] is True
+
+
+def test_load_bo_source_reads_one_sheet_when_a_report_is_named():
+    """A single-tab export is a single sheet. Unioning there would be a no-op
+    at best and would mask an unexpected extra sheet at worst."""
+    svc = _svc()
+
+    with patch("etl_framework.sap_bo.client.BORestClient") as MockBO, \
+         patch("api.services.compare_service.read_tabular") as mock_read:
+        MockBO.return_value.download_report.return_value = b"xlsx"
+        mock_read.return_value = pd.DataFrame({"id": [1]})
+        svc._load_bo_source(_live_source(format="xlsx"), None, None)
+
+    assert mock_read.call_args.kwargs["combine_sheets"] is False
+
+
+def test_load_bo_source_still_requires_a_document():
+    """Dropping the report requirement must not drop the document one: with
+    neither, there is nothing to export."""
+    from fastapi import HTTPException
+    svc = _svc()
+
+    with pytest.raises(HTTPException) as exc:
+        svc._load_bo_source(
+            SourceConfig(source_type="live", config_id=1, doc_id=None,
+                         report_id=None, format="csv"),
+            None, None,
+        )
+    assert exc.value.status_code == 422
+
+
 def test_load_bo_source_logs_out_even_when_answering_fails():
     """A prompt PUT failure must not leak the BO session."""
     svc = _svc()

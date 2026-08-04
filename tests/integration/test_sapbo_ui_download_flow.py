@@ -153,6 +153,28 @@ def test_ui_download_honours_a_different_answered_date(api):
     assert "D400" not in sheet
 
 
+def test_ui_download_of_the_whole_document_covers_every_tab(api):
+    """SAP's primary step 5, end to end: no report named, every tab in one
+    workbook, still answered on occurrence 0. Document 1001 is the multi-tab
+    one — a per-tab export can only ever carry one of these row sets."""
+    client, config_id = api
+
+    download = client.post(
+        f"/api/adapters/sap-bo/documents/1001/download?config_id={config_id}",
+        json={"format": "xlsx", "parameters": [
+            {"id": 0, "type": "DateTime", "value": "2026-06-03"},
+        ]},
+    )
+
+    assert download.status_code == 200
+    assert download.content.startswith(b"PK")
+    assert 'filename="report_1001.xlsx"' in download.headers["content-disposition"]
+
+    sheet = _sheet_text(download.content)
+    assert "A100" in sheet       # rpt-sales
+    assert "orders" in sheet     # rpt-sales-summary
+
+
 def test_ui_download_accepts_the_lowercase_type_the_live_listing_reports(api):
     """The live listing reported document 124313's string prompt as lowercase
     'string' while the answer PUT requires "String". The UI echoes the listing's

@@ -386,7 +386,23 @@ def _read_xml_bytes(raw: bytes) -> pd.DataFrame:
     return _read_xml_bytes_dom(raw)
 
 
-def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:
+def _read_excel_all_sheets(raw: bytes) -> pd.DataFrame:
+    """Every sheet of a workbook as one frame, columns unioned.
+
+    For a SAP BO whole-document export — one sheet per report tab — reading
+    only the first sheet would compare a fraction of what the user asked for
+    and say nothing about it. Sheets that share a schema stack; ones that do
+    not contribute their own columns, blank elsewhere. Opt-in: every other
+    caller has always read sheet 1 and must keep doing so.
+    """
+    sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None)
+    frames = [frame for frame in sheets.values() if not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _read_tabular_bytes(raw: bytes, ext: str, combine_sheets: bool = False) -> pd.DataFrame:
     if ext in (".csv", ".dat"):
         # .dat is a common extension for delimited flat-file spools (e.g. the
         # financials_{YYYYMMDD}.dat baseline exports multi-file reconciliation
@@ -394,6 +410,8 @@ def _read_tabular_bytes(raw: bytes, ext: str) -> pd.DataFrame:
         # comma/tab/semicolon/pipe .dat files all parse.
         return _read_csv_bytes(raw)
     if ext in (".xlsx", ".xls"):
+        if combine_sheets:
+            return _read_excel_all_sheets(raw)
         return pd.read_excel(io.BytesIO(raw))
     if ext == ".json":
         return _read_json_bytes(raw)
@@ -475,18 +493,26 @@ def read_tabular(
     path: str | None = None,
     content_b64: str | None = None,
     file_name: str | None = None,
+    combine_sheets: bool = False,
 ) -> pd.DataFrame:
-    """Read tabular files into a DataFrame from a filesystem path or base64-encoded bytes."""
+    """Read tabular files into a DataFrame from a filesystem path or base64-encoded bytes.
+
+    `combine_sheets` unions every sheet of a workbook instead of reading the
+    first — for SAP BO whole-document exports, which carry one sheet per report
+    tab. Off everywhere else: uploads, reconciliation targets and multi-file
+    baselines have always compared sheet 1, and changing that silently would
+    change what already-saved jobs compare.
+    """
     if path is None and content_b64 is None:
         raise HTTPException(status_code=400, detail="Provide path or content_b64")
 
     if content_b64 is not None:
         raw = base64.b64decode(content_b64)
         name = file_name or ""
-        return _read_tabular_bytes(raw, Path(name).suffix.lower())
+        return _read_tabular_bytes(raw, Path(name).suffix.lower(), combine_sheets)
 
     p = _resolve_allowed_path(path)
     try:
-        return _read_tabular_bytes(p.read_bytes(), p.suffix.lower())
+        return _read_tabular_bytes(p.read_bytes(), p.suffix.lower(), combine_sheets)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")

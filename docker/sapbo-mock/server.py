@@ -209,6 +209,27 @@ def _rows_for_download(doc_id: str, report_id: str) -> list[dict] | None:
     return DATASETS.get((doc_id, report_id))
 
 
+def _rows_for_whole_document(doc_id: str) -> list[dict] | None:
+    """Every tab's rows, concatenated — the mock's stand-in for a multi-sheet
+    workbook. The real server returns one sheet per report; the export helper
+    here writes a single sheet, so tabs are joined rather than separated. That
+    is enough for the only thing a test can assert about a whole-document
+    export: rows from more than one tab are present."""
+    reports = REPORTS.get(doc_id)
+    if not reports:
+        return None
+    rows: list[dict] = []
+    for report in reports:
+        rows.extend(_rows_for_download(doc_id, report["id"]) or [])
+    # Both writers take their columns from rows[0], and _csv_bytes' DictWriter
+    # raises on a later row carrying a key the header lacks. Tabs of a real
+    # document rarely share a schema, so widen every row to the union first —
+    # otherwise the tabs after the first silently export as blank cells, which
+    # is the exact failure shape this whole flow exists to rule out.
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    return [{column: row.get(column, "") for column in columns} for row in rows]
+
+
 def _rows_for_doc(doc_id: str) -> list[dict]:
     reports = REPORTS.get(doc_id, [])
     if not reports:
@@ -393,6 +414,22 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # SAP's documented step before any parameter write: opening the
+        # document initialises it in the Raylight server cache. The client
+        # sends it and tolerates a failure, so this route exists to keep the
+        # tolerated path from becoming the tested one — a mock that 404s here
+        # would make every e2e run log the same "could not open" warning that
+        # has to stay meaningful against a real deployment.
+        document_match = re.fullmatch(r"/biprws/raylight/v1/documents/([^/]+)", path)
+        if document_match:
+            doc_id = document_match.group(1)
+            document = next((d for d in DOCUMENTS if d["id"] == doc_id), None)
+            if document is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"document {doc_id} not found"})
+                return
+            self._send_json(HTTPStatus.OK, {"document": document})
+            return
+
         reports_match = re.fullmatch(r"/biprws/raylight/v1/documents/([^/]+)/reports", path)
         if reports_match:
             doc_id = reports_match.group(1)
@@ -419,6 +456,19 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
         if occurrence_export:
             doc_id = occurrence_export.group(1)
             report_id = (parse_qs(parsed.query).get("reportIds") or [""])[0]
+            if not report_id:
+                # No reportIds at all is SAP's whole-document export: every tab
+                # in one file. Deliberately not the same as reportIds="" — the
+                # client omits the parameter rather than sending it empty, and
+                # a mock that treated the two alike could not catch a
+                # regression back to the empty one.
+                rows = _rows_for_whole_document(doc_id)
+                if rows is None:
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND, {"error": f"document {doc_id} not found"})
+                    return
+                self._send_export(rows)
+                return
             rows = _rows_for_download(doc_id, report_id)
             if rows is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"report {report_id} not found"})

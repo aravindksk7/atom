@@ -522,8 +522,9 @@ class JobDefinition(BaseModel):
             if source_mode == "bo_live":
                 if not self.params.get("report_id"):
                     raise ValueError("bo_live reconciliation jobs require 'report_id' in params")
-                if not self.params.get("bo_report_id"):
-                    raise ValueError("bo_live reconciliation jobs require 'bo_report_id' in params")
+                # 'bo_report_id' names one tab of the document. Omitting it is
+                # SAP's whole-document export — every tab as one table — not an
+                # incomplete job, so it is deliberately not required here.
                 _validate_job_file_source(self.params, "target")
                 if not _has_job_file_source(self.params, "target"):
                     raise ValueError("bo_live reconciliation jobs require a target file")
@@ -731,7 +732,8 @@ class BOJobCreateRequest(BaseModel):
     name: str
     title: str
     doc_id: str
-    report_id: str
+    # One tab of the document, or "" for SAP's whole-document export.
+    report_id: str = ""
     key_columns: list[str]
     format: str = "xlsx"
 

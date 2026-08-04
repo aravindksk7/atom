@@ -102,6 +102,95 @@ test.describe('08a compare / BO report', () => {
     try { await deleteConfig(cleanup, cfgId!); } finally { await cleanup.dispose(); }
   });
 
+  /** A live BO source wired to stubs, so the report select's own behaviour can
+   *  be asserted without a BO server. Returns the config to clean up. */
+  async function stubbedLiveSource(page: import('@playwright/test').Page, adminToken: string) {
+    const ctx = await authedContext(adminToken);
+    let cfgId: number;
+    try {
+      const cfg = await createConfig(ctx, `e2e-bo-alltabs-${Date.now()}`, 'dev', {
+        db_host: 'unused', db_password: 'unused',
+        bo_url: 'http://127.0.0.1:1', bo_user: 'u', bo_password: 'p',
+      });
+      cfgId = cfg.id;
+    } finally {
+      await ctx.dispose();
+    }
+
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    await page.route('**/api/adapters/sap-bo/documents?**', (r) =>
+      r.fulfill(json([{ id: '9001', name: 'Sales Orders', folder: 'Public' }])));
+    await page.route('**/api/adapters/sap-bo/documents/9001/reports**', (r) =>
+      r.fulfill(json([
+        { id: '2', name: 'Orders', reportIndex: 0 },
+        { id: '3', name: 'Summary', reportIndex: 1 },
+      ])));
+    await page.route('**/api/adapters/sap-bo/documents/9001/parameters**', (r) => r.fulfill(json([])));
+    return cfgId!;
+  }
+
+  test('All tabs sends an empty report_id, not the "*" the select holds', async ({ authedPage, adminToken }) => {
+    // '*' is a UI sentinel: the API expresses "whole document" as an empty
+    // report_id, and leaking the sentinel through would name a tab called '*'.
+    const cfgId = await stubbedLiveSource(authedPage, adminToken);
+
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    let posted: any = null;
+    await authedPage.route('**/api/compare/bo-report', (r) => {
+      posted = JSON.parse(r.request().postData() || '{}');
+      return r.fulfill(json({ run_id: 'stub-run', status: 'PENDING' }));
+    });
+    await authedPage.route('**/api/runs/stub-run/status', (r) =>
+      r.fulfill(json({ run_id: 'stub-run', status: 'PASSED', total_tests: 0 })));
+
+    await openBO(authedPage);
+    await authedPage.locator('[data-testid="compare-bo-source-a-mode-live"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-a-config-select"]').selectOption(String(cfgId));
+    await authedPage.locator('[data-testid="compare-bo-source-a-doc-select"]').selectOption('9001');
+    await authedPage.locator('[data-testid="compare-bo-source-a-report-select"]').selectOption('*');
+
+    await authedPage.locator('[data-testid="compare-bo-source-b-mode-upload"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-b-upload-input"]').setInputFiles(dataFile('target.csv'));
+    await authedPage.locator('[data-testid="compare-bo-key-columns-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-bo-run-btn"]').click();
+
+    await expect.poll(() => posted !== null).toBe(true);
+    expect(posted.source_a.report_id).toBe('');
+
+    const cleanup = await authedContext(adminToken);
+    try { await deleteConfig(cleanup, cfgId); } finally { await cleanup.dispose(); }
+  });
+
+  test('an untouched report select is rejected rather than pulling the whole document', async ({ authedPage, adminToken }) => {
+    // Allowing a missing report to mean "whole document" server-side made
+    // forgetting to pick one silently export every tab. The blank select has to
+    // stay an error the user is told about.
+    const cfgId = await stubbedLiveSource(authedPage, adminToken);
+
+    let posted = false;
+    await authedPage.route('**/api/compare/bo-report', (r) => {
+      posted = true;
+      return r.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await openBO(authedPage);
+    await authedPage.locator('[data-testid="compare-bo-source-a-mode-live"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-a-config-select"]').selectOption(String(cfgId));
+    await authedPage.locator('[data-testid="compare-bo-source-a-doc-select"]').selectOption('9001');
+    // Report select deliberately left alone.
+
+    await authedPage.locator('[data-testid="compare-bo-source-b-mode-upload"]').click();
+    await authedPage.locator('[data-testid="compare-bo-source-b-upload-input"]').setInputFiles(dataFile('target.csv'));
+    await authedPage.locator('[data-testid="compare-bo-key-columns-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-bo-run-btn"]').click();
+
+    await expect(authedPage.getByText('Select a report')).toBeVisible();
+    expect(posted).toBe(false);
+
+    const cleanup = await authedContext(adminToken);
+    try { await deleteConfig(cleanup, cfgId); } finally { await cleanup.dispose(); }
+  });
+
   test.describe('live BO mock', () => {
     test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1');
     let boConfigId: number;
