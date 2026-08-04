@@ -177,6 +177,9 @@ class BORestClient:
         self._timeout = env_config.bo_timeout
         self._token = None
         self._owns_token = False
+        # The occurrence path spelling this server was proved to use, or None
+        # while both candidates are still open. See _occurrence_urls.
+        self._occurrence_segment: str | None = None
         self._session = requests.Session()
         self._verify_ssl = env_config.bo_verify_ssl
         self._server_utc_offset_hours = env_config.bo_server_utc_offset_hours
@@ -760,6 +763,114 @@ class BORestClient:
             })
         return result
 
+    # BO has shipped the occurrence path segment both ways: the 2026-08-04
+    # trace and current docs say "occurrences", some releases say "occurences".
+    # Ordered by what this deployment was observed to use.
+    _OCCURRENCE_SEGMENTS = ("occurrences", "occurences")
+
+    def _occurrence_urls(self, doc_id: str, suffix: str = ""):
+        """Yield the occurrence-0 URLs to try, best candidate first.
+
+        Once a spelling has answered anything other than a 404 it is the only
+        one yielded: a deployment does not change spelling between requests,
+        and probing again would double the write traffic of every prompted
+        download on exactly the deployments that need the retry.
+        """
+        segments = (
+            (self._occurrence_segment,) if self._occurrence_segment
+            else self._OCCURRENCE_SEGMENTS
+        )
+        for segment in segments:
+            yield (
+                f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+                f"/{segment}/0{suffix}"
+            )
+
+    def _remember_occurrence_url(self, url: str) -> None:
+        """Pin the spelling that a non-404 response proved this server uses."""
+        for segment in self._OCCURRENCE_SEGMENTS:
+            if f"/{segment}/0" in url:
+                self._occurrence_segment = segment
+                return
+
+    def _open_document(self, doc_id: str) -> None:
+        """GET …/documents/{doc_id} — SAP's documented step before any
+        parameter write: it initialises the document inside the Raylight
+        server cache.
+
+        Never raises. The client wrote straight to occurrence 0 for as long as
+        that happened to be reachable cold on this deployment, which left
+        "does the occurrence need the document opened first?" unanswered (it is
+        the question `probe_occurrence.py` exists to settle). One idempotent
+        GET removes the question without making a deployment that refuses the
+        open fail a download it would otherwise complete — the answer PUT that
+        follows raises on its own if the open genuinely mattered.
+        """
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+        try:
+            response = self._session.get(
+                url,
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SAP BO could not open document %s to seed the session cache "
+                "(%s); answering its parameters anyway.", doc_id, exc,
+            )
+            return
+        if response.status_code >= 400:
+            logger.warning(
+                "SAP BO could not open document %s to seed the session cache "
+                "(HTTP %s: %s); answering its parameters anyway.",
+                doc_id, response.status_code, str(response.text or "")[:300],
+            )
+
+    def _trigger_parameter_refresh(self, doc_id: str) -> None:
+        """POST …/documents/{doc_id}/parameters with an empty body — SAP's
+        documented refresh trigger, used here only as an escalation.
+
+        Reached when the occurrence PUT came back without
+        `allDataprovidersRefreshed=true`, i.e. in exactly the state that used
+        to produce a workbook of layout with no data rows. Never raises: this
+        is a recovery attempt for a download already headed for a blank
+        export, and failing it would replace an inspectable empty workbook —
+        which the export's own diagnostics can explain — with an opaque error.
+        """
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
+        logger.warning(
+            "SAP BO document %s: triggering the documented refresh POST %s "
+            "because the answer PUT did not report a refresh.", doc_id, url,
+        )
+        try:
+            response = self._session.post(
+                url,
+                json={},
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SAP BO refresh POST for document %s failed: %s — the export "
+                "is still likely to come back with no data rows.", doc_id, exc,
+            )
+            return
+        if response.status_code >= 400:
+            logger.warning(
+                "SAP BO refresh POST for document %s -> HTTP %s: %s — the "
+                "export is still likely to come back with no data rows.",
+                doc_id, response.status_code, str(response.text or "")[:500],
+            )
+            return
+        refreshed = _dataproviders_refreshed_flag(response)
+        logger.info(
+            "SAP BO refresh POST for document %s -> HTTP %s (refreshed=%r): %s",
+            doc_id, response.status_code, refreshed,
+            str(response.text or "")[:1000],
+        )
+
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
         """PUT …/documents/{doc_id}/occurrences/0/parameters — answer a
         document's prompts and refresh its data providers.
@@ -792,10 +903,7 @@ class BORestClient:
         """
         if not self._token:
             self.authenticate()
-        url = (
-            f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
-            f"/occurrences/0/parameters"
-        )
+        self._open_document(doc_id)
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
@@ -817,14 +925,18 @@ class BORestClient:
                 "the export may come back with no rows.",
                 doc_id, blank,
             )
-        response = self._session.put(
-            url,
-            params={"dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false"},
-            json=body,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=self._timeout,
-            verify=self._verify_ssl,
-        )
+        for url in self._occurrence_urls(doc_id, "/parameters"):
+            response = self._session.put(
+                url,
+                params={"dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false"},
+                json=body,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            if response.status_code != 404:
+                self._remember_occurrence_url(url)
+                break
         if response.status_code >= 400:
             logger.error(
                 "SAP BO rejected the prompt answer PUT %s -> HTTP %s: %s",
@@ -854,6 +966,7 @@ class BORestClient:
                 "data rows.",
                 doc_id, refreshed,
             )
+            self._trigger_parameter_refresh(doc_id)
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
@@ -861,7 +974,7 @@ class BORestClient:
         "csv":  "text/csv",
     }
 
-    def download_report(self, doc_id: str, report_id: str, format: str = "pdf") -> bytes:
+    def download_report(self, doc_id: str, report_id: str = "", format: str = "pdf") -> bytes:
         """GET …/documents/{doc_id}/occurrences/0 — export as PDF/XLSX/CSV via
         the Accept header, with the report tab chosen by `reportIds`.
 
@@ -873,6 +986,10 @@ class BORestClient:
         report layout and **zero data rows**, because that resource does not
         see the refresh.
 
+        An empty `report_id` exports the **whole document** — every tab in one
+        file, SAP's primary step 5 — by omitting `reportIds` entirely rather
+        than sending it empty, which BO would read as the tab named "".
+
         `dpi`/`optimized` are the UI's own rendering options; `c` is its cache
         buster, kept because this deployment sits behind a proxy already caught
         re-serving cached GETs (it defeats `page` and `Range:` on the document
@@ -881,19 +998,24 @@ class BORestClient:
         if not self._token:
             self.authenticate()
         accept = self._MIME_MAP.get(format, "application/pdf")
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/occurrences/0"
-        response = self._session.get(
-            url,
-            params={
-                "dpi": "96",
-                "optimized": "true",
-                "reportIds": report_id,
-                "c": str(int(time.time() * 1000)),
-            },
-            headers={"Accept": accept},
-            timeout=self._timeout,
-            verify=self._verify_ssl,
-        )
+        params = {
+            "dpi": "96",
+            "optimized": "true",
+            "c": str(int(time.time() * 1000)),
+        }
+        if report_id:
+            params["reportIds"] = report_id
+        for url in self._occurrence_urls(doc_id):
+            response = self._session.get(
+                url,
+                params=params,
+                headers={"Accept": accept},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+            if response.status_code != 404:
+                self._remember_occurrence_url(url)
+                break
         if response.status_code == 404:
             # A document with no prompts is downloaded with no preceding answer
             # PUT, so nothing guarantees it has an occurrence 0 — that resource
@@ -901,13 +1023,21 @@ class BORestClient:
             # downloads working via the resource that served them until
             # 2026-08-04, but say so loudly: on a prompted document this is the
             # path that exported layout with no data rows.
+            #
+            # Which resource depends on what was asked for: SAP's whole-document
+            # export is the document itself, its single-tab alternative is
+            # …/reports/{id}. Falling back to a report resource for a request
+            # that named no report would export the tab called "".
             logger.warning(
                 "SAP BO occurrence 0 unavailable for document %s (HTTP 404: %s); "
-                "falling back to the report resource. If this document has "
+                "falling back to the %s resource. If this document has "
                 "prompts, expect an export with no data rows.",
                 doc_id, str(response.text or "")[:300],
+                "report" if report_id else "document",
             )
-            url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports/{report_id}"
+            url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+            if report_id:
+                url = f"{url}/reports/{report_id}"
             response = self._session.get(
                 url,
                 headers={"Accept": accept},

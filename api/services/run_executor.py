@@ -599,10 +599,18 @@ class RunExecutor:
                 data = client.download_report(doc_id, report_id, fmt)
             finally:
                 client.logout()
-            artifact_name = f"bo_report_{doc_id}_{report_id}.{fmt}"
+            artifact_name = (
+                f"bo_report_{doc_id}_{report_id}.{fmt}" if report_id
+                else f"bo_report_{doc_id}.{fmt}"
+            )
+            # No tab named means a whole-document export: one sheet per tab, of
+            # which pandas reads only the first unless told otherwise. Reading
+            # one sheet here would reconcile a fraction of the document against
+            # the whole target file and report the rest as missing.
             source_df = read_tabular(
                 content_b64=base64.b64encode(data).decode("ascii"),
                 file_name=artifact_name,
+                combine_sheets=not report_id,
             )
             # Keep the live pull so this run can later serve as a source in the
             # Compare tab. "The run's data" here is its source side — the rows it
@@ -1619,10 +1627,16 @@ class RunExecutor:
             finally:
                 client.logout()
 
-            artifact_name = f"bo_report_{doc_id}_{report_id}.{fmt}"
+            artifact_name = (
+                f"bo_report_{doc_id}_{report_id}.{fmt}" if report_id
+                else f"bo_report_{doc_id}.{fmt}"
+            )
+            # See the bo_live builder: a whole-document export is one sheet per
+            # tab, and reading only the first would undercount the document.
             df = read_tabular(
                 content_b64=base64.b64encode(data).decode("ascii"),
                 file_name=artifact_name,
+                combine_sheets=not report_id,
             )
             row_count = len(df)
             artifact_path = self._persist_run_data_artifact(data, artifact_name)

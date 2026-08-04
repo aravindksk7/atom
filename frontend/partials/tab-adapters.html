@@ -107,6 +107,28 @@
                 <template x-if="boReports[doc.id] && boReports[doc.id].length === 0">
                   <div class="text-muted text-xs px-3 py-1">No reports found</div>
                 </template>
+                <!-- SAP's whole-document export: every tab in one workbook.
+                     Only offered when there is more than one tab, since for a
+                     single-tab document it is the per-tab button already below.
+                     Hidden while a filter is active: "All tabs" ignores the
+                     filter, so next to a filtered list — or next to "No reports
+                     match" — it reads as a claim about what is on screen. -->
+                <template x-if="boReports[doc.id] && boReports[doc.id].length > 1 && !boFilterQuery">
+                  <div class="bo-report-item">
+                    <span class="text-muted text-xs">All tabs</span>
+                    <div class="flex gap-1">
+                      <button @click="downloadBOReport(doc.id, '', 'xlsx')"
+                              :aria-label="`Download every tab of ${doc.name} as XLSX`"
+                              class="btn-secondary btn-sm py-0.5">XLSX</button>
+                      <button @click="downloadBOReport(doc.id, '', 'pdf')"
+                              :aria-label="`Download every tab of ${doc.name} as PDF`"
+                              class="btn-secondary btn-sm py-0.5">PDF</button>
+                      <button @click="openAddBOJobModal(doc, null)"
+                              :aria-label="`Add a job for every tab of ${doc.name}`"
+                              class="btn-primary btn-sm py-0.5">+ Job</button>
+                    </div>
+                  </div>
+                </template>
                 <template x-if="boReports[doc.id] && boReports[doc.id].length > 0 && boFilteredReports(doc).length === 0">
                   <div class="text-muted text-xs px-3 py-1">No reports match "<span x-text="boFilterQuery"></span>"</div>
                 </template>

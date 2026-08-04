@@ -224,11 +224,14 @@ class CompareService:
     ):
         if src.source_type == "live":
             doc_id = src.doc_id or fallback_doc_id
-            report_id = src.report_id or fallback_report_id
-            if not doc_id or not report_id:
+            # No report named is SAP's whole-document export — every tab in one
+            # workbook — not a missing field. The document is still required:
+            # without it there is nothing to export.
+            report_id = src.report_id or fallback_report_id or ""
+            if not doc_id:
                 raise HTTPException(
                     status_code=422,
-                    detail="doc_id and report_id are required for live BO sources",
+                    detail="doc_id is required for live BO sources",
                 )
             cfg = self._config_repo.get(src.config_id)
             if cfg is None:
@@ -252,9 +255,16 @@ class CompareService:
                         ),
                     )
                 raw = client.download_report(doc_id, report_id, src.format)
+                # A whole-document export carries one sheet per tab, and pandas
+                # reads the first alone unless told otherwise — which would diff
+                # a fraction of the document the user selected.
                 return read_tabular(
                     content_b64=base64.b64encode(raw).decode("ascii"),
-                    file_name=f"bo_report_{doc_id}_{report_id}.{src.format}",
+                    file_name=(
+                        f"bo_report_{doc_id}_{report_id}.{src.format}" if report_id
+                        else f"bo_report_{doc_id}.{src.format}"
+                    ),
+                    combine_sheets=not report_id,
                 )
             finally:
                 client.logout()

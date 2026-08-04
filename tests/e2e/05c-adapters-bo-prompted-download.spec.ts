@@ -155,6 +155,92 @@ test.describe('05c adapters - prompted SAP BO download from the UI', () => {
     expect(sheet).not.toContain('D400');
   });
 
+  test('All tabs exports every tab of the document in one workbook', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-adapters"]').click();
+    await authedPage.locator('[data-testid="bo-config-select"]').selectOption(String(boConfigId));
+    await authedPage.getByRole('button', { name: 'Browse Documents' }).click();
+
+    // Document 1001 is the multi-tab one (Orders + Summary). A per-tab export
+    // can only ever carry one of those row sets, so asserting both is the only
+    // thing that distinguishes a whole-document export from a single-tab one.
+    const doc = authedPage.locator('.bo-doc-item', { hasText: 'Sales Orders' });
+    await expect(doc).toBeVisible({ timeout: 20_000 });
+    await doc.click();
+    await authedPage.locator(dateInput('1001', 0)).fill('2026-06-03');
+
+    const allTabs = authedPage.locator('.bo-report-item', { hasText: 'All tabs' });
+    await expect(allTabs).toBeVisible();
+    const downloadPromise = authedPage.waitForEvent('download');
+    const responsePromise = authedPage.waitForResponse(
+      r => /\/documents\/1001\/download/.test(r.url()));
+    await allTabs.getByRole('button', { name: 'XLSX' }).click();
+    const response = await responsePromise;
+
+    expect(response.status()).toBe(200);
+    // The whole-document route carries no /reports/ segment — that segment is
+    // what names a single tab.
+    expect(response.url()).not.toContain('/reports/');
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('report_1001.xlsx');
+
+    const sheet = await sheetOf(download);
+    expect(sheet).toContain('A100');     // Orders tab
+    expect(sheet).toContain('orders');   // Summary tab
+  });
+
+  test('All tabs is hidden while a report filter is active', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-adapters"]').click();
+    await authedPage.locator('[data-testid="bo-config-select"]').selectOption(String(boConfigId));
+    await authedPage.getByRole('button', { name: 'Browse Documents' }).click();
+
+    const doc = authedPage.locator('.bo-doc-item', { hasText: 'Sales Orders' });
+    await expect(doc).toBeVisible({ timeout: 20_000 });
+    await doc.click();
+
+    const allTabs = authedPage.locator('.bo-report-item', { hasText: 'All tabs' });
+    await expect(allTabs).toBeVisible();
+
+    // "All tabs" ignores the filter by definition, so next to a filtered list
+    // it would read as a claim about what is on screen.
+    const filter = authedPage.getByPlaceholder('Search documents');
+    await filter.fill('Summary');
+    await expect(allTabs).toBeHidden();
+
+    await filter.fill('');
+    await expect(allTabs).toBeVisible();
+  });
+
+  test('All tabs + Job creates a job with no tab named', async ({ authedPage, adminToken }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-adapters"]').click();
+    await authedPage.locator('[data-testid="bo-config-select"]').selectOption(String(boConfigId));
+    await authedPage.getByRole('button', { name: 'Browse Documents' }).click();
+
+    const doc = authedPage.locator('.bo-doc-item', { hasText: 'Sales Orders' });
+    await expect(doc).toBeVisible({ timeout: 20_000 });
+    await doc.click();
+
+    await authedPage.locator('.bo-report-item', { hasText: 'All tabs' })
+      .getByRole('button', { name: '+ Job' }).click();
+    await authedPage.getByRole('button', { name: 'Save Job' }).click();
+
+    // The job's scope lives in its params, not its name: an empty bo_report_id
+    // is what makes the run export every tab.
+    const ctx = await authedContext(adminToken);
+    try {
+      const jobs = await (await ctx.get('/api/jobs')).json();
+      const created = jobs.find((j: any) => j.name === 'bo_1001_all');
+      expect(created).toBeTruthy();
+      expect(created.params.report_id).toBe('1001');
+      expect(created.params.bo_report_id).toBe('');
+      await ctx.delete('/api/jobs/bo_1001_all');
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
   test('a document with no prompts still downloads', async ({ authedPage }) => {
     await authedPage.goto('/');
     await authedPage.locator('[data-testid="nav-tab-adapters"]').click();

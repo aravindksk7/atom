@@ -932,20 +932,144 @@ def test_download_report_falls_back_to_the_report_resource_when_occurrence_404s(
     missing = MagicMock()
     missing.status_code = 404
     missing.text = 'the resource of type "Occurrence" with identifier "0" does not exist.'
+    misspelled_missing = MagicMock()
+    misspelled_missing.status_code = 404
+    misspelled_missing.text = "not found"
     fallback = MagicMock()
     fallback.status_code = 200
     fallback.content = b"id,sku\n1,A100\n"
     fallback.headers = {}
     with patch.object(authenticated_client._session, "get",
-                      side_effect=[missing, fallback]) as mock_get:
+                      side_effect=[missing, misspelled_missing, fallback]) as mock_get:
         with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
             result = authenticated_client.download_report("DOC1", "RPT2", "csv")
 
     assert result == fallback.content
     urls = [call[0][0] for call in mock_get.call_args_list]
     assert urls[0].endswith("/documents/DOC1/occurrences/0")
-    assert urls[1].endswith("/documents/DOC1/reports/RPT2")
+    assert urls[1].endswith("/documents/DOC1/occurences/0")
+    assert urls[2].endswith("/documents/DOC1/reports/RPT2")
     assert "occurrence" in caplog.text.lower()
+
+
+def test_download_report_exports_the_whole_document_when_no_report_is_named(
+    authenticated_client,
+):
+    """SAP's primary step 5 is the whole document — every tab in one file —
+    and only its *alternative* narrows to a single report. Naming no report
+    must drop `reportIds` rather than send an empty one, which BO would read
+    as "the tab called ''"."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"data"
+    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
+        authenticated_client.download_report("DOC1", "", "xlsx")
+    assert mock_get.call_args[0][0].endswith("/documents/DOC1/occurrences/0")
+    assert "reportIds" not in mock_get.call_args[1]["params"]
+
+
+def test_download_report_whole_document_falls_back_to_the_document_resource(
+    authenticated_client,
+):
+    """When there is no occurrence to read, a whole-document export has to fall
+    back to SAP's documented whole-document resource — GET …/documents/{id}
+    with the format's Accept — not to a per-report one it was never given a
+    report for."""
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = "no occurrence"
+    fallback = MagicMock()
+    fallback.status_code = 200
+    fallback.content = b"xlsx bytes"
+    fallback.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[missing, missing, fallback]) as mock_get:
+        result = authenticated_client.download_report("DOC1", "", "xlsx")
+
+    assert result == fallback.content
+    url = mock_get.call_args_list[2][0][0]
+    assert url.endswith("/biprws/raylight/v1/documents/DOC1")
+    accept = mock_get.call_args_list[2][1]["headers"]["Accept"]
+    assert accept == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_download_report_retries_the_misspelled_occurrence_path(authenticated_client):
+    """BO has shipped the segment both ways — the captured trace says
+    `occurrences`, some releases say `occurences`. A deployment on the
+    misspelled build must not be told it has no occurrence and silently
+    downgraded to the resource that exports layout with no data rows."""
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = "not found"
+    found = MagicMock()
+    found.status_code = 200
+    found.content = b"rows"
+    found.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[missing, found]) as mock_get:
+        result = authenticated_client.download_report("DOC1", "RPT2", "csv")
+
+    assert result == found.content
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert urls[0].endswith("/documents/DOC1/occurrences/0")
+    assert urls[1].endswith("/documents/DOC1/occurences/0")
+
+
+def test_answer_document_parameters_retries_the_misspelled_occurrence_path(
+    authenticated_client,
+):
+    """Same spelling split on the write side. A 404 here used to raise, which
+    would fail every prompted download on a misspelled-segment deployment."""
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = "not found"
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put",
+                      side_effect=[missing, _refreshed_put_response()]) as mock_put:
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+
+    urls = [call[0][0] for call in mock_put.call_args_list]
+    assert urls[0].endswith("/documents/124313/occurrences/0/parameters")
+    assert urls[1].endswith("/documents/124313/occurences/0/parameters")
+
+
+def test_answer_document_parameters_reuses_the_spelling_that_worked(authenticated_client):
+    """A deployment does not change spelling between two requests. Probing it
+    again on every call would double the write traffic of every prompted
+    download on the deployments that need the retry most."""
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = "not found"
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put",
+                      side_effect=[missing, _refreshed_put_response(),
+                                   _refreshed_put_response()]) as mock_put:
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "y"}])
+
+    urls = [call[0][0] for call in mock_put.call_args_list]
+    assert len(urls) == 3
+    assert urls[2].endswith("/documents/124313/occurences/0/parameters")
+
+
+def test_answer_document_parameters_raises_when_neither_spelling_exists(
+    authenticated_client,
+):
+    """The retry is for a spelling difference, not for a missing occurrence.
+    When both 404, the failure is real and must surface — silently continuing
+    to the export is what produced blank workbooks."""
+    from etl_framework.exceptions import BOAPIError
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = "not found"
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put", return_value=missing):
+        with pytest.raises(BOAPIError):
+            authenticated_client.answer_document_parameters(
+                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
 
 
 def test_download_report_does_not_fall_back_on_other_errors(authenticated_client):
@@ -1424,3 +1548,125 @@ def test_answer_document_parameters_raises_on_http_error(authenticated_client):
         with pytest.raises(BOAPIError):
             authenticated_client.answer_document_parameters(
                 "124267", [{"id": 0, "type": "DateTime", "value": "x"}])
+
+
+def _refreshed_put_response(refreshed: str | None = "true") -> MagicMock:
+    """A prompt-answer PUT response, with or without SAP BO's one piece of
+    positive evidence that the data providers actually ran."""
+    resp = MagicMock()
+    resp.status_code = 200
+    if refreshed is None:
+        resp.json.return_value = {"success": {"message": "updated"}}
+    else:
+        resp.json.return_value = {"success": {"details": {"property": [
+            {"@key": "allDataprovidersRefreshed", "$": refreshed}]}}}
+    return resp
+
+
+def test_answer_document_parameters_opens_the_document_before_answering(authenticated_client):
+    """SAP's documented Raylight flow opens the document — GET
+    …/documents/{id} — to create the server-side session cache BEFORE any
+    parameter is written or any refresh triggered. This client had been
+    writing straight to the occurrence, which only worked because occurrence 0
+    happened to be reachable cold on this deployment; `probe_occurrence.py`
+    was written precisely because "does it need the document opened first" was
+    never settled. One idempotent GET removes the question."""
+    order: list[tuple[str, str]] = []
+    opened = MagicMock()
+    opened.status_code = 200
+
+    def fake_get(url, **kwargs):
+        order.append(("GET", url))
+        return opened
+
+    put_resp = _refreshed_put_response()
+
+    def fake_put(url, **kwargs):
+        order.append(("PUT", url))
+        return put_resp
+
+    with patch.object(authenticated_client._session, "get", side_effect=fake_get), \
+         patch.object(authenticated_client._session, "put", side_effect=fake_put):
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"}])
+
+    assert [method for method, _ in order] == ["GET", "PUT"]
+    assert order[0][1].endswith("/biprws/raylight/v1/documents/124313")
+    assert order[1][1].endswith("/documents/124313/occurrences/0/parameters")
+
+
+def test_answer_document_parameters_survives_a_failed_document_open(
+    authenticated_client, caplog
+):
+    """The open is a cache-seeding courtesy, not a gate. A deployment that
+    refuses it must still get the answer PUT, whose own error is the one worth
+    surfacing — but the failed open is logged so it cannot be the silent cause
+    of a later blank export."""
+    failed_open = MagicMock()
+    failed_open.status_code = 500
+    failed_open.text = "boom"
+    with patch.object(authenticated_client._session, "get", return_value=failed_open), \
+         patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response()) as mock_put:
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    assert mock_put.called
+    assert "open" in caplog.text.lower()
+
+
+def test_answer_document_parameters_posts_the_documented_refresh_when_the_put_did_not(
+    authenticated_client,
+):
+    """SAP documents a separate refresh trigger — POST …/documents/{id}/parameters
+    with an empty body — as the step that evaluates the stored answers and
+    fetches rows. This client relied entirely on the occurrence PUT doing it,
+    and merely *warned* when `allDataprovidersRefreshed` came back anything
+    other than "true", then exported blank anyway. Use SAP's own escalation
+    instead of exporting a workbook already known to be empty."""
+    post_resp = _refreshed_put_response("true")
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response(None)), \
+         patch.object(authenticated_client._session, "post", return_value=post_resp) as mock_post:
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+
+    url = mock_post.call_args[0][0]
+    assert url.endswith("/biprws/raylight/v1/documents/124313/parameters")
+    assert mock_post.call_args[1]["json"] == {}
+
+
+def test_answer_document_parameters_skips_the_refresh_post_when_the_put_refreshed(
+    authenticated_client,
+):
+    """The occurrence PUT already ran the refresh on this deployment. Don't
+    make every healthy download pay for a second execution of the data
+    providers."""
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response("true")), \
+         patch.object(authenticated_client._session, "post") as mock_post:
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    assert not mock_post.called
+
+
+def test_answer_document_parameters_survives_a_failed_refresh_post(
+    authenticated_client, caplog
+):
+    """The refresh POST is a recovery attempt for a state that was already
+    going to export blank. If it fails, the export and its diagnostics must
+    still run — failing here would replace an inspectable empty workbook with
+    an opaque error."""
+    failed_post = MagicMock()
+    failed_post.status_code = 405
+    failed_post.text = "method not allowed"
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
+         patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response(None)), \
+         patch.object(authenticated_client._session, "post", return_value=failed_post):
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    assert "405" in caplog.text

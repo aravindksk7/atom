@@ -189,3 +189,19 @@ def test_document_level_answer_is_accepted_but_leaves_the_export_blank(sapbo_moc
     )
     assert export.status_code == 200          # 200 and a well-formed file …
     assert b"A100" not in export.content      # … with no data in it
+
+
+def test_answering_opens_the_document_without_a_failed_open_warning(
+    client, sapbo_mock_server, caplog
+):
+    """SAP's documented flow opens the document before writing parameters, and
+    the client now does. The mock has to serve that GET: an open the mock 404s
+    would train every e2e run to show a "could not open" warning, which is the
+    exact line that has to stay meaningful when a real deployment refuses it."""
+    with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+        client.answer_document_parameters(
+            "1001",
+            [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+        )
+
+    assert "could not open document" not in caplog.text.lower()

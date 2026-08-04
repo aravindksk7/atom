@@ -17,6 +17,60 @@ def test_read_tabular_from_csv_path(tmp_path, monkeypatch):
     assert len(df) == 2
 
 
+def _two_sheet_xlsx() -> bytes:
+    """A workbook shaped like a SAP BO whole-document export: one sheet per
+    report tab, schemas overlapping but not identical."""
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer) as writer:
+        pd.DataFrame({"id": [1, 2], "sku": ["A100", "B200"]}).to_excel(
+            writer, sheet_name="Orders", index=False)
+        pd.DataFrame({"id": [3], "metric": ["total"]}).to_excel(
+            writer, sheet_name="Summary", index=False)
+    return buffer.getvalue()
+
+
+def test_read_tabular_xlsx_keeps_only_the_first_sheet_by_default():
+    """Every existing caller — uploads, reconciliation targets, multi-file
+    baselines — has always compared sheet 1 alone. Pinned so combine_sheets
+    cannot quietly become the default and change what saved jobs compare."""
+    from api.services.file_source import read_tabular
+    df = read_tabular(
+        content_b64=base64.b64encode(_two_sheet_xlsx()).decode("ascii"),
+        file_name="doc.xlsx",
+    )
+    assert list(df["sku"]) == ["A100", "B200"]
+    assert "metric" not in df.columns
+    assert len(df) == 2
+
+
+def test_read_tabular_combines_every_sheet_when_asked():
+    """A SAP BO whole-document export is one sheet per tab. Reading sheet 1
+    alone would silently compare a fraction of the document the user asked
+    for, so the whole-document path opts in to the union of all sheets."""
+    from api.services.file_source import read_tabular
+    df = read_tabular(
+        content_b64=base64.b64encode(_two_sheet_xlsx()).decode("ascii"),
+        file_name="doc.xlsx",
+        combine_sheets=True,
+    )
+    assert len(df) == 3
+    assert set(df.columns) == {"id", "sku", "metric"}
+    assert list(df["id"]) == [1, 2, 3]
+
+
+def test_read_tabular_combine_sheets_is_ignored_for_csv():
+    """`combine_sheets` describes a workbook. A CSV has no sheets, and asking
+    for the union of them must not become an error on a job whose source
+    format is configurable."""
+    from api.services.file_source import read_tabular
+    df = read_tabular(
+        content_b64=base64.b64encode(b"id,amount\n1,100\n").decode("ascii"),
+        file_name="data.csv",
+        combine_sheets=True,
+    )
+    assert list(df.columns) == ["id", "amount"]
+
+
 def test_read_tabular_from_dat_path_parses_as_delimited_text(tmp_path, monkeypatch):
     import api.services.file_source as fs
     monkeypatch.setattr(fs, "_UPLOAD_BASE", tmp_path)

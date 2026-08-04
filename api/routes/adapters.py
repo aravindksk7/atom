@@ -164,6 +164,61 @@ def list_bo_document_parameters(
     return service.get_bo_document_parameters(config_id, doc_id, _sap_bo_auth_from_request(request))
 
 
+@router.get("/sap-bo/documents/{doc_id}/download")
+def download_whole_bo_document(
+    doc_id: str,
+    config_id: int,
+    request: Request,
+    format: str = "xlsx",
+    service: AdapterService = Depends(get_adapter_service),
+):
+    """SAP's primary step 5: every tab of the document in one file. Naming no
+    report is the whole point, so this cannot be folded into the report-scoped
+    route below — a path segment always names a tab."""
+    content = service.download_bo_report(
+        config_id,
+        doc_id,
+        "",
+        fmt=format,
+        auth=_sap_bo_auth_from_request(request),
+    )
+    mime = _MIME_MAP.get(format, "application/octet-stream")
+    ext = _EXT_MAP.get(format, "bin")
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}.{ext}"'},
+    )
+
+
+@router.post("/sap-bo/documents/{doc_id}/download")
+def download_whole_bo_document_with_parameters(
+    doc_id: str,
+    config_id: int,
+    body: BOReportDownloadRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+    service: AdapterService = Depends(get_adapter_service),
+):
+    tz = SettingsRepository(db).get_timezone()
+    content = service.download_bo_report(
+        config_id,
+        doc_id,
+        "",
+        fmt=body.format,
+        auth=_sap_bo_auth_from_request(request),
+        parameters=[p.model_dump() for p in body.parameters],
+        timezone=tz,
+    )
+    mime = _MIME_MAP.get(body.format, "application/octet-stream")
+    ext = _EXT_MAP.get(body.format, "bin")
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}.{ext}"'},
+    )
+
+
 @router.get("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
 def download_bo_report(
     doc_id: str,

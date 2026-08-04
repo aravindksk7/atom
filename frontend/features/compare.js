@@ -375,13 +375,22 @@
       reader.readAsArrayBuffer(file);
     },
 
+    // The report select's '*' is "all tabs" — SAP's whole-document export,
+    // which the API expresses as an empty report_id. Kept distinct from the
+    // unselected '' so forgetting to pick a report stays an error the user is
+    // told about, rather than silently becoming a whole-document pull.
+    _boReportId(src) {
+      if (src.reportId === '*') return '';
+      return src.reportId || null;
+    },
+
     _buildBOSource(type, src) {
       if (type === 'live') {
         return {
           source_type: 'live',
           config_id: Number(src.configId),
           doc_id: src.docId || null,
-          report_id: src.reportId || null,
+          report_id: this._boReportId(src),
           format: 'xlsx',
           // Prompt answers, or the export ignores the picked date and reflects
           // whatever answers the document last held.
@@ -431,7 +440,20 @@
       return adv;
     },
 
+    // A live source needs a report chosen — one tab, or the explicit "All
+    // tabs". Blank means the user never touched the select, and sending that
+    // would pull the whole document without them asking for it.
+    _boSourceMissingReport(type, src) {
+      return type === 'live' && Boolean(src.docId) && !src.reportId;
+    },
+
     async runBOComparison() {
+      if (this._boSourceMissingReport(this.boSourceAType, this.boSourceA) ||
+          this._boSourceMissingReport(this.boSourceBType, this.boSourceB)) {
+        this.toast('error', 'Select a report',
+          'Choose a tab, or "All tabs" to compare the whole document.');
+        return;
+      }
       this.boCompareLoading = true;
       this.boCompareResult = null;
       if (this.boComparePollInterval) clearInterval(this.boComparePollInterval);
@@ -857,6 +879,12 @@
     },
 
     async runColumnStats() {
+      if (this._boSourceMissingReport(this.colStatsSourceAType, this.colStatsSourceA) ||
+          this._boSourceMissingReport(this.colStatsSourceBType, this.colStatsSourceB)) {
+        this.toast('error', 'Select a report',
+          'Choose a tab, or "All tabs" to compare the whole document.');
+        return;
+      }
       this.colStatsLoading = true;
       this.colStatsResult = null;
       try {
@@ -870,7 +898,10 @@
           row_count_tolerance: parseInt(this.colStatsRowCountTol) || 0,
         };
         if (this.colStatsSourceA.docId) payload.doc_id = this.colStatsSourceA.docId;
-        if (this.colStatsSourceA.reportId) payload.report_id = this.colStatsSourceA.reportId;
+        // These are the request-level fallbacks each source inherits when it
+        // names no report of its own; '*' must not leak through as a tab name.
+        const fallbackReport = this._boReportId(this.colStatsSourceA);
+        if (fallbackReport) payload.report_id = fallbackReport;
         this.colStatsResult = await api('POST', '/api/compare/column-stats', payload);
       } catch (e) {
         this.toast('error', 'Column stats failed', e.message);

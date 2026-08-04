@@ -20,18 +20,21 @@ def test_bo_live_reconciliation_requires_report_id() -> None:
         )
 
 
-def test_bo_live_reconciliation_requires_bo_report_id() -> None:
-    with pytest.raises(ValidationError, match="bo_report_id"):
-        JobDefinition(
-            name="qa_vs_prod",
-            job_type="reconciliation",
-            query="",
-            params={
-                "source_mode": "bo_live",
-                "report_id": "101",
-                "target_file_path": "prod_snapshot.xlsx",
-            },
-        )
+def test_bo_live_reconciliation_treats_a_missing_bo_report_id_as_the_whole_document() -> None:
+    """`bo_report_id` names one tab; omitting it is SAP's whole-document
+    export, not an incomplete job. `report_id` — the document — stays required,
+    since without it there is nothing to export."""
+    job = JobDefinition(
+        name="qa_vs_prod",
+        job_type="reconciliation",
+        query="",
+        params={
+            "source_mode": "bo_live",
+            "report_id": "101",
+            "target_file_path": "prod_snapshot.xlsx",
+        },
+    )
+    assert job.params.get("bo_report_id") is None
 
 
 def test_bo_live_reconciliation_requires_target_file() -> None:
@@ -97,6 +100,7 @@ def test_bo_live_reconciliation_upload_without_name_rejected() -> None:
 
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -182,6 +186,63 @@ def test_bo_live_recon_diffs_live_pull_against_target_file(tmp_path, monkeypatch
     assert result.target_file_name == "prod_snapshot.csv"
     assert result.source_file_name is None
     assert result.status == TestStatus.FAILED.value
+
+
+def test_bo_live_recon_pulls_the_whole_document_when_no_tab_is_named(tmp_path, monkeypatch):
+    """A job without `bo_report_id` exports every tab, and the reader has to be
+    told so: a whole-document workbook is one sheet per tab, and pandas reads
+    the first alone by default — which would reconcile a fraction of the
+    document against the full target file and call the rest missing."""
+    target = tmp_path / "prod_snapshot.csv"
+    target.write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    from api.services import file_source
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    db = _session()
+    RunRepository(db).create_run("r-bo-whole", "qa", "prod", {})
+    JobRepository(db).create({
+        "name": "qa_vs_prod_whole",
+        "description": "",
+        "tags": [],
+        "job_type": "reconciliation",
+        "query": "",
+        "key_columns": ["id"],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "source_mode": "bo_live",
+            "report_id": "101",
+            "format": "csv",
+            "target_file_path": str(target),
+        },
+        "enabled": True,
+    })
+    executor = RunExecutor(
+        db=db,
+        run_id="r-bo-whole",
+        source_env="qa",
+        target_env="prod",
+        job_sequence=["qa_vs_prod_whole"],
+        run_settings=RunSettings(use_live_connections=True, metrics_enabled=False),
+        config_snapshot=_BO_SNAPSHOT,
+    )
+
+    # read_tabular is imported inside the executor's job builder, so the patch
+    # has to land on its defining module rather than on run_executor.
+    with patch("api.services.run_executor.BORestClient") as MockBO, \
+         patch("api.services.file_source.read_tabular") as mock_read:
+        MockBO.return_value.download_report.return_value = b"id,value\n1,alpha\n"
+        mock_read.return_value = pd.DataFrame({"id": [1], "value": ["alpha"]})
+        executor.execute()
+
+    doc_id, report_id, _fmt = MockBO.return_value.download_report.call_args.args
+    assert (doc_id, report_id) == ("101", "")
+    # First read is the BO source; the target file is read after it, and a
+    # local target has no tabs to union.
+    assert mock_read.call_args_list[0].kwargs["combine_sheets"] is True
+    assert mock_read.call_args_list[1].kwargs.get("combine_sheets") is not True
 
 
 def test_bo_live_recon_raises_without_target_file():

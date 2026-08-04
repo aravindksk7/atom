@@ -214,6 +214,13 @@
     },
 
     async downloadBOReport(docId, reportId, format) {
+      // An omitted reportId is SAP's whole-document export: every tab in one
+      // file, served by the routes without the /reports/{id} segment. An empty
+      // segment would name the tab called '' instead.
+      const scope = reportId ? `/reports/${reportId}` : '';
+      const fallbackName = reportId
+        ? `report_${docId}_${reportId}.${format}`
+        : `report_${docId}.${format}`;
       // Ensure prompt definitions are known before deciding which path to use;
       // returns the cached list when already loaded (e.g. on doc expand).
       const params = await this.loadBOReportParams({ id: docId });
@@ -221,10 +228,10 @@
       if (!params.length) {
         try {
           const { blob, disposition } = await apiBlob(
-            `/api/adapters/sap-bo/documents/${docId}/reports/${reportId}/download?config_id=${this.boConfigId}&format=${format}`
+            `/api/adapters/sap-bo/documents/${docId}${scope}/download?config_id=${this.boConfigId}&format=${format}`
           );
           const match = disposition.match(/filename="?([^"]+)"?/);
-          triggerDownload(blob, match ? match[1] : `report_${docId}_${reportId}.${format}`);
+          triggerDownload(blob, match ? match[1] : fallbackName);
           this.toast('success', 'Download started');
         } catch (e) {
           this.toast('error', 'Download failed', e.message);
@@ -248,7 +255,7 @@
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = 'Bearer ' + token;
         const resp = await fetch(
-          API + `/api/adapters/sap-bo/documents/${docId}/reports/${reportId}/download?config_id=${this.boConfigId}`,
+          API + `/api/adapters/sap-bo/documents/${docId}${scope}/download?config_id=${this.boConfigId}`,
           { method: 'POST', headers, body: JSON.stringify({ format, parameters }) }
         );
         if (!resp.ok) {
@@ -258,19 +265,22 @@
         }
         const disposition = resp.headers.get('content-disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/);
-        triggerDownload(await resp.blob(), match ? match[1] : `report_${docId}_${reportId}.${format}`);
+        triggerDownload(await resp.blob(), match ? match[1] : fallbackName);
         this.toast('success', 'Download started');
       } catch (e) {
         this.toast('error', 'Download failed', e.message);
       }
     },
 
+    // `rep` omitted means the whole document — every tab as one table, the
+    // same scope the "All tabs" download uses.
     openAddBOJobModal(doc, rep) {
       this.boJobForm = {
-        name: `bo_${doc.id}_${rep.id}`.replace(/[^a-z0-9_]/gi, '_').toLowerCase(),
-        title: `${doc.name} – ${rep.name}`,
+        name: (rep ? `bo_${doc.id}_${rep.id}` : `bo_${doc.id}_all`)
+          .replace(/[^a-z0-9_]/gi, '_').toLowerCase(),
+        title: rep ? `${doc.name} – ${rep.name}` : `${doc.name} – all tabs`,
         doc_id: doc.id,
-        report_id: rep.id,
+        report_id: rep ? rep.id : '',
         key_columns_raw: 'id',
         format: 'xlsx',
       };
