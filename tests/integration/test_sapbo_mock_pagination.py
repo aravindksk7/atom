@@ -84,8 +84,8 @@ def test_list_reports_pages_past_real_mock_server_page_cap(client, sapbo_mock_se
 
 def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_server):
     """End-to-end date-prompt flow against the real mock server: discover the
-    document's prompts (GET …/parameters), answer them (PUT …/parameters),
-    then export the report. Proves the discovery GET and the answering PUT
+    document's prompts (GET …/parameters), answer them (PUT …/occurrences/0
+    /parameters), then export that occurrence. Proves the discovery GET and the answering PUT
     agree wire-to-wire with BORestClient."""
     doc_id, report_id = "1001", "rpt-sales"
 
@@ -97,23 +97,42 @@ def test_discover_answer_download_flow_against_real_mock(client, sapbo_mock_serv
         [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
     )
 
-    data = client.download_report(doc_id, report_id, "xlsx")
-    assert data
+    data = client.download_report(doc_id, report_id, "csv")
+    # Not just "a file came back" — the live bug returned a well-formed file
+    # with the layout and no data rows, at HTTP 200. Assert on the rows.
+    assert b"A100" in data
+
+
+def test_answered_date_reaches_the_export(client, sapbo_mock_server):
+    """The whole point of the two-step occurrence-0 flow: the answered prompt
+    has to change what the export contains. Doc 1003's rows differ per answered
+    day, so a download that ignored the answer cannot pass this."""
+    doc_id, report_id = "1003", "rpt-daily-sales"
+
+    client.answer_document_parameters(
+        doc_id,
+        [{"id": 0, "type": "DateTime", "value": "2026-06-03T00:00:00.000Z"},
+         {"id": 1, "type": "String", "value": "ASX"}],
+    )
+    data = client.download_report(doc_id, report_id, "csv")
+
+    assert b"D400" in data and b"E500" in data
+    assert b"A100" not in data          # the 2026-06-02 row set
 
 
 def test_mock_rejects_occurrence_1_answer_like_the_live_server(sapbo_mock_server):
     """Pins the one occurrence behaviour actually observed against the live
     server: a 404 for identifier "1", the session-scoped id copied out of a
-    captured browser trace. Scoped deliberately to identifier 1 — see
-    test_mock_takes_no_position_on_occurrence_0 for why."""
+    captured browser trace. Scoped deliberately to identifier 1 — index 0
+    is the document's persisted occurrence and answers there."""
     import requests
 
-    (host, port), _module = sapbo_mock_server
+    (host, port), module = sapbo_mock_server
     resp = requests.put(
         f"http://{host}:{port}"
         "/biprws/raylight/v1/documents/1001/occurrences/1/parameters",
         json={"parameters": {"parameter": []}},
-        headers={"X-SAP-LogonToken": "test-token", "Content-Type": "application/json"},
+        headers={"X-SAP-LogonToken": module.TOKEN, "Content-Type": "application/json"},
         timeout=10,
     )
 
@@ -121,31 +140,52 @@ def test_mock_rejects_occurrence_1_answer_like_the_live_server(sapbo_mock_server
     assert "Occurrence" in resp.text
 
 
-def test_mock_takes_no_position_on_occurrence_0(sapbo_mock_server):
-    """Occurrence 0 is an open question, and the mock must not answer it.
-
-    The 404 above was for identifier "1" and was generalised to "a stateless
-    client has no occurrence at all". Index 0 was never tried, and the
-    on-premises UI was later observed reading report data from
-    …/documents/{id}/occurences/0?reportids={n}. If the mock kept emitting the
-    live server's typed "Occurrence does not exist" error for index 0 it would
-    fail a correct fix, which is exactly the rubber-stamping this mock exists
-    to prevent — just inverted.
-
-    So index 0 gets the generic no-handler 404: still a 404, but without the
-    live server's error vocabulary, marking absence of evidence rather than
-    evidence of absence. Replace this test with the real behaviour once the
-    live probe reports it.
-    """
+def test_occurrence_0_answer_reports_the_refresh_like_the_live_server(sapbo_mock_server):
+    """Occurrence 0 is the persisted one, and answering it reports
+    allDataprovidersRefreshed=true — the 2026-08-04 live trace. That flag is
+    the only positive evidence the flow produces, so the mock has to emit it
+    for the client's warning path to mean anything."""
     import requests
 
-    (host, port), _module = sapbo_mock_server
+    (host, port), module = sapbo_mock_server
     resp = requests.put(
         f"http://{host}:{port}"
-        "/biprws/raylight/v1/documents/1001/occurences/0/parameters",
+        "/biprws/raylight/v1/documents/1001/occurrences/0/parameters",
         json={"parameters": {"parameter": []}},
-        headers={"X-SAP-LogonToken": "test-token", "Content-Type": "application/json"},
+        headers={"X-SAP-LogonToken": module.TOKEN, "Content-Type": "application/json"},
         timeout=10,
     )
 
-    assert "Occurrence" not in resp.text
+    assert resp.status_code == 200
+    props = resp.json()["success"]["details"]["property"]
+    assert {"@key": "allDataprovidersRefreshed", "$": "true"} in props
+
+
+def test_document_level_answer_is_accepted_but_leaves_the_export_blank(sapbo_mock_server):
+    """The failure being fixed, pinned so it can't come back silently: the
+    document-level PUT returns 200 with no refresh flag, and the
+    …/reports/{id} export of a prompted document then yields the layout with
+    zero data rows."""
+    import requests
+
+    (host, port), module = sapbo_mock_server
+    base = f"http://{host}:{port}/biprws/raylight/v1/documents/1001"
+    headers = {"X-SAP-LogonToken": module.TOKEN, "Content-Type": "application/json"}
+
+    answered = requests.put(
+        f"{base}/parameters",
+        json={"parameters": {"parameter": [{"id": 0, "answer": {"values": {"value": [
+            {"$": "2026-06-03T00:00:00.000Z", "@type": "DateTime"}]}}}]}},
+        headers=headers,
+        timeout=10,
+    )
+    assert answered.status_code == 200
+    assert "allDataprovidersRefreshed" not in answered.text
+
+    export = requests.get(
+        f"{base}/reports/rpt-sales",
+        headers={"X-SAP-LogonToken": module.TOKEN, "Accept": "text/csv"},
+        timeout=10,
+    )
+    assert export.status_code == 200          # 200 and a well-formed file …
+    assert b"A100" not in export.content      # … with no data in it

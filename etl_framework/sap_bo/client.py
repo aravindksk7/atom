@@ -128,6 +128,30 @@ def _dedupe_by_id(items: list[dict]) -> list[dict]:
     return deduped
 
 
+def _dataproviders_refreshed_flag(response) -> str | None:
+    """Pull `allDataprovidersRefreshed` out of the answer PUT's response.
+
+    The live occurrence-0 PUT replies:
+        {"success": {"message": …, "id": …, "details": {"property": [
+            {"@key": "allDataprovidersRefreshed", "$": "true"}]}}}
+
+    Returns the flag's value, or None when the response carries no such
+    property (or isn't JSON at all). Never raises — this is an observation
+    used for logging, not a gate on the download.
+    """
+    try:
+        payload = response.json()
+    except Exception:  # noqa: BLE001 - any parse failure means "no flag"
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details = ((payload.get("success") or {}).get("details") or {})
+    for prop in _as_list(details.get("property")):
+        if isinstance(prop, dict) and prop.get("@key") == "allDataprovidersRefreshed":
+            return str(prop.get("$", ""))
+    return None
+
+
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
@@ -737,19 +761,26 @@ class BORestClient:
         return result
 
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
-        """PUT …/documents/{doc_id}/parameters — answer a document's prompts.
+        """PUT …/documents/{doc_id}/occurrences/0/parameters — answer a
+        document's prompts and refresh its data providers.
 
-        Answers the **document-level** parameters resource — the same one
-        `get_document_parameters` reads — rather than an occurrence.
+        This is step 1 of the two-step flow the on-premises web UI actually
+        performs (2026-08-04 trace, document 124313); there is no snapshot or
+        schedule step. Step 2 is `download_report`, which MUST read the same
+        occurrence — see its docstring.
 
-        The captured browser trace answered
-        `…/documents/{id}/occurrences/1/parameters`, but an occurrence is
-        created when a document is *opened* in an interactive viewing session,
-        so "1" was that session's own instance. A stateless REST client never
-        opens the document and therefore has no occurrence; addressing one
-        makes the server reply 404 with `the resource of type "Occurrence"
-        with identifier "1" does not exist`. Answering the document itself
-        needs no session-scoped id.
+        Answering the **document-level** parameters resource instead (the one
+        `get_document_parameters` reads) is accepted with HTTP 200 but leaves
+        the export blank: only the occurrence PUT reports
+        `allDataprovidersRefreshed: "true"`, i.e. only it runs the refresh the
+        export then reads. That flag is the one piece of positive evidence in
+        this flow, so its absence is logged as a warning here rather than
+        discovered later as a workbook of column headers with no rows.
+
+        Occurrence **0** specifically: an earlier 404 (`the resource of type
+        "Occurrence" with identifier "1" does not exist`) was for index 1, a
+        viewing session's own instance copied out of a browser trace. Index 0
+        is the document's persisted occurrence and needs no session.
 
         `built_answers` is a list of already-finalized
         {"id", "type", "value"} (date conversion and answer-vocabulary
@@ -761,7 +792,10 @@ class BORestClient:
         """
         if not self._token:
             self.authenticate()
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
+        url = (
+            f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
+            f"/occurrences/0/parameters"
+        )
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
@@ -772,9 +806,20 @@ class BORestClient:
             len(built_answers), doc_id,
             [a["id"] for a in built_answers], [a["type"] for a in built_answers],
         )
+        # The web UI posts every prompt and turns an untouched optional one into
+        # "" (frontend/features/adapters.js). BO can apply that as a filter and
+        # match nothing, so name the prompts before the export, not after.
+        blank = [a["id"] for a in built_answers if not str(a["value"]).strip()]
+        if blank:
+            logger.warning(
+                "SAP BO document %s: prompt(s) %s answered with an empty value. "
+                "BO treats an empty answer as a filter, not as 'unanswered', so "
+                "the export may come back with no rows.",
+                doc_id, blank,
+            )
         response = self._session.put(
             url,
-            params={"dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false"},
+            params={"dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false"},
             json=body,
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             timeout=self._timeout,
@@ -790,13 +835,25 @@ class BORestClient:
                 http_status=response.status_code,
                 response_body=response.text,
             )
-        # A 200 here does not prove the answer took effect on the document the
-        # export later reads. Log what the server echoed back so an accepted-
-        # but-ignored answer is visible in the same run as the blank export.
+        # A 200 here does not prove the answer took effect on the data the
+        # export later reads — the blank export was a 200. Log what the server
+        # echoed back, and single out the one flag that does carry evidence.
         logger.info(
             "SAP BO answer PUT for document %s -> HTTP %s: %s",
             doc_id, response.status_code, str(response.text or "")[:1500],
         )
+        refreshed = _dataproviders_refreshed_flag(response)
+        if refreshed == "true":
+            logger.info(
+                "SAP BO document %s reports allDataprovidersRefreshed=true", doc_id,
+            )
+        else:
+            logger.warning(
+                "SAP BO document %s answered without allDataprovidersRefreshed=true "
+                "(got %r) — the export is likely to come back with layout but no "
+                "data rows.",
+                doc_id, refreshed,
+            )
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
@@ -805,19 +862,58 @@ class BORestClient:
     }
 
     def download_report(self, doc_id: str, report_id: str, format: str = "pdf") -> bytes:
-        """GET …/documents/{doc_id}/reports/{report_id} — export as PDF/XLSX/CSV
-        via the Accept header. There is no '/content' sub-resource; requesting
-        one 404s on a real biprws server."""
+        """GET …/documents/{doc_id}/occurrences/0 — export as PDF/XLSX/CSV via
+        the Accept header, with the report tab chosen by `reportIds`.
+
+        Step 2 of the on-premises UI's two-step flow (2026-08-04 trace):
+        `answer_document_parameters` refreshes occurrence 0's data providers,
+        then this reads that same occurrence. Exporting from
+        `…/documents/{id}/reports/{id}` instead — which this did until
+        2026-08-04 — returns HTTP 200 and a well-formed workbook containing the
+        report layout and **zero data rows**, because that resource does not
+        see the refresh.
+
+        `dpi`/`optimized` are the UI's own rendering options; `c` is its cache
+        buster, kept because this deployment sits behind a proxy already caught
+        re-serving cached GETs (it defeats `page` and `Range:` on the document
+        listing).
+        """
         if not self._token:
             self.authenticate()
         accept = self._MIME_MAP.get(format, "application/pdf")
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports/{report_id}"
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/occurrences/0"
         response = self._session.get(
             url,
+            params={
+                "dpi": "96",
+                "optimized": "true",
+                "reportIds": report_id,
+                "c": str(int(time.time() * 1000)),
+            },
             headers={"Accept": accept},
             timeout=self._timeout,
             verify=self._verify_ssl,
         )
+        if response.status_code == 404:
+            # A document with no prompts is downloaded with no preceding answer
+            # PUT, so nothing guarantees it has an occurrence 0 — that resource
+            # has only been observed on a prompted document. Keep those
+            # downloads working via the resource that served them until
+            # 2026-08-04, but say so loudly: on a prompted document this is the
+            # path that exported layout with no data rows.
+            logger.warning(
+                "SAP BO occurrence 0 unavailable for document %s (HTTP 404: %s); "
+                "falling back to the report resource. If this document has "
+                "prompts, expect an export with no data rows.",
+                doc_id, str(response.text or "")[:300],
+            )
+            url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/reports/{report_id}"
+            response = self._session.get(
+                url,
+                headers={"Accept": accept},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
         if response.status_code >= 400:
             raise BOAPIError(
                 report_id=report_id,
@@ -874,27 +970,18 @@ class BORestClient:
             )
 
     def _log_blank_export_diagnostics(self, doc_id: str) -> None:
-        """Gather, in one shot, the evidence that distinguishes the candidate
-        causes of a header-only export. Diagnostics only — every call swallows
-        its errors, so this can never turn a successful export into a failure.
+        """Dump the document's data-provider state after a suspiciously empty
+        export: it distinguishes "nothing was refreshed" from "refreshed and
+        the answers genuinely match no rows". Diagnostics only — the call
+        swallows its errors, so this can never turn a successful export into a
+        failure.
 
-        - `dataproviders`: whether the document's data providers ever executed.
-          Distinguishes "no data refreshed" from "refreshed, genuinely 0 rows".
-        - `occurences/0` before and after opening the document: the on-premises
-          web UI reads report data from
-          `…/documents/{id}/occurences/0?reportids={n}` (BO's own spelling,
-          single r) inside a Fiori BI viewing session. A previous 404 for
-          identifier "1" was read as proof that a stateless client has no
-          occurrence at all, but index 0 was never tried. Probing it cold and
-          again after `GET /documents/{id}` says whether occurrence 0 is
-          unconditional, created by opening the document, or genuinely
-          portal-only.
+        The occurrence-0 probes that used to live here are gone: the export
+        itself now reads occurrence 0, so a missing occurrence surfaces as a
+        raised 404 on the export instead of a silent probe.
         """
         doc_url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
         self._diagnostic_get("dataproviders", f"{doc_url}/dataproviders")
-        self._diagnostic_get("occurence-0-cold", f"{doc_url}/occurences/0")
-        self._diagnostic_get("open-document", doc_url)
-        self._diagnostic_get("occurence-0-after-open", f"{doc_url}/occurences/0")
 
     def schedule_object(self, object_id: str, schedule_params: dict | None = None) -> str:
         """POST /biprws/infostore/{object_id}/schedules — schedule any BOE

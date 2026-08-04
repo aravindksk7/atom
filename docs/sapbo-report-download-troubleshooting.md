@@ -1,7 +1,47 @@
 # Troubleshooting a SAP BO report download
 
-Written against the on-premises deployment, 2026-08-03. Ordered cheapest-first:
-each step either explains the symptom or rules out a whole class of cause.
+Written against the on-premises deployment, 2026-08-03; root cause added
+2026-08-04. Ordered cheapest-first: each step either explains the symptom or
+rules out a whole class of cause.
+
+## The cause found on 2026-08-04 — check this first
+
+A UI trace of document 124313 showed the on-premises web UI doing exactly two
+requests, no snapshot and no schedule, **both against occurrence 0**:
+
+```
+PUT  …/documents/124313/occurrences/0/parameters
+       ?dataproviderScope=accessible&lovInfo=false&prepare=false
+     -> 200 {"success":{…,"details":{"property":[
+             {"@key":"allDataprovidersRefreshed","$":"true"}]}}}
+
+GET  …/documents/124313/occurrences/0?dpi=96&optimized=true&reportIds=1
+     Accept: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+```
+
+This client had been answering the **document-level** `…/documents/{id}/parameters`
+and exporting from `…/documents/{id}/reports/{id}`. Both return 200. Neither
+refreshes the data providers the export reads — hence a valid workbook with
+column headers and no data rows. Fixed 2026-08-04 in
+`etl_framework/sap_bo/client.py` (`answer_document_parameters`, `download_report`).
+
+`allDataprovidersRefreshed: "true"` is the only positive evidence this flow
+produces. The client now logs a warning whenever the answer PUT comes back
+without it — if you see that warning, the export after it will be blank.
+
+Both entry points share this code, so both are fixed together:
+
+| Entry point | Path |
+|---|---|
+| Web UI, prompted report | `POST /api/adapters/sap-bo/documents/{id}/reports/{r}/download` → `AdapterService.download_bo_report` → answer + export |
+| Web UI, report with no prompts | `GET …/download` → export only |
+| Scheduled ETL job (`bo_report`/`bo_live`) | `run_executor` → `job.params["bo_parameters"]` → answer + export |
+
+A report **with no prompts** is exported with no answer PUT before it, so
+nothing guarantees it has an occurrence. That download falls back to
+`…/documents/{id}/reports/{id}` on a 404 and logs `occurrence 0 unavailable`.
+Seeing that line for a *prompted* report means the export is about to be
+blank — treat it as the failure, not as a recovery.
 
 The dominant failure on this deployment is **not** an error. The download
 returns HTTP 200, the file opens, and the report is empty. Every layer reports
@@ -60,6 +100,14 @@ goes to BO as `""`.
 Answering a prompt with `""` is **not** the same as leaving it unanswered. BO
 applies it as a filter, matches nothing, and exports the layout with zero rows.
 
+This is a *hypothesis* — it was never confirmed live, and the 2026-08-04
+occurrence-0 finding explains the blank exports on its own. The client now
+names the offending prompts before the export:
+
+```
+SAP BO document 124313: prompt(s) [1] answered with an empty value.
+```
+
 **Test it in a minute:** re-run the download with every prompt filled with a
 real value. If rows appear, that was the cause.
 
@@ -72,9 +120,10 @@ types=['DateTime','string']
 The answer PUT's accepted vocabulary is capitalised (`String`, `DateTime`). The
 parameters *listing* uses a different vocabulary per prompt kind — `"Text"` and
 lowercase `"string"` have both been observed. `_ANSWER_TYPE_ALIASES` in
-`etl_framework/sap_bo/parameters.py` maps only exact `"Text"` → `"String"`;
-anything else passes through verbatim. A type BO does not recognise can be
-accepted with a 200 and then ignored.
+`etl_framework/sap_bo/parameters.py` now matches case-insensitively and maps
+`text`/`string` → `String` and `datetime` → `DateTime`; anything else passes
+through verbatim. A type BO does not recognise can be accepted with a 200 and
+then ignored, so an unmapped type in this log line is still worth chasing.
 
 ## 4. Read what the server echoed back
 
@@ -108,26 +157,22 @@ If steps 1–5 do not explain it, run one pull with:
 $env:ATOM_BO_EXPORT_DIAGNOSTICS = "1"
 ```
 
-Every tabular export then probes the live session and logs four lines:
+Every tabular export then probes the document's data providers:
 
 ```
 SAP BO blank-export diagnostic [dataproviders] ...
-SAP BO blank-export diagnostic [occurence-0-cold] ...
-SAP BO blank-export diagnostic [open-document] ...
-SAP BO blank-export diagnostic [occurence-0-after-open] ...
 ```
 
-Read them as:
+Read it as:
 
 | Observation | Meaning |
 |---|---|
-| `dataproviders` shows a recent execution / row count | Data ran and genuinely returned nothing — go back to steps 2–5 |
-| `dataproviders` shows no execution | The document never refreshed on this path |
-| `occurence-0-cold` is 200 | Occurrence 0 is addressable without a viewing session |
-| cold 404, `after-open` 200 | Occurrence 0 is created by opening the document — the open is a required step we skip |
-| both 404 | Occurrences are portal-only; the answer is a document-level refresh |
+| shows a recent execution / row count | Data ran and genuinely returned nothing — go back to steps 2–5 |
+| shows no execution | The document never refreshed — check the answer PUT logged `allDataprovidersRefreshed=true` |
 
-Note BO's own spelling: `occurences`, single r.
+The occurrence-0 probes that used to run here are gone: the export itself now
+reads occurrence 0, so a missing occurrence raises on the export instead of
+hiding in a probe line.
 
 ## 7. Known traps
 
@@ -139,7 +184,11 @@ Note BO's own spelling: `occurences`, single r.
   not evidence about the server.
 - **Do not copy session-scoped ids out of a browser trace.** A captured trace
   is authoritative for the request *body* and worthless for any id the viewing
-  session minted for itself. An `occurrences/1` copied this way 404s.
+  session minted for itself. An `occurrences/1` copied this way 404s — while
+  occurrence **0**, the document's persisted one, is the correct target.
+- **One 404 is not a rule.** That `occurrences/1` 404 was generalised to "a
+  stateless client has no occurrence", which sent both the answer and the
+  export to document-level paths and caused the blank exports for a week.
 - **A 502 from this app is usually our own `_friendly_error` wrapper** around
   BO's real status. Read the response body for the true code.
 - **`c=<epoch>` in captured UI URLs is a cache buster** — it decodes to

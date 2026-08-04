@@ -40,6 +40,27 @@ def test_text_prompt_type_is_mapped_to_bo_answer_vocabulary():
     assert built == [{"id": 1, "type": "String", "value": "ASX"}]
 
 
+def test_lowercase_listing_types_are_normalised_to_the_answer_vocabulary():
+    # The live listing for document 124313 reported its string prompt's type as
+    # lowercase 'string', while the 200-OK answer PUT in the same trace uses
+    # "String". An exact-match alias table let 'string' through unmapped.
+    built = build_parameter_answers(
+        [{"id": 1, "type": "string", "value": "ASX"}], "Etc/GMT-1"
+    )
+    assert built == [{"id": 1, "type": "String", "value": "ASX"}]
+
+
+def test_lowercase_datetime_still_gets_its_date_converted():
+    # The date conversion keys off the type, so a lowercase 'datetime' from the
+    # listing would otherwise ship a raw YYYY-MM-DD to BO.
+    built = build_parameter_answers(
+        [{"id": 0, "type": "datetime", "value": "2026-06-02"}], "Etc/GMT-1"
+    )
+    assert built == [
+        {"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}
+    ]
+
+
 def test_unknown_prompt_type_passes_through_unmapped():
     built = build_parameter_answers(
         [{"id": 2, "type": "Numeric", "value": "42"}], "Etc/GMT-1"

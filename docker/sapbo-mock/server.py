@@ -329,6 +329,20 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_export(self, rows: list[dict]) -> None:
+        """Serve a report export in the format the Accept header asks for."""
+        accept = self.headers.get("Accept", "")
+        if "spreadsheetml" in accept:
+            self._send_bytes(
+                HTTPStatus.OK,
+                _xlsx_bytes(rows),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        elif "pdf" in accept:
+            self._send_bytes(HTTPStatus.OK, b"%PDF-1.4\n% SAP BO mock report\n", "application/pdf")
+        else:
+            self._send_bytes(HTTPStatus.OK, _csv_bytes(rows), "text/csv")
+
     def _require_token(self) -> bool:
         if self.headers.get("X-SAP-LogonToken") == TOKEN:
             return True
@@ -395,6 +409,23 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # The export the on-premises web UI actually performs (2026-08-04
+        # trace): GET …/documents/{id}/occurrences/0?dpi=96&optimized=true
+        # &reportIds={n}, format chosen by Accept. This is the resource the
+        # occurrence-0 answer PUT refreshed, so it is the one that carries data.
+        occurrence_export = re.fullmatch(
+            r"/biprws/raylight/v1/documents/([^/]+)/occurrences/0", path
+        )
+        if occurrence_export:
+            doc_id = occurrence_export.group(1)
+            report_id = (parse_qs(parsed.query).get("reportIds") or [""])[0]
+            rows = _rows_for_download(doc_id, report_id)
+            if rows is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"report {report_id} not found"})
+                return
+            self._send_export(rows)
+            return
+
         content_match = re.fullmatch(
             r"/biprws/raylight/v1/documents/([^/]+)/reports/([^/]+)",
             path,
@@ -405,17 +436,14 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if rows is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"report {report_id} not found"})
                 return
-            accept = self.headers.get("Accept", "")
-            if "spreadsheetml" in accept:
-                self._send_bytes(
-                    HTTPStatus.OK,
-                    _xlsx_bytes(rows),
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            elif "pdf" in accept:
-                self._send_bytes(HTTPStatus.OK, b"%PDF-1.4\n% SAP BO mock report\n", "application/pdf")
-            else:
-                self._send_bytes(HTTPStatus.OK, _csv_bytes(rows), "text/csv")
+            # Reproduce the live failure this endpoint caused: for a document
+            # WITH prompts it returns HTTP 200 and a well-formed file holding
+            # the report layout and zero data rows, no matter what was answered
+            # — it never sees the occurrence-0 refresh. Only documents without
+            # prompts (never observed failing here) still export their rows.
+            if PARAMETERS.get(doc_id):
+                rows = []
+            self._send_export(rows)
             return
 
         instance_match = re.fullmatch(r"/biprws/infostore/([^/]+)", path)
@@ -566,19 +594,9 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
 
-        # What was actually observed against the live server: a 404 for
-        # occurrence identifier "1", copied from a captured browser trace. That
-        # was generalised here to "a stateless client has no occurrence at
-        # all" — but index 0 was never tried, and a later trace showed the
-        # on-premises UI reading report data from
-        # …/documents/{id}/occurences/0?reportids={n} (BO's own spelling,
-        # single r). So index 0 is an OPEN QUESTION, not a known 404.
-        #
-        # This handler therefore 404s only the identifiers whose 404 was
-        # observed. Occurrence 0 falls through to the generic no-handler 404
-        # below, which is an absence of evidence rather than a mock asserting
-        # live behaviour it has never seen. Once the live probe settles index
-        # 0, model it here from that output — not from this comment.
+        # Occurrence identifiers other than 0 are that viewing session's own
+        # instances: the live server 404s them (observed for "1", the id copied
+        # out of a browser trace). Occurrence 0 is the document's persisted one.
         occurrence_match = re.fullmatch(
             r"/biprws/raylight/v1/documents/([^/]+)/occurrences?/([^/]+)/parameters", path
         )
@@ -592,6 +610,29 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             }})
             return
 
+        # The answer PUT the on-premises UI actually performs (2026-08-04
+        # trace). Only this one refreshes the data providers, so only answers
+        # recorded here reach an export — mirroring the live split that made
+        # the document-level PUT below look like it worked.
+        if occurrence_match:
+            if not self._require_token():
+                return
+            doc_id = occurrence_match.group(1)
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b""
+            self._record_answers(doc_id, raw)
+            self._send_json(HTTPStatus.OK, {"success": {
+                "message": (
+                    'The resource of type "Document" with identifier '
+                    f'"{doc_id}" has been successfully updated.'
+                ),
+                "id": doc_id,
+                "details": {"property": [
+                    {"@key": "allDataprovidersRefreshed", "$": "true"},
+                ]},
+            }})
+            return
+
         answer_match = re.fullmatch(
             r"/biprws/raylight/v1/documents/([^/]+)/parameters", path
         )
@@ -599,9 +640,19 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if not self._require_token():
                 return
             length = int(self.headers.get("Content-Length", "0") or "0")
-            raw = self.rfile.read(length) if length else b""
-            self._record_answers(answer_match.group(1), raw)
-            self._send_json(HTTPStatus.OK, {"success": True})
+            self.rfile.read(length) if length else b""
+            # Deliberately accepted and NOT recorded: the live server takes this
+            # PUT with 200 but the values never reach the data — its response
+            # carries no allDataprovidersRefreshed, and the export that follows
+            # comes back as layout with no rows. A mock that honoured these
+            # answers would rubber-stamp exactly the bug this reproduces.
+            self._send_json(HTTPStatus.OK, {"success": {
+                "message": (
+                    'The resource of type "Document" with identifier '
+                    f'"{answer_match.group(1)}" has been successfully updated.'
+                ),
+                "id": answer_match.group(1),
+            }})
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})

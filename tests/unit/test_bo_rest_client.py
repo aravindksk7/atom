@@ -894,19 +894,70 @@ def test_download_report_csv_sends_csv_accept_header(authenticated_client):
     assert "csv" in accept.lower()
 
 
-def test_download_report_calls_report_resource_without_content_suffix(authenticated_client):
-    """The raylight export endpoint is GET .../documents/{docId}/reports/{reportId}
-    with the format chosen via the Accept header -- there is no '/content'
-    sub-resource. The old '/content' suffix hit a real on-premises server and
-    got back 'SAP BO API error 404 for report' since that path doesn't exist."""
+def test_download_report_exports_from_occurrence_zero(authenticated_client):
+    """The export must read the SAME resource the prompt answers were written
+    to: occurrence 0. The 2026-08-04 live UI trace exports with
+    GET .../documents/{id}/occurrences/0?dpi=96&optimized=true&reportIds={n}
+    (Accept picks the format). Exporting from .../reports/{id} instead is what
+    produced a valid workbook with column headers and zero data rows: that
+    resource never saw the refreshed data providers."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.content = b"data"
     with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
         authenticated_client.download_report("DOC1", "RPT2", "pdf")
     called_url = mock_get.call_args[0][0]
-    assert called_url.endswith("/documents/DOC1/reports/RPT2")
-    assert "content" not in called_url
+    assert called_url.endswith("/documents/DOC1/occurrences/0")
+    assert "/reports/" not in called_url
+    params = mock_get.call_args[1]["params"]
+    assert params["dpi"] == "96"
+    assert params["optimized"] == "true"
+    assert params["reportIds"] == "RPT2"
+    # `c` is the UI's cache buster. This deployment sits behind a proxy that has
+    # already been caught re-serving cached GETs (it defeats `page` and
+    # `Range:` on the document listing), so a repeat export of the same
+    # document must not be answerable from cache.
+    assert params["c"]
+
+
+def test_download_report_falls_back_to_the_report_resource_when_occurrence_404s(
+    authenticated_client, caplog
+):
+    """A document with NO prompts is downloaded straight from the UI with no
+    preceding answer PUT, so nothing guarantees it has an occurrence 0 — that
+    resource has only ever been observed on a prompted document. Rather than
+    breaking those downloads, fall back to .../reports/{id}, which served them
+    until 2026-08-04, and say so: on a prompted document that same resource is
+    what exported layout with no data rows."""
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.text = 'the resource of type "Occurrence" with identifier "0" does not exist.'
+    fallback = MagicMock()
+    fallback.status_code = 200
+    fallback.content = b"id,sku\n1,A100\n"
+    fallback.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[missing, fallback]) as mock_get:
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            result = authenticated_client.download_report("DOC1", "RPT2", "csv")
+
+    assert result == fallback.content
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert urls[0].endswith("/documents/DOC1/occurrences/0")
+    assert urls[1].endswith("/documents/DOC1/reports/RPT2")
+    assert "occurrence" in caplog.text.lower()
+
+
+def test_download_report_does_not_fall_back_on_other_errors(authenticated_client):
+    """Only a 404 means "no such occurrence". A 500 or a 403 must surface."""
+    from etl_framework.exceptions import BOAPIError
+    failed = MagicMock()
+    failed.status_code = 500
+    failed.text = "boom"
+    with patch.object(authenticated_client._session, "get", return_value=failed) as mock_get:
+        with pytest.raises(BOAPIError):
+            authenticated_client.download_report("DOC1", "RPT2", "csv")
+    assert mock_get.call_count == 1
 
 
 def test_download_report_http_error_raises(authenticated_client):
@@ -979,38 +1030,6 @@ def test_download_report_warns_and_probes_dataproviders_when_no_data_rows(
     assert any(u.endswith("/documents/DOC1/dataproviders") for u in urls)
 
 
-def test_blank_export_probes_occurrence_zero_before_and_after_opening(
-    authenticated_client, caplog
-):
-    """The on-premises UI reads report data from
-    .../documents/{id}/occurences/0 (BO's spelling, single r) inside a viewing
-    session. An earlier 404 for identifier "1" was generalised to "a stateless
-    client has no occurrence"; index 0 was never tried. A blank export must
-    probe occurrence 0 cold AND after opening the document, so a real run says
-    which of the two it is instead of leaving it to inference."""
-    export = MagicMock()
-    export.status_code = 200
-    export.content = _xlsx_with_rows(1)
-    export.headers = {}
-    probe = MagicMock()
-    probe.status_code = 200
-    probe.text = "{}"
-
-    with patch.object(authenticated_client._session, "get",
-                      side_effect=[export] + [probe] * 4) as mock_get:
-        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
-            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
-
-    urls = [call[0][0] for call in mock_get.call_args_list]
-    assert urls.count("http://bo.example.com/biprws/raylight/v1/documents/DOC1/occurences/0") == 2
-    # the document open must sit between the two occurrence probes
-    occ_positions = [i for i, u in enumerate(urls) if u.endswith("/occurences/0")]
-    open_position = urls.index("http://bo.example.com/biprws/raylight/v1/documents/DOC1")
-    assert occ_positions[0] < open_position < occ_positions[1]
-    assert "occurence-0-cold" in caplog.text
-    assert "occurence-0-after-open" in caplog.text
-
-
 def test_download_report_logs_cell_preview_so_layout_rows_are_recognisable(
     authenticated_client, caplog
 ):
@@ -1055,7 +1074,6 @@ def test_export_diagnostics_can_be_forced_by_env_var(authenticated_client, monke
                       side_effect=[export] + [probe] * 4) as mock_get:
         authenticated_client.download_report("DOC1", "RPT2", "xlsx")
     urls = [call[0][0] for call in mock_get.call_args_list]
-    assert any(u.endswith("/occurences/0") for u in urls)
     assert any(u.endswith("/dataproviders") for u in urls)
 
 
@@ -1317,28 +1335,84 @@ def test_get_document_parameters_404_raises_report_not_found(authenticated_clien
 
 
 def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client):
+    """Reproduces the 2026-08-04 live UI trace byte for byte:
+    PUT .../documents/124313/occurrences/0/parameters
+        ?dataproviderScope=accessible&lovInfo=false&prepare=false
+
+    Occurrence 0 — not the document-level parameters resource. Answering the
+    document accepted the values with 200 but left the export blank; only the
+    occurrence PUT reports allDataprovidersRefreshed=true, i.e. only it runs
+    the refresh the export then reads. (The earlier 404 was for occurrence
+    "1", a viewing session's own instance; index 0 is the persisted one.)"""
     resp = MagicMock()
     resp.status_code = 200
+    resp.json.return_value = {"success": {"details": {"property": [
+        {"@key": "allDataprovidersRefreshed", "$": "true"}]}}}
     with patch.object(authenticated_client._session, "put", return_value=resp) as mock_put:
         authenticated_client.answer_document_parameters(
-            "124267",
-            [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+            "124313",
+            [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"},
+             {"id": 1, "type": "String", "value": "ASX"}],
         )
     url = mock_put.call_args[0][0]
-    # Answer the document-level parameters resource, NOT an occurrence. An
-    # occurrence only exists inside an interactive viewing session (the browser
-    # trace's "occurrences/1" was that session's own instance); a stateless
-    # REST client has none, and the server replies 404 'the resource of type
-    # "Occurrence" with identifier "1" does not exist'. This is the same
-    # resource whose GET already returns the prompt list.
-    assert url.endswith("/documents/124267/parameters")
-    assert "occurrence" not in url.lower()
+    assert url.endswith("/documents/124313/occurrences/0/parameters")
     assert mock_put.call_args[1]["params"] == {
-        "dataproviderScope": "accessible", "lovinfo": "false", "prepare": "false",
+        "dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false",
     }
     assert mock_put.call_args[1]["json"] == {"parameters": {"parameter": [
         {"id": 0, "answer": {"values": {"value": [
-            {"$": "2026-06-01T23:00:00.000Z", "@type": "DateTime"}]}}}]}}
+            {"$": "2026-05-08T00:00:00.000Z", "@type": "DateTime"}]}}},
+        {"id": 1, "answer": {"values": {"value": [
+            {"$": "ASX", "@type": "String"}]}}}]}}
+
+
+def test_answer_document_parameters_warns_when_dataproviders_did_not_refresh(
+    authenticated_client, caplog
+):
+    """`allDataprovidersRefreshed: "true"` is the only positive evidence in the
+    whole flow that the answers reached the data. HTTP 200 is not — the blank
+    export was a 200. A response without that flag must say so loudly, in the
+    same run, instead of surfacing later as an empty workbook."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"success": {"message": "updated"}}
+    with patch.object(authenticated_client._session, "put", return_value=resp):
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    assert "allDataprovidersRefreshed" in caplog.text
+
+
+def test_answer_document_parameters_warns_about_blank_answers(authenticated_client, caplog):
+    """The web UI sends every prompt and turns an untouched optional one into
+    "" (frontend/features/adapters.js). An empty answer is not the same as an
+    unanswered prompt — BO can filter on it and match nothing. Name the prompt
+    in the log so a blank export has a suspect ready."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"success": {"details": {"property": [
+        {"@key": "allDataprovidersRefreshed", "$": "true"}]}}}
+    with patch.object(authenticated_client._session, "put", return_value=resp):
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "124313",
+                [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"},
+                 {"id": 1, "type": "String", "value": ""}],
+            )
+    assert "empty" in caplog.text.lower()
+    assert "[1]" in caplog.text
+
+
+def test_answer_document_parameters_tolerates_a_non_json_response(authenticated_client):
+    """The refresh-flag check is an observation, not a gate: a deployment that
+    answers with something unparseable must not break the download."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.side_effect = ValueError("not json")
+    resp.text = "<html>ok</html>"
+    with patch.object(authenticated_client._session, "put", return_value=resp):
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
 
 
 def test_answer_document_parameters_raises_on_http_error(authenticated_client):
