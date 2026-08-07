@@ -1736,24 +1736,86 @@ def _refreshed_put_response(refreshed: str | None = "true") -> MagicMock:
     return resp
 
 
-def test_answer_document_parameters_does_not_open_the_document_first(
-    authenticated_client,
-):
-    """The client used to GET …/documents/{id} before answering, on the theory
-    that occurrence 0 might not exist until the document was opened. The
-    2026-08-07 probe run settles it: a session holding nothing but a logon
-    token wrote occurrence 0 cold — state "Modified", snapshot created,
-    rowCount 18159 — without ever opening the document, and neither does the
-    browser (SAPBO_10_bold.har). The GET is therefore not a courtesy but a
-    difference from the two callers known to work, on a document that is
-    refreshOnOpen:true."""
-    with patch.object(authenticated_client._session, "get") as mock_get,          patch.object(authenticated_client._session, "put",
-                      return_value=_refreshed_put_response()) as mock_put:
+def test_answer_document_parameters_reads_the_parameters_first(authenticated_client):
+    """The 2026-08-07 10:16 probe run found the cause of the blank export.
+
+    Two cold sessions, identical but for one GET:
+
+        9  logon then PUT          -> refreshed "false", rowCount 0,     1.3s
+        10 logon, GET parameters,
+           then PUT                -> refreshed "true",  rowCount 28444, 5.3s
+
+    Step 9 is the client's own process shape — download_bo_report builds a
+    fresh client, authenticates and answers immediately — and reproduces the
+    live failure down to the ~1s round trip. The answer PUT only binds prompt
+    values if …/documents/{id}/parameters has been read in the same session;
+    without it BO accepts the PUT, reports success, refreshes against the
+    document's saved state and matches nothing.
+
+    Note the resource. `GET …/documents/{id}` was tried for this and does not
+    work (matrix steps 5 and 6 refreshed with and without it, and the 2026-08-05
+    11:53 client run failed while making it). It is the parameters listing that
+    primes the session."""
+    order: list[tuple[str, str]] = []
+
+    def fake_get(url, **kwargs):
+        order.append(("GET", url))
+        return MagicMock(status_code=200)
+
+    def fake_put(url, **kwargs):
+        order.append(("PUT", url))
+        return _refreshed_put_response()
+
+    with patch.object(authenticated_client._session, "get", side_effect=fake_get),          patch.object(authenticated_client._session, "put", side_effect=fake_put):
         authenticated_client.answer_document_parameters(
             "124313", [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"}])
-    assert not mock_get.called
-    assert mock_put.call_args[0][0].endswith(
-        "/documents/124313/occurrences/0/parameters")
+
+    assert [method for method, _ in order] == ["GET", "PUT"]
+    assert order[0][1].endswith("/documents/124313/parameters")
+    assert order[1][1].endswith("/documents/124313/occurrences/0/parameters")
+
+
+def test_answer_document_parameters_survives_a_failed_parameters_read(
+    authenticated_client, caplog
+):
+    """A deployment that refuses the priming read must still get the answer
+    PUT, whose own error is the one worth surfacing. But the export that
+    follows will carry no rows, so say so — a silent skip here is precisely the
+    failure that took this long to find."""
+    failed = MagicMock()
+    failed.status_code = 500
+    failed.text = "boom"
+    with patch.object(authenticated_client._session, "get", return_value=failed),          patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response()) as mock_put:
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters(
+                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    assert mock_put.called
+    assert "no data rows" in caplog.text
+
+
+def test_answer_document_parameters_does_not_open_the_document(authenticated_client):
+    """`GET …/documents/{id}` is the wrong resource for priming the session and
+    is not made.
+
+    It was added on the theory that occurrence 0 might not exist until the
+    document was opened, then removed when the probe wrote occurrence 0 cold.
+    The 2026-08-07 matrix confirms it is inert: steps 5 and 6 refreshed with and
+    without it, and the 2026-08-05 11:53 client run failed while making it. The
+    read that does prime the session is the parameters listing — see
+    test_answer_document_parameters_reads_the_parameters_first."""
+    seen: list[str] = []
+
+    def fake_get(url, **kwargs):
+        seen.append(url)
+        return MagicMock(status_code=200)
+
+    with patch.object(authenticated_client._session, "get", side_effect=fake_get),          patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response()):
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"}])
+
+    assert not any(u.endswith("/documents/124313") for u in seen)
 
 
 def test_client_sends_the_viewer_headers_on_every_call(env_config):
