@@ -1746,6 +1746,31 @@ def test_answer_document_parameters_does_not_fire_the_405_refresh_trigger(
     assert not mock_post.called
 
 
+def test_answer_document_parameters_logs_the_values_it_sent(
+    authenticated_client, caplog
+):
+    """The 2026-08-07 matrix acquitted every difference in request *shape* —
+    viewer headers, the c= buster, the pre-answer open, re-sending an unchanged
+    value, and the occurrence-vs-document resource all refreshed. What the
+    client sends that nothing else has replayed is the payload itself: the date
+    is converted through the app timezone, so a non-UTC setting ships a shifted
+    instant (2026-05-08 -> "2026-05-07T23:00:00.000Z") where the browser and
+    the probe both send plain UTC midnight.
+
+    The log recorded ids and types but never the values, which is why the
+    11:53 failure could not be replayed. Log them, so one failing download
+    names the payload instead of hiding it."""
+    with patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response()):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.answer_document_parameters("124313", [
+                {"id": 0, "type": "DateTime", "value": "2026-05-07T23:00:00.000Z"},
+                {"id": 1, "type": "String", "value": "ASX"},
+            ])
+    assert "2026-05-07T23:00:00.000Z" in caplog.text
+    assert "ASX" in caplog.text
+
+
 def test_answer_document_parameters_logs_the_url_it_answered(
     authenticated_client, caplog
 ):

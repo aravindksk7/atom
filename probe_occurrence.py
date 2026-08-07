@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import re
 import time
 import zipfile
@@ -87,6 +88,12 @@ def parse_args() -> argparse.Namespace:
                    help="a second date, alternated with --date so each step "
                         "that is meant to change the answer really changes it")
     p.add_argument("--code", default="ASX", help="String prompt answer")
+    p.add_argument("--replay", default="",
+                   help="exact answers to replay as an extra matrix step, as a "
+                        "JSON list of {id, type, value}. Paste what the ETL "
+                        "client logged (\"SAP BO answering N parameter(s) on "
+                        "document D: [(id, type, value), ...]\") to reproduce a "
+                        "failing download here instead of a healthy one.")
     p.add_argument("--full-sequence", action="store_true",
                    help="also re-run the settled snapshot/render/export "
                         "comparison across both API bases")
@@ -201,19 +208,26 @@ def dataprovider_state(session: requests.Session, occ: str,
 
 def answer_put(session: requests.Session, doc: str, occ: str, args: argparse.Namespace,
                kw: dict, *, label: str, date: str, headers_on: bool,
-               cache_bust: bool, open_first: bool, document_level: bool) -> dict:
-    """One answer PUT with a single variable flipped. Returns a summary row."""
+               cache_bust: bool, open_first: bool, document_level: bool,
+               answers: list | None = None) -> dict:
+    """One answer PUT with a single variable flipped. Returns a summary row.
+
+    `answers` replaces the date/code pair with an exact {"id","type","value"}
+    list, so a payload the ETL client logged can be replayed verbatim.
+    """
     if open_first:
         # The client's own pre-answer open. The document is refreshOnOpen:true,
         # so this is not obviously inert.
         show(f"{label} GET document (open)", session.get(
             doc, params={"c": cache_buster()}, headers=JSON_HEADERS, **kw))
 
+    if answers is None:
+        answers = [{"id": 0, "type": "DateTime", "value": date},
+                   {"id": 1, "type": "String", "value": args.code}]
     body = {"parameters": {"parameter": [
-        {"id": 0, "answer": {"values": {"value": [
-            {"$": date, "@type": "DateTime"}]}}},
-        {"id": 1, "answer": {"values": {"value": [
-            {"@type": "String", "$": args.code}]}}},
+        {"id": a["id"], "answer": {"values": {"value": [
+            {"$": a["value"], "@type": a["type"]}]}}}
+        for a in answers
     ]}}
     # requests deletes a session header when a per-request value is None, which
     # is how a step drops the trace headers without disturbing the others.
@@ -270,12 +284,23 @@ def run_matrix(session: requests.Session, api: str, args: argparse.Namespace,
         ("6 client-exact",                     a, False, False, True,  False),
         ("7 document-level resource",          b, True,  True,  False, True),
     ]
-    return [
+    rows = [
         answer_put(session, doc, occ, args, kw, label=label, date=date,
                    headers_on=headers, cache_bust=bust, open_first=opened,
                    document_level=doc_level)
         for label, date, headers, bust, opened, doc_level in plan
     ]
+    # Every shape difference is already acquitted, so the payload is what is
+    # left to test. Replaying the exact triples the client logged is the only
+    # way to reproduce a failing download here rather than a healthy one.
+    if args.replay:
+        replay = json.loads(args.replay)
+        print(f"== replaying the client's exact answers: {replay}\n")
+        rows.append(answer_put(
+            session, doc, occ, args, kw, label="8 REPLAY client payload",
+            date="(replayed)", headers_on=True, cache_bust=True,
+            open_first=False, document_level=False, answers=replay))
+    return rows
 
 
 def run_render_check(session: requests.Session, api: str, args: argparse.Namespace,
