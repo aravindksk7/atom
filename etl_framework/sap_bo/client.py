@@ -820,6 +820,66 @@ class BORestClient:
                 self._occurrence_segment = segment
                 return
 
+    def _prime_document_parameters(self, doc_id: str) -> None:
+        """GET …/documents/{doc_id}/parameters — required before the answer PUT.
+
+        The 2026-08-07 10:16 probe run found this. Two cold sessions, identical
+        but for one GET:
+
+            9  logon then PUT                    -> refreshed "false",
+                                                    rowCount 0,     1.3s
+            10 logon, GET parameters, then PUT   -> refreshed "true",
+                                                    rowCount 28444, 5.3s
+
+        Step 9 is this client's own process shape — `download_bo_report` builds
+        a fresh client, authenticates and answers immediately — and reproduces
+        the live failure down to the ~1s round trip. The answer PUT only binds
+        prompt values if the parameters have been read in the same session.
+        Without it BO accepts the PUT, replies "successfully updated", refreshes
+        against the document's saved state and matches nothing: a query that
+        completes with isPartial "false" and rowCount 0, and an export of
+        report layout with no data rows.
+
+        The resource matters. `GET …/documents/{id}` was tried for this and does
+        not work — matrix steps 5 and 6 refreshed with and without it, and the
+        2026-08-05 11:53 client run failed while making it. It is the parameters
+        listing that primes the session.
+
+        Never raises: a deployment that refuses the read must still get the
+        answer PUT, whose own error is the more informative one. But the export
+        that follows will carry no rows, so the failure is logged as such rather
+        than skipped silently — which is exactly what made this take so long to
+        find.
+        """
+        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
+        try:
+            response = self._session.get(
+                url,
+                # The gateway in front of this deployment keys on URL path
+                # alone; it already defeats `page` and `Range:` on the document
+                # listing, and a cached listing would not prime anything.
+                params={"c": str(int(time.time() * 1000))},
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SAP BO could not read document %s's parameters before answering "
+                "(%s). The answer PUT needs that read to bind the prompt values, "
+                "so the export is likely to come back with layout but no data "
+                "rows.", doc_id, exc,
+            )
+            return
+        if response.status_code >= 400:
+            logger.warning(
+                "SAP BO could not read document %s's parameters before answering "
+                "(HTTP %s: %s). The answer PUT needs that read to bind the prompt "
+                "values, so the export is likely to come back with layout but no "
+                "data rows.",
+                doc_id, response.status_code, str(response.text or "")[:300],
+            )
+
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
         """PUT …/documents/{doc_id}/occurrences/0/parameters — answer a
         document's prompts and refresh its data providers.
@@ -858,6 +918,7 @@ class BORestClient:
         """
         if not self._token:
             self.authenticate()
+        self._prime_document_parameters(doc_id)
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
