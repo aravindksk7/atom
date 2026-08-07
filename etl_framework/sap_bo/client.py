@@ -152,6 +152,24 @@ def _dataproviders_refreshed_flag(response) -> str | None:
     return None
 
 
+# Sent by the Fiori BI viewer on every Raylight call (SAPBO_10_bold.har) and by
+# probe_occurrence.py, the two callers observed refreshing this deployment. The
+# client sent only X-SAP-LogonToken and is the only caller whose answer PUT
+# comes back allDataprovidersRefreshed:"false".
+#
+# `X-Client-Type: wise` is the one with teeth — it identifies the caller as a
+# WebI interactive-viewing client, the session kind that owns a live document
+# instance for a refresh to act on. The rest are sent because they are part of
+# the configuration known to work, not because any of them is individually
+# implicated; probe_occurrence.py's matrix separates them.
+_VIEWER_HEADERS = {
+    "X-Client-Type": "wise",
+    "X-SAP-PVL": "en_US",
+    "Accept-Language": "en_US",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+
 class BORestClient:
     LOGON_ENDPOINT = "/biprws/logon/long"
     REPORT_ENDPOINT = "/biprws/raylight/v1/documents/{doc_id}/reports"
@@ -186,6 +204,7 @@ class BORestClient:
         # in a session. See download_report.
         self._last_refresh: tuple[str, str | None] | None = None
         self._session = requests.Session()
+        self._session.headers.update(_VIEWER_HEADERS)
         self._verify_ssl = env_config.bo_verify_ssl
         self._server_utc_offset_hours = env_config.bo_server_utc_offset_hours
         proxy_url = env_config.bo_proxy_url.strip()
@@ -798,40 +817,6 @@ class BORestClient:
                 self._occurrence_segment = segment
                 return
 
-    def _open_document(self, doc_id: str) -> None:
-        """GET …/documents/{doc_id} — SAP's documented step before any
-        parameter write: it initialises the document inside the Raylight
-        server cache.
-
-        Never raises. The client wrote straight to occurrence 0 for as long as
-        that happened to be reachable cold on this deployment, which left
-        "does the occurrence need the document opened first?" unanswered (it is
-        the question `probe_occurrence.py` exists to settle). One idempotent
-        GET removes the question without making a deployment that refuses the
-        open fail a download it would otherwise complete — the answer PUT that
-        follows raises on its own if the open genuinely mattered.
-        """
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
-        try:
-            response = self._session.get(
-                url,
-                headers={"Accept": "application/json"},
-                timeout=self._timeout,
-                verify=self._verify_ssl,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "SAP BO could not open document %s to seed the session cache "
-                "(%s); answering its parameters anyway.", doc_id, exc,
-            )
-            return
-        if response.status_code >= 400:
-            logger.warning(
-                "SAP BO could not open document %s to seed the session cache "
-                "(HTTP %s: %s); answering its parameters anyway.",
-                doc_id, response.status_code, str(response.text or "")[:300],
-            )
-
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
         """PUT …/documents/{doc_id}/occurrences/0/parameters — answer a
         document's prompts and refresh its data providers.
@@ -870,7 +855,6 @@ class BORestClient:
         """
         if not self._token:
             self.authenticate()
-        self._open_document(doc_id)
         body = {"parameters": {"parameter": [
             {"id": a["id"], "answer": {"values": {"value": [
                 {"$": a["value"], "@type": a["type"]}]}}}
@@ -895,7 +879,16 @@ class BORestClient:
         for url in self._occurrence_urls(doc_id, "/parameters"):
             response = self._session.put(
                 url,
-                params={"dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false"},
+                params={
+                    "dataproviderScope": "accessible",
+                    "lovInfo": "false",
+                    "prepare": "false",
+                    # The viewer puts c=<ms> on every URL including this PUT.
+                    # This deployment sits behind a gateway already caught
+                    # keying purely on URL path — it defeats both `page` and
+                    # `Range:` on the document listing.
+                    "c": str(int(time.time() * 1000)),
+                },
                 json=body,
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
                 timeout=self._timeout,
