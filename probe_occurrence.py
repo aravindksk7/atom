@@ -381,30 +381,85 @@ def run_full_sequence(session: requests.Session, api: str, tag: str,
             headers={"Accept": XLSX}, **kw))
 
 
-def main() -> int:
-    args = parse_args()
-    base = args.url.rstrip("/")
+def logon(base: str, args: argparse.Namespace, kw: dict,
+          *, label: str = "logon") -> requests.Session | None:
+    """A fresh authenticated session, or None if the logon failed."""
     session = requests.Session()
     session.headers.update(TRACE_HEADERS)
-    kw = {"timeout": args.timeout, "verify": not args.insecure}
-
-    logon = session.post(
+    response = session.post(
         f"{base}/biprws/logon/long",
         json={"password": args.password, "clientType": "",
               "auth": args.auth, "userName": args.user},
         headers=PUT_HEADERS, **kw,
     )
-    token = logon.headers.get("X-SAP-LogonToken")
-    print(f"logon HTTP {logon.status_code} token={'yes' if token else 'NO'}")
+    token = response.headers.get("X-SAP-LogonToken")
+    print(f"{label} HTTP {response.status_code} token={'yes' if token else 'NO'}")
     if not token:
-        print(logon.text[:900])
-        return 1
+        print(response.text[:900])
+        return None
     session.headers.update({"X-SAP-LogonToken": token})
+    return session
+
+
+def run_cold_sessions(base: str, api: str, args: argparse.Namespace,
+                      kw: dict) -> list[dict]:
+    """Reproduce the ETL client's *process* shape, not just its request shape.
+
+    Every matrix step so far ran in a session that had already read
+    …/documents/{id}/parameters — run_matrix does that first, so the read was a
+    constant, never a variable. The ETL client's download builds a fresh client,
+    authenticates and PUTs immediately: its session has never touched the
+    document. That is the one difference left once the account, the payload, the
+    URL, the headers, the buster, the pre-answer open and the resource are all
+    the same.
+
+    If a PUT on a session with no prompt context refreshes against the document's
+    saved default (2003-12-05 on 124313) instead of the answered date, the query
+    completes and matches nothing — exactly the rowCount 0 the 2026-08-07 19:40
+    log recorded. Two cold sessions separate it: one PUTs straight after logon,
+    the other reads the parameters listing first and changes nothing else.
+    """
+    print(f"\n{'=' * 72}\n== COLD SESSIONS\n{'=' * 72}\n")
+    doc = f"{api}/documents/{args.doc}"
+    occ = f"{doc}/occurrences/0"
+    rows: list[dict] = []
+
+    for label, read_listing, date in (
+        ("9 cold session, PUT straight after logon", False, args.date),
+        ("10 cold session, parameters read first", True, args.date_b),
+    ):
+        session = logon(base, args, kw, label=f"[{label}] logon")
+        if session is None:
+            continue
+        try:
+            if read_listing:
+                listing = session.get(f"{doc}/parameters",
+                                      params={"c": cache_buster()},
+                                      headers=JSON_HEADERS, **kw)
+                show(f"{label} params-listing", listing, limit=200)
+                print(f"    stored answers: {stored_answers(listing)}\n")
+            rows.append(answer_put(
+                session, doc, occ, args, kw, label=label, date=date,
+                headers_on=True, cache_bust=True, open_first=False,
+                document_level=False))
+        finally:
+            session.post(f"{base}/biprws/logoff", headers=JSON_HEADERS, **kw)
+    return rows
+
+
+def main() -> int:
+    args = parse_args()
+    base = args.url.rstrip("/")
+    kw = {"timeout": args.timeout, "verify": not args.insecure}
+    session = logon(base, args, kw)
+    if session is None:
+        return 1
 
     api = f"{base}/biprws/raylight/v1"
     try:
         rows = run_matrix(session, api, args, kw)
         render = run_render_check(session, api, args, kw)
+        rows += run_cold_sessions(base, api, args, kw)
         if args.full_sequence:
             portal = args.portal_path.strip("/")
             run_full_sequence(session, api, "direct", args, kw)
@@ -414,16 +469,23 @@ def main() -> int:
         session.post(f"{base}/biprws/logoff", headers=JSON_HEADERS, **kw)
 
     print(f"\n{'=' * 78}\n== ANSWER-PUT MATRIX\n{'=' * 78}")
-    print(f"{'step':<28} {'hdrs':<5} {'c':<5} {'open':<5} {'refreshed':<10} "
+    print(f"{'step':<42} {'hdrs':<5} {'c':<5} {'open':<5} {'refreshed':<10} "
           f"{'rows':<7} {'secs':<5} dp.updated")
     for r in rows:
-        print(f"{r['label']:<28} {str(r['headers']):<5} {str(r['cache_bust']):<5} "
+        print(f"{r['label']:<42} {str(r['headers']):<5} {str(r['cache_bust']):<5} "
               f"{str(r['open_first']):<5} {str(r['refreshed']):<10} "
               f"{str(r['rows']):<7} {r['secs']:<5} {r['updated']}")
     print("\nRead it as: a step whose dp.updated did NOT move past the previous "
           "row's did not run the data providers, whatever its refresh flag "
           "says. Step 2 falsifies 'an unchanged answer still refreshes'; steps "
-          "3-6 each convict or acquit one client-vs-script difference.")
+          "3-7 each convict or acquit one client-vs-script difference — all "
+          "were acquitted on 2026-08-07.\n"
+          "Steps 9 and 10 are the ones that matter now. They test the process "
+          "shape rather than the request: 9 PUTs on a session that has never "
+          "read the document, which is exactly what the ETL client's download "
+          "does, and 10 adds only the parameters listing. rows=0 on 9 and rows "
+          "on 10 means the client must read …/documents/{id}/parameters in the "
+          "same session before it answers.")
 
     print(f"\n{'=' * 78}\n== RENDER CHECK\n{'=' * 78}")
     for label, count in render:
