@@ -841,13 +841,19 @@ class BORestClient:
         schedule step. Step 2 is `download_report`, which MUST read the same
         occurrence — see its docstring.
 
-        Answering the **document-level** parameters resource instead (the one
-        `get_document_parameters` reads) is accepted with HTTP 200 but leaves
-        the export blank: only the occurrence PUT reports
-        `allDataprovidersRefreshed: "true"`, i.e. only it runs the refresh the
-        export then reads. That flag is the one piece of positive evidence in
-        this flow, so its absence is logged as a warning here rather than
-        discovered later as a workbook of column headers with no rows.
+        `allDataprovidersRefreshed` is the one piece of positive evidence in
+        this flow, and the thing that decides whether the export carries data —
+        the export resource does not (see `download_report`). Its absence is
+        logged as a warning here rather than discovered later as a workbook of
+        column headers with no rows, and recorded on `_last_refresh` so the
+        export can collect diagnostics instead of guessing from a row count.
+
+        Whether the **document-level** parameters resource (the one
+        `get_document_parameters` reads) would do just as well is untested. It
+        was once claimed here that only the occurrence PUT refreshes; nothing
+        on record establishes that, and the neighbouring claim about export
+        resources turned out to be false, so treat it as open. The occurrence
+        is used because it is the resource the browser writes.
 
         Occurrence **0** specifically: an earlier 404 (`the resource of type
         "Occurrence" with identifier "1" does not exist`) was for index 1, a
@@ -951,13 +957,23 @@ class BORestClient:
         """GET …/documents/{doc_id}/occurrences/0 — export as PDF/XLSX/CSV via
         the Accept header, with the report tab chosen by `reportIds`.
 
-        Step 2 of the on-premises UI's two-step flow (2026-08-04 trace):
-        `answer_document_parameters` refreshes occurrence 0's data providers,
-        then this reads that same occurrence. Exporting from
-        `…/documents/{id}/reports/{id}` instead — which this did until
-        2026-08-04 — returns HTTP 200 and a well-formed workbook containing the
-        report layout and **zero data rows**, because that resource does not
-        see the refresh.
+        Step 2 of the flow: `answer_document_parameters` refreshes occurrence
+        0's data providers, then this reads that same occurrence.
+
+        The export resource does **not** decide whether data comes back. This
+        docstring used to claim `…/documents/{id}/reports/{id}` "returns HTTP
+        200 and a well-formed workbook containing the report layout and zero
+        data rows, because that resource does not see the refresh". The
+        2026-08-07 probe run disproves it: against a refreshed document,
+        occurrences/0?reportIds=N, occurrences/0/reports/N, documents/{id} and
+        documents/{id}/reports/N all returned the same 901280 bytes and 18175
+        rows. Occurrence 0 is kept because it is what the viewer reads and it
+        costs nothing, not because the alternatives are blank.
+
+        What decides it is upstream: whether the answer PUT reported
+        `allDataprovidersRefreshed:"true"`. A blank workbook means the refresh
+        did not run — see `answer_document_parameters` and the diagnostics at
+        the end of this method.
 
         An empty `report_id` exports the **whole document** — every tab in one
         file, SAP's primary step 5 — by omitting `reportIds` entirely rather
@@ -992,10 +1008,13 @@ class BORestClient:
         if response.status_code == 404:
             # A document with no prompts is downloaded with no preceding answer
             # PUT, so nothing guarantees it has an occurrence 0 — that resource
-            # has only been observed on a prompted document. Keep those
-            # downloads working via the resource that served them until
-            # 2026-08-04, but say so loudly: on a prompted document this is the
-            # path that exported layout with no data rows.
+            # has only been observed on a prompted document.
+            #
+            # The fallback is not a degraded export. The 2026-08-07 probe run
+            # pulled a refreshed document from all four resources and got
+            # identical bytes, so this warning no longer predicts missing rows;
+            # it records that the expected resource was absent, which is worth
+            # knowing on its own.
             #
             # Which resource depends on what was asked for: SAP's whole-document
             # export is the document itself, its single-tab alternative is
@@ -1003,8 +1022,7 @@ class BORestClient:
             # that named no report would export the tab called "".
             logger.warning(
                 "SAP BO occurrence 0 unavailable for document %s (HTTP 404: %s); "
-                "falling back to the %s resource. If this document has "
-                "prompts, expect an export with no data rows.",
+                "falling back to the %s resource.",
                 doc_id, str(response.text or "")[:300],
                 "report" if report_id else "document",
             )
