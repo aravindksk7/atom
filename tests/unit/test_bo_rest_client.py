@@ -1566,15 +1566,19 @@ def test_get_document_parameters_404_raises_report_not_found(authenticated_clien
 
 
 def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client):
-    """Reproduces the 2026-08-04 live UI trace byte for byte:
+    """Reproduces the live UI trace (SAPBO_10_bold.har, 2026-08-07 05:40:38):
     PUT .../documents/124313/occurrences/0/parameters
-        ?dataproviderScope=accessible&lovInfo=false&prepare=false
+        ?dataproviderScope=accessible&lovInfo=false&prepare=false&c=<ms>
 
-    Occurrence 0 — not the document-level parameters resource. Answering the
-    document accepted the values with 200 but left the export blank; only the
-    occurrence PUT reports allDataprovidersRefreshed=true, i.e. only it runs
-    the refresh the export then reads. (The earlier 404 was for occurrence
-    "1", a viewing session's own instance; index 0 is the persisted one.)"""
+    The `c` is part of that trace and was missing from this assertion, which
+    had been pinning three of the viewer's four query params as if they were
+    all of them.
+
+    Occurrence 0 — not the document-level parameters resource. Whether the
+    document-level one would refresh just as well is untested; it is avoided
+    because the occurrence is what the browser writes. (The earlier 404 was
+    for occurrence "1", a viewing session's own instance; index 0 is the
+    persisted one.)"""
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = {"success": {"details": {"property": [
@@ -1587,9 +1591,11 @@ def test_answer_document_parameters_puts_trace_shaped_body(authenticated_client)
         )
     url = mock_put.call_args[0][0]
     assert url.endswith("/documents/124313/occurrences/0/parameters")
-    assert mock_put.call_args[1]["params"] == {
+    params = mock_put.call_args[1]["params"]
+    assert {k: v for k, v in params.items() if k != "c"} == {
         "dataproviderScope": "accessible", "lovInfo": "false", "prepare": "false",
     }
+    assert int(params["c"]) > 0
     assert mock_put.call_args[1]["json"] == {"parameters": {"parameter": [
         {"id": 0, "answer": {"values": {"value": [
             {"$": "2026-05-08T00:00:00.000Z", "@type": "DateTime"}]}}},
@@ -1670,56 +1676,56 @@ def _refreshed_put_response(refreshed: str | None = "true") -> MagicMock:
     return resp
 
 
-def test_answer_document_parameters_opens_the_document_before_answering(authenticated_client):
-    """SAP's documented Raylight flow opens the document — GET
-    …/documents/{id} — to create the server-side session cache BEFORE any
-    parameter is written or any refresh triggered. This client had been
-    writing straight to the occurrence, which only worked because occurrence 0
-    happened to be reachable cold on this deployment; `probe_occurrence.py`
-    was written precisely because "does it need the document opened first" was
-    never settled. One idempotent GET removes the question."""
-    order: list[tuple[str, str]] = []
-    opened = MagicMock()
-    opened.status_code = 200
-
-    def fake_get(url, **kwargs):
-        order.append(("GET", url))
-        return opened
-
-    put_resp = _refreshed_put_response()
-
-    def fake_put(url, **kwargs):
-        order.append(("PUT", url))
-        return put_resp
-
-    with patch.object(authenticated_client._session, "get", side_effect=fake_get), \
-         patch.object(authenticated_client._session, "put", side_effect=fake_put):
+def test_answer_document_parameters_does_not_open_the_document_first(
+    authenticated_client,
+):
+    """The client used to GET …/documents/{id} before answering, on the theory
+    that occurrence 0 might not exist until the document was opened. The
+    2026-08-07 probe run settles it: a session holding nothing but a logon
+    token wrote occurrence 0 cold — state "Modified", snapshot created,
+    rowCount 18159 — without ever opening the document, and neither does the
+    browser (SAPBO_10_bold.har). The GET is therefore not a courtesy but a
+    difference from the two callers known to work, on a document that is
+    refreshOnOpen:true."""
+    with patch.object(authenticated_client._session, "get") as mock_get,          patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response()) as mock_put:
         authenticated_client.answer_document_parameters(
             "124313", [{"id": 0, "type": "DateTime", "value": "2026-05-08T00:00:00.000Z"}])
+    assert not mock_get.called
+    assert mock_put.call_args[0][0].endswith(
+        "/documents/124313/occurrences/0/parameters")
 
-    assert [method for method, _ in order] == ["GET", "PUT"]
-    assert order[0][1].endswith("/biprws/raylight/v1/documents/124313")
-    assert order[1][1].endswith("/documents/124313/occurrences/0/parameters")
+
+def test_client_sends_the_viewer_headers_on_every_call(env_config):
+    """Both callers observed refreshing this deployment — the Fiori viewer in
+    SAPBO_10_bold.har and probe_occurrence.py on 2026-08-07 — send these on
+    every Raylight request. The client sent only X-SAP-LogonToken and is the
+    only caller whose answer PUT comes back allDataprovidersRefreshed:"false".
+    X-Client-Type: wise is the one with teeth: it identifies the caller as a
+    WebI interactive-viewing client."""
+    from etl_framework.sap_bo.client import BORestClient
+
+    headers = BORestClient(env_config)._session.headers
+    assert headers["X-Client-Type"] == "wise"
+    assert headers["X-SAP-PVL"] == "en_US"
+    assert headers["Accept-Language"] == "en_US"
+    assert headers["X-Requested-With"] == "XMLHttpRequest"
 
 
-def test_answer_document_parameters_survives_a_failed_document_open(
-    authenticated_client, caplog
-):
-    """The open is a cache-seeding courtesy, not a gate. A deployment that
-    refuses it must still get the answer PUT, whose own error is the one worth
-    surfacing — but the failed open is logged so it cannot be the silent cause
-    of a later blank export."""
-    failed_open = MagicMock()
-    failed_open.status_code = 500
-    failed_open.text = "boom"
-    with patch.object(authenticated_client._session, "get", return_value=failed_open), \
-         patch.object(authenticated_client._session, "put",
+def test_answer_document_parameters_sends_a_cache_buster(authenticated_client):
+    """The viewer puts c=<ms> on every URL including this PUT, and this
+    deployment sits behind a gateway already caught keying purely on URL path —
+    it defeats both `page` and `Range:` on the document listing. The export
+    already carried a buster; the answer PUT did not."""
+    with patch.object(authenticated_client._session, "put",
                       return_value=_refreshed_put_response()) as mock_put:
-        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
-            authenticated_client.answer_document_parameters(
-                "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
-    assert mock_put.called
-    assert "open" in caplog.text.lower()
+        authenticated_client.answer_document_parameters(
+            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
+    params = mock_put.call_args[1]["params"]
+    assert params["dataproviderScope"] == "accessible"
+    assert params["lovInfo"] == "false"
+    assert params["prepare"] == "false"
+    assert int(params["c"]) > 0
 
 
 def test_answer_document_parameters_does_not_fire_the_405_refresh_trigger(
