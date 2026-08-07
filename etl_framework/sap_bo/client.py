@@ -960,6 +960,13 @@ class BORestClient:
         Step 2 of the flow: `answer_document_parameters` refreshes occurrence
         0's data providers, then this reads that same occurrence.
 
+        This URL and its parameters are confirmed against a real browser
+        download (SAPBO_10_bold.har, 2026-08-07 05:41:36): the viewer's Export
+        → Excel issues exactly `GET …/documents/{id}/occurrences/0?dpi=96&
+        optimized=true&reportIds={n}&c=<ms>` with the xlsx Accept header, and
+        gets 901280 bytes back. Earlier revisions of this docstring cited a
+        trace that did not in fact contain the export.
+
         The export resource does **not** decide whether data comes back. This
         docstring used to claim `…/documents/{id}/reports/{id}` "returns HTTP
         200 and a well-formed workbook containing the report layout and zero
