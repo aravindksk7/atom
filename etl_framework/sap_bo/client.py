@@ -940,12 +940,17 @@ class BORestClient:
                 "SAP BO document %s reports allDataprovidersRefreshed=true", doc_id,
             )
         else:
+            # A prediction, not a diagnosis. The 2026-08-07 19:40 log shows
+            # "false" arriving alongside providers whose `updated` had moved to
+            # this PUT's own moment, isPartial "false" and rowCount 0: the query
+            # ran to completion and matched nothing. So the flag does not mean
+            # the refresh was skipped — it reliably precedes a data-less export,
+            # which is all that is claimed here. `download_report` reads it off
+            # `_last_refresh` and gets the actual verdict from the providers.
+            #
             # No escalation follows. SAP documents POST …/documents/{id}/parameters
             # as a separate refresh trigger and this client used to call it here;
-            # the on-premises server answers that method with HTTP 405, so all it
-            # bought was a failed request and a warning claiming a recovery had
-            # been attempted. The flag itself is the signal — `download_report`
-            # reads it off `_last_refresh` and collects diagnostics.
+            # the on-premises server answers that method with HTTP 405.
             logger.warning(
                 "SAP BO document %s answered without allDataprovidersRefreshed=true "
                 "(got %r) — the export is likely to come back with layout but no "
@@ -1096,8 +1101,12 @@ class BORestClient:
             self._log_blank_export_diagnostics(doc_id)
         return response.content
 
-    def _diagnostic_get(self, label: str, url: str) -> None:
-        """GET a diagnostic resource and log status + body. Never raises."""
+    def _diagnostic_get(self, label: str, url: str):
+        """GET a diagnostic resource and log status + body. Never raises.
+
+        Returns the response so the caller can draw a conclusion from it, or
+        None if the request failed.
+        """
         try:
             response = self._session.get(
                 url,
@@ -1105,14 +1114,69 @@ class BORestClient:
                 timeout=self._timeout,
                 verify=self._verify_ssl,
             )
-            logger.warning(
-                "SAP BO blank-export diagnostic [%s] %s -> HTTP %s: %s",
-                label, url, response.status_code, str(response.text or "")[:1000],
-            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "SAP BO blank-export diagnostic [%s] %s failed: %s", label, url, exc
             )
+            return None
+        logger.warning(
+            "SAP BO blank-export diagnostic [%s] %s -> HTTP %s: %s",
+            label, url, response.status_code, str(response.text or "")[:1000],
+        )
+        return response
+
+    def _log_dataprovider_verdict(self, doc_id: str, response) -> None:
+        """Say what the occurrence's data providers mean. Never raises.
+
+        The 2026-08-07 19:40 log is why this exists. It carried
+        `allDataprovidersRefreshed:"false"` alongside providers reporting
+        `updated` equal to the answer PUT's own moment, `isPartial:"false"` and
+        `rowCount:0` — i.e. the query ran to completion and matched nothing.
+        The flag does not mean the refresh was skipped, and reading it that way
+        cost several rounds of investigation into the request instead of the
+        result.
+
+        Probe runs against that same document, with the same date and code but
+        a different account, return 18159 rows. A completed zero-row query
+        therefore points at what the account is allowed to see — row
+        restrictions on the universe, or a connection resolving to different
+        database credentials — rather than at anything this client sends.
+        """
+        if response is None:
+            return
+        try:
+            providers = _unwrap_collection(
+                response.json(), "dataproviders", "dataprovider")
+        except Exception:  # noqa: BLE001 - a verdict we cannot form is not fatal
+            return
+        if not providers:
+            return
+        counts = [p.get("rowCount") for p in providers if isinstance(p, dict)]
+        known = [c for c in counts if isinstance(c, int)]
+        if not known:
+            return
+        stamps = ", ".join(
+            f"{p.get('id')}: rowCount={p.get('rowCount')} updated={p.get('updated')}"
+            for p in providers if isinstance(p, dict)
+        )
+        if any(c > 0 for c in known):
+            logger.warning(
+                "SAP BO document %s: the data providers hold rows (%s) but the "
+                "export carried none — that is a problem with the export, not "
+                "with the query or the account.",
+                doc_id, stamps,
+            )
+            return
+        logger.warning(
+            "SAP BO document %s: the data providers ran and returned 0 rows "
+            "(%s). `updated` moving to the answer PUT's own moment means the "
+            "query executed and matched nothing — it was not skipped. Check "
+            "what this account may see (row restrictions on the universe, or a "
+            "connection mapping to different database credentials) and whether "
+            "the prompt values select any data; the same document and prompts "
+            "return rows for accounts with the rights.",
+            doc_id, stamps,
+        )
 
     def _log_blank_export_diagnostics(self, doc_id: str) -> None:
         """Dump the document's data-provider state after a suspiciously empty
@@ -1131,8 +1195,9 @@ class BORestClient:
         """
         doc_url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
         occurrence_url = next(iter(self._occurrence_urls(doc_id, "/dataproviders")))
-        self._diagnostic_get("dataproviders (occurrence)", occurrence_url)
+        occurrence = self._diagnostic_get("dataproviders (occurrence)", occurrence_url)
         self._diagnostic_get("dataproviders (document)", f"{doc_url}/dataproviders")
+        self._log_dataprovider_verdict(doc_id, occurrence)
 
     def schedule_object(self, object_id: str, schedule_params: dict | None = None) -> str:
         """POST /biprws/infostore/{object_id}/schedules — schedule any BOE

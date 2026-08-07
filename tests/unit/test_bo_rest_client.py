@@ -1,6 +1,7 @@
 """Tests for BORestClient SAP BO REST API methods."""
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -1327,6 +1328,65 @@ def test_blank_export_diagnostics_probe_the_occurrence_dataproviders(
     urls = [call[0][0] for call in mock_get.call_args_list]
     assert any(u.endswith("/documents/DOC1/occurrences/0/dataproviders") for u in urls)
     assert any(u.endswith("/documents/DOC1/dataproviders") for u in urls)
+
+
+def test_blank_export_diagnostics_name_a_zero_row_query_as_the_cause(
+    authenticated_client, monkeypatch, caplog
+):
+    """The 2026-08-07 19:40 log shows what allDataprovidersRefreshed:"false"
+    actually means here. The occurrence's data providers came back
+    updated=2026-08-07T09:40:15Z — the answer PUT's own moment, so they ran —
+    with isPartial "false" and rowCount 0. The query executed and matched
+    nothing; the refresh was not skipped.
+
+    Probe runs against the same document with the same date and code return
+    18159 rows for a different account, so a completed zero-row query points at
+    data-level rights, not at the request. Say that, instead of leaving the
+    reader to convert a UTC timestamp and compare it against a log clock."""
+    monkeypatch.setenv("ATOM_BO_EXPORT_DIAGNOSTICS", "1")
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    body = {"dataproviders": {"dataprovider": [
+        {"id": "DP0", "name": "Query 1", "updated": "2026-08-07T09:40:15.000Z",
+         "isPartial": "false", "rowCount": 0}]}}
+    probe.text = json.dumps(body)
+    probe.json.return_value = body
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4):
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "returned 0 row" in caplog.text
+    assert "2026-08-07T09:40:15.000Z" in caplog.text
+    assert "rights" in caplog.text.lower()
+
+
+def test_blank_export_diagnostics_distinguish_providers_that_hold_rows(
+    authenticated_client, monkeypatch, caplog
+):
+    """The opposite verdict has a different fix. Providers holding rows while
+    the export carries none is a problem with the export, not with the query or
+    the account — and must not be reported as a rights issue."""
+    monkeypatch.setenv("ATOM_BO_EXPORT_DIAGNOSTICS", "1")
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    body = {"dataproviders": {"dataprovider": [
+        {"id": "DP0", "updated": "2026-08-07T09:40:15.000Z", "rowCount": 18159}]}}
+    probe.text = json.dumps(body)
+    probe.json.return_value = body
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4):
+        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "18159" in caplog.text
+    assert "rights" not in caplog.text.lower()
 
 
 def test_download_report_logs_the_url_it_exported_from(authenticated_client, caplog):
