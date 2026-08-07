@@ -152,16 +152,19 @@ def _dataproviders_refreshed_flag(response) -> str | None:
     return None
 
 
-# Sent by the Fiori BI viewer on every Raylight call (SAPBO_10_bold.har) and by
-# probe_occurrence.py, the two callers observed refreshing this deployment. The
-# client sent only X-SAP-LogonToken and is the only caller whose answer PUT
-# comes back allDataprovidersRefreshed:"false".
+# Sent by the Fiori BI viewer on every Raylight call (SAPBO_10_bold.har).
 #
-# `X-Client-Type: wise` is the one with teeth — it identifies the caller as a
-# WebI interactive-viewing client, the session kind that owns a live document
-# instance for a refresh to act on. The rest are sent because they are part of
-# the configuration known to work, not because any of them is individually
-# implicated; probe_occurrence.py's matrix separates them.
+# These do NOT fix the blank export, and were briefly believed to. The
+# 2026-08-07 matrix ran the answer PUT with them and without them and got
+# allDataprovidersRefreshed:"true" either way — as it did for the c= buster,
+# the pre-answer document open, an unchanged answer value, and the
+# document-level parameters resource. Every difference in request shape is
+# acquitted; the cause is still open.
+#
+# They are kept only because matching the one caller known to work costs
+# nothing and this deployment sits behind a gateway with a history of treating
+# requests differently than it should. Do not read them as a fix, and do not
+# add more on the same reasoning.
 _VIEWER_HEADERS = {
     "X-Client-Type": "wise",
     "X-SAP-PVL": "en_US",
@@ -860,10 +863,20 @@ class BORestClient:
                 {"$": a["value"], "@type": a["type"]}]}}}
             for a in built_answers
         ]}}
+        # Values, not just ids and types. The 2026-08-07 matrix acquitted every
+        # difference in request *shape* — viewer headers, the c= buster, the
+        # pre-answer open, re-sending an unchanged value, and the
+        # occurrence-vs-document resource all refreshed. What is left
+        # unreplayed is the payload: `build_parameter_answers` converts a date
+        # through the app timezone, so a non-UTC setting ships a shifted
+        # instant ("2026-05-08" -> "2026-05-07T23:00:00.000Z") where the
+        # browser and the probe both send plain UTC midnight. The 11:53 failure
+        # could not be reproduced because this line recorded the shape and
+        # dropped the payload. Prompt answers are report filters, not secrets.
         logger.info(
-            "SAP BO answering %d parameter(s) on document %s (ids=%s, types=%s)",
+            "SAP BO answering %d parameter(s) on document %s: %s",
             len(built_answers), doc_id,
-            [a["id"] for a in built_answers], [a["type"] for a in built_answers],
+            [(a["id"], a["type"], a["value"]) for a in built_answers],
         )
         # The web UI posts every prompt and turns an untouched optional one into
         # "" (frontend/features/adapters.js). BO can apply that as a filter and
