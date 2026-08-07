@@ -180,6 +180,11 @@ class BORestClient:
         # The occurrence path spelling this server was proved to use, or None
         # while both candidates are still open. See _occurrence_urls.
         self._occurrence_segment: str | None = None
+        # (doc_id, allDataprovidersRefreshed) from the last answer PUT, so the
+        # export can tell a healthy pull from one it already knows will carry
+        # layout and no rows. Keyed by document because one client serves many
+        # in a session. See download_report.
+        self._last_refresh: tuple[str, str | None] | None = None
         self._session = requests.Session()
         self._verify_ssl = env_config.bo_verify_ssl
         self._server_utc_offset_hours = env_config.bo_server_utc_offset_hours
@@ -827,50 +832,6 @@ class BORestClient:
                 doc_id, response.status_code, str(response.text or "")[:300],
             )
 
-    def _trigger_parameter_refresh(self, doc_id: str) -> None:
-        """POST …/documents/{doc_id}/parameters with an empty body — SAP's
-        documented refresh trigger, used here only as an escalation.
-
-        Reached when the occurrence PUT came back without
-        `allDataprovidersRefreshed=true`, i.e. in exactly the state that used
-        to produce a workbook of layout with no data rows. Never raises: this
-        is a recovery attempt for a download already headed for a blank
-        export, and failing it would replace an inspectable empty workbook —
-        which the export's own diagnostics can explain — with an opaque error.
-        """
-        url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}/parameters"
-        logger.warning(
-            "SAP BO document %s: triggering the documented refresh POST %s "
-            "because the answer PUT did not report a refresh.", doc_id, url,
-        )
-        try:
-            response = self._session.post(
-                url,
-                json={},
-                headers={"Accept": "application/json", "Content-Type": "application/json"},
-                timeout=self._timeout,
-                verify=self._verify_ssl,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "SAP BO refresh POST for document %s failed: %s — the export "
-                "is still likely to come back with no data rows.", doc_id, exc,
-            )
-            return
-        if response.status_code >= 400:
-            logger.warning(
-                "SAP BO refresh POST for document %s -> HTTP %s: %s — the "
-                "export is still likely to come back with no data rows.",
-                doc_id, response.status_code, str(response.text or "")[:500],
-            )
-            return
-        refreshed = _dataproviders_refreshed_flag(response)
-        logger.info(
-            "SAP BO refresh POST for document %s -> HTTP %s (refreshed=%r): %s",
-            doc_id, response.status_code, refreshed,
-            str(response.text or "")[:1000],
-        )
-
     def answer_document_parameters(self, doc_id: str, built_answers: list[dict]) -> None:
         """PUT …/documents/{doc_id}/occurrences/0/parameters — answer a
         document's prompts and refresh its data providers.
@@ -950,23 +911,35 @@ class BORestClient:
         # A 200 here does not prove the answer took effect on the data the
         # export later reads — the blank export was a 200. Log what the server
         # echoed back, and single out the one flag that does carry evidence.
+        #
+        # The URL is logged on success too, not only on the error path above:
+        # the 2026-08-05 11:53 log recorded a refreshed=false response without
+        # it, which left "did that write reach the occurrence or the document?"
+        # — the single most important fact about the request — unanswerable
+        # after the fact.
         logger.info(
-            "SAP BO answer PUT for document %s -> HTTP %s: %s",
-            doc_id, response.status_code, str(response.text or "")[:1500],
+            "SAP BO answer PUT %s for document %s -> HTTP %s: %s",
+            url, doc_id, response.status_code, str(response.text or "")[:1500],
         )
         refreshed = _dataproviders_refreshed_flag(response)
+        self._last_refresh = (doc_id, refreshed)
         if refreshed == "true":
             logger.info(
                 "SAP BO document %s reports allDataprovidersRefreshed=true", doc_id,
             )
         else:
+            # No escalation follows. SAP documents POST …/documents/{id}/parameters
+            # as a separate refresh trigger and this client used to call it here;
+            # the on-premises server answers that method with HTTP 405, so all it
+            # bought was a failed request and a warning claiming a recovery had
+            # been attempted. The flag itself is the signal — `download_report`
+            # reads it off `_last_refresh` and collects diagnostics.
             logger.warning(
                 "SAP BO document %s answered without allDataprovidersRefreshed=true "
                 "(got %r) — the export is likely to come back with layout but no "
                 "data rows.",
                 doc_id, refreshed,
             )
-            self._trigger_parameter_refresh(doc_id)
 
     _MIME_MAP: dict[str, str] = {
         "pdf":  "application/pdf",
@@ -1052,9 +1025,9 @@ class BORestClient:
             )
         rows = _count_export_rows(response.content, format)
         logger.info(
-            "SAP BO export doc=%s report=%s fmt=%s -> HTTP %s, content-type=%s, "
+            "SAP BO export %s doc=%s report=%s fmt=%s -> HTTP %s, content-type=%s, "
             "bytes=%d, rows=%s",
-            doc_id, report_id, format, response.status_code,
+            url, doc_id, report_id, format, response.status_code,
             (response.headers or {}).get("Content-Type"),
             len(response.content), "unknown" if rows is None else rows,
         )
@@ -1067,16 +1040,27 @@ class BORestClient:
         # A row count cannot recognise this deployment's blank export: a WebI
         # sheet carries title, filter-summary and column-header rows even with
         # an empty table, so the observed data-less pull still reported
-        # rows=17. Only a human comparing the preview above against the report
-        # can currently say "that is layout, not data" — so the probes are
-        # opt-in via ATOM_BO_EXPORT_DIAGNOSTICS rather than guarded by a
-        # threshold that would either miss this case or fire on healthy pulls.
+        # rows=17 — well clear of any threshold that wouldn't also fire on
+        # healthy pulls.
+        #
+        # The answer PUT's `allDataprovidersRefreshed` can, and it is already
+        # known by the time we get here: anything other than "true" is the exact
+        # state that produced those 17 rows. Documents answered in this session
+        # are matched by id so a failed refresh on one does not drag diagnostics
+        # behind every later download. The row-count and env-var gates stay:
+        # a genuinely empty file is still worth a look, and a document with no
+        # prompts never sets the flag at all.
         forced = bool(os.environ.get("ATOM_BO_EXPORT_DIAGNOSTICS"))
-        if forced or (rows is not None and rows <= 1):
+        answered = self._last_refresh
+        refresh_failed = bool(
+            answered and answered[0] == doc_id and answered[1] != "true"
+        )
+        if forced or refresh_failed or (rows is not None and rows <= 1):
             logger.warning(
                 "SAP BO export doc=%s report=%s collecting diagnostics "
-                "(rows=%s, bytes=%d, forced=%s).",
+                "(rows=%s, bytes=%d, forced=%s, refresh_failed=%s).",
                 doc_id, report_id, rows, len(response.content), forced,
+                refresh_failed,
             )
             self._log_blank_export_diagnostics(doc_id)
         return response.content
@@ -1106,12 +1090,18 @@ class BORestClient:
         swallows its errors, so this can never turn a successful export into a
         failure.
 
-        The occurrence-0 probes that used to live here are gone: the export
-        itself now reads occurrence 0, so a missing occurrence surfaces as a
-        raised 404 on the export instead of a silent probe.
+        Both scopes are probed. The 2026-08-05 browser trace's `rowCount:18159`
+        came from the **occurrence's** data providers, while this dumped only
+        `…/documents/{id}/dataproviders` — a different resource, and so unable
+        to answer "did rows land on the thing we just exported?". The
+        document-scoped dump is kept alongside it: it still distinguishes a
+        document whose providers have never run from one whose occurrence
+        simply isn't carrying the refresh.
         """
         doc_url = f"{self._base_url}/biprws/raylight/v1/documents/{doc_id}"
-        self._diagnostic_get("dataproviders", f"{doc_url}/dataproviders")
+        occurrence_url = next(iter(self._occurrence_urls(doc_id, "/dataproviders")))
+        self._diagnostic_get("dataproviders (occurrence)", occurrence_url)
+        self._diagnostic_get("dataproviders (document)", f"{doc_url}/dataproviders")
 
     def schedule_object(self, object_id: str, schedule_params: dict | None = None) -> str:
         """POST /biprws/infostore/{object_id}/schedules — schedule any BOE

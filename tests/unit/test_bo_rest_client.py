@@ -1236,6 +1236,113 @@ def test_download_report_survives_a_failing_dataprovider_probe(authenticated_cli
     assert result == b"id,name\n"
 
 
+def _answer(client, doc_id: str, refreshed: str | None) -> None:
+    """Run the prompt-answer PUT with a given refresh outcome."""
+    with patch.object(client._session, "get", return_value=MagicMock(status_code=200)),          patch.object(client._session, "put",
+                      return_value=_refreshed_put_response(refreshed)):
+        client.answer_document_parameters(
+            doc_id, [{"id": 0, "type": "DateTime", "value": "x"}])
+
+
+def test_download_report_probes_when_the_answer_did_not_refresh(
+    authenticated_client, caplog
+):
+    """The row-count gate cannot fire on this deployment's blank export: it
+    carries 17 rows of title, filter summary and column headers. The refresh
+    flag can — `allDataprovidersRefreshed:"false"` on the answer PUT is exactly
+    the state that produced those 17 rows. Gate the diagnostics on the evidence
+    that exists rather than a threshold that would have to fire on healthy
+    pulls to catch this one."""
+    _answer(authenticated_client, "DOC1", "false")
+
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    probe.text = '{"dataproviders":{"dataprovider":[{"id":"DP0","rowCount":0}]}}'
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "collecting diagnostics" in caplog.text
+    assert "DP0" in caplog.text
+
+
+def test_download_report_does_not_probe_when_the_answer_refreshed(
+    authenticated_client,
+):
+    """A refreshed document with a full workbook is a healthy pull. Probing it
+    would spend two extra requests per download on every prompted report."""
+    _answer(authenticated_client, "DOC1", "true")
+
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      return_value=export) as mock_get:
+        authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert mock_get.call_count == 1
+
+
+def test_download_report_ignores_a_refresh_flag_from_another_document(
+    authenticated_client,
+):
+    """One client serves many documents in a session. A failed refresh on the
+    previous one must not make every later download drag diagnostics behind
+    it."""
+    _answer(authenticated_client, "DOC-A", "false")
+
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get",
+                      return_value=export) as mock_get:
+        authenticated_client.download_report("DOC-B", "RPT2", "xlsx")
+    assert mock_get.call_count == 1
+
+
+def test_blank_export_diagnostics_probe_the_occurrence_dataproviders(
+    authenticated_client, monkeypatch
+):
+    """The 2026-08-05 trace's `rowCount:18159` came from the **occurrence's**
+    data providers; the client probed only `…/documents/{id}/dataproviders`, a
+    different resource, so it could not answer "did rows land on the thing we
+    just exported?". Probe both — the document-scoped one still distinguishes a
+    document whose providers never ran at all."""
+    monkeypatch.setenv("ATOM_BO_EXPORT_DIAGNOSTICS", "1")
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(17)
+    export.headers = {}
+    probe = MagicMock()
+    probe.status_code = 200
+    probe.text = "{}"
+    with patch.object(authenticated_client._session, "get",
+                      side_effect=[export] + [probe] * 4) as mock_get:
+        authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    urls = [call[0][0] for call in mock_get.call_args_list]
+    assert any(u.endswith("/documents/DOC1/occurrences/0/dataproviders") for u in urls)
+    assert any(u.endswith("/documents/DOC1/dataproviders") for u in urls)
+
+
+def test_download_report_logs_the_url_it_exported_from(authenticated_client, caplog):
+    """Which resource served the workbook is the question every blank-export
+    investigation starts from, and the export log named the document, report and
+    format but not the URL."""
+    export = MagicMock()
+    export.status_code = 200
+    export.content = _xlsx_with_rows(4)
+    export.headers = {}
+    with patch.object(authenticated_client._session, "get", return_value=export):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
+            authenticated_client.download_report("DOC1", "RPT2", "xlsx")
+    assert "/documents/DOC1/occurrences/0" in caplog.text
+
+
 def test_answer_document_parameters_logs_the_server_response(authenticated_client, caplog):
     """The answer PUT returning 200 does not prove the answer took effect; log
     what the server echoed back so a silently-ignored answer is visible."""
@@ -1615,58 +1722,34 @@ def test_answer_document_parameters_survives_a_failed_document_open(
     assert "open" in caplog.text.lower()
 
 
-def test_answer_document_parameters_posts_the_documented_refresh_when_the_put_did_not(
+def test_answer_document_parameters_does_not_fire_the_405_refresh_trigger(
     authenticated_client,
 ):
     """SAP documents a separate refresh trigger — POST …/documents/{id}/parameters
-    with an empty body — as the step that evaluates the stored answers and
-    fetches rows. This client relied entirely on the occurrence PUT doing it,
-    and merely *warned* when `allDataprovidersRefreshed` came back anything
-    other than "true", then exported blank anyway. Use SAP's own escalation
-    instead of exporting a workbook already known to be empty."""
-    post_resp = _refreshed_put_response("true")
-    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
-         patch.object(authenticated_client._session, "put",
-                      return_value=_refreshed_put_response(None)), \
-         patch.object(authenticated_client._session, "post", return_value=post_resp) as mock_post:
-        authenticated_client.answer_document_parameters(
-            "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
-
-    url = mock_post.call_args[0][0]
-    assert url.endswith("/biprws/raylight/v1/documents/124313/parameters")
-    assert mock_post.call_args[1]["json"] == {}
-
-
-def test_answer_document_parameters_skips_the_refresh_post_when_the_put_refreshed(
-    authenticated_client,
-):
-    """The occurrence PUT already ran the refresh on this deployment. Don't
-    make every healthy download pay for a second execution of the data
-    providers."""
-    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
-         patch.object(authenticated_client._session, "put",
-                      return_value=_refreshed_put_response("true")), \
-         patch.object(authenticated_client._session, "post") as mock_post:
+    with an empty body — and this client escalated to it whenever the occurrence
+    PUT came back without `allDataprovidersRefreshed:"true"`. The 2026-08-05
+    11:53 on-premises log answers that: the POST returns **HTTP 405**, the
+    endpoint does not exist on this deployment. All the escalation bought was a
+    failed request and a warning claiming a recovery had been attempted. The
+    refresh flag itself is the signal; nothing is gained by asking a method the
+    server does not allow."""
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)),          patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response(None)),          patch.object(authenticated_client._session, "post") as mock_post:
         authenticated_client.answer_document_parameters(
             "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
     assert not mock_post.called
 
 
-def test_answer_document_parameters_survives_a_failed_refresh_post(
+def test_answer_document_parameters_logs_the_url_it_answered(
     authenticated_client, caplog
 ):
-    """The refresh POST is a recovery attempt for a state that was already
-    going to export blank. If it fails, the export and its diagnostics must
-    still run — failing here would replace an inspectable empty workbook with
-    an opaque error."""
-    failed_post = MagicMock()
-    failed_post.status_code = 405
-    failed_post.text = "method not allowed"
-    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)), \
-         patch.object(authenticated_client._session, "put",
-                      return_value=_refreshed_put_response(None)), \
-         patch.object(authenticated_client._session, "post", return_value=failed_post):
-        with caplog.at_level("WARNING", logger="etl_framework.sap_bo.client"):
+    """The 11:53 log recorded the PUT's response but not its URL, so it could
+    not confirm whether the occurrence resource or the document resource had
+    been written — the single most important fact about that request. Log the
+    URL on success, not only on failure."""
+    with patch.object(authenticated_client._session, "get", return_value=MagicMock(status_code=200)),          patch.object(authenticated_client._session, "put",
+                      return_value=_refreshed_put_response("true")):
+        with caplog.at_level("INFO", logger="etl_framework.sap_bo.client"):
             authenticated_client.answer_document_parameters(
                 "124313", [{"id": 0, "type": "DateTime", "value": "x"}])
-    assert "405" in caplog.text
+    assert "/documents/124313/occurrences/0/parameters" in caplog.text
