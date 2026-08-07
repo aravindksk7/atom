@@ -486,11 +486,24 @@ class SAPBOMockHandler(BaseHTTPRequestHandler):
             if rows is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"report {report_id} not found"})
                 return
-            # Reproduce the live failure this endpoint caused: for a document
-            # WITH prompts it returns HTTP 200 and a well-formed file holding
-            # the report layout and zero data rows, no matter what was answered
-            # — it never sees the occurrence-0 refresh. Only documents without
-            # prompts (never observed failing here) still export their rows.
+            # DISPROVEN, kept deliberately until the real cause is known.
+            #
+            # This models the belief that …/documents/{id}/reports/{id} returns
+            # layout with zero data rows for a prompted document because it
+            # never sees the occurrence-0 refresh. The 2026-08-07 probe run
+            # against the on-premises server pulled a refreshed document from
+            # occurrences/0?reportIds=N, occurrences/0/reports/N, documents/{id}
+            # and this resource, and got identical bytes from all four: 901280
+            # bytes, 18175 rows. The export resource does not decide whether
+            # data comes back; the answer PUT's allDataprovidersRefreshed does.
+            #
+            # It is not corrected yet because the sibling belief below — that
+            # the document-level answer PUT does not refresh — is still
+            # untested, and rewriting this mock twice would churn
+            # tests/integration/test_sapbo_ui_download_flow.py and
+            # test_sapbo_mock_pagination.py for nothing. probe_occurrence.py
+            # step 7 answers the document-level resource; when it reports back,
+            # blank on "the providers never ran" instead of on which URL asked.
             if PARAMETERS.get(doc_id):
                 rows = []
             self._send_export(rows)
