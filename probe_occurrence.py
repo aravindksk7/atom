@@ -278,6 +278,48 @@ def run_matrix(session: requests.Session, api: str, args: argparse.Namespace,
     ]
 
 
+def run_render_check(session: requests.Session, api: str, args: argparse.Namespace,
+                     kw: dict) -> list[tuple[str, int | None]]:
+    """Does the export need the report rendered first?
+
+    Nothing on record answers this. The browser renders before it exports
+    (SAPBO_10_bold.har spends 6.4s in getReportPageOutput, then downloads), the
+    client never renders, and every probe run so far happened to render before
+    exporting too. So "refresh ran but the export is still blank" is a failure
+    mode that could survive fixing the refresh, and it would look identical.
+
+    Answer it directly: refresh, export before any render, render, export
+    again. Equal row counts mean the render is the viewer's business and the
+    client can keep skipping it.
+    """
+    print(f"\n{'=' * 72}\n== RENDER CHECK\n{'=' * 72}\n")
+    doc = f"{api}/documents/{args.doc}"
+    occ = f"{doc}/occurrences/0"
+    export_params = {"dpi": 96, "optimized": "true", "reportIds": args.report}
+
+    # A known-good refresh first: the matrix leaves the document in whatever
+    # state its last step produced, and this must start from a refreshed one.
+    answer_put(session, doc, occ, args, kw, label="render-check refresh",
+               date=args.date, headers_on=True, cache_bust=True,
+               open_first=False, document_level=False)
+
+    before = show("export BEFORE any render", session.get(
+        occ, params={**export_params, "c": cache_buster()},
+        headers={"Accept": XLSX}, **kw))
+    show("render (getReportPageOutput)", session.post(
+        f"{occ}/reports/{args.report}/pages/1",
+        params={"getReportPageOutput": "", "c": cache_buster()},
+        json={"export": {"mode": "normal", "show": "normal",
+                         "chartOutputFormat": "vbo", "incremental": True,
+                         "stylePrefix": "V1R1P1P0", "baseUrl": api}},
+        headers={"Accept": "multipart/mixed", "Content-Type": "application/json"},
+        **kw), limit=400)
+    after = show("export AFTER the render", session.get(
+        occ, params={**export_params, "c": cache_buster()},
+        headers={"Accept": XLSX}, **kw))
+    return [("export before render", before), ("export after render", after)]
+
+
 def run_full_sequence(session: requests.Session, api: str, tag: str,
                       args: argparse.Namespace, kw: dict) -> None:
     """The settled snapshot/render/export comparison, kept for regression."""
@@ -337,6 +379,7 @@ def main() -> int:
     api = f"{base}/biprws/raylight/v1"
     try:
         rows = run_matrix(session, api, args, kw)
+        render = run_render_check(session, api, args, kw)
         if args.full_sequence:
             portal = args.portal_path.strip("/")
             run_full_sequence(session, api, "direct", args, kw)
@@ -356,6 +399,12 @@ def main() -> int:
           "row's did not run the data providers, whatever its refresh flag "
           "says. Step 2 falsifies 'an unchanged answer still refreshes'; steps "
           "3-6 each convict or acquit one client-vs-script difference.")
+
+    print(f"\n{'=' * 78}\n== RENDER CHECK\n{'=' * 78}")
+    for label, count in render:
+        print(f"    {'unreadable' if count is None else count:>10}  {label}")
+    print("Equal row counts mean the export does not need the render, and the "
+          "client can keep skipping it.")
     return 0
 
 
