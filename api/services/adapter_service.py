@@ -5,12 +5,14 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
 from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut
 from api.services.api_artifact import adhoc_artifact_dir, build_api_response_sink
+from api.services.bo_archive import save_bo_download
 from api.services.api_exchange import capture_exchange
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
@@ -85,6 +87,18 @@ def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
     if "Forbidden" in msg or "403" in msg:
         return "Access denied (403) - check service account permissions"
     return msg
+
+
+@dataclass(frozen=True)
+class BOReportDownload:
+    """A BO export plus what happened to the server-side copy.
+
+    `saved_path` and `save_error` are mutually exclusive, and both are None
+    when no download directory is configured.
+    """
+    content: bytes
+    saved_path: Path | None
+    save_error: str | None
 
 
 class AdapterService:
@@ -369,7 +383,8 @@ class AdapterService:
         auth: SAPBOAuthContext | None = None,
         parameters: list[dict] | None = None,
         timezone: str | None = None,
-    ) -> bytes:
+        download_dir: str = "",
+    ) -> BOReportDownload:
         env = self._get_env_config(config_id)
         with _bo_lock:
             client = self._client_for_auth(env, auth)
@@ -378,12 +393,19 @@ class AdapterService:
                 if parameters:
                     built = build_parameter_answers(parameters, timezone or "UTC")
                     client.answer_document_parameters(doc_id, built)
-                return client.download_report(doc_id, report_id, fmt)
+                content = client.download_report(doc_id, report_id, fmt)
             except Exception as exc:
                 auth_type = auth.auth_type if auth and auth.auth_type else env.bo_auth_type
                 raise HTTPException(status_code=502, detail=_friendly_error(exc, auth_type=auth_type)) from exc
             finally:
                 client.logout()
+        # Outside the lock on purpose: a disk write does not need the BO client
+        # lock, and holding it would queue file writes behind network calls.
+        saved_path, save_error = save_bo_download(
+            content, doc_id=doc_id, report_id=report_id, fmt=fmt,
+            directory=download_dir,
+        )
+        return BOReportDownload(content=content, saved_path=saved_path, save_error=save_error)
 
     # ------------------------------------------------------------------
     # Automic
