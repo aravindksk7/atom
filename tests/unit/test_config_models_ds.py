@@ -36,3 +36,24 @@ def test_ds_password_is_a_secret_field():
 def test_ds_timeout_must_be_positive():
     with pytest.raises(ValueError, match="must be > 0"):
         EnvironmentConfig(name="test", db_host="localhost", db_password="secret", ds_timeout=0)
+
+
+def test_ds_auth_type_defaults_to_sec_enterprise():
+    cfg = EnvironmentConfig(name="test", db_host="localhost", db_password="secret")
+    assert cfg.ds_auth_type == "secEnterprise"
+
+
+def test_ds_auth_type_can_be_set():
+    cfg = EnvironmentConfig(
+        name="test", db_host="localhost", db_password="secret",
+        ds_auth_type="secWinAD",
+    )
+    assert cfg.ds_auth_type == "secWinAD"
+
+
+def test_ds_auth_type_rejects_invalid_value():
+    with pytest.raises(ValueError, match="must be one of"):
+        EnvironmentConfig(
+            name="test", db_host="localhost", db_password="secret",
+            ds_auth_type="not_a_real_type",
+        )
