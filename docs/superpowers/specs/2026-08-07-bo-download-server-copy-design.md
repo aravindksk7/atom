@@ -90,7 +90,8 @@ exactly as it does today, browser-only, until someone sets a path.
 
 `SettingsRepository` gains `get_bo_download_dir()` and `set_bo_download_dir(path)`.
 The setter validates the way `set_timezone` already does, raising `ValueError` (which
-the settings route turns into a 400):
+`update_settings` turns into an **HTTP 422**, matching how it already handles a bad
+timezone):
 
 - empty string → accepted, disables the feature
 - non-empty → must be an **absolute** path (`Path(p).is_absolute()`) to an existing
@@ -185,10 +186,12 @@ outside it.
 
 ## Component 4 — the browser
 
-`apiBlob` already lifts `x-stored-complete` off the response
-([frontend/app.js:105](../../../frontend/app.js#L105)); it gains `savedPath` and
-`saveError`, `decodeURIComponent`-ed. The POST branch of `downloadBOReport` uses a raw
-`fetch` and reads the headers directly.
+`apiBlob` currently returns only `{blob, disposition}`. It gains `savedPath` and
+`saveError`, `decodeURIComponent`-ed. The precedent for lifting a custom header into
+the returned object is `apiPaged`, which does exactly this with `x-stored-complete`
+([frontend/app.js:105](../../../frontend/app.js#L105)) — a sibling helper, not
+`apiBlob` itself. The POST branch of `downloadBOReport` uses a raw `fetch` and reads
+the headers directly.
 
 Today the two branches duplicate their toast code. They will share one local helper:
 
