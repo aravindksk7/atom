@@ -784,9 +784,32 @@ download route test fail. Replace it with:
 Run: `python -m pytest tests/unit/test_adapters_routes.py -q -k "saved_path or save_error or neither_header"`
 Expected: FAIL — `KeyError: 'x-saved-path'`
 
+- [ ] **Step 3a: Take the extension mapping from bo_archive**
+
+Task 1's code review established that this module's local `_EXT_MAP` and
+`bo_archive`'s copy would drift silently — add a format to one and the browser's
+filename and the server copy's filename disagree, with no test failing. There is no
+circular-import obstacle: this module already imports `api.services.adapter_service`,
+so routes → services is the established direction and importing upward from
+`bo_archive` adds no cycle.
+
+Delete the local map at `api/routes/adapters.py:45`:
+
+```python
+_EXT_MAP = {"pdf": "pdf", "xlsx": "xlsx", "csv": "csv"}
+```
+
+and import Task 1's public one instead, with the other imports at the top:
+
+```python
+from api.services.bo_archive import EXT_MAP as _EXT_MAP
+```
+
+Every existing `_EXT_MAP.get(...)` call site keeps working unchanged.
+
 - [ ] **Step 3: Add the shared response helper**
 
-In `api/routes/adapters.py`, below the `_EXT_MAP` line at the top:
+In `api/routes/adapters.py`, below the `_MIME_MAP` block at the top:
 
 ```python
 def _download_response(result, doc_id: str, report_id: str, fmt: str) -> Response:
