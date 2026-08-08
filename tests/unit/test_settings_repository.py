@@ -86,3 +86,28 @@ def test_set_bo_download_dir_rejects_a_file(tmp_path):
     db = _session()
     with pytest.raises(ValueError, match="not a directory"):
         SettingsRepository(db).set_bo_download_dir(str(target))
+
+
+def test_set_bo_download_dir_rejects_an_unwritable_directory(tmp_path, monkeypatch):
+    import etl_framework.repository.repository as repo_mod
+    monkeypatch.setattr(repo_mod.os, "access", lambda *a, **k: False)
+    db = _session()
+    with pytest.raises(ValueError, match="not writable"):
+        SettingsRepository(db).set_bo_download_dir(str(tmp_path))
+
+
+def test_a_rejected_path_leaves_the_previous_value_intact(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    with pytest.raises(ValueError):
+        repo.set_bo_download_dir("reports/out")
+    assert repo.get_bo_download_dir() == str(tmp_path)
+
+
+def test_whitespace_only_path_disables_the_feature(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    repo.set_bo_download_dir("   ")
+    assert repo.get_bo_download_dir() == ""

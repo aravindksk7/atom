@@ -1481,13 +1481,13 @@ class SettingsRepository:
         be the only check — a network share can be reachable at save and gone
         at download — so bo_archive still treats every write as fallible.
         """
-        import os
-
         cleaned = (path or "").strip()
         if cleaned:
             candidate = Path(cleaned)
             if not candidate.is_absolute():
-                raise ValueError(f"Download directory must be an absolute path: {cleaned}")
+                raise ValueError(
+                    f"Download directory must be an absolute path such as "
+                    f"C:\\reports or \\\\server\\share\\reports: {cleaned}")
             if not candidate.exists():
                 raise ValueError(f"Download directory does not exist: {cleaned}")
             if not candidate.is_dir():
@@ -1496,7 +1496,7 @@ class SettingsRepository:
             if not os.access(candidate, os.W_OK):
                 raise ValueError(f"Download directory is not writable: {cleaned}")
         row = self._get_or_create()
-        row.bo_download_dir = cleaned
+        row.bo_download_dir = str(candidate) if cleaned else ""
         row.updated_at = datetime.now(timezone.utc)
         self._db.commit()
         self._db.refresh(row)
