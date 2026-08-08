@@ -1101,13 +1101,13 @@ Timezone card:
     </button>
     <template x-if="boDownloadDirOpen">
       <div class="mt-3 space-y-3">
-        <p class="text-muted text-sm">When set, every SAP BO report downloaded from the Adapters tab is also written here on the server, with a timestamp in the filename so nothing is ever overwritten. Files are never deleted. Leave empty to keep downloads browser-only. The path must already exist on the machine running this app.</p>
+        <p class="text-muted text-sm">When set, every SAP BO report downloaded from the Adapters tab is also written here on the server, with a timestamp in the filename so nothing is ever overwritten. Files are never deleted. Leave empty to keep downloads browser-only. The path must already exist on the machine running this app, and must be absolute — on Windows that means a drive letter (<code>C:\reports\sapbo</code>) or a UNC share (<code>\\server\share\reports</code>), not a rooted path like <code>/var/reports</code>.</p>
         <template x-if="!activeTokenIsAdmin">
           <div class="text-sm">Current: <span class="font-medium" x-text="boDownloadDir || '(browser only)'"></span> <span class="text-muted text-xs">(administrator access required to change)</span></div>
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
-            <input type="text" x-model="boDownloadDirDraft" placeholder="/var/reports/sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft">
+            <input type="text" x-model="boDownloadDirDraft" placeholder="C:\reports\sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft">
             <button @click="saveBoDownloadDirSetting()" :disabled="boDownloadDirSaving || boDownloadDirDraft === boDownloadDir" class="btn-primary btn-sm">
               <span x-show="!boDownloadDirSaving">Save</span>
               <span x-show="boDownloadDirSaving">Saving…</span>
