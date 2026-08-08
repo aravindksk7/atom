@@ -44,6 +44,7 @@ class DSRestClient:
         self._user = env_config.ds_user
         self._password = env_config.ds_password
         self._default_repository = env_config.ds_repository
+        self._auth_type = env_config.ds_auth_type
         self._timeout = env_config.ds_timeout
         self._token: str | None = None
         self._owns_token = False
@@ -58,6 +59,7 @@ class DSRestClient:
         payload = {
             "userName": self._user if username is None else username,
             "password": self._password if password is None else password,
+            "authType": self._auth_type,
         }
         logger.debug("Authenticating with SAP DS Administrator API")
         response = self._session.post(

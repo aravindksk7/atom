@@ -77,7 +77,22 @@ def test_login_posts_credentials_and_stores_token(env_config):
     called_url = mock_post.call_args[0][0]
     assert called_url == "http://ds.example.com/Login"
     sent_payload = mock_post.call_args[1]["json"]
-    assert sent_payload == {"userName": "admin", "password": "dspass"}
+    assert sent_payload == {"userName": "admin", "password": "dspass", "authType": "secEnterprise"}
+
+
+def test_login_sends_configured_auth_type(env_config):
+    from etl_framework.sap_ds.client import DSRestClient
+
+    cfg = env_config.model_copy(update={"ds_auth_type": "secLDAP"})
+    client = DSRestClient(cfg)
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"X-DS-SessionToken": "tok"}
+    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+        client.login()
+
+    sent_payload = mock_post.call_args[1]["json"]
+    assert sent_payload["authType"] == "secLDAP"
 
 
 def test_login_raises_ds_api_error_on_http_failure(env_config):
