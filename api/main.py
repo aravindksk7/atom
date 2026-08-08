@@ -45,7 +45,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-SAP-LogonToken"],
-    expose_headers=["X-Total-Count", "X-Stored-Complete"],
+    expose_headers=["X-Total-Count", "X-Stored-Complete", "X-Saved-Path", "X-Save-Error"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(BearerTokenMiddleware)
