@@ -11,10 +11,10 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Same mapping the download routes apply (api/routes/adapters.py). Carried
-# here rather than imported because routes -> service -> archive would become
-# circular, and it is one line.
-_EXT_MAP = {"pdf": "pdf", "xlsx": "xlsx", "csv": "csv"}
+# The download routes need this same mapping. It lives here, in the lower
+# layer, so they can import it upward — routes already depend on services, so
+# that direction adds no cycle. Task 5 removes their local copy.
+EXT_MAP = {"pdf": "pdf", "xlsx": "xlsx", "csv": "csv"}
 
 # doc_id and report_id come straight off the URL path.
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
@@ -37,21 +37,24 @@ def save_bo_download(content: bytes, *, doc_id: str, report_id: str, fmt: str,
         return None, None
 
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
-    ext = _EXT_MAP.get(fmt, "bin")
+    ext = EXT_MAP.get(fmt, "bin")
     parts = ["report", _safe(doc_id)]
     if str(report_id or "").strip():
         parts.append(_safe(report_id))
     stem = "_".join(parts) + "_" + stamp
 
-    try:
-        target_dir = Path(directory)
-        candidate = target_dir / f"{stem}.{ext}"
-        # Never overwrite: two downloads inside one second share a stamp.
-        suffix = 0
-        while candidate.exists():
+    suffix = 0
+    target_dir = Path(directory)
+    candidate = target_dir / f"{stem}.{ext}"
+    while True:
+        try:
+            # O_EXCL: atomic create-or-fail, so two concurrent downloads can
+            # never both see "no file yet" and clobber one another.
+            with candidate.open("xb") as handle:
+                handle.write(content)
+            return candidate, None
+        except FileExistsError:
             suffix += 1
             candidate = target_dir / f"{stem}-{suffix}.{ext}"
-        candidate.write_bytes(content)
-        return candidate, None
-    except OSError as exc:
-        return None, str(exc)
+        except (OSError, ValueError) as exc:
+            return None, str(exc)

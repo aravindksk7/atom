@@ -15,16 +15,16 @@ from api.services.bo_archive import save_bo_download
 STAMP = datetime(2026, 8, 7, 20, 30, 15, tzinfo=timezone.utc)
 
 
-def test_empty_directory_means_disabled(tmp_path):
+def test_empty_directory_means_disabled(monkeypatch):
     """An unset setting must be a no-op, not an error and not a write. This is
     the default on every upgraded install."""
+    monkeypatch.setattr(Path, "open", lambda *a, **k: pytest.fail("touched the disk"))
     path, error = save_bo_download(
         b"PK\x03\x04", doc_id="124313", report_id="1", fmt="xlsx",
         directory="", now=STAMP,
     )
     assert path is None
     assert error is None
-    assert list(tmp_path.iterdir()) == []
 
 
 def test_writes_a_timestamped_file(tmp_path):
@@ -99,9 +99,14 @@ def test_missing_directory_returns_an_error_and_does_not_raise(tmp_path):
 
 
 def test_uses_the_current_time_when_now_is_omitted(tmp_path):
+    before = datetime.now(timezone.utc)
     path, error = save_bo_download(
-        b"data", doc_id="1", report_id="", fmt="xlsx",
-        directory=str(tmp_path),
-    )
+        b"data", doc_id="1", report_id="", fmt="xlsx", directory=str(tmp_path))
     assert error is None
-    assert path.exists()
+    stamped = datetime.strptime(
+        path.stem.rsplit("_", 1)[1], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    # strftime("%S") truncates rather than rounds, so `stamped` can read up to
+    # ~1s *before* `before` even though it was produced strictly after it.
+    # -1 tolerates that truncation; a dropped tz (UTC+10 on this machine)
+    # would still miss by ~36000s, so this remains a real regression check.
+    assert -1 <= (stamped - before).total_seconds() < 5
