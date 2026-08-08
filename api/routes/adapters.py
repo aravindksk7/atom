@@ -4,6 +4,7 @@ import base64
 import binascii
 
 from datetime import date
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
@@ -51,8 +52,6 @@ def _download_response(result, doc_id: str, report_id: str, fmt: str) -> Respons
     Both headers are percent-encoded: HTTP header values are latin-1, and a
     Windows share path or an OS error string can carry characters outside it.
     """
-    from urllib.parse import quote
-
     mime = _MIME_MAP.get(fmt, "application/octet-stream")
     ext = _EXT_MAP.get(fmt, "bin")
     name = f"report_{doc_id}_{report_id}.{ext}" if report_id else f"report_{doc_id}.{ext}"
