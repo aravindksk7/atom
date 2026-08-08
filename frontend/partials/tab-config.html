@@ -759,6 +759,15 @@
           <div><label  class="field-label" for="a11y-config-sap-ds-url">SAP DS URL</label><input x-model="configModal.ds_url" class="field-input" placeholder="http://ds-server:8080" id="a11y-config-sap-ds-url" /></div>
           <div><label  class="field-label" for="a11y-config-ds-user">DS User</label><input x-model="configModal.ds_user" class="field-input" id="a11y-config-ds-user" /></div>
           <div><label  class="field-label" for="a11y-config-ds-password">DS Password</label><input x-model="configModal.ds_password" type="password" class="field-input" id="a11y-config-ds-password" /></div>
+          <div>
+            <label  class="field-label" for="a11y-config-ds-auth-type">DS Auth Type</label>
+            <select x-model="configModal.ds_auth_type" class="field-input" id="a11y-config-ds-auth-type">
+              <option value="secEnterprise">Enterprise</option>
+              <option value="secWinAD">Windows AD (on-premises)</option>
+              <option value="secLDAP">LDAP</option>
+              <option value="secSAPR3">SAP R/3</option>
+            </select>
+          </div>
           <div><label  class="field-label" for="a11y-config-ds-repository">DS Repository</label><input x-model="configModal.ds_repository" class="field-input" placeholder="DS_REPO" id="a11y-config-ds-repository" /></div>
           <div><label  class="field-label" for="a11y-config-ds-timeout-s">DS Timeout (s)</label><input x-model="configModal.ds_timeout" type="number" class="field-input" placeholder="60" id="a11y-config-ds-timeout-s" /></div>
           <div><label  class="field-label" for="a11y-config-ds-proxy-url">DS Proxy URL</label><input x-model="configModal.ds_proxy_url" class="field-input" placeholder="http://proxy.company:8080" id="a11y-config-ds-proxy-url" /></div>
