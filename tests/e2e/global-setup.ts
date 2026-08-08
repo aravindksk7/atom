@@ -36,7 +36,7 @@ from pathlib import Path
 
 client = boto3.client(
     "s3",
-    endpoint_url="http://127.0.0.1:19000",
+    endpoint_url="http://127.0.0.1:29000",
     aws_access_key_id="minioadmin",
     aws_secret_access_key="minioadmin",
     region_name="us-east-1",

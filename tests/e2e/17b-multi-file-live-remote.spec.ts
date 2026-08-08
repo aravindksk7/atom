@@ -5,7 +5,7 @@ import { authedContext, createConfig, deleteConfig, deleteJob, triggerRun, waitF
 
 const liveBackends = process.env.E2E_LIVE_BACKENDS === '1';
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
-const MINIO_ENDPOINT = 'http://127.0.0.1:19000';
+const MINIO_ENDPOINT = 'http://127.0.0.1:29000';
 const MINIO_BUCKET = 'atom-e2e';
 const SFTP_HOST = '127.0.0.1';
 const SFTP_PORT = '12222';

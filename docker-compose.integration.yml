@@ -67,7 +67,9 @@ services:
       MINIO_ROOT_USER: "minioadmin"
       MINIO_ROOT_PASSWORD: "minioadmin"
     ports:
-      - "19000:9000"
+      # 29000, not 19000: on some hosts Windows/Hyper-V reserves the
+      # 18979-19078 dynamic port range, which blocks docker from binding it.
+      - "29000:9000"
     # No healthcheck: the official image is distroless (no shell/curl to run a
     # CMD healthcheck with). global-setup.ts's seedMinio() (a later task) does
     # its own retry-with-backoff wait for the API to accept requests before

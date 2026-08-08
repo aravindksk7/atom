@@ -4,7 +4,7 @@ import { test, expect } from './fixtures';
 import { authedContext, createConfig, deleteConfig, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
 
 const liveBackends = process.env.E2E_LIVE_BACKENDS === '1';
-const MINIO_ENDPOINT = 'http://127.0.0.1:19000';
+const MINIO_ENDPOINT = 'http://127.0.0.1:29000';
 const MINIO_BUCKET = 'atom-e2e';
 const CSV_KEY = 'source/sales_east.csv';
 const CSV_PREFIX = 'source/';
