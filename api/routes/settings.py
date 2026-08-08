@@ -55,9 +55,11 @@ def update_settings(body: SettingsUpdate, request: Request, db: Session = Depend
         "settings.updated",
         "settings",
         1,
-        {"timezone": row.timezone,
-         "upload_retention_days": row.upload_retention_days,
-         "bo_download_dir": row.bo_download_dir},
+        {
+            "timezone": row.timezone,
+            "upload_retention_days": row.upload_retention_days,
+            "bo_download_dir": row.bo_download_dir,
+        },
     )
     return SettingsOut(
         timezone=row.timezone,

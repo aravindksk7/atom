@@ -30,6 +30,24 @@ def admin_client(monkeypatch):
         yield c
 
 
+@pytest.fixture
+def plain_client(monkeypatch):
+    """A non-admin token — PUT /api/settings must refuse it."""
+    from api.main import app
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("plain")
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
+        yield c
+
+
 def test_get_settings_reports_the_bo_download_dir(admin_client):
     resp = admin_client.get("/api/settings")
     assert resp.status_code == 200
@@ -59,3 +77,19 @@ def test_put_settings_leaves_the_timezone_alone(admin_client, tmp_path):
     assert resp.status_code == 200
     assert resp.json()["timezone"] == "Australia/Sydney"
     assert resp.json()["bo_download_dir"] == str(tmp_path)
+
+
+def test_put_settings_clears_the_bo_download_dir(admin_client, tmp_path):
+    """Empty is the documented off-switch, and the one branch that skips
+    validation entirely — `if body.bo_download_dir:` instead of `is not None`
+    would break it with every other test still green."""
+    admin_client.put("/api/settings", json={"bo_download_dir": str(tmp_path)})
+    resp = admin_client.put("/api/settings", json={"bo_download_dir": ""})
+    assert resp.status_code == 200
+    assert resp.json()["bo_download_dir"] == ""
+    assert admin_client.get("/api/settings").json()["bo_download_dir"] == ""
+
+
+def test_put_settings_requires_an_admin_token(plain_client, tmp_path):
+    resp = plain_client.put("/api/settings", json={"bo_download_dir": str(tmp_path)})
+    assert resp.status_code == 403
