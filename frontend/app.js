@@ -85,7 +85,12 @@ async function apiBlob(path) {
     error.status = resp.status;
     throw error;
   }
-  return { blob: await resp.blob(), disposition: resp.headers.get('content-disposition') || '' };
+  return {
+    blob: await resp.blob(),
+    disposition: resp.headers.get('content-disposition') || '',
+    savedPath: decodeURIComponent(resp.headers.get('x-saved-path') || ''),
+    saveError: decodeURIComponent(resp.headers.get('x-save-error') || ''),
+  };
 }
 
 async function apiPaged(path) {
