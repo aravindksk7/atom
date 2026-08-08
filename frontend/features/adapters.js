@@ -213,6 +213,19 @@
       return seeded;
     },
 
+    // Both download branches end the same way: hand the blob to the browser,
+    // then report the server-side copy. A failed copy still gets its own error
+    // toast on top of the success one — the download really did succeed and
+    // the archive really did fail, and saying only one of those would be a lie.
+    finishBODownload(blob, filename, savedPath, saveError) {
+      triggerDownload(blob, filename);
+      this.toast('success', 'Download started',
+        savedPath ? `Also saved to ${savedPath}` : '');
+      if (saveError) {
+        this.toast('error', 'Server copy failed', saveError);
+      }
+    },
+
     async downloadBOReport(docId, reportId, format) {
       // An omitted reportId is SAP's whole-document export: every tab in one
       // file, served by the routes without the /reports/{id} segment. An empty
@@ -227,12 +240,11 @@
       // No prompts → keep the existing authenticated GET blob download.
       if (!params.length) {
         try {
-          const { blob, disposition } = await apiBlob(
+          const { blob, disposition, savedPath, saveError } = await apiBlob(
             `/api/adapters/sap-bo/documents/${docId}${scope}/download?config_id=${this.boConfigId}&format=${format}`
           );
           const match = disposition.match(/filename="?([^"]+)"?/);
-          triggerDownload(blob, match ? match[1] : fallbackName);
-          this.toast('success', 'Download started');
+          this.finishBODownload(blob, match ? match[1] : fallbackName, savedPath, saveError);
         } catch (e) {
           this.toast('error', 'Download failed', e.message);
         }
@@ -265,8 +277,12 @@
         }
         const disposition = resp.headers.get('content-disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/);
-        triggerDownload(await resp.blob(), match ? match[1] : fallbackName);
-        this.toast('success', 'Download started');
+        this.finishBODownload(
+          await resp.blob(),
+          match ? match[1] : fallbackName,
+          decodeURIComponent(resp.headers.get('x-saved-path') || ''),
+          decodeURIComponent(resp.headers.get('x-save-error') || ''),
+        );
       } catch (e) {
         this.toast('error', 'Download failed', e.message);
       }

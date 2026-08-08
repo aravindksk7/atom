@@ -44,3 +44,70 @@ def test_set_timezone_updates_updated_at():
     repo = SettingsRepository(db)
     row = repo.set_timezone("Europe/London")
     assert row.updated_at is not None
+
+
+def test_bo_download_dir_defaults_to_empty():
+    """Empty means disabled, and it is the default — an upgraded install keeps
+    today's browser-only behaviour until someone sets a path."""
+    db = _session()
+    assert SettingsRepository(db).get_bo_download_dir() == ""
+
+
+def test_set_bo_download_dir_round_trips(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    assert repo.get_bo_download_dir() == str(tmp_path)
+
+
+def test_set_bo_download_dir_accepts_empty_to_disable(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    repo.set_bo_download_dir("")
+    assert repo.get_bo_download_dir() == ""
+
+
+def test_set_bo_download_dir_rejects_a_relative_path():
+    db = _session()
+    with pytest.raises(ValueError, match="absolute"):
+        SettingsRepository(db).set_bo_download_dir("reports/out")
+
+
+def test_set_bo_download_dir_rejects_a_missing_directory(tmp_path):
+    db = _session()
+    with pytest.raises(ValueError, match="does not exist"):
+        SettingsRepository(db).set_bo_download_dir(str(tmp_path / "nope"))
+
+
+def test_set_bo_download_dir_rejects_a_file(tmp_path):
+    target = tmp_path / "a-file.txt"
+    target.write_text("x")
+    db = _session()
+    with pytest.raises(ValueError, match="not a directory"):
+        SettingsRepository(db).set_bo_download_dir(str(target))
+
+
+def test_set_bo_download_dir_rejects_an_unwritable_directory(tmp_path, monkeypatch):
+    import etl_framework.repository.repository as repo_mod
+    monkeypatch.setattr(repo_mod.os, "access", lambda *a, **k: False)
+    db = _session()
+    with pytest.raises(ValueError, match="not writable"):
+        SettingsRepository(db).set_bo_download_dir(str(tmp_path))
+
+
+def test_a_rejected_path_leaves_the_previous_value_intact(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    with pytest.raises(ValueError):
+        repo.set_bo_download_dir("reports/out")
+    assert repo.get_bo_download_dir() == str(tmp_path)
+
+
+def test_whitespace_only_path_disables_the_feature(tmp_path):
+    db = _session()
+    repo = SettingsRepository(db)
+    repo.set_bo_download_dir(str(tmp_path))
+    repo.set_bo_download_dir("   ")
+    assert repo.get_bo_download_dir() == ""

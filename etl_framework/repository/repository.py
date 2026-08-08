@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from sqlalchemy import case, insert, or_, cast, String, func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -1468,6 +1469,38 @@ class SettingsRepository:
 
     def get_upload_retention_days(self) -> int:
         return int(self._get_or_create().upload_retention_days or 30)
+
+    def get_bo_download_dir(self) -> str:
+        return self._get_or_create().bo_download_dir or ""
+
+    def set_bo_download_dir(self, path: str) -> AppSettings:
+        """Empty disables the feature. Anything else must be a writable
+        directory that exists right now.
+
+        Validating here catches a typo where the user can act on it. It cannot
+        be the only check — a network share can be reachable at save and gone
+        at download — so bo_archive still treats every write as fallible.
+        """
+        cleaned = (path or "").strip()
+        if cleaned:
+            candidate = Path(cleaned)
+            if not candidate.is_absolute():
+                raise ValueError(
+                    f"Download directory must be an absolute path such as "
+                    f"C:\\reports or \\\\server\\share\\reports: {cleaned}")
+            if not candidate.exists():
+                raise ValueError(f"Download directory does not exist: {cleaned}")
+            if not candidate.is_dir():
+                raise ValueError(f"Download directory is not a directory: {cleaned}")
+            # Advisory on Windows; download-time failure is the real check.
+            if not os.access(candidate, os.W_OK):
+                raise ValueError(f"Download directory is not writable: {cleaned}")
+        row = self._get_or_create()
+        row.bo_download_dir = str(candidate) if cleaned else ""
+        row.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(row)
+        return row
 
     def set_timezone(self, tz_name: str) -> AppSettings:
         from zoneinfo import ZoneInfo

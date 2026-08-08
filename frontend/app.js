@@ -85,7 +85,12 @@ async function apiBlob(path) {
     error.status = resp.status;
     throw error;
   }
-  return { blob: await resp.blob(), disposition: resp.headers.get('content-disposition') || '' };
+  return {
+    blob: await resp.blob(),
+    disposition: resp.headers.get('content-disposition') || '',
+    savedPath: decodeURIComponent(resp.headers.get('x-saved-path') || ''),
+    saveError: decodeURIComponent(resp.headers.get('x-save-error') || ''),
+  };
 }
 
 async function apiPaged(path) {
@@ -258,6 +263,10 @@ function _appRaw() {
     timezoneOpen: false,
     timezoneDraft: 'UTC',
     timezoneSaving: false,
+    boDownloadDir: '',
+    boDownloadDirOpen: false,
+    boDownloadDirDraft: '',
+    boDownloadDirSaving: false,
     timezoneOptions: [
       'UTC',
       'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
@@ -954,6 +963,8 @@ function _appRaw() {
         const resp = await api('GET', '/api/settings');
         this.appTimezone = resp.timezone || 'UTC';
         this.timezoneDraft = this.appTimezone;
+        this.boDownloadDir = resp.bo_download_dir || '';
+        this.boDownloadDirDraft = this.boDownloadDir;
       } catch {}
     },
 
@@ -967,6 +978,26 @@ function _appRaw() {
         this.toast('error', 'Failed to update timezone', e.message || '');
       } finally {
         this.timezoneSaving = false;
+      }
+    },
+
+    async saveBoDownloadDirSetting() {
+      this.boDownloadDirSaving = true;
+      try {
+        const resp = await api('PUT', '/api/settings', { bo_download_dir: this.boDownloadDirDraft });
+        this.boDownloadDir = resp.bo_download_dir || '';
+        // The server normalizes the path (e.g. forward slashes -> backslashes
+        // on Windows), so re-sync the draft or the Save button stays enabled
+        // after a successful save, looking like the save silently failed.
+        this.boDownloadDirDraft = this.boDownloadDir;
+        this.toast('success', 'Download directory updated',
+          this.boDownloadDir
+            ? `SAP BO downloads will also be saved to ${this.boDownloadDir}`
+            : 'SAP BO downloads will go to the browser only');
+      } catch (e) {
+        this.toast('error', 'Failed to update download directory', e.message || '');
+      } finally {
+        this.boDownloadDirSaving = false;
       }
     },
 

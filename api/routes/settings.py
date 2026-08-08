@@ -14,11 +14,13 @@ router = APIRouter(tags=["settings"])
 class SettingsOut(BaseModel):
     timezone: str
     upload_retention_days: int = 30
+    bo_download_dir: str = ""
 
 
 class SettingsUpdate(BaseModel):
     timezone: str | None = None
     upload_retention_days: int | None = None
+    bo_download_dir: str | None = None
 
 
 @router.get("", response_model=SettingsOut)
@@ -27,6 +29,7 @@ def get_settings(db: Session = Depends(get_session)):
     return SettingsOut(
         timezone=repo.get_timezone(),
         upload_retention_days=repo.get_upload_retention_days(),
+        bo_download_dir=repo.get_bo_download_dir(),
     )
 
 
@@ -42,6 +45,8 @@ def update_settings(body: SettingsUpdate, request: Request, db: Session = Depend
             row = repo._get_or_create()
         if body.upload_retention_days is not None:
             row = repo.set_upload_retention_days(body.upload_retention_days)
+        if body.bo_download_dir is not None:
+            row = repo.set_bo_download_dir(body.bo_download_dir)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -50,9 +55,14 @@ def update_settings(body: SettingsUpdate, request: Request, db: Session = Depend
         "settings.updated",
         "settings",
         1,
-        {"timezone": row.timezone, "upload_retention_days": row.upload_retention_days},
+        {
+            "timezone": row.timezone,
+            "upload_retention_days": row.upload_retention_days,
+            "bo_download_dir": row.bo_download_dir,
+        },
     )
     return SettingsOut(
         timezone=row.timezone,
         upload_retention_days=int(row.upload_retention_days or 30),
+        bo_download_dir=row.bo_download_dir or "",
     )

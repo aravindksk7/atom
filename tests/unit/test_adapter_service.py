@@ -214,7 +214,7 @@ def test_download_bo_report_returns_bytes(service):
     with patch("api.services.adapter_service.BORestClient") as MockClient:
         MockClient.return_value.download_report.return_value = b"PDF bytes"
         result = service.download_bo_report(1, "101", "1", "pdf")
-    assert result == b"PDF bytes"
+    assert result.content == b"PDF bytes"
 
 
 def test_download_bo_report_answers_parameters_before_downloading(monkeypatch):
@@ -234,7 +234,7 @@ def test_download_bo_report_answers_parameters_before_downloading(monkeypatch):
         parameters=[{"id": 0, "type": "DateTime", "value": "2026-06-02"}],
         timezone="Etc/GMT-1",
     )
-    assert out == b"XLSXBYTES"
+    assert out.content == b"XLSXBYTES"
     assert calls == ["answer", "download"]  # answer strictly before download
     built = fake.answer_document_parameters.call_args[0][1]
     assert built[0]["value"] == "2026-06-01T23:00:00.000Z"  # tz-converted
@@ -516,3 +516,46 @@ def test_preview_api_endpoint_failure_detail_carries_message_and_exchange(
     assert "Cannot parse API response as json" in detail["message"]
     assert detail["exchange"]["response"]["status"] == 502
     assert detail["exchange"]["response"]["content_type"] == "text/html"
+
+
+# ---------------------------------------------------------------------------
+# download_bo_report - server-side copy
+# ---------------------------------------------------------------------------
+
+def test_download_bo_report_writes_a_server_copy(service, tmp_path):
+    """The service threads the configured directory into the archive module and
+    reports back where the file landed."""
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.download_report.return_value = b"PK\x03\x04"
+        result = service.download_bo_report(
+            1, "124313", "1", fmt="xlsx", download_dir=str(tmp_path))
+
+    assert result.content == b"PK\x03\x04"
+    assert result.save_error is None
+    assert result.saved_path is not None
+    assert result.saved_path.parent == tmp_path
+    assert result.saved_path.read_bytes() == b"PK\x03\x04"
+
+
+def test_download_bo_report_without_a_directory_saves_nothing(service, tmp_path):
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.download_report.return_value = b"PK\x03\x04"
+        result = service.download_bo_report(1, "124313", "1", fmt="xlsx")
+
+    assert result.content == b"PK\x03\x04"
+    assert result.saved_path is None
+    assert result.save_error is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_bo_report_still_returns_bytes_when_the_copy_fails(service, tmp_path):
+    """A bad directory must never cost the user their download."""
+    with patch("api.services.adapter_service.BORestClient") as MockClient:
+        MockClient.return_value.download_report.return_value = b"PK\x03\x04"
+        result = service.download_bo_report(
+            1, "124313", "1", fmt="xlsx",
+            download_dir=str(tmp_path / "does-not-exist"))
+
+    assert result.content == b"PK\x03\x04"
+    assert result.saved_path is None
+    assert result.save_error
