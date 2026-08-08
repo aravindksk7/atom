@@ -14,6 +14,7 @@ from api.schemas import (
     AdapterTestOut, BODocOut, BODocRanOnOut, BOAuthSessionOut, BOReportOut,
     BOParamOut, AutomicJobStatusOut, JobDefinition,
 )
+from api.services.adapter_service import BOReportDownload
 from etl_framework.repository.database import Base
 from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401
@@ -50,7 +51,8 @@ def mock_adapter_service():
     svc.list_bo_reports.return_value = [
         BOReportOut(id="1", name="Page 1", report_index=0),
     ]
-    svc.download_bo_report.return_value = b"PDF content"
+    svc.download_bo_report.return_value = BOReportDownload(
+        content=b"PDF content", saved_path=None, save_error=None)
     svc.create_bo_session.return_value = BOAuthSessionOut(
         ok=True,
         message="SAP BO logon successful",
@@ -204,7 +206,8 @@ def test_download_bo_report_returns_bytes(client):
 
 
 def test_download_bo_report_default_format_is_xlsx(client, mock_adapter_service):
-    mock_adapter_service.download_bo_report.return_value = b"xlsx data"
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"xlsx data", saved_path=None, save_error=None)
     resp = client.get(
         "/api/adapters/sap-bo/documents/101/reports/1/download?config_id=1"
     )
@@ -219,7 +222,8 @@ def test_download_whole_bo_document_names_no_report(client, mock_adapter_service
     """SAP's primary step 5 exports the whole document — every tab in one
     workbook. The report-scoped route can't express it: a path segment always
     names a tab, and an empty one would export the tab called ""."""
-    mock_adapter_service.download_bo_report.return_value = b"whole doc"
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"whole doc", saved_path=None, save_error=None)
     resp = client.get("/api/adapters/sap-bo/documents/101/download?config_id=1&format=xlsx")
     assert resp.status_code == 200
     assert resp.content == b"whole doc"
@@ -231,7 +235,8 @@ def test_download_whole_bo_document_names_no_report(client, mock_adapter_service
 def test_download_whole_bo_document_with_parameters(client, mock_adapter_service):
     """A prompted document has to be answerable on the whole-document route
     too — otherwise every multi-tab export is stuck on the unprompted GET."""
-    mock_adapter_service.download_bo_report.return_value = b"whole doc"
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"whole doc", saved_path=None, save_error=None)
     with patch("api.routes.adapters.SettingsRepository") as MockSettings:
         MockSettings.return_value.get_timezone.return_value = "Etc/GMT-1"
         resp = client.post(
@@ -469,3 +474,57 @@ def test_adapters_prefix_registered(client):
     """Confirms /api/adapters/* is reachable (not 404 routing miss)."""
     resp = client.post("/api/adapters/sap-bo/test", json={"config_id": 1})
     assert resp.status_code != 404
+
+
+# ---------------------------------------------------------------------------
+# Server-side copy: X-Saved-Path / X-Save-Error headers
+# ---------------------------------------------------------------------------
+
+def test_download_route_reports_the_saved_path(client, mock_adapter_service, tmp_path):
+    """The header is percent-encoded: HTTP header values are latin-1 and a
+    Windows share path can carry characters outside it."""
+    from urllib.parse import unquote
+    from api.services.adapter_service import BOReportDownload
+
+    saved = tmp_path / "report_101_1_20260807T203015Z.xlsx"
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"PK", saved_path=saved, save_error=None)
+
+    resp = client.get(
+        "/api/adapters/sap-bo/documents/101/reports/1/download?config_id=1")
+
+    assert resp.status_code == 200
+    assert resp.content == b"PK"
+    assert unquote(resp.headers["x-saved-path"]) == str(saved)
+    assert "x-save-error" not in resp.headers
+
+
+def test_download_route_reports_a_save_error_and_still_returns_the_file(
+    client, mock_adapter_service
+):
+    from urllib.parse import unquote
+    from api.services.adapter_service import BOReportDownload
+
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"PK", saved_path=None, save_error="Permission denied")
+
+    resp = client.get(
+        "/api/adapters/sap-bo/documents/101/reports/1/download?config_id=1")
+
+    assert resp.status_code == 200
+    assert resp.content == b"PK"
+    assert unquote(resp.headers["x-save-error"]) == "Permission denied"
+    assert "x-saved-path" not in resp.headers
+
+
+def test_download_route_sends_neither_header_when_disabled(client, mock_adapter_service):
+    from api.services.adapter_service import BOReportDownload
+
+    mock_adapter_service.download_bo_report.return_value = BOReportDownload(
+        content=b"PK", saved_path=None, save_error=None)
+
+    resp = client.get(
+        "/api/adapters/sap-bo/documents/101/reports/1/download?config_id=1")
+
+    assert "x-saved-path" not in resp.headers
+    assert "x-save-error" not in resp.headers

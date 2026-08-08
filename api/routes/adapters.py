@@ -32,6 +32,7 @@ from api.schemas import (
     RestApiTestRequest,
 )
 from api.services.adapter_service import AdapterService, SAPBOAuthContext
+from api.services.bo_archive import EXT_MAP as _EXT_MAP
 from etl_framework.repository.repository import ConfigRepository, JobRepository, SettingsRepository
 from api.services.audit_service import AuditService
 
@@ -42,7 +43,25 @@ _MIME_MAP = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "csv":  "text/csv",
 }
-_EXT_MAP = {"pdf": "pdf", "xlsx": "xlsx", "csv": "csv"}
+
+
+def _download_response(result, doc_id: str, report_id: str, fmt: str) -> Response:
+    """One Response builder for all four download routes.
+
+    Both headers are percent-encoded: HTTP header values are latin-1, and a
+    Windows share path or an OS error string can carry characters outside it.
+    """
+    from urllib.parse import quote
+
+    mime = _MIME_MAP.get(fmt, "application/octet-stream")
+    ext = _EXT_MAP.get(fmt, "bin")
+    name = f"report_{doc_id}_{report_id}.{ext}" if report_id else f"report_{doc_id}.{ext}"
+    headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+    if result.saved_path is not None:
+        headers["X-Saved-Path"] = quote(str(result.saved_path))
+    if result.save_error:
+        headers["X-Save-Error"] = quote(result.save_error)
+    return Response(content=result.content, media_type=mime, headers=headers)
 
 
 def get_adapter_service(db: Session = Depends(get_session)) -> AdapterService:
@@ -170,25 +189,21 @@ def download_whole_bo_document(
     config_id: int,
     request: Request,
     format: str = "xlsx",
+    db: Session = Depends(get_session),
     service: AdapterService = Depends(get_adapter_service),
 ):
     """SAP's primary step 5: every tab of the document in one file. Naming no
     report is the whole point, so this cannot be folded into the report-scoped
     route below — a path segment always names a tab."""
-    content = service.download_bo_report(
+    result = service.download_bo_report(
         config_id,
         doc_id,
         "",
         fmt=format,
         auth=_sap_bo_auth_from_request(request),
+        download_dir=SettingsRepository(db).get_bo_download_dir(),
     )
-    mime = _MIME_MAP.get(format, "application/octet-stream")
-    ext = _EXT_MAP.get(format, "bin")
-    return Response(
-        content=content,
-        media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}.{ext}"'},
-    )
+    return _download_response(result, doc_id, "", format)
 
 
 @router.post("/sap-bo/documents/{doc_id}/download")
@@ -200,23 +215,18 @@ def download_whole_bo_document_with_parameters(
     db: Session = Depends(get_session),
     service: AdapterService = Depends(get_adapter_service),
 ):
-    tz = SettingsRepository(db).get_timezone()
-    content = service.download_bo_report(
+    settings = SettingsRepository(db)
+    result = service.download_bo_report(
         config_id,
         doc_id,
         "",
         fmt=body.format,
         auth=_sap_bo_auth_from_request(request),
         parameters=[p.model_dump() for p in body.parameters],
-        timezone=tz,
+        timezone=settings.get_timezone(),
+        download_dir=settings.get_bo_download_dir(),
     )
-    mime = _MIME_MAP.get(body.format, "application/octet-stream")
-    ext = _EXT_MAP.get(body.format, "bin")
-    return Response(
-        content=content,
-        media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}.{ext}"'},
-    )
+    return _download_response(result, doc_id, "", body.format)
 
 
 @router.get("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
@@ -226,24 +236,18 @@ def download_bo_report(
     config_id: int,
     request: Request,
     format: str = "xlsx",
+    db: Session = Depends(get_session),
     service: AdapterService = Depends(get_adapter_service),
 ):
-    content = service.download_bo_report(
+    result = service.download_bo_report(
         config_id,
         doc_id,
         report_id,
         fmt=format,
         auth=_sap_bo_auth_from_request(request),
+        download_dir=SettingsRepository(db).get_bo_download_dir(),
     )
-    mime = _MIME_MAP.get(format, "application/octet-stream")
-    ext = _EXT_MAP.get(format, "bin")
-    return Response(
-        content=content,
-        media_type=mime,
-        headers={
-            "Content-Disposition": f'attachment; filename="report_{doc_id}_{report_id}.{ext}"'
-        },
-    )
+    return _download_response(result, doc_id, report_id, format)
 
 
 @router.post("/sap-bo/documents/{doc_id}/reports/{report_id}/download")
@@ -256,23 +260,18 @@ def download_bo_report_with_parameters(
     db: Session = Depends(get_session),
     service: AdapterService = Depends(get_adapter_service),
 ):
-    tz = SettingsRepository(db).get_timezone()
-    content = service.download_bo_report(
+    settings = SettingsRepository(db)
+    result = service.download_bo_report(
         config_id,
         doc_id,
         report_id,
         fmt=body.format,
         auth=_sap_bo_auth_from_request(request),
         parameters=[p.model_dump() for p in body.parameters],
-        timezone=tz,
+        timezone=settings.get_timezone(),
+        download_dir=settings.get_bo_download_dir(),
     )
-    mime = _MIME_MAP.get(body.format, "application/octet-stream")
-    ext = _EXT_MAP.get(body.format, "bin")
-    return Response(
-        content=content,
-        media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="report_{doc_id}_{report_id}.{ext}"'},
-    )
+    return _download_response(result, doc_id, report_id, body.format)
 
 
 # ---------------------------------------------------------------------------
