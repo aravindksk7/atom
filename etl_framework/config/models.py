@@ -51,6 +51,7 @@ class EnvironmentConfig(BaseModel):
     ds_user: str = ""
     ds_password: str = ""
     ds_repository: str = ""
+    ds_auth_type: str = "secEnterprise"
     ds_timeout: int = 60
     ds_proxy_url: str = ""
     ds_verify_ssl: bool = True
@@ -113,6 +114,14 @@ class EnvironmentConfig(BaseModel):
     @field_validator("bo_auth_type")
     @classmethod
     def validate_bo_auth_type(cls, v: str) -> str:
+        valid = {"secEnterprise", "secWinAD", "secLDAP", "secSAPR3"}
+        if v not in valid:
+            raise ValueError(f"must be one of {sorted(valid)}, got {v!r}")
+        return v
+
+    @field_validator("ds_auth_type")
+    @classmethod
+    def validate_ds_auth_type(cls, v: str) -> str:
         valid = {"secEnterprise", "secWinAD", "secLDAP", "secSAPR3"}
         if v not in valid:
             raise ValueError(f"must be one of {sorted(valid)}, got {v!r}")
