@@ -70,7 +70,7 @@ def api(mock_bo, monkeypatch):
     Base.metadata.create_all(engine)
     monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
     with Session(engine) as db:
-        raw, _ = TokenRepository(db).create("test")
+        raw, _ = TokenRepository(db).create("test", is_admin=True)
         cfg = ConfigRepository(db).create(
             name="sapbo-mock",
             env_name="mock",
@@ -206,3 +206,64 @@ def test_ui_download_without_prompts_uses_the_plain_get(api):
 
     assert download.status_code == 200
     assert "A100" in _sheet_text(download.content)
+
+
+def test_ui_download_also_writes_a_server_copy(api, tmp_path):
+    """The whole feature, through the endpoint the browser calls: the response
+    still carries the workbook AND the file is on disk under a timestamped
+    name."""
+    from urllib.parse import unquote
+
+    client, config_id = api
+
+    settings = client.put("/api/settings", json={"bo_download_dir": str(tmp_path)})
+    assert settings.status_code == 200
+
+    download = client.post(
+        f"/api/adapters/sap-bo/documents/1003/reports/rpt-daily-sales/download"
+        f"?config_id={config_id}",
+        json={"format": "xlsx", "parameters": [
+            {"id": 0, "type": "DateTime", "value": "2026-06-03"},
+            {"id": 1, "type": "String", "value": "ASX"},
+        ]},
+    )
+
+    assert download.status_code == 200
+    assert download.content.startswith(b"PK")
+
+    written = list(tmp_path.glob("report_1003_rpt-daily-sales_*.xlsx"))
+    assert len(written) == 1
+    assert written[0].read_bytes() == download.content
+    assert unquote(download.headers["x-saved-path"]) == str(written[0])
+
+    # The archived copy holds the answered day's data, not just any workbook.
+    sheet = _sheet_text(written[0].read_bytes())
+    assert "D400" in sheet and "A100" not in sheet
+
+
+def test_ui_download_survives_an_unwritable_directory(api, tmp_path):
+    """A directory that disappears after it was configured must not cost the
+    user the download — only the archive."""
+    from urllib.parse import unquote
+
+    client, config_id = api
+
+    target = tmp_path / "share"
+    target.mkdir()
+    assert client.put(
+        "/api/settings", json={"bo_download_dir": str(target)}).status_code == 200
+    target.rmdir()          # the share went away after it was configured
+
+    download = client.post(
+        f"/api/adapters/sap-bo/documents/1003/reports/rpt-daily-sales/download"
+        f"?config_id={config_id}",
+        json={"format": "xlsx", "parameters": [
+            {"id": 0, "type": "DateTime", "value": "2026-06-03"},
+            {"id": 1, "type": "String", "value": "ASX"},
+        ]},
+    )
+
+    assert download.status_code == 200
+    assert download.content.startswith(b"PK")
+    assert unquote(download.headers["x-save-error"])
+    assert "x-saved-path" not in download.headers
