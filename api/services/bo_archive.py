@@ -36,7 +36,7 @@ def save_bo_download(content: bytes, *, doc_id: str, report_id: str, fmt: str,
     if not (directory or "").strip():
         return None, None
 
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     ext = EXT_MAP.get(fmt, "bin")
     parts = ["report", _safe(doc_id)]
     if str(report_id or "").strip():

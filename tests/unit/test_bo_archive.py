@@ -5,7 +5,7 @@ client. That is the whole reason the write policy lives in its own module.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -110,3 +110,13 @@ def test_uses_the_current_time_when_now_is_omitted(tmp_path):
     # -1 tolerates that truncation; a dropped tz (UTC+10 on this machine)
     # would still miss by ~36000s, so this remains a real regression check.
     assert -1 <= (stamped - before).total_seconds() < 5
+
+
+def test_stamp_is_utc_even_when_now_carries_another_offset(tmp_path):
+    """The trailing Z has to be computed, not glued on: a +10:00 instant must
+    be stamped as its UTC equivalent."""
+    aest = datetime(2026, 8, 7, 20, 30, 15, tzinfo=timezone(timedelta(hours=10)))
+    path, error = save_bo_download(b"data", doc_id="1", report_id="", fmt="xlsx",
+                                   directory=str(tmp_path), now=aest)
+    assert error is None
+    assert path.name == "report_1_20260807T103015Z.xlsx"
