@@ -336,6 +336,7 @@ class AppSettings(Base):
     id = Column(Integer, primary_key=True)
     timezone = Column(String(64), nullable=False, default="UTC")
     upload_retention_days = Column(Integer, nullable=False, default=30)
+    bo_download_dir = Column(String(1024), nullable=False, default="")
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
