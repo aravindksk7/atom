@@ -228,10 +228,12 @@ test.describe('08a compare / BO report', () => {
     });
 
     test('live Source A vs path Source B', async ({ authedPage }) => {
-      // Source B as a server-side file path (api/services/compare_service.py's
-      // _load_bo_source() falls through to read_tabular(path=...) for anything
-      // that isn't 'live'/'api') was untested against a real live BO pull --
-      // every other live-BO-mock case here goes through upload instead. Requires
+      // Source A is the live BO pull, which the app always exports as xlsx
+      // (_buildBOSource() hardcodes format: 'xlsx'). Source B as a server-side
+      // xlsx file path (api/services/compare_service.py's _load_bo_source()
+      // falls through to read_tabular(path=...) for anything that isn't
+      // 'live'/'api') was untested against a real live BO pull -- every other
+      // live-BO-mock case here goes through upload instead. Requires
       // playwright.config.ts's SERVER_FILE_ALLOWED_DIRS to include fixtures/data.
       await openBO(authedPage);
       await authedPage.locator('[data-testid="compare-bo-source-a-mode-live"]').click();
@@ -239,7 +241,7 @@ test.describe('08a compare / BO report', () => {
       await authedPage.locator('[data-testid="compare-bo-source-a-doc-select"]').selectOption({ label: 'Sales Orders' });
       await authedPage.locator('[data-testid="compare-bo-source-a-report-select"]').selectOption({ label: 'Orders' });
       await authedPage.locator('[data-testid="compare-bo-source-b-mode-path"]').click();
-      await authedPage.getByPlaceholder('C:\\reports\\b.csv').fill(dataFile('source.csv'));
+      await authedPage.getByPlaceholder('C:\\reports\\b.csv').fill(dataFile('source.xlsx'));
       await authedPage.locator('[data-testid="compare-bo-key-columns-input"]').fill('id');
       await authedPage.locator('[data-testid="compare-bo-run-btn"]').click();
       await expect(authedPage.locator('[data-testid="compare-bo-result-status"]')).toBeVisible({ timeout: 20_000 });
