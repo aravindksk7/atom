@@ -986,6 +986,10 @@ function _appRaw() {
       try {
         const resp = await api('PUT', '/api/settings', { bo_download_dir: this.boDownloadDirDraft });
         this.boDownloadDir = resp.bo_download_dir || '';
+        // The server normalizes the path (e.g. forward slashes -> backslashes
+        // on Windows), so re-sync the draft or the Save button stays enabled
+        // after a successful save, looking like the save silently failed.
+        this.boDownloadDirDraft = this.boDownloadDir;
         this.toast('success', 'Download directory updated',
           this.boDownloadDir
             ? `SAP BO downloads will also be saved to ${this.boDownloadDir}`
