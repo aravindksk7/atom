@@ -262,10 +262,12 @@ function _appRaw() {
     appTimezone: 'UTC',
     timezoneOpen: false,
     timezoneDraft: 'UTC',
+    timezoneDraftDirty: false,
     timezoneSaving: false,
     boDownloadDir: '',
     boDownloadDirOpen: false,
     boDownloadDirDraft: '',
+    boDownloadDirDraftDirty: false,
     boDownloadDirSaving: false,
     timezoneOptions: [
       'UTC',
@@ -962,9 +964,13 @@ function _appRaw() {
       try {
         const resp = await api('GET', '/api/settings');
         this.appTimezone = resp.timezone || 'UTC';
-        this.timezoneDraft = this.appTimezone;
         this.boDownloadDir = resp.bo_download_dir || '';
-        this.boDownloadDirDraft = this.boDownloadDir;
+        // This load is fire-and-forget from init, so it can resolve after the
+        // user has already opened a settings card and started typing. Only
+        // seed the draft if they haven't touched it yet, or a slow response
+        // clobbers whatever they typed in the meantime.
+        if (!this.timezoneDraftDirty) this.timezoneDraft = this.appTimezone;
+        if (!this.boDownloadDirDraftDirty) this.boDownloadDirDraft = this.boDownloadDir;
       } catch {}
     },
 
@@ -973,6 +979,7 @@ function _appRaw() {
       try {
         const resp = await api('PUT', '/api/settings', { timezone: this.timezoneDraft });
         this.appTimezone = resp.timezone;
+        this.timezoneDraftDirty = false;
         this.toast('success', 'Timezone updated', `All timestamps now shown in ${resp.timezone}`);
       } catch (e) {
         this.toast('error', 'Failed to update timezone', e.message || '');
@@ -990,6 +997,7 @@ function _appRaw() {
         // on Windows), so re-sync the draft or the Save button stays enabled
         // after a successful save, looking like the save silently failed.
         this.boDownloadDirDraft = this.boDownloadDir;
+        this.boDownloadDirDraftDirty = false;
         this.toast('success', 'Download directory updated',
           this.boDownloadDir
             ? `SAP BO downloads will also be saved to ${this.boDownloadDir}`

@@ -34,6 +34,7 @@ test.describe('08d compare / column stats', () => {
     await openColumnStats(authedPage);
     await authedPage.locator('[data-testid="compare-colstats-source-a-type-select"]').selectOption('live');
     await authedPage.locator('[data-testid="compare-colstats-source-a-docid-input"]').fill('not-a-number');
+    await authedPage.locator('[data-testid="compare-colstats-source-a-reportid-input"]').fill('*');
     await authedPage.locator('[data-testid="compare-colstats-source-b-upload-input"]').setInputFiles(dataFile('source.csv'));
     await authedPage.locator('[data-testid="compare-colstats-run-btn"]').click();
     await expect(authedPage.locator('.toast-title')).toContainText('Column stats failed');
