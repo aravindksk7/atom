@@ -317,6 +317,26 @@ def test_create_job_from_bo_report_returns_201(client):
     assert data["name"] == "my_bo_job"
     assert data["job_type"] == "bo_report"
     assert data["params"]["report_id"] == "101"
+    assert data["params"]["bo_parameters"] == []
+
+
+def test_create_job_from_bo_report_carries_parameters(client):
+    with patch("api.routes.adapters.JobRepository") as MockRepo:
+        MockRepo.return_value.upsert.return_value = MagicMock()
+        resp = client.post("/api/adapters/jobs/from-bo-report", json={
+            "name": "my_bo_job",
+            "title": "Sales Report",
+            "doc_id": "101",
+            "report_id": "1",
+            "key_columns": ["region"],
+            "format": "xlsx",
+            "parameters": [{"id": 0, "type": "DateTime", "value": "2026-08-09"}],
+        })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["params"]["bo_parameters"] == [
+        {"id": 0, "type": "DateTime", "value": "2026-08-09"},
+    ]
 
 
 def test_create_job_from_automic_returns_201(client):

@@ -298,8 +298,8 @@
   </div>
 
   <!-- SAP BO – server-side copy of downloads -->
-  <div class="card mt-4">
-    <button type="button" class="card-toggle" @click="boDownloadDirOpen = !boDownloadDirOpen" :aria-expanded="boDownloadDirOpen.toString()">
+  <div class="card mt-4" data-testid="bo-download-dir-card">
+    <button type="button" class="card-toggle" data-testid="bo-download-dir-toggle" @click="boDownloadDirOpen = !boDownloadDirOpen" :aria-expanded="boDownloadDirOpen.toString()">
       <div class="font-semibold text-slate-700">💾 SAP BO — download directory</div>
       <span class="text-muted text-sm" x-text="boDownloadDirOpen ? '▲ collapse' : '▼ expand'"></span>
     </button>
@@ -311,8 +311,8 @@
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
-            <input type="text" x-model="boDownloadDirDraft" placeholder="C:\reports\sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft">
-            <button @click="saveBoDownloadDirSetting()" :disabled="boDownloadDirSaving || boDownloadDirDraft === boDownloadDir" class="btn-primary btn-sm">
+            <input type="text" x-model="boDownloadDirDraft" placeholder="C:\reports\sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft" data-testid="bo-download-dir-input">
+            <button @click="saveBoDownloadDirSetting()" :disabled="boDownloadDirSaving || boDownloadDirDraft === boDownloadDir" class="btn-primary btn-sm" data-testid="bo-download-dir-save-btn">
               <span x-show="!boDownloadDirSaving">Save</span>
               <span x-show="boDownloadDirSaving">Saving…</span>
             </button>

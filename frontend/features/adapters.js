@@ -305,13 +305,24 @@
 
     async saveBOJob() {
       try {
+        // Carry over prompt answers already collected for this doc (loaded on
+        // expand via loadBOReportParams) so the new job's Report Parameters
+        // — including any DateTime prompt — aren't blank in the Job Launcher
+        // editor until the user manually clicks "Load from report".
+        const docId = this.boJobForm.doc_id;
+        const docParams = this.boReportParams[docId] || [];
+        const docValues = this.boParamValues[docId] || {};
+        const parameters = docParams.map(p => ({
+          id: p.id, type: p.type, value: String(docValues[p.id] ?? ''),
+        }));
         await api('POST', '/api/adapters/jobs/from-bo-report', {
           name: this.boJobForm.name,
           title: this.boJobForm.title,
-          doc_id: this.boJobForm.doc_id,
+          doc_id: docId,
           report_id: this.boJobForm.report_id,
           key_columns: this.boJobForm.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean),
           format: this.boJobForm.format,
+          parameters,
         });
         await this.loadJobs();
         this.showBOJobModal = false;

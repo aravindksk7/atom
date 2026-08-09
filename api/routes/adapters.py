@@ -336,6 +336,7 @@ def create_job_from_bo_report(
             "report_id": body.doc_id,
             "bo_report_id": body.report_id,
             "format": body.format,
+            "bo_parameters": [p.model_dump() for p in body.parameters],
         },
         "enabled": True,
     }

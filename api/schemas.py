@@ -736,6 +736,10 @@ class BOJobCreateRequest(BaseModel):
     report_id: str = ""
     key_columns: list[str]
     format: str = "xlsx"
+    # Prompt answers already collected in the Adapters tab (e.g. the date
+    # prompt), carried into job.params.bo_parameters so the Job Launcher
+    # editor shows them without a separate "Load from report" click.
+    parameters: list[BOParamAnswer] = []
 
 
 class AutomicJobCreateRequest(BaseModel):
