@@ -89,4 +89,31 @@ test.describe('01 config', () => {
     // Confirm the test's own name: a failed import must not silently persist a config.
     await expect(authedPage.locator('[data-testid^="config-row-"][data-testid$="-edit-btn"]')).toHaveCount(countBefore);
   });
+
+  test('SAP DS auth type is saved and round-trips through the edit modal', async ({ authedPage }) => {
+    // ds_auth_type (added alongside the SAP DS integration) has no dedicated
+    // data-testid -- select it by its label's `id`, matching the field's own markup
+    // (frontend/partials/tab-config.html, id="a11y-config-ds-auth-type"). Defaults to
+    // 'secEnterprise' (frontend/features/config.js); this picks a non-default value so
+    // a save that silently drops the field, or an edit-reload that falls back to the
+    // default, would both be caught.
+    const name = `e2e-ds-auth-${Date.now()}`;
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-config"]').click();
+    await authedPage.locator('[data-testid="config-new-btn"]').click();
+    await authedPage.locator('[data-testid="config-modal-name-input"]').fill(name);
+    await authedPage.locator('#a11y-config-ds-auth-type').selectOption('secWinAD');
+    await authedPage.locator('[data-testid="config-modal-save-btn"]').click();
+    await expect(authedPage.locator('[data-testid="config-modal"]')).toBeHidden();
+
+    const row = authedPage.locator('[data-testid^="config-row-"]').filter({ hasText: name });
+    await expect(row).toBeVisible();
+    await row.locator('button:has-text("Edit")').click();
+    await expect(authedPage.locator('[data-testid="config-modal"]')).toBeVisible();
+    await expect(authedPage.locator('#a11y-config-ds-auth-type')).toHaveValue('secWinAD');
+
+    await authedPage.locator('[data-testid="config-modal-cancel-btn"]').click();
+    await expect(authedPage.locator('[data-testid="config-modal"]')).toBeHidden();
+  });
 });
