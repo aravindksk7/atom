@@ -1615,6 +1615,33 @@ def test_get_document_parameters_extracts_default_answer_value(authenticated_cli
     ]
 
 
+def test_get_document_parameters_never_answered_string_prompt_is_not_typed_as_prompt_kind(
+    authenticated_client,
+):
+    """A prompt that has never been answered has no `answer` object at all —
+    common for text prompts (unlike DateTime ones, BO rarely pre-fills a
+    remembered default for them). The outer `type` in this nested BIP shape
+    is the parameter *kind* ("prompt"), not a data type; falling through to
+    it would ship "prompt" itself as the answer PUT's @type, which BO does
+    not recognise and silently answers nothing for — the date prompt (which
+    does carry a default, so its real type is found) then "gets through"
+    while the string prompt's answer does not."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"parameters": {"parameter": [
+        {"id": 0, "name": "Start Date", "type": "prompt", "mandatory": True,
+         "answer": {"type": "DateTime", "values": {"value": [
+             {"$": "2026-05-08T00:00:00.000Z", "@type": "DateTime"}]}}},
+        {"id": 1, "name": "Region", "type": "prompt", "mandatory": False},
+    ]}}
+    with patch.object(authenticated_client._session, "get", return_value=resp):
+        params = authenticated_client.get_document_parameters("124313")
+    assert params == [
+        {"id": 0, "name": "Start Date", "type": "DateTime", "mandatory": True, "default": "2026-05-08"},
+        {"id": 1, "name": "Region", "type": "String", "mandatory": False, "default": ""},
+    ]
+
+
 def test_get_document_parameters_404_raises_report_not_found(authenticated_client):
     from etl_framework.exceptions import ReportNotFoundError
     resp = MagicMock()

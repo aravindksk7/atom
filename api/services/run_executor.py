@@ -1626,6 +1626,7 @@ class RunExecutor:
                 data = client.download_report(doc_id, report_id, fmt)
             finally:
                 client.logout()
+            self._archive_bo_download(data, doc_id=doc_id, report_id=report_id, fmt=fmt)
 
             artifact_name = (
                 f"bo_report_{doc_id}_{report_id}.{fmt}" if report_id
@@ -1678,6 +1679,26 @@ class RunExecutor:
                 exc_info=True,
             )
             return None
+
+    def _archive_bo_download(self, data: bytes, *, doc_id: str, report_id: str, fmt: str) -> None:
+        """Copy a job-executed SAP BO export into the configured download
+        directory, same as the interactive Adapters-tab download does.
+
+        Best-effort by design, like `_persist_run_data_artifact`: `save_bo_download`
+        never raises, but a save_error (e.g. the directory vanished) must not fail
+        a run that already produced a valid result — only get logged.
+        """
+        from api.services.bo_archive import save_bo_download
+
+        directory = SettingsRepository(self._db).get_bo_download_dir()
+        _, save_error = save_bo_download(
+            data, doc_id=doc_id, report_id=report_id, fmt=fmt, directory=directory,
+        )
+        if save_error:
+            logger.warning(
+                "Could not save SAP BO report %s/%s to %s for run %s: %s",
+                doc_id, report_id, directory, self._run_id, save_error,
+            )
 
     def _build_case_bo_job(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:

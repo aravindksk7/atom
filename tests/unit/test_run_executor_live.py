@@ -302,6 +302,46 @@ def test_bo_report_job_returns_error_on_failure():
     assert run.results[0].status == TestStatus.ERROR.value
 
 
+def test_bo_report_job_saves_a_server_copy_to_the_configured_download_dir(tmp_path):
+    """The interactive Adapters-tab download archives its export via
+    bo_archive.save_bo_download (api/services/adapter_service.py); running the
+    same report as a job through the executor previously downloaded the bytes
+    and used them for the reconciliation result without ever writing them to
+    the operator-configured directory."""
+    from etl_framework.repository.repository import SettingsRepository
+
+    db = _session()
+    RunRepository(db).create_run("r-bo-archive", "dev", "prod", {})
+    SettingsRepository(db).set_bo_download_dir(str(tmp_path))
+    JobRepository(db).create({
+        "name": "orders_report",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_report",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"report_id": "101", "bo_report_id": "1", "format": "csv"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-bo-archive", ["orders_report"],
+        RunSettings(use_live_connections=True, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    csv_bytes = b"id,sku\n1,A100\n"
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        inst = MockBO.return_value
+        inst.download_report.return_value = csv_bytes
+        executor.execute()
+
+    saved = list(tmp_path.glob("report_101_1_*.csv"))
+    assert len(saved) == 1
+    assert saved[0].read_bytes() == csv_bytes
+
+
 def _bo_report_job(params):
     from api.schemas import JobDefinition
     return JobDefinition(

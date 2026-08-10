@@ -767,15 +767,30 @@ class BORestClient:
             # ("prompt"). Prefer answer.type so date prompts are recognised and
             # converted — else they export as raw text and BO rejects (502).
             answer = p.get("answer") or {}
-            dtype = (
-                answer.get("type") or answer.get("@type")
-                or p.get("type") or p.get("@type", "")
-            )
             # Surface the prompt's current/default answer value when the
             # listing carries one, so the UI can pre-fill an editable default.
             vals = (answer.get("values") or {}).get("value") or []
             if isinstance(vals, dict):
                 vals = [vals]
+            dtype = answer.get("type") or answer.get("@type")
+            if not dtype and vals:
+                # A prompt that was answered but whose `answer` wrapper omits
+                # `type` still carries the real data type on the value itself.
+                dtype = vals[0].get("@type")
+            if not dtype or dtype == "prompt":
+                # A never-answered prompt (common for text/string prompts —
+                # unlike DateTime ones, BO rarely pre-fills a remembered
+                # default for them) has no `answer` object at all, so every
+                # signal above is empty. Falling through to the *outer*
+                # `type` here would silently ship "prompt" itself — the
+                # parameter *kind*, not a data type — as the answer PUT's
+                # @type, which BO does not recognise and answers nothing
+                # for, while a DateTime prompt with an existing default
+                # answers fine. Only trust the outer field when it isn't
+                # that sentinel (the flat listing shape reuses `type` for
+                # the real data type); otherwise assume the common case.
+                candidate = p.get("type") or p.get("@type", "")
+                dtype = candidate if candidate and candidate != "prompt" else "String"
             default = str(vals[0].get("$", "")) if vals else ""
             # A DateTime default arrives as a full ISO instant; the <input
             # type="date"> picker only accepts YYYY-MM-DD, so trim to the date.
