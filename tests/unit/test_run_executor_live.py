@@ -272,6 +272,41 @@ def test_bo_report_job_stores_sample_of_read_rows():
     ]
 
 
+def test_bo_report_job_fails_fast_when_live_connections_disabled():
+    """Regression test: with live connections off, bo_report had no guard
+    (unlike bo_job/ds_job) and silently fell through to the generic
+    reconciliation fallback, which built an empty-key merge and crashed with
+    a cryptic `IndexError: list index out of range` deep in pandas instead
+    of a clear error naming the actual problem."""
+    db = _session()
+    RunRepository(db).create_run("r-bor-nolive", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "orders_report",
+        "description": "",
+        "tags": [],
+        "job_type": "bo_report",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"report_id": "101", "bo_report_id": "1", "format": "csv"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-bor-nolive", ["orders_report"],
+        RunSettings(use_live_connections=False, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.BORestClient") as MockBO:
+        executor.execute()
+        MockBO.assert_not_called()
+
+    run = RunRepository(db).get_run("r-bor-nolive")
+    assert run.results[0].status == TestStatus.ERROR.value
+    assert "bo_report jobs require live connections" in run.results[0].error_message
+
+
 def test_bo_report_job_returns_error_on_failure():
     db = _session()
     RunRepository(db).create_run("r-bo-err", "dev", "prod", {})
@@ -440,6 +475,40 @@ def test_automic_job_returns_passed_when_status_passed():
 
     run = RunRepository(db).get_run("r-ac")
     assert run.results[0].status == TestStatus.PASSED.value
+
+
+def test_automic_job_fails_fast_when_live_connections_disabled():
+    """Same gap as bo_report: automic_job jobs carry no query/key_columns of
+    their own, so with live connections off the old code fell through to the
+    generic reconciliation fallback and crashed with a cryptic pandas
+    IndexError instead of a clear error."""
+    db = _session()
+    RunRepository(db).create_run("r-ac-nolive", "dev", "prod", {})
+    JobRepository(db).create({
+        "name": "nightly_etl",
+        "description": "",
+        "tags": [],
+        "job_type": "automic_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {"job_name": "ETL_NIGHTLY"},
+        "enabled": True,
+    })
+    executor = _make_executor(
+        db, "r-ac-nolive", ["nightly_etl"],
+        RunSettings(use_live_connections=False, metrics_enabled=False),
+        snapshot=_LIVE_SNAPSHOT,
+    )
+
+    with patch("api.services.run_executor.AutomicClient") as MockAC:
+        executor.execute()
+        MockAC.assert_not_called()
+
+    run = RunRepository(db).get_run("r-ac-nolive")
+    assert run.results[0].status == TestStatus.ERROR.value
+    assert "automic_job jobs require live connections" in run.results[0].error_message
 
 
 def test_automic_job_uses_run_id_lookup_when_run_id_param():

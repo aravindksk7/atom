@@ -481,9 +481,17 @@ class RunExecutor:
             return self._build_case_cross_job(job)
         if job.job_type == "dbt_artifact":
             return self._build_case_dbt(job)
-        if job.job_type == "bo_report" and self._settings.use_live_connections:
+        if job.job_type == "bo_report":
+            if not self._settings.use_live_connections:
+                def run_job() -> ReconciliationResult:
+                    raise ValueError("bo_report jobs require live connections to be enabled")
+                return run_job
             return self._build_case_bo_report(job)
-        if job.job_type == "automic_job" and self._settings.use_live_connections:
+        if job.job_type == "automic_job":
+            if not self._settings.use_live_connections:
+                def run_job() -> ReconciliationResult:
+                    raise ValueError("automic_job jobs require live connections to be enabled")
+                return run_job
             return self._build_case_automic(job)
         if job.job_type == "bo_job":
             if not self._settings.use_live_connections:
