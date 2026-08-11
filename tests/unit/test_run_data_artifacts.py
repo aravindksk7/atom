@@ -264,3 +264,78 @@ def test_run_status_out_flag_is_false_without_artifact():
     RunRepository(db).create_run("r-plain", "qa", "prod", {})
 
     assert _run_status_out(RunRepository(db).get_run("r-plain")).has_data_artifact is False
+
+
+# ---------------------------------------------------------------------------
+# Job-scoped artifact resolution (multi-job runs)
+# ---------------------------------------------------------------------------
+
+def test_resolve_job_result_artifact_finds_the_named_jobs_result(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    artifact_path = upload_store.persist_run_data_artifact("run-1", _CSV, "report.csv")
+
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="my_bo_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        data_artifact_path=artifact_path,
+    ))
+
+    resolved = resolve_job_result_artifact(repo, "run-1", "my_bo_job")
+
+    assert resolved is not None
+    assert resolved.read_bytes() == _CSV
+
+
+def test_resolve_job_result_artifact_returns_none_for_unknown_job(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+
+    assert resolve_job_result_artifact(repo, "run-1", "no_such_job") is None
+
+
+def test_load_job_result_frame_reads_the_artifact_as_a_dataframe(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import load_job_result_frame
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    artifact_path = upload_store.persist_run_data_artifact("run-1", _CSV, "report.csv")
+
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="my_bo_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        data_artifact_path=artifact_path,
+    ))
+
+    frame = load_job_result_frame(repo, "run-1", "my_bo_job")
+
+    assert frame is not None
+    assert list(frame["value"]) == ["alpha", "beta"]
