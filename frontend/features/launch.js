@@ -1226,11 +1226,9 @@
         this.boKeyColumns = (job.key_columns || []).join(', ');
       } else if (subTab === 'multi_file') {
         this.mfCompareKeyColumns = (job.key_columns || []).join(', ');
-        if (opts.runIdA) {
-          this.mfCompareSourceMode = 'run';
-          this.mfCompareRunId = opts.runIdA;
-          this.mfCompareJobName = job.name;
-        }
+        this.mfCompareSourceMode = opts.runIdA ? 'run' : 'files';
+        this.mfCompareRunId = opts.runIdA || '';
+        this.mfCompareJobName = opts.runIdA ? job.name : '';
       } else if (subTab === 'recon') {
         this.reconMode = 'file';
         this.fileSourceAType = opts.runIdA ? 'run' : 'path';
