@@ -925,13 +925,31 @@ class MultiFileCompareRequest(BaseModel):
     ``etl_framework.reconciliation.file_mapping.FileMappingSpec.from_params``),
     but this phase only supports ``kind: "local"`` on both sides -- see the
     Phase 7 plan doc for why.
+
+    Alternatively, ``run_id`` + ``job_name`` re-compares the file pairs a
+    saved multi_file job's run already persisted, instead of re-discovering
+    files from ``file_mapping``'s source/target roots. Exactly one of
+    ``file_mapping`` or ``run_id``+``job_name`` must be set.
     """
     label_a: str = "Source A"
     label_b: str = "Source B"
     key_columns: list[str] | None = None
     exclude_columns: list[str] = Field(default_factory=list)
-    file_mapping: dict[str, Any] = Field(...)
+    file_mapping: dict[str, Any] | None = None
+    run_id: str | None = None
+    job_name: str | None = None
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "MultiFileCompareRequest":
+        has_run_ref = bool(self.run_id or self.job_name)
+        if has_run_ref and not (self.run_id and self.job_name):
+            raise ValueError("run_id and job_name must both be set for a run-reference multi-file compare")
+        if has_run_ref and self.file_mapping:
+            raise ValueError("file_mapping and run_id/job_name are mutually exclusive")
+        if not has_run_ref and not self.file_mapping:
+            raise ValueError("multi-file compare requires either file_mapping or run_id + job_name")
+        return self
 
 
 class PreviewFileMappingRequest(BaseModel):

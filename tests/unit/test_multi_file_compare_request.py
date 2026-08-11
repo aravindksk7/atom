@@ -24,3 +24,42 @@ def test_multi_file_compare_request_accepts_minimal_config() -> None:
     assert req.exclude_columns == []
     assert req.file_mapping["match_on"] == ["region"]
     assert req.advanced.float_tolerance == 1e-9
+
+
+def test_multi_file_compare_request_accepts_run_reference():
+    from api.schemas import MultiFileCompareRequest
+
+    req = MultiFileCompareRequest(run_id="run-1", job_name="regional_sales_recon")
+
+    assert req.run_id == "run-1"
+    assert req.file_mapping is None
+
+
+def test_multi_file_compare_request_rejects_run_id_without_job_name():
+    from api.schemas import MultiFileCompareRequest
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError, match="run_id and job_name must both be set"):
+        MultiFileCompareRequest(run_id="run-1")
+
+
+def test_multi_file_compare_request_rejects_both_file_mapping_and_run_reference():
+    from api.schemas import MultiFileCompareRequest
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError, match="mutually exclusive"):
+        MultiFileCompareRequest(
+            run_id="run-1", job_name="job",
+            file_mapping={"strategy": "explicit", "source": {}, "target": {}},
+        )
+
+
+def test_multi_file_compare_request_rejects_neither_file_mapping_nor_run_reference():
+    from api.schemas import MultiFileCompareRequest
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError, match="requires either file_mapping or run_id"):
+        MultiFileCompareRequest()
