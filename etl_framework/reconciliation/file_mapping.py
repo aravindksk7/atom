@@ -485,11 +485,13 @@ def aggregate_reconciliation_results(
             "value_mismatch_count": result.value_mismatch_count,
             "source_artifact_path": (
                 result.mismatch_summary.get("pair_source_artifact_path")
-                if isinstance(result.mismatch_summary, dict) else None
+                if isinstance(result.mismatch_summary, dict)
+                else None
             ),
             "target_artifact_path": (
                 result.mismatch_summary.get("pair_target_artifact_path")
-                if isinstance(result.mismatch_summary, dict) else None
+                if isinstance(result.mismatch_summary, dict)
+                else None
             ),
         })
 

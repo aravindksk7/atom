@@ -779,9 +779,12 @@ class RunExecutor:
                         use_hash_precheck=False,
                         segment_columns=segment_columns,
                     )
-                    # These two keys are pair-scoped only: aggregate_reconciliation_results()
-                    # does not yet copy them onto the aggregate TestResult.mismatch_summary
-                    # ["file_pairs"] entries, so nothing downstream reads them yet (future task).
+                    # These two keys live on the pair-level mismatch_summary.
+                    # aggregate_reconciliation_results() (etl_framework/reconciliation/
+                    # file_mapping.py) copies them onto the aggregate TestResult
+                    # .mismatch_summary["file_pairs"] entries as source_artifact_path/
+                    # target_artifact_path (unprefixed), which is what downstream
+                    # consumers (Reports/Compare UI) actually read.
                     return dataclasses.replace(
                         pair_result,
                         mismatch_summary={

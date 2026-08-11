@@ -843,21 +843,14 @@ def test_multi_file_pairs_persist_source_and_target_artifacts(tmp_path, monkeypa
     assert source_artifacts[0].read_text() == "id,value\n1,alpha\n"
     assert target_artifacts[0].read_text() == "id,value\n1,alpha\n"
 
-    # NOTE (Task 7 vs Task 8 split): _make_pair_case's run_pair() attaches
-    # pair_source_artifact_path/pair_target_artifact_path onto the PAIR-level
-    # ReconciliationResult.mismatch_summary (see run_executor.py's
-    # dataclasses.replace(...) right after _run_reconciliation_job in
-    # _build_case_multi_file_reconciliation). That is this task's full scope.
-    #
+    # _make_pair_case's run_pair() attaches pair_source_artifact_path/
+    # pair_target_artifact_path onto the PAIR-level ReconciliationResult
+    # .mismatch_summary (see run_executor.py's dataclasses.replace(...) right
+    # after _run_reconciliation_job in _build_case_multi_file_reconciliation).
     # aggregate_reconciliation_results() (etl_framework/reconciliation/
-    # file_mapping.py), which rolls per-pair results into the aggregate
-    # TestResult.mismatch_summary["file_pairs"] list asserted on below, does
-    # NOT yet copy those two keys across -- that copy is Task 8, a separate,
-    # not-yet-implemented task. So today these keys are dropped during
-    # aggregation and the assertions below are expected to fail with KeyError
-    # until Task 8 lands. Left commented out (rather than deleted) so Task 8's
-    # implementer can uncomment them as an immediate regression check.
-    #
+    # file_mapping.py) then copies those two keys onto each aggregate
+    # TestResult.mismatch_summary["file_pairs"] entry as source_artifact_path/
+    # target_artifact_path (unprefixed), which is what's asserted below.
     pair = result.mismatch_summary["file_pairs"][0]
     assert pair["source_artifact_path"]
     assert pair["target_artifact_path"]
