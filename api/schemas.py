@@ -259,6 +259,11 @@ class JobRunSummaryOut(BaseModel):
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # NOTE: unlike RunStatusOut.has_data_artifact above, this is just raw,
+    # job-scoped truthiness of this TestResult's data_artifact_path column --
+    # it does NOT verify "exactly one tabular artifact for the run" or that
+    # the file still resolves on disk (see run_has_row_diffable_artifact).
+    # A swept or non-tabular artifact still reads as True here.
     has_data_artifact: bool = False
 
     model_config = {"from_attributes": True}
