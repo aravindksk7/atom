@@ -1,6 +1,8 @@
 # tests/unit/test_multi_file_jobs.py
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -856,10 +858,10 @@ def test_multi_file_pairs_persist_source_and_target_artifacts(tmp_path, monkeypa
     # until Task 8 lands. Left commented out (rather than deleted) so Task 8's
     # implementer can uncomment them as an immediate regression check.
     #
-    # pair = result.mismatch_summary["file_pairs"][0]
-    # assert pair["source_artifact_path"]
-    # assert pair["target_artifact_path"]
-    # assert Path(pair["source_artifact_path"]).read_text() == "id,value\n1,alpha\n"
+    pair = result.mismatch_summary["file_pairs"][0]
+    assert pair["source_artifact_path"]
+    assert pair["target_artifact_path"]
+    assert Path(pair["source_artifact_path"]).read_text() == "id,value\n1,alpha\n"
 
 
 def test_multi_file_pair_reconciliation_survives_artifact_persistence_failure(tmp_path, monkeypatch, caplog):
