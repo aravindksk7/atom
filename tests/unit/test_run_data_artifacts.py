@@ -312,6 +312,31 @@ def test_resolve_job_result_artifact_returns_none_for_unknown_job(tmp_path, monk
     assert resolve_job_result_artifact(repo, "run-1", "no_such_job") is None
 
 
+def test_resolve_job_result_artifact_returns_none_when_result_has_no_artifact(tmp_path, monkeypatch):
+    """A plain-SQL job inside a multi-job selection run has a TestResult but no
+    stored data_artifact_path — that must resolve to None, not raise."""
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="plain_sql_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+    ))
+
+    assert resolve_job_result_artifact(repo, "run-1", "plain_sql_job") is None
+
+
 def test_load_job_result_frame_reads_the_artifact_as_a_dataframe(tmp_path, monkeypatch):
     from api.services import upload_store
     from api.services.run_data_artifact import load_job_result_frame
