@@ -188,6 +188,11 @@
         mfPreviewError: '',
       };
       this.showJobModalCompare = false;
+      // Prior Test Compare results belong to whichever job produced them --
+      // don't let a stale badge/link linger under a different job's identity.
+      this.boCompareResult = null;
+      this.mfCompareResult = null;
+      this.fileCompareResult = null;
       this.jobModalEditing = false;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -353,6 +358,11 @@
         mfPreviewError: '',
       };
       this.showJobModalCompare = false;
+      // Prior Test Compare results belong to whichever job produced them --
+      // don't let a stale badge/link linger under a different job's identity.
+      this.boCompareResult = null;
+      this.mfCompareResult = null;
+      this.fileCompareResult = null;
       this.jobModalEditing = true;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -1214,7 +1224,7 @@
       const subTab = this._compareSubTabForJob(job);
       if (!subTab) {
         this.toast('warn', 'No compare type for this job', `job_type '${job.job_type}' has no compare equivalent`);
-        return;
+        return null;
       }
       if (subTab === 'bo') {
         this.boSourceAType = opts.runIdA ? 'run' : 'live';
@@ -1225,7 +1235,14 @@
           configId: this.boSourceA.configId,
         };
         this.boSourceBType = opts.runIdB ? 'run' : 'upload';
-        if (opts.runIdB) this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name };
+        if (opts.runIdB) {
+          this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name };
+        } else {
+          // No run reference for Source B -- don't leave a prior session's
+          // Source B (or its exclude-columns filter) attached to this job.
+          this.boSourceB = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '' };
+          this.boExcludeColumns = '';
+        }
         this.boKeyColumns = (job.key_columns || []).join(', ');
       } else if (subTab === 'multi_file') {
         this.mfCompareKeyColumns = (job.key_columns || []).join(', ');
@@ -1235,15 +1252,27 @@
       } else if (subTab === 'recon') {
         this.reconMode = 'file';
         this.fileSourceAType = opts.runIdA ? 'run' : 'path';
-        if (opts.runIdA) this.fileRunIdA = opts.runIdA;
+        if (opts.runIdA) {
+          this.fileRunIdA = opts.runIdA;
+        } else {
+          // No run reference for Source A -- clear any prior session's file
+          // paths/uploads so this job isn't compared against stale data.
+          this.filePathA = ''; this.fileB64A = ''; this.fileNameA = '';
+        }
         this.fileSourceBType = opts.runIdB ? 'run' : 'path';
-        if (opts.runIdB) this.fileRunIdB = opts.runIdB;
+        if (opts.runIdB) {
+          this.fileRunIdB = opts.runIdB;
+        } else {
+          this.filePathB = ''; this.fileB64B = ''; this.fileNameB = '';
+        }
+        if (!opts.runIdA && !opts.runIdB) this.fileCompareExcludeColumns = '';
         this.fileCompareKeyColumns = (job.key_columns || []).join(', ');
       }
       if (opts.navigate !== false) {
         this.currentView = 'compare';
         this.compareSubTab = subTab;
       }
+      return subTab;
     },
 
     // Test Compare inside the Job modal: builds a job-shaped object from the
@@ -1254,12 +1283,15 @@
       const job = {
         name: m.name, job_type: m.job_type,
         key_columns: (m.key_columns_raw || '').split(',').map(s => s.trim()).filter(Boolean),
+        // report_id/bo_report_id are swapped relative to what they hold here:
+        // job.params.report_id is the BO *document* id and job.params.bo_report_id
+        // is the *page* id -- matches the existing job param convention read
+        // elsewhere in openCompareForJob, just easy to misread in isolation.
         params: m.job_type === 'bo_report'
           ? { report_id: m.bo_report_id, bo_report_id: m.bo_page_id }
           : { source_mode: m.source_mode },
       };
-      this.openCompareForJob(job, { navigate: false });
-      const subTab = this._compareSubTabForJob(job);
+      const subTab = this.openCompareForJob(job, { navigate: false });
       if (subTab === 'bo') await this.runBOComparison();
       else if (subTab === 'multi_file') await this.runMultiFileCompare();
       else if (subTab === 'recon') await this.runFileCompare();
