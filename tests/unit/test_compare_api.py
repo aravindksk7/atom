@@ -692,3 +692,15 @@ def test_source_config_run_type_accepts_run_id_and_job_name():
 
     assert src.run_id == "run-1"
     assert src.job_name == "my_job"
+
+
+def test_multi_file_compare_run_reference_returns_202(client, monkeypatch):
+    import api.routes.compare as cmp_module
+    monkeypatch.setattr(cmp_module, "_run_multi_file_bg", lambda *a, **kw: None)
+
+    resp = client.post("/api/compare/multi-file", json={
+        "run_id": "prior-run", "job_name": "regional_sales_recon",
+    })
+
+    assert resp.status_code == 202
+    assert resp.json()["run_type"] == "multi_file"

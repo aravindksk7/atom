@@ -391,15 +391,16 @@ def compare_multi_file(
 ) -> RunStatusOut:
     from etl_framework.reconciliation.file_mapping import FileMappingSpec
 
-    try:
-        spec = FileMappingSpec.from_params({"file_mapping": body.file_mapping})
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    if spec.source.kind != "local" or spec.target.kind != "local":
-        raise HTTPException(
-            status_code=400,
-            detail="Ad-hoc multi-file compare only supports 'local' source/target kinds.",
-        )
+    if not (body.run_id and body.job_name):
+        try:
+            spec = FileMappingSpec.from_params({"file_mapping": body.file_mapping})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if spec.source.kind != "local" or spec.target.kind != "local":
+            raise HTTPException(
+                status_code=400,
+                detail="Ad-hoc multi-file compare only supports 'local' source/target kinds.",
+            )
 
     run_id = str(uuid.uuid4())
     snapshot = {
