@@ -254,6 +254,16 @@ class RunStatusOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JobRunSummaryOut(BaseModel):
+    run_id: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    has_data_artifact: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 class TestSuiteTrigger(BaseModel):
     pytest_args: list[str] = []
 
