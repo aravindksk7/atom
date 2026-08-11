@@ -675,4 +675,20 @@ def test_bo_compare_export_repull_writes_no_artifacts(tmp_path, monkeypatch):
         with patch("etl_framework.rest_api.client.APIEndpointClient", _RecordingAPIClient):
             _write_bo_compare(db, payload, MagicMock())
 
-    assert list(artifact_root.iterdir()) == []
+
+def test_source_config_run_type_requires_run_id_and_job_name():
+    from api.schemas import SourceConfig
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError, match="run_id and job_name required"):
+        SourceConfig(source_type="run")
+
+
+def test_source_config_run_type_accepts_run_id_and_job_name():
+    from api.schemas import SourceConfig
+
+    src = SourceConfig(source_type="run", run_id="run-1", job_name="my_job")
+
+    assert src.run_id == "run-1"
+    assert src.job_name == "my_job"

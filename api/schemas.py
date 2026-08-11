@@ -793,7 +793,7 @@ class RunCompareOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SourceConfig(BaseModel):
-    source_type: Literal["live", "path", "upload", "api"]
+    source_type: Literal["live", "path", "upload", "api", "run"]
     config_id: int | None = None
     doc_id: str | None = None
     report_id: str | None = None
@@ -807,6 +807,11 @@ class SourceConfig(BaseModel):
     # params["bo_parameters"]. Without these, a prompted report exports with
     # whatever answers were last saved on the document.
     bo_parameters: list[BOParamAnswer] = Field(default_factory=list)
+    # For source_type == "run": re-use a past job's own persisted pull instead
+    # of fetching live/path/upload/api. job_name picks which job's TestResult
+    # inside that run to read — a run may hold many jobs' results.
+    run_id: str | None = None
+    job_name: str | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":
@@ -818,6 +823,8 @@ class SourceConfig(BaseModel):
             raise ValueError("file_content_b64 required for upload source")
         if self.source_type == "api" and (self.config_id is None or not self.api_endpoint_name):
             raise ValueError("config_id and api_endpoint_name required for api source")
+        if self.source_type == "run" and (not self.run_id or not self.job_name):
+            raise ValueError("run_id and job_name required for run source")
         return self
 
 
