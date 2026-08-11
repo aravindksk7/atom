@@ -71,6 +71,9 @@
 
     mfCompareLabelA: 'Source A',
     mfCompareLabelB: 'Source B',
+    mfCompareSourceMode: 'files', // 'files' | 'run'
+    mfCompareRunId: '',
+    mfCompareJobName: '',
     mfCompareStrategy: 'explicit',
     mfCompareMatchOnRaw: '',
     mfCompareUnmatchedPolicy: 'fail',
@@ -697,8 +700,13 @@
         const payload = {
           label_a: this.mfCompareLabelA || 'Source A',
           label_b: this.mfCompareLabelB || 'Source B',
-          file_mapping: this._buildMfCompareFileMapping(),
         };
+        if (this.mfCompareSourceMode === 'run') {
+          payload.run_id = this.mfCompareRunId;
+          payload.job_name = this.mfCompareJobName;
+        } else {
+          payload.file_mapping = this._buildMfCompareFileMapping();
+        }
         if (this.mfCompareKeyColumns.trim()) {
           payload.key_columns = this.mfCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
         }

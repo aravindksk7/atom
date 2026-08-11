@@ -273,6 +273,9 @@
                   :data-testid="'job-row-' + job.name + '-gate-verdict'"
                   x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
             <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
+            <button x-show="job.job_type === 'bo_report' || job.job_type === 'reconciliation'"
+                    @click.stop="openCompareForJob(job)" class="btn-secondary btn-sm text-xs"
+                    :data-testid="'job-row-' + job.name + '-compare-btn'">Compare</button>
             <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
             <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
