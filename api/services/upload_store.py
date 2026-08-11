@@ -99,6 +99,26 @@ def persist_run_data_artifact(run_id: str, data: bytes, file_name: str) -> str |
     return _persist_bytes(run_id, data, file_name, "run_data.dat")
 
 
+def persist_pair_artifacts(
+    run_id: str, job_name: str, pair_index: int, source_df: Any, target_df: Any,
+) -> tuple[str | None, str | None]:
+    """Store a multi-file job's per-pair source/target frames as CSV, so a
+    later compare can reference this run+job as a source without re-reading
+    the original file set. Best-effort, like persist_run_data_artifact: a
+    frame past the size cap is simply skipped for that side.
+    """
+    safe_job = safe_filename(job_name, "job")
+    source_path = persist_run_data_artifact(
+        run_id, source_df.to_csv(index=False).encode("utf-8"),
+        f"{safe_job}_pair{pair_index}_source.csv",
+    )
+    target_path = persist_run_data_artifact(
+        run_id, target_df.to_csv(index=False).encode("utf-8"),
+        f"{safe_job}_pair{pair_index}_target.csv",
+    )
+    return source_path, target_path
+
+
 def resolve_run_data_artifact(path: str | None) -> Path | None:
     """Resolve a stored artifact path, or None if it escaped UPLOAD_ROOT or is gone.
 

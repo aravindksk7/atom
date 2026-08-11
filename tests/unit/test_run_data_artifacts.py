@@ -162,6 +162,37 @@ def test_resolve_run_data_artifact_returns_none_when_file_deleted(tmp_path, monk
     assert upload_store.resolve_run_data_artifact(str(tmp_path / "run-1" / "gone.csv")) is None
 
 
+def test_persist_pair_artifacts_writes_source_and_target_csvs(tmp_path, monkeypatch):
+    from api.services import upload_store
+    import pandas as pd
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    source_df = pd.DataFrame({"id": [1], "value": ["alpha"]})
+    target_df = pd.DataFrame({"id": [1], "value": ["alpha"]})
+
+    source_path, target_path = upload_store.persist_pair_artifacts(
+        "run-1", "regional_sales_recon", 0, source_df, target_df,
+    )
+
+    assert source_path is not None and target_path is not None
+    assert Path(source_path).read_text().strip().splitlines() == ["id,value", "1,alpha"]
+    assert Path(target_path).parent == tmp_path.resolve() / "run-1"
+
+
+def test_persist_pair_artifacts_sanitizes_job_name_in_filenames(tmp_path, monkeypatch):
+    from api.services import upload_store
+    import pandas as pd
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    df = pd.DataFrame({"id": [1]})
+
+    source_path, _ = upload_store.persist_pair_artifacts(
+        "run-1", "../../etc/passwd", 0, df, df,
+    )
+
+    assert Path(source_path).parent == tmp_path.resolve() / "run-1"
+
+
 # ---------------------------------------------------------------------------
 # bo_report run persists its download
 # ---------------------------------------------------------------------------
