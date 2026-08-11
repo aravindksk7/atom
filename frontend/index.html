@@ -1258,6 +1258,9 @@
                   :data-testid="'job-row-' + job.name + '-gate-verdict'"
                   x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
             <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
+            <button x-show="job.job_type === 'bo_report' || job.job_type === 'reconciliation'"
+                    @click.stop="openCompareForJob(job)" class="btn-secondary btn-sm text-xs"
+                    :data-testid="'job-row-' + job.name + '-compare-btn'">Compare</button>
             <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
             <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
@@ -2031,6 +2034,29 @@
               <option value="rows_mean_pass">Rows returned → PASS (assert good state exists)</option>
               <option value="rows_mean_fail">Rows returned → FAIL (assert no bad rows exist)</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      <div x-show="jobModal.job_type === 'bo_report' || jobModal.job_type === 'reconciliation'" class="border-t pt-3 mt-3">
+        <button type="button" @click="showJobModalCompare = !showJobModalCompare" class="text-sm font-medium text-slate-600" data-testid="job-modal-compare-toggle">
+          Test Compare <span x-text="showJobModalCompare ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="showJobModalCompare" class="mt-2 space-y-2">
+          <button type="button" @click="runInlineJobCompare()" class="btn-secondary btn-sm text-xs" data-testid="job-modal-compare-run-btn">
+            Run Compare
+          </button>
+          <div x-show="boCompareResult && jobModal.job_type === 'bo_report'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(boCompareResult?.status)" x-text="boCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'bo'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="mfCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(mfCompareResult?.status)" x-text="mfCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'multi_file'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="fileCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(fileCompareResult?.status)" x-text="fileCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'recon'" class="btn-link btn-sm ml-2">View full results →</button>
           </div>
         </div>
       </div>
@@ -5918,6 +5944,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" id="a11y-compare-label-b" />
       </div>
     </div>
+    <div class="mode-row mb-3">
+      <button data-testid="compare-mf-mode-files" @click="mfCompareSourceMode = 'files'" :class="mfCompareSourceMode === 'files' ? 'pill active' : 'pill'">Server File Sets</button>
+      <button data-testid="compare-mf-mode-run" @click="mfCompareSourceMode = 'run'" :class="mfCompareSourceMode === 'run' ? 'pill active' : 'pill'">Past Run</button>
+    </div>
+    <div x-show="mfCompareSourceMode === 'run'" class="mb-3">
+      <span class="text-xs text-slate-400">Job: <span x-text="mfCompareJobName"></span>, Run: <span x-text="mfCompareRunId ? mfCompareRunId.substring(0, 8) + '…' : '(none selected)'"></span></span>
+    </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-strategy">Strategy</label>
@@ -5957,6 +5992,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </label>
       </div>
     </div>
+    </div>
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-key-columns-comma-separated">Key Columns (comma-separated)</label>
@@ -5967,6 +6003,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" id="a11y-compare-exclude-columns-comma-separated" />
       </div>
     </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="border-t border-slate-200 pt-3">
       <p class="text-xs font-medium text-slate-500 mb-1">Source server file set</p>
       <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Files are parsed as CSV, Excel, JSON, XML, TSV, or delimited text when supported by the parser.</p>
@@ -5988,8 +6026,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </div>
     <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>
+    </div>
     <div class="flex items-center gap-2">
-      <button @click="previewMfCompareMapping()"
+      <button x-show="mfCompareSourceMode === 'files'"
+              @click="previewMfCompareMapping()"
               :disabled="mfComparePreviewLoading"
               class="btn-secondary btn-sm text-xs px-3 py-1 disabled:opacity-40"
               data-testid="compare-mf-preview-btn">
