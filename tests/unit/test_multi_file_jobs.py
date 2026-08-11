@@ -1,6 +1,8 @@
 # tests/unit/test_multi_file_jobs.py
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -773,3 +775,76 @@ def test_run_executor_multi_file_readiness_times_out_when_files_never_arrive(tmp
 
     with pytest.raises(TimeoutError, match="only 1 of 5 expected file"):
         executor._build_case(job)()
+
+
+def test_multi_file_pairs_persist_source_and_target_artifacts(tmp_path, monkeypatch):
+    from api.services import file_source, upload_store
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    artifact_root = tmp_path / "artifacts"
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", artifact_root.resolve())
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    result = executor._build_case(job)()
+
+    # Primary assertion for Task 7: persist_pair_artifacts (Task 6, already
+    # tested standalone) is now actually wired into the multi_file pair
+    # executor, so the source/target frames for every pair land on disk
+    # under upload_store.UPLOAD_ROOT.
+    csv_files = list(artifact_root.rglob("*.csv"))
+    assert csv_files, "expected pair source/target artifacts to be persisted to disk"
+    source_artifacts = [p for p in csv_files if p.name.endswith("_pair0_source.csv")]
+    target_artifacts = [p for p in csv_files if p.name.endswith("_pair0_target.csv")]
+    assert len(source_artifacts) == 1
+    assert len(target_artifacts) == 1
+    assert source_artifacts[0].read_text() == "id,value\n1,alpha\n"
+    assert target_artifacts[0].read_text() == "id,value\n1,alpha\n"
+
+    # NOTE (Task 7 vs Task 8 split): _make_pair_case's run_pair() attaches
+    # pair_source_artifact_path/pair_target_artifact_path onto the PAIR-level
+    # ReconciliationResult.mismatch_summary (see run_executor.py's
+    # dataclasses.replace(...) right after _run_reconciliation_job in
+    # _build_case_multi_file_reconciliation). That is this task's full scope.
+    #
+    # aggregate_reconciliation_results() (etl_framework/reconciliation/
+    # file_mapping.py), which rolls per-pair results into the aggregate
+    # TestResult.mismatch_summary["file_pairs"] list asserted on below, does
+    # NOT yet copy those two keys across -- that copy is Task 8, a separate,
+    # not-yet-implemented task. So today these keys are dropped during
+    # aggregation and the assertions below are expected to fail with KeyError
+    # until Task 8 lands. Left commented out (rather than deleted) so Task 8's
+    # implementer can uncomment them as an immediate regression check.
+    #
+    # pair = result.mismatch_summary["file_pairs"][0]
+    # assert pair["source_artifact_path"]
+    # assert pair["target_artifact_path"]
+    # assert Path(pair["source_artifact_path"]).read_text() == "id,value\n1,alpha\n"

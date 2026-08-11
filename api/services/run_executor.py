@@ -726,7 +726,7 @@ class RunExecutor:
 
             segment_columns = self._resolve_segment_columns(job)
 
-            def _make_pair_case(pair):
+            def _make_pair_case(pair, pair_index):
                 def run_pair() -> ReconciliationResult:
                     # Each pair gets its own session rather than sharing
                     # discovery_session's clients across TestRunner's worker
@@ -746,6 +746,10 @@ class RunExecutor:
                             [pair_session.read_file(f, spec.target) for f in pair.target.files],
                             ignore_index=True,
                         )
+                    from api.services import upload_store
+                    source_artifact, target_artifact = upload_store.persist_pair_artifacts(
+                        self._run_id, job.name, pair_index, source_df, target_df,
+                    )
                     source_df, target_df, resolved_keys = resolve_key_columns(
                         source_df,
                         target_df,
@@ -757,7 +761,7 @@ class RunExecutor:
                     target_label = "/".join(f.file_name for f in pair.target.files)
                     source_engine = FrameEngine(source_df, source_label)
                     target_engine = FrameEngine(target_df, target_label)
-                    return self._run_reconciliation_job(
+                    pair_result = self._run_reconciliation_job(
                         pair_job,
                         source_engine,
                         target_engine,
@@ -767,9 +771,17 @@ class RunExecutor:
                         use_hash_precheck=False,
                         segment_columns=segment_columns,
                     )
+                    return dataclasses.replace(
+                        pair_result,
+                        mismatch_summary={
+                            **(pair_result.mismatch_summary or {}),
+                            "pair_source_artifact_path": source_artifact,
+                            "pair_target_artifact_path": target_artifact,
+                        },
+                    )
                 return run_pair
 
-            cases = [(f"pair_{i}", _make_pair_case(pair)) for i, pair in enumerate(mapping.pairs)]
+            cases = [(f"pair_{i}", _make_pair_case(pair, i)) for i, pair in enumerate(mapping.pairs)]
             states = TestRunner(max_workers=self._settings.max_workers).run(cases)
             states_by_name = {state.name: state for state in states}
 
