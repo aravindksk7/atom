@@ -268,6 +268,19 @@ class CompareService:
                 )
             finally:
                 client.logout()
+        if src.source_type == "run":
+            from api.services.run_data_artifact import load_job_result_frame
+
+            frame = load_job_result_frame(self._repo, src.run_id, src.job_name)
+            if frame is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"No comparable data artifact found for job '{src.job_name}' "
+                        f"in run {src.run_id}"
+                    ),
+                )
+            return frame
         if src.source_type == "api":
             return self._load_api_source(src, run_id, store_responses=store_responses)
         return read_tabular(

@@ -364,3 +364,52 @@ def test_load_job_result_frame_reads_the_artifact_as_a_dataframe(tmp_path, monke
 
     assert frame is not None
     assert list(frame["value"]) == ["alpha", "beta"]
+
+
+# ---------------------------------------------------------------------------
+# CompareService._load_bo_source resolves "run" sources
+# ---------------------------------------------------------------------------
+
+def test_bo_run_reference_source_reads_the_stored_jobs_pull(tmp_path, monkeypatch):
+    from api.schemas import SourceConfig, BOCompareRequest
+    from api.services.compare_service import CompareService
+    from etl_framework.repository.repository import ConfigRepository, RunRepository
+
+    db = _session()
+    run = _bo_report_run(db, tmp_path, monkeypatch)  # job name "sales_report"
+
+    other_csv = b"id,value\n1,alpha\n2,beta\n"
+    svc = CompareService(db, ConfigRepository(db))
+    compare_run_id = "compare-run-1"
+    RunRepository(db).create_run(compare_run_id, "Source A", "Source B")
+
+    req = BOCompareRequest(
+        source_a=SourceConfig(source_type="run", run_id=run.run_id, job_name="sales_report"),
+        source_b=SourceConfig(source_type="upload", file_content_b64=__import__("base64").b64encode(other_csv).decode(), file_name="b.csv"),
+        key_columns=["id"],
+    )
+    svc.run_bo_comparison(req, compare_run_id)
+
+    result = RunRepository(db).get_run(compare_run_id)
+    assert result.status == "PASSED"
+
+
+def test_bo_run_reference_source_404s_when_job_never_ran_in_that_run(tmp_path, monkeypatch):
+    from api.schemas import SourceConfig, BOCompareRequest
+    from api.services.compare_service import CompareService
+    from etl_framework.repository.repository import ConfigRepository, RunRepository
+    from fastapi import HTTPException
+    import pytest as _pytest
+
+    db = _session()
+    run = _bo_report_run(db, tmp_path, monkeypatch)
+
+    svc = CompareService(db, ConfigRepository(db))
+    req = BOCompareRequest(
+        source_a=SourceConfig(source_type="run", run_id=run.run_id, job_name="no_such_job"),
+        source_b=SourceConfig(source_type="upload", file_content_b64="aWQsdmFsdWUKMSxhbHBoYQo=", file_name="b.csv"),
+        key_columns=["id"],
+    )
+    with _pytest.raises(HTTPException) as exc_info:
+        svc._load_bo_source(req.source_a, None, None)
+    assert exc_info.value.status_code == 404
