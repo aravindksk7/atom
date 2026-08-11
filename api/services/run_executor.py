@@ -747,9 +747,17 @@ class RunExecutor:
                             ignore_index=True,
                         )
                     from api.services import upload_store
-                    source_artifact, target_artifact = upload_store.persist_pair_artifacts(
-                        self._run_id, job.name, pair_index, source_df, target_df,
-                    )
+                    try:
+                        source_artifact, target_artifact = upload_store.persist_pair_artifacts(
+                            self._run_id, job.name, pair_index, source_df, target_df,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Could not persist pair artifacts for job %s pair %d in run %s",
+                            job.name, pair_index, self._run_id,
+                            exc_info=True,
+                        )
+                        source_artifact, target_artifact = None, None
                     source_df, target_df, resolved_keys = resolve_key_columns(
                         source_df,
                         target_df,
@@ -771,6 +779,9 @@ class RunExecutor:
                         use_hash_precheck=False,
                         segment_columns=segment_columns,
                     )
+                    # These two keys are pair-scoped only: aggregate_reconciliation_results()
+                    # does not yet copy them onto the aggregate TestResult.mismatch_summary
+                    # ["file_pairs"] entries, so nothing downstream reads them yet (future task).
                     return dataclasses.replace(
                         pair_result,
                         mismatch_summary={

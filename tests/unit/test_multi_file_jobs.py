@@ -1,12 +1,24 @@
 # tests/unit/test_multi_file_jobs.py
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
 from api.schemas import JobDefinition
+from api.services import upload_store
+
+
+@pytest.fixture(autouse=True)
+def _isolate_upload_root(tmp_path, monkeypatch):
+    """Every test in this module that reaches the multi_file pair executor now
+    triggers upload_store.persist_pair_artifacts() unconditionally (see
+    run_executor.py's _make_pair_case). Without this, each test run writes
+    real CSV files under the default UPLOAD_ROOT (reports/uploads/<run_id>/...
+    relative to cwd), accumulating unbounded across local test runs. Route
+    every test's writes into its own tmp_path instead; tests that explicitly
+    override UPLOAD_ROOT themselves simply take precedence over this default.
+    """
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", (tmp_path / "uploads").resolve())
 
 
 def test_multi_file_job_requires_file_mapping() -> None:
@@ -848,3 +860,85 @@ def test_multi_file_pairs_persist_source_and_target_artifacts(tmp_path, monkeypa
     # assert pair["source_artifact_path"]
     # assert pair["target_artifact_path"]
     # assert Path(pair["source_artifact_path"]).read_text() == "id,value\n1,alpha\n"
+
+
+def test_multi_file_pair_reconciliation_survives_artifact_persistence_failure(tmp_path, monkeypatch, caplog):
+    """persist_pair_artifacts() is best-effort, matching this file's other
+    upload_store call (_persist_run_data_artifact): a storage failure (disk
+    full, permission error, an unusual dtype breaking to_csv, ...) must not
+    fail a pair whose reconciliation itself succeeded fine. Confirms the
+    run_executor.py try/except around that call site."""
+    from api.services import file_source
+    from etl_framework.runner import test_runner as test_runner_module
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(upload_store, "persist_pair_artifacts", _boom)
+
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "sales_data_east_20260101.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (target_dir / "financials_east_20260101.dat").write_text("id,value\n1,alpha\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="regional_sales_recon",
+        job_type="reconciliation",
+        query="",
+        key_columns=["id"],
+        params={
+            "source_mode": "multi_file",
+            "file_mapping": {
+                "strategy": "explicit",
+                "match_on": ["region", "date"],
+                "source": {"kind": "local", "root": str(source_dir), "pattern": "sales_data_{region}_{date:%Y%m%d}.csv"},
+                "target": {"kind": "local", "root": str(target_dir), "pattern": "financials_{region}_{date:%Y%m%d}.dat"},
+            },
+        },
+    )
+    executor = RunExecutor(
+        db=None, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        config_snapshot={},
+    )
+    executor._resolve_segment_columns = lambda _job: []
+
+    # Capture the raw per-pair TestState (before aggregate_reconciliation_results
+    # rolls it up and drops pair_source_artifact_path/pair_target_artifact_path,
+    # per the NOTE above) so we can assert directly on the pair-level
+    # mismatch_summary that the try/except wired those keys to None.
+    captured_states = []
+    original_run = test_runner_module.TestRunner.run
+
+    def _spy_run(self, cases):
+        states = original_run(self, cases)
+        captured_states.extend(states)
+        return states
+
+    monkeypatch.setattr(test_runner_module.TestRunner, "run", _spy_run)
+
+    with caplog.at_level("WARNING"):
+        result = executor._build_case(job)()
+
+    # The reconciliation itself must reflect the actual data comparison
+    # (matching rows -> PASSED), not ERROR, despite persist_pair_artifacts
+    # blowing up.
+    assert result.status == TestStatus.PASSED
+    assert result.mismatch_summary["pairs_total"] == 1
+    assert result.mismatch_summary["pairs_passed"] == 1
+
+    assert len(captured_states) == 1
+    pair_result = captured_states[0].result
+    assert pair_result.status == TestStatus.PASSED
+    assert pair_result.mismatch_summary["pair_source_artifact_path"] is None
+    assert pair_result.mismatch_summary["pair_target_artifact_path"] is None
+
+    assert any(
+        "persist" in record.message.lower() and "pair" in record.message.lower()
+        for record in caplog.records
+    )
