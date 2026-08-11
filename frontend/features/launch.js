@@ -1183,6 +1183,68 @@
       this.runMismatchDiff();
     },
 
+    async loadJobRuns(jobName) {
+      try {
+        return await api('GET', `/api/jobs/${encodeURIComponent(jobName)}/runs`);
+      } catch (e) {
+        this.toast('error', 'Could not load run history', e.message);
+        return [];
+      }
+    },
+
+    // Determine which Compare sub-tab a job's own compare type maps to.
+    // Only bo_report and reconciliation (incl. multi_file source_mode) jobs
+    // have a compare type at all -- callers must gate visibility on this too.
+    _compareSubTabForJob(job) {
+      if (job.job_type === 'bo_report') return 'bo';
+      if (job.job_type === 'reconciliation' && job.params?.source_mode === 'multi_file') return 'multi_file';
+      if (job.job_type === 'reconciliation') return 'recon';
+      return null;
+    },
+
+    // Shared prefill + navigate used by the Job Catalog Compare button, the
+    // Job modal's inline Test Compare section, and the Job Selections
+    // History bridge. `opts.runIdA`/`opts.runIdB` (run-vs-run) and
+    // `opts.navigate` (false keeps the caller on the current view, for the
+    // Job modal's inline run) are optional.
+    openCompareForJob(job, opts = {}) {
+      const subTab = this._compareSubTabForJob(job);
+      if (!subTab) {
+        this.toast('warn', 'No compare type for this job', `job_type '${job.job_type}' has no compare equivalent`);
+        return;
+      }
+      if (subTab === 'bo') {
+        this.boSourceAType = opts.runIdA ? 'run' : 'live';
+        this.boSourceA = {
+          ...this.boSourceA,
+          runId: opts.runIdA || '', jobName: job.name,
+          docId: job.params?.report_id || '', reportId: job.params?.bo_report_id || '',
+          configId: this.boSourceA.configId,
+        };
+        this.boSourceBType = opts.runIdB ? 'run' : 'upload';
+        if (opts.runIdB) this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name };
+        this.boKeyColumns = (job.key_columns || []).join(', ');
+      } else if (subTab === 'multi_file') {
+        this.mfCompareKeyColumns = (job.key_columns || []).join(', ');
+        if (opts.runIdA) {
+          this.mfCompareSourceMode = 'run';
+          this.mfCompareRunId = opts.runIdA;
+          this.mfCompareJobName = job.name;
+        }
+      } else if (subTab === 'recon') {
+        this.reconMode = 'file';
+        this.fileSourceAType = opts.runIdA ? 'run' : 'path';
+        if (opts.runIdA) this.fileRunIdA = opts.runIdA;
+        this.fileSourceBType = opts.runIdB ? 'run' : 'path';
+        if (opts.runIdB) this.fileRunIdB = opts.runIdB;
+        this.fileCompareKeyColumns = (job.key_columns || []).join(', ');
+      }
+      if (opts.navigate !== false) {
+        this.currentView = 'compare';
+        this.compareSubTab = subTab;
+      }
+    },
+
     // ===========================================================
     // ===========================================================
     get filteredJobList() {
