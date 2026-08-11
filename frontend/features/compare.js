@@ -26,8 +26,8 @@
 
     boSourceAType: 'live',
     boSourceBType: 'upload',
-    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [] },
-    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [] },
+    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [], runId: '', jobName: '' },
+    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '' },
     boDocsA: [],
     boDocsB: [],
     boReportsA: [],
@@ -408,6 +408,9 @@
           config_id: Number(src.configId),
           api_endpoint_name: src.endpointName,
         };
+      }
+      if (type === 'run') {
+        return { source_type: 'run', run_id: src.runId, job_name: src.jobName };
       }
       return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
     },
