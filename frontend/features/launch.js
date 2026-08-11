@@ -16,6 +16,7 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showJobModal: false,
+    showJobModalCompare: false,
     // The multi-file panel in tab-launch.html binds jobModal.mf_*_preview_creds.*
     // for 16 credential fields. Those bindings evaluate as soon as the Launch tab
     // mounts — long before newJob()/openJobModal() assigns the full shape — so the
@@ -186,6 +187,7 @@
         mfPreviewResult: null,
         mfPreviewError: '',
       };
+      this.showJobModalCompare = false;
       this.jobModalEditing = false;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -350,6 +352,7 @@
         mfPreviewResult: null,
         mfPreviewError: '',
       };
+      this.showJobModalCompare = false;
       this.jobModalEditing = true;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -1241,6 +1244,25 @@
         this.currentView = 'compare';
         this.compareSubTab = subTab;
       }
+    },
+
+    // Test Compare inside the Job modal: builds a job-shaped object from the
+    // in-progress (possibly unsaved) form state and drives the same Compare
+    // state/methods openCompareForJob uses, without navigating away.
+    async runInlineJobCompare() {
+      const m = this.jobModal;
+      const job = {
+        name: m.name, job_type: m.job_type,
+        key_columns: (m.key_columns_raw || '').split(',').map(s => s.trim()).filter(Boolean),
+        params: m.job_type === 'bo_report'
+          ? { report_id: m.bo_report_id, bo_report_id: m.bo_page_id }
+          : { source_mode: m.source_mode },
+      };
+      this.openCompareForJob(job, { navigate: false });
+      const subTab = this._compareSubTabForJob(job);
+      if (subTab === 'bo') await this.runBOComparison();
+      else if (subTab === 'multi_file') await this.runMultiFileCompare();
+      else if (subTab === 'recon') await this.runFileCompare();
     },
 
     // ===========================================================

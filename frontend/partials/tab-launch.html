@@ -1053,6 +1053,29 @@
         </div>
       </div>
 
+      <div x-show="jobModal.job_type === 'bo_report' || jobModal.job_type === 'reconciliation'" class="border-t pt-3 mt-3">
+        <button type="button" @click="showJobModalCompare = !showJobModalCompare" class="text-sm font-medium text-slate-600" data-testid="job-modal-compare-toggle">
+          Test Compare <span x-text="showJobModalCompare ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="showJobModalCompare" class="mt-2 space-y-2">
+          <button type="button" @click="runInlineJobCompare()" class="btn-secondary btn-sm text-xs" data-testid="job-modal-compare-run-btn">
+            Run Compare
+          </button>
+          <div x-show="boCompareResult && jobModal.job_type === 'bo_report'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(boCompareResult?.status)" x-text="boCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'bo'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="mfCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(mfCompareResult?.status)" x-text="mfCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'multi_file'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="fileCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(fileCompareResult?.status)" x-text="fileCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'recon'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-end gap-3 mt-6">
         <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
           <span x-show="!validateDefinitionLoading">Validate Definition</span>
