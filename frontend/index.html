@@ -2319,13 +2319,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
       </div>
       <div x-show="compareRunIds.length === 2" class="flex items-center gap-2 mb-2">
-        <select x-model="selectionCompareJobName" class="field-input field-select text-xs" data-testid="selection-compare-job-select">
+        <select x-model="selectionCompareJobName" class="field-input field-select text-xs" data-testid="selection-compare-job-select" aria-label="compare job">
           <option value="">Whole run (mismatch diff)</option>
           <template x-for="name in selectionCompareJobOptions" :key="name">
             <option :value="name" x-text="name"></option>
           </template>
         </select>
-        <select x-show="selectionCompareJobName" x-model="selectionCompareType" class="field-input field-select text-xs" data-testid="selection-compare-type-select">
+        <select x-show="selectionCompareJobName" x-model="selectionCompareType" class="field-input field-select text-xs" data-testid="selection-compare-type-select" aria-label="compare type">
           <option value="mismatch_diff">Mismatch Diff</option>
           <option value="bo">BO Report</option>
           <option value="recon">Reconciliation</option>

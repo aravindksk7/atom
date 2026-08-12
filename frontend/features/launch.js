@@ -1133,6 +1133,8 @@
     async openSelectionRuns(sel) {
       this.selectionRunsPanel = sel;
       this.compareRunIds = [];
+      this.selectionCompareJobName = '';
+      this.selectionCompareType = 'mismatch_diff';
       try {
         this.selectionRuns = await api('GET', `/api/selections/${sel.id}/runs`);
       } catch (e) {
