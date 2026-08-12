@@ -16,8 +16,8 @@ async function openBOCompare(page: import('@playwright/test').Page) {
 }
 
 test.describe('26 compare / save as job', () => {
-  test.afterEach(async ({ playwright }) => {
-    const ctx = await authedContext(playwright);
+  test.afterEach(async ({ adminToken }) => {
+    const ctx = await authedContext(adminToken);
     await deleteJob(ctx, JOB_NAME);
     await ctx.dispose();
   });
