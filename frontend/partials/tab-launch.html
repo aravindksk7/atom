@@ -1214,6 +1214,24 @@
         <div><label  class="field-label" for="a11y-launch-name">Name *</label><input x-model="selectionModal.name" class="field-input" :disabled="selectionModalEditing" placeholder="nightly-set" id="a11y-launch-name" /></div>
         <div><label  class="field-label" for="a11y-launch-description-2">Description</label><input x-model="selectionModal.description" class="field-input" id="a11y-launch-description-2" /></div>
         <div><label  class="field-label" for="a11y-launch-tags-comma-separated">Tags (comma-separated)</label><input x-model="selectionModal.tags" class="field-input" placeholder="daily, orders" id="a11y-launch-tags-comma-separated" /></div>
+        <label class="toggle-wrap">
+          <div class="toggle-track" :class="selectionModal.use_live_connections ? 'on' : ''">
+            <div class="toggle-thumb"></div>
+          </div>
+          <span class="toggle-label" role="button" tabindex="0" @click="selectionModal.use_live_connections = !selectionModal.use_live_connections" @keydown.enter="selectionModal.use_live_connections = !selectionModal.use_live_connections" @keydown.space.prevent="selectionModal.use_live_connections = !selectionModal.use_live_connections">
+            Live Connections
+          </span>
+        </label>
+        <div x-show="selectionModal.use_live_connections">
+          <label class="field-label" for="a11y-selection-saved-config">Saved Config</label>
+          <select x-model="selectionModal.config_id" class="field-input field-select" id="a11y-selection-saved-config">
+            <option value="">— None —</option>
+            <template x-for="cfg in configs" :key="cfg.id">
+              <option :value="cfg.id" x-text="savedConfigDisplay(cfg)"></option>
+            </template>
+          </select>
+          <div class="text-xs text-slate-500 mt-1">Credentials used for live jobs (SAP BO, Automic, SAP DS, etc.) whenever this selection is launched — saved with the selection, not asked again at launch time.</div>
+        </div>
         <div>
           <label  class="field-label" for="a11y-launch-jobs-cancel-save-launch-job-selection-source-env">Jobs</label>
           <div class="border rounded-lg max-h-64 overflow-y-auto">

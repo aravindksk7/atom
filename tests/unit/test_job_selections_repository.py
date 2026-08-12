@@ -47,6 +47,45 @@ def test_create_new_version_increments_and_keeps_old():
     assert repo.get_version(sel.id, 2).job_sequence == ["a", "b"]
 
 
+def test_create_persists_config_id():
+    """A job selection remembers which Saved Config (SAP BO/Automic/DS
+    credentials etc.) it should launch with, so launching doesn't require
+    re-picking a config every time -- unlike run_settings/job_sequence this
+    was never threaded through at all before this test."""
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel = repo.create(
+        name="s", description="", tags=[], job_sequence=["a"], run_settings={}, config_id=7,
+    )
+    assert repo.latest_version(sel.id).config_id == 7
+
+
+def test_create_new_version_carries_forward_config_id_when_omitted():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel = repo.create(name="s", description="", tags=[], job_sequence=["a"], run_settings={}, config_id=7)
+    v2 = repo.create_new_version(sel.id, job_sequence=["a", "b"], run_settings=None)
+    assert v2.config_id == 7
+
+
+def test_create_new_version_can_change_config_id():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel = repo.create(name="s", description="", tags=[], job_sequence=["a"], run_settings={}, config_id=7)
+    v2 = repo.create_new_version(sel.id, job_sequence=None, run_settings=None, config_id=9)
+    assert v2.config_id == 9
+
+
+def test_create_new_version_can_clear_config_id_explicitly():
+    """An explicit config_id=None must clear it, distinct from omitting the
+    kwarg (which carries the previous version's config_id forward)."""
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel = repo.create(name="s", description="", tags=[], job_sequence=["a"], run_settings={}, config_id=7)
+    v2 = repo.create_new_version(sel.id, job_sequence=None, run_settings=None, config_id=None)
+    assert v2.config_id is None
+
+
 def test_update_metadata_does_not_create_new_version():
     db = _session()
     repo = JobSelectionRepository(db)

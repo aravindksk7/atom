@@ -75,6 +75,7 @@ class JobSelectionVersion(Base):
     version_number = Column(Integer, nullable=False)
     job_sequence = Column(JSON, nullable=False, default=list)
     run_settings_json = Column(JSON, nullable=False, default=dict)
+    config_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     selection = relationship("JobSelection", back_populates="versions")

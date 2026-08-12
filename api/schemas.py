@@ -573,6 +573,7 @@ class JobSelectionVersionOut(BaseModel):
     version_number: int
     job_sequence: list[str | SequenceStep]
     run_settings: RunSettings
+    config_id: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -584,6 +585,7 @@ class JobSelectionCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     job_sequence: list[str | SequenceStep] = Field(default_factory=list)
     run_settings: RunSettings = Field(default_factory=RunSettings)
+    config_id: int | None = None
 
 
 class JobSelectionUpdate(BaseModel):
@@ -592,6 +594,7 @@ class JobSelectionUpdate(BaseModel):
     tags: list[str] | None = None
     job_sequence: list[str | SequenceStep] | None = None
     run_settings: RunSettings | None = None
+    config_id: int | None = None
 
 
 class JobSelectionOut(BaseModel):

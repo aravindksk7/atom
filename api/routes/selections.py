@@ -18,7 +18,7 @@ from api.schemas import (
 )
 from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
-from etl_framework.repository.repository import JobRepository, JobSelectionRepository, RunRepository
+from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunRepository
 
 router = APIRouter(tags=["selections"])
 
@@ -47,8 +47,14 @@ def _version_out(version) -> JobSelectionVersionOut:
         version_number=version.version_number,
         job_sequence=version.job_sequence or [],
         run_settings=version.run_settings_json or {},
+        config_id=version.config_id,
         created_at=version.created_at,
     )
+
+
+def _validate_config_id_or_404(config_id: int | None, db: Session) -> None:
+    if config_id is not None and ConfigRepository(db).get(config_id) is None:
+        raise HTTPException(status_code=404, detail="Config not found")
 
 
 def _detail_out(selection) -> JobSelectionDetailOut:
@@ -73,10 +79,12 @@ def create_selection(body: JobSelectionCreate, request: Request, db: Session = D
     repo = JobSelectionRepository(db)
     if repo.get_by_name(body.name) is not None:
         raise HTTPException(status_code=409, detail="A job selection with this name already exists")
+    _validate_config_id_or_404(body.config_id, db)
     job_sequence = _dump_job_sequence(body.job_sequence)
     selection = repo.create(
         name=body.name, description=body.description, tags=body.tags,
         job_sequence=job_sequence, run_settings=body.run_settings.model_dump(),
+        config_id=body.config_id,
     )
     AuditService(db).log(
         request, "selection.created", "job_selection", selection.id,
@@ -115,10 +123,14 @@ def update_selection(
 
     repo.update_metadata(selection_id, name=body.name, description=body.description, tags=body.tags)
 
-    if body.job_sequence is not None or body.run_settings is not None:
+    config_id_set = "config_id" in body.model_fields_set
+    if body.job_sequence is not None or body.run_settings is not None or config_id_set:
+        if config_id_set:
+            _validate_config_id_or_404(body.config_id, db)
         job_sequence = _dump_job_sequence(body.job_sequence) if body.job_sequence is not None else None
         run_settings = body.run_settings.model_dump() if body.run_settings is not None else None
-        repo.create_new_version(selection_id, job_sequence, run_settings)
+        version_kwargs = {"config_id": body.config_id} if config_id_set else {}
+        repo.create_new_version(selection_id, job_sequence, run_settings, **version_kwargs)
 
     db.refresh(selection)
     AuditService(db).log(request, "selection.updated", "job_selection", selection_id, {"name": selection.name})
@@ -206,7 +218,10 @@ def launch_selection(
         source_connection=body.source_connection,
         target_connection=body.target_connection,
         job_sequence=version.job_sequence or [],
-        config_id=body.config_id,
+        # The selection remembers its own config (saved on the selection so
+        # launching doesn't require re-picking one every time); an explicit
+        # config_id on the launch request overrides it for a one-off run.
+        config_id=body.config_id if body.config_id is not None else version.config_id,
         config_data=body.config_data,
         run_settings=version.run_settings_json or {},
     )

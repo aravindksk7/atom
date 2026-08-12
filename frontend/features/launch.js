@@ -1032,7 +1032,7 @@
     },
 
     openNewSelectionModal() {
-      this.selectionModal = { name: '', description: '', tags: '' };
+      this.selectionModal = { name: '', description: '', tags: '', use_live_connections: false, config_id: '' };
       this.selectedSelectionJobNames = [];
       this.selectionModalEditing = false;
       this.showSelectionModal = true;
@@ -1046,6 +1046,8 @@
         name: detail.name,
         description: detail.description,
         tags: (detail.tags || []).join(', '),
+        use_live_connections: Boolean(latest.run_settings?.use_live_connections),
+        config_id: latest.config_id || '',
       };
       this.selectedSelectionJobNames = (latest.job_sequence || []).map(
         s => (typeof s === 'string' ? s : s.job_name)
@@ -1071,6 +1073,8 @@
         description: m.description || '',
         tags: (m.tags || '').split(',').map(s => s.trim()).filter(Boolean),
         job_sequence: this.selectedSelectionJobNames,
+        run_settings: { use_live_connections: Boolean(m.use_live_connections) },
+        config_id: m.config_id || null,
       };
       try {
         if (this.selectionModalEditing) {

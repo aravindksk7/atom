@@ -327,6 +327,8 @@ def _ensure_compare_columns(bind) -> None:
         ensure_column(conn, "app_settings", "upload_retention_days", "ALTER TABLE app_settings ADD COLUMN upload_retention_days INTEGER NOT NULL DEFAULT 30")
         ensure_column(conn, "app_settings", "bo_download_dir", "ALTER TABLE app_settings ADD COLUMN bo_download_dir VARCHAR(1024) NOT NULL DEFAULT ''")
 
+        ensure_column(conn, "job_selection_versions", "config_id", "ALTER TABLE job_selection_versions ADD COLUMN config_id INTEGER")
+
 
 def _backfill_schedule_selections(bind) -> None:
     """One-time backfill: give every pre-existing ScheduledRun row a JobSelection.

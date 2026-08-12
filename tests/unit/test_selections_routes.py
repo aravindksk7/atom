@@ -70,6 +70,57 @@ def test_create_and_get_selection(client):
     assert data["versions"][0]["version_number"] == 1
 
 
+def test_create_selection_persists_use_live_connections(client):
+    """Regression test: the create/edit modal never sent run_settings at all,
+    so every job selection was silently pinned to use_live_connections=False
+    forever -- with no UI control to change it. A bo_report/automic_job added
+    to a selection could then never run (guarded ValueError, or before that
+    fix, a pandas IndexError), even though the identical job runs fine from
+    the Launch tab's Jobs sub-tab where the live-connections toggle exists."""
+    resp = client.post("/api/selections", json={
+        "name": "live-set", "job_sequence": ["bo_job"],
+        "run_settings": {"use_live_connections": True},
+    })
+    assert resp.status_code == 201, resp.text
+    selection_id = resp.json()["id"]
+
+    detail = client.get(f"/api/selections/{selection_id}").json()
+    assert detail["versions"][-1]["run_settings"]["use_live_connections"] is True
+
+
+def test_update_run_settings_creates_new_version_with_live_connections(client):
+    created = _create_selection(client, jobs=["bo_job"])
+    resp = client.put(f"/api/selections/{created['id']}", json={
+        "run_settings": {"use_live_connections": True},
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["versions"][-1]["run_settings"]["use_live_connections"] is True
+
+
+def test_update_can_clear_config_id_explicitly(client):
+    """Regression test: the edit modal always sends config_id (int or null)
+    alongside run_settings, so PUT with config_id: null must clear the saved
+    config -- not silently carry the previous version's config_id forward,
+    which is what a bare `body.config_id is None` check would do."""
+    from etl_framework.repository.repository import ConfigRepository
+    from etl_framework.repository.database import SessionLocal
+
+    with SessionLocal() as db:
+        cfg_id = ConfigRepository(db).create("bo-prod", "prod", {"bo_url": "x"}).id
+
+    created = client.post("/api/selections", json={
+        "name": "with-config", "job_sequence": ["bo_job"],
+        "run_settings": {"use_live_connections": True}, "config_id": cfg_id,
+    }).json()
+
+    resp = client.put(f"/api/selections/{created['id']}", json={
+        "run_settings": {"use_live_connections": False}, "config_id": None,
+    })
+    assert resp.status_code == 200
+    assert resp.json()["versions"][-1]["config_id"] is None
+
+
 def test_duplicate_name_rejected(client):
     _create_selection(client)
     resp = client.post("/api/selections", json={"name": "nightly-set", "job_sequence": ["orders_recon"]})
@@ -98,6 +149,49 @@ def test_archive_succeeds_with_no_schedules(client):
     created = _create_selection(client)
     resp = client.delete(f"/api/selections/{created['id']}")
     assert resp.status_code == 204
+
+
+def test_launch_uses_config_saved_on_the_selection(client, monkeypatch):
+    """Regression test: the Launch Job Selection modal had no config picker,
+    so launching a bo_report job always sent an empty config_id/config_data,
+    which produced an empty bo_credentials dict and blew up EnvironmentConfig
+    validation (missing db_host/db_password) deep inside RunExecutor. The
+    config should be picked once when the selection is created/edited and
+    reused on every launch, not re-supplied at launch time."""
+    from etl_framework.repository.repository import ConfigRepository
+    from etl_framework.repository.database import SessionLocal
+
+    with SessionLocal() as db:
+        cfg = ConfigRepository(db).create(
+            "bo-prod", "prod",
+            {"bo_url": "https://bo.example.com", "bo_user": "admin", "bo_password": "secret", "db_host": "bo-host"},
+        )
+        cfg_id = cfg.id
+
+    resp = client.post("/api/selections", json={
+        "name": "bo-live-set", "job_sequence": ["bo_job"],
+        "run_settings": {"use_live_connections": True},
+        "config_id": cfg_id,
+    })
+    assert resp.status_code == 201, resp.text
+    selection_id = resp.json()["id"]
+
+    detail = client.get(f"/api/selections/{selection_id}").json()
+    assert detail["versions"][-1]["config_id"] == cfg_id
+
+    captured = {}
+    monkeypatch.setattr(
+        "api.routes.selections._execute_run",
+        lambda run_id, job_sequence, source_env, target_env, run_settings, config_snapshot: captured.update(
+            config_snapshot=config_snapshot
+        ),
+    )
+
+    resp = client.post(f"/api/selections/{selection_id}/launch", json={"source_env": "dev"})
+    assert resp.status_code == 202, resp.text
+
+    assert captured["config_snapshot"]["bo_credentials"]["db_host"] == "bo-host"
+    assert captured["config_snapshot"]["bo_credentials"]["bo_password"] == "secret"
 
 
 def test_launch_creates_run_with_selection_fields(client):
