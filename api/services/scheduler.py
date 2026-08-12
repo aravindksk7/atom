@@ -105,48 +105,73 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Schedule disabled")
             return
 
-        sel_repo = JobSelectionRepository(db)
-        version = sel_repo.get_version(sched.selection_id, sched.selection_version)
-        if version is None:
-            logger.error(
-                "Schedule '%s' references missing selection %s v%s; skipping run",
-                name, sched.selection_id, sched.selection_version,
-            )
-            record_scheduler_event(
-                db,
-                sched,
-                "skipped",
-                "ERROR",
-                exit_code=1,
-                error_summary=f"Selection version not found: selection {sched.selection_id} v{sched.selection_version}",
-            )
-            return
+        from api.schemas import SequenceRef
+        from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
+
+        sequence_meta = None
+        if sched.sequence_id is not None:
+            try:
+                resolved = resolve_sequence(
+                    db,
+                    SequenceRef(sequence_id=sched.sequence_id,
+                                sequence_version=sched.sequence_version),
+                )
+            except SequenceResolutionError as exc:
+                logger.error("Schedule '%s' could not resolve its sequence: %s", name, exc)
+                record_scheduler_event(
+                    db, sched, "skipped", "ERROR", exit_code=1, error_summary=str(exc)
+                )
+                return
+            job_sequence = resolved.as_linear_steps()
+            run_settings = resolved.defaults.run_settings or {}
+            config_id = resolved.defaults.config_id
+            sequence_meta = resolved.snapshot_meta()
+            selection_id = None
+            selection_version = None
+        else:
+            sel_repo = JobSelectionRepository(db)
+            version = sel_repo.get_version(sched.selection_id, sched.selection_version)
+            if version is None:
+                logger.error(
+                    "Schedule '%s' references missing selection %s v%s; skipping run",
+                    name, sched.selection_id, sched.selection_version,
+                )
+                record_scheduler_event(
+                    db, sched, "skipped", "ERROR", exit_code=1,
+                    error_summary=(
+                        f"Selection version not found: selection {sched.selection_id} "
+                        f"v{sched.selection_version}"
+                    ),
+                )
+                return
+            job_sequence = version.job_sequence or []
+            run_settings = version.run_settings_json or {}
+            # Without this, a scheduled run resolves no Saved Config and every
+            # live job in it (bo_report, automic_job, compare) runs without
+            # credentials. Selection launch already does this -- see
+            # api/routes/selections.py's launch handler.
+            config_id = version.config_id
+            selection_id = sched.selection_id
+            selection_version = sched.selection_version
 
         run_repo = RunRepository(db)
-        if run_repo.has_active_run_for_selection(sched.selection_id):
+        if selection_id is not None and run_repo.has_active_run_for_selection(selection_id):
             logger.info(
                 "Schedule '%s' skipped because selection %s already has an active run",
-                name, sched.selection_id,
+                name, selection_id,
             )
             record_scheduler_event(
-                db,
-                sched,
-                "skipped",
-                "BLOCKED",
-                error_summary=f"Selection {sched.selection_id} already has an active run",
+                db, sched, "skipped", "BLOCKED",
+                error_summary=f"Selection {selection_id} already has an active run",
             )
             return
 
         trigger = RunTrigger(
             source_env=sched.source_env,
             target_env=sched.target_env,
-            job_sequence=version.job_sequence or [],
-            run_settings=version.run_settings_json or {},
-            # Without this, a scheduled run resolves no Saved Config and every
-            # live job in it (bo_report, automic_job, compare) runs without
-            # credentials. Selection launch already does this -- see
-            # api/routes/selections.py's launch handler.
-            config_id=version.config_id,
+            job_sequence=job_sequence,
+            run_settings=run_settings,
+            config_id=config_id,
         )
         started_at = datetime.now(timezone.utc)
         started_perf = time.perf_counter()
@@ -157,14 +182,16 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             s.model_dump() if hasattr(s, "model_dump") else s for s in trigger.job_sequence
         ]
         config_snapshot["run_settings"] = trigger.run_settings.model_dump()
+        if sequence_meta is not None:
+            config_snapshot["sequence"] = sequence_meta
 
         run_repo.create_run(
             run_id=run_id,
             source_env=trigger.source_env,
             target_env=trigger.target_env,
             config_snapshot=config_snapshot,
-            selection_id=sched.selection_id,
-            selection_version=sched.selection_version,
+            selection_id=selection_id,
+            selection_version=selection_version,
         )
         _execute_run(
             run_id=run_id,

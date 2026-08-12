@@ -11,6 +11,12 @@
     // -----------------------------------------------------------
     jobs: [],
     selectedJobs: [],
+    // Saved execution sequences available to attach to a selection or schedule.
+    availableSequences: [],
+    selectionSourceMode: 'inline',     // 'inline' | 'sequence'
+    selectionSequenceRef: { sequence_id: null, sequence_version: null },
+    scheduleTargetMode: 'selection',   // 'selection' | 'sequence'
+    scheduleSequenceRef: { sequence_id: null, sequence_version: null },
     stepSettings: {},      // { jobName: { hold_after, wait_seconds, require_status, max_mismatch_count } }
     stepSettingsOpen: {},  // { jobName: bool } — expanded settings panel
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
@@ -976,6 +982,8 @@
         selection_id: this.jobSelections[0]?.id || '',
         enabled: true,
       };
+      this.scheduleTargetMode = 'selection';
+      this.scheduleSequenceRef = { sequence_id: null, sequence_version: null };
       this.scheduleModalEditing = false;
       this.showScheduleModal = true;
     },
@@ -988,8 +996,19 @@
         source_env: sched.source_env,
         target_env: sched.target_env,
         selection_id: sched.selection_id,
+        selection_version: sched.selection_version,
         enabled: sched.enabled,
       };
+      if (sched.sequence_id) {
+        this.scheduleTargetMode = 'sequence';
+        this.scheduleSequenceRef = {
+          sequence_id: sched.sequence_id,
+          sequence_version: sched.sequence_version,
+        };
+      } else {
+        this.scheduleTargetMode = 'selection';
+        this.scheduleSequenceRef = { sequence_id: null, sequence_version: null };
+      }
       this.scheduleModalEditing = true;
       this.showScheduleModal = true;
     },
@@ -1001,9 +1020,17 @@
         cron_expr: m.cron_expr,
         source_env: m.source_env,
         target_env: m.target_env || '',
-        selection_id: m.selection_id,
         enabled: m.enabled,
       };
+      if (this.scheduleTargetMode === 'sequence') {
+        body.sequence_id = Number(this.scheduleSequenceRef.sequence_id);
+        body.sequence_version = this.scheduleSequenceRef.sequence_version
+          ? Number(this.scheduleSequenceRef.sequence_version)
+          : null;
+      } else {
+        body.selection_id = Number(m.selection_id);
+        body.selection_version = m.selection_version || null;
+      }
       try {
         if (this.scheduleModalEditing) {
           await api('PUT', `/api/schedules/${m.id}`, body);
@@ -1042,13 +1069,28 @@
     // ===========================================================
     // JOB SELECTIONS
     // ===========================================================
+    async loadAvailableSequences() {
+      try {
+        this.availableSequences = await api('GET', '/api/sequences');
+      } catch { this.availableSequences = []; }
+    },
+
+    sequenceVersionOptions(sequenceId) {
+      const seq = this.availableSequences.find((s) => s.id === Number(sequenceId));
+      if (!seq) return [];
+      return Array.from({ length: seq.latest_version }, (_, i) => i + 1).reverse();
+    },
+
     async loadJobSelections() {
       try { this.jobSelections = await api('GET', '/api/selections'); } catch {}
+      await this.loadAvailableSequences();
     },
 
     openNewSelectionModal() {
       this.selectionModal = { name: '', description: '', tags: '', use_live_connections: false, config_id: '' };
       this.selectedSelectionJobNames = [];
+      this.selectionSourceMode = 'inline';
+      this.selectionSequenceRef = { sequence_id: null, sequence_version: null };
       this.selectionModalEditing = false;
       this.showSelectionModal = true;
     },
@@ -1064,9 +1106,20 @@
         use_live_connections: Boolean(latest.run_settings?.use_live_connections),
         config_id: latest.config_id || '',
       };
-      this.selectedSelectionJobNames = (latest.job_sequence || []).map(
-        s => (typeof s === 'string' ? s : s.job_name)
-      );
+      if (latest.sequence_ref) {
+        this.selectionSourceMode = 'sequence';
+        this.selectionSequenceRef = {
+          sequence_id: latest.sequence_ref.sequence_id,
+          sequence_version: latest.sequence_ref.sequence_version,
+        };
+        this.selectedSelectionJobNames = [];
+      } else {
+        this.selectionSourceMode = 'inline';
+        this.selectionSequenceRef = { sequence_id: null, sequence_version: null };
+        this.selectedSelectionJobNames = (latest.job_sequence || []).map(
+          s => (typeof s === 'string' ? s : s.job_name)
+        );
+      }
       this.selectionModalEditing = true;
       this.showSelectionModal = true;
     },
@@ -1087,10 +1140,19 @@
         name: m.name,
         description: m.description || '',
         tags: (m.tags || '').split(',').map(s => s.trim()).filter(Boolean),
-        job_sequence: this.selectedSelectionJobNames,
-        run_settings: { use_live_connections: Boolean(m.use_live_connections) },
-        config_id: m.config_id || null,
       };
+      if (this.selectionSourceMode === 'sequence') {
+        body.sequence_ref = {
+          sequence_id: Number(this.selectionSequenceRef.sequence_id),
+          sequence_version: this.selectionSequenceRef.sequence_version
+            ? Number(this.selectionSequenceRef.sequence_version)
+            : null,
+        };
+      } else {
+        body.job_sequence = this.selectedSelectionJobNames;
+        body.run_settings = { use_live_connections: Boolean(m.use_live_connections) };
+        body.config_id = m.config_id || null;
+      }
       try {
         if (this.selectionModalEditing) {
           await api('PUT', `/api/selections/${m.id}`, body);

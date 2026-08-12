@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -178,6 +178,152 @@ class SequenceStep(BaseModel):
     hold_after: bool = False
     condition: StepCondition | None = None
     wait_seconds: int = Field(default=0, ge=0)
+
+
+# ---------------------------------------------------------------------------
+# Saved execution sequences
+# ---------------------------------------------------------------------------
+
+class SequenceStepRef(BaseModel):
+    """A step inside a saved sequence.
+
+    step_id is separate from job_name because a DAG may run the same job more
+    than once (a reconciliation before a load and again after it), so job_name
+    cannot anchor a dependency edge.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(min_length=1, max_length=255)
+    job_name: str = Field(min_length=1)
+    depends_on: list[str] = Field(default_factory=list)
+    trigger_rule: Literal["all_success", "all_done", "any_success", "all_failed"] = "all_success"
+    hold_after: bool = False
+    condition: StepCondition | None = None
+    wait_seconds: int = Field(default=0, ge=0)
+    max_retries: int | None = Field(default=None, ge=0, le=10)
+    retry_delay_seconds: float | None = Field(default=None, ge=0)
+    on_failure: Literal["stop", "continue", "skip_downstream"] = "skip_downstream"
+
+
+class TimeWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class RequireRunSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_name: str = Field(min_length=1)
+    within_hours: int = Field(gt=0)
+
+
+class SequencePrecondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time_window: TimeWindow | None = None
+    weekdays: list[int] | None = None
+    require_run_success: RequireRunSuccess | None = None
+
+    @field_validator("weekdays")
+    @classmethod
+    def check_weekdays(cls, v: list[int] | None) -> list[int] | None:
+        if v is not None and any(d < 0 or d > 6 for d in v):
+            raise ValueError("weekdays entries must be between 0 (Monday) and 6 (Sunday)")
+        return v
+
+
+class SequenceDefaults(BaseModel):
+    """Optional defaults a caller may override. A sequence is env-agnostic."""
+    model_config = ConfigDict(extra="forbid")
+
+    source_env: str | None = None
+    target_env: str | None = None
+    config_id: int | None = None
+    run_settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class SequenceRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sequence_id: int
+    sequence_version: int | None = None   # None resolves to the latest version
+
+
+class SequenceValidationIssue(BaseModel):
+    step_id: str | None = None
+    field: str
+    message: str
+
+
+class ExecutionSequenceVersionOut(BaseModel):
+    version_number: int
+    steps: list[SequenceStepRef]
+    preconditions: SequencePrecondition | None = None
+    defaults: SequenceDefaults = Field(default_factory=SequenceDefaults)
+    created_at: datetime
+
+
+class ExecutionSequenceCreate(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    steps: list[SequenceStepRef] = Field(default_factory=list)
+    preconditions: SequencePrecondition | None = None
+    defaults: SequenceDefaults = Field(default_factory=SequenceDefaults)
+
+
+class ExecutionSequenceUpdate(BaseModel):
+    """Metadata only. Steps change by creating a new version."""
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    archived: bool | None = None
+
+
+class ExecutionSequenceVersionCreate(BaseModel):
+    steps: list[SequenceStepRef]
+    preconditions: SequencePrecondition | None = None
+    defaults: SequenceDefaults | None = None
+
+
+class ExecutionSequenceOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    tags: list[str]
+    archived: bool
+    latest_version: int
+    step_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExecutionSequenceDetailOut(ExecutionSequenceOut):
+    versions: list[ExecutionSequenceVersionOut]
+
+
+class SequenceValidateRequest(BaseModel):
+    steps: list[SequenceStepRef]
+    preconditions: SequencePrecondition | None = None
+
+
+class SequenceValidateResponse(BaseModel):
+    ok: bool
+    errors: list[SequenceValidationIssue] = Field(default_factory=list)
+    order: list[str] = Field(default_factory=list)
+
+
+class SequenceUsageRef(BaseModel):
+    id: int
+    name: str
+    version: int | None = None
+
+
+class SequenceUsageOut(BaseModel):
+    selections: list[SequenceUsageRef] = Field(default_factory=list)
+    schedules: list[SequenceUsageRef] = Field(default_factory=list)
 
 
 class RunStepOut(BaseModel):
@@ -629,6 +775,7 @@ class JobSelectionVersionOut(BaseModel):
     job_sequence: list[str | SequenceStep]
     run_settings: RunSettings
     config_id: int | None = None
+    sequence_ref: SequenceRef | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -641,6 +788,15 @@ class JobSelectionCreate(BaseModel):
     job_sequence: list[str | SequenceStep] = Field(default_factory=list)
     run_settings: RunSettings = Field(default_factory=RunSettings)
     config_id: int | None = None
+    sequence_ref: SequenceRef | None = None
+
+    @model_validator(mode="after")
+    def check_one_source(self) -> "JobSelectionCreate":
+        if self.sequence_ref is not None and self.job_sequence:
+            raise ValueError(
+                "Provide either job_sequence or sequence_ref, not both"
+            )
+        return self
 
 
 class JobSelectionUpdate(BaseModel):
@@ -650,6 +806,15 @@ class JobSelectionUpdate(BaseModel):
     job_sequence: list[str | SequenceStep] | None = None
     run_settings: RunSettings | None = None
     config_id: int | None = None
+    sequence_ref: SequenceRef | None = None
+
+    @model_validator(mode="after")
+    def check_one_source(self) -> "JobSelectionUpdate":
+        if self.sequence_ref is not None and self.job_sequence:
+            raise ValueError(
+                "Provide either job_sequence or sequence_ref, not both"
+            )
+        return self
 
 
 class JobSelectionOut(BaseModel):

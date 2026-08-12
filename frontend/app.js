@@ -150,6 +150,8 @@ function _appRaw() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 15l2 2 4-4"></path></svg>' },
       { id: 'jobs',     label: 'Launch', group: 'execution',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>' },
+      { id: 'sequences', label: 'Sequences', group: 'execution',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M9 6h6a3 3 0 0 1 3 3v6"></path></svg>' },
       { id: 'monitor',  label: 'Monitor', group: 'execution',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>' },
       { id: 'history',  label: 'History', group: 'analysis',
@@ -1383,7 +1385,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}

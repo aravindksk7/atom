@@ -1,0 +1,195 @@
+<template x-if="currentView === 'sequences'"><div data-testid="sequences-panel">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Execution Sequences</div>
+      <div class="section-sub">Saved, versioned job pipelines with their own dependencies. Attach one to a job selection or a schedule.</div>
+    </div>
+    <button class="btn btn-primary" data-testid="sequence-new-btn" @click="openSequenceCreate()">New sequence</button>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- List -->
+    <div class="card">
+      <div class="card-title">Saved sequences</div>
+      <div x-show="sequencesLoading" class="text-sm text-muted">Loading…</div>
+      <div x-show="!sequencesLoading && sequences.length === 0" class="text-sm text-muted">
+        No sequences yet.
+      </div>
+      <ul class="space-y-2" data-testid="sequence-list">
+        <template x-for="seq in sequences" :key="seq.id">
+          <li class="flex items-center justify-between gap-2 p-2 rounded hover:bg-subtle cursor-pointer"
+              :data-testid="'sequence-row-' + seq.name"
+              @click="selectSequence(seq)">
+            <div>
+              <div class="font-medium" x-text="seq.name"></div>
+              <div class="text-xs text-muted">
+                <span x-text="'v' + seq.latest_version"></span> ·
+                <span x-text="seq.step_count + ' steps'"></span>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-xs" :data-testid="'sequence-archive-' + seq.name"
+                    @click.stop="archiveSequence(seq)">Archive</button>
+          </li>
+        </template>
+      </ul>
+    </div>
+
+    <!-- Detail -->
+    <div class="card lg:col-span-2" x-show="selectedSequence" data-testid="sequence-detail">
+      <div class="flex items-center justify-between">
+        <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
+        <button class="btn btn-secondary btn-sm" data-testid="sequence-edit-btn"
+                @click="openSequenceVersionEditor()">Edit as new version</button>
+      </div>
+      <div class="text-sm text-muted mb-3" x-text="selectedSequence && selectedSequence.description"></div>
+
+      <table class="data-table" aria-label="sequences table 1">
+        <thead>
+          <tr><th>Step</th><th>Job</th><th>Runs after</th></tr>
+        </thead>
+        <tbody>
+          <template x-if="selectedSequence">
+            <template x-for="step in selectedSequence.versions[selectedSequence.versions.length - 1].steps"
+                      :key="step.step_id">
+              <tr>
+                <td x-text="step.step_id"></td>
+                <td x-text="step.job_name"></td>
+                <td x-text="(step.depends_on || []).join(', ') || '—'"></td>
+              </tr>
+            </template>
+          </template>
+        </tbody>
+      </table>
+
+      <div class="mt-4 text-sm" data-testid="sequence-usage">
+        <div class="font-medium">Used by</div>
+        <div class="text-muted">
+          <span x-text="sequenceUsage.selections.length + ' selection(s)'"></span> ·
+          <span x-text="sequenceUsage.schedules.length + ' schedule(s)'"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor -->
+  <div class="modal" x-show="sequenceEditorOpen" x-cloak data-testid="sequence-editor">
+    <div class="modal-body max-w-4xl">
+      <div class="modal-title"
+           x-text="sequenceEditorMode === 'create' ? 'New execution sequence' : 'New version'"></div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input class="field-input" data-testid="sequence-name-input"
+                 x-model="sequenceMeta.name" :disabled="sequenceEditorMode === 'version'"
+                 aria-label="sequence name" />
+        </label>
+        <label class="field">
+          <span class="field-label">Description</span>
+          <input class="field-input" x-model="sequenceMeta.description" aria-label="sequence description" />
+        </label>
+        <label class="field">
+          <span class="field-label">Tags (comma separated)</span>
+          <input class="field-input" x-model="sequenceMeta.tags_raw" aria-label="sequence tags" />
+        </label>
+      </div>
+
+      <div class="space-y-3" data-testid="sequence-step-editor">
+        <template x-for="(step, index) in sequenceSteps" :key="index">
+          <div class="card card-compact">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label class="field">
+                <span class="field-label">Job</span>
+                <select class="field-input" :data-testid="'sequence-step-job-' + index"
+                        x-model="step.job_name" @change="onSequenceJobPicked(step)"
+                        aria-label="step job">
+                  <option value="">Select a job…</option>
+                  <template x-for="job in jobs" :key="job.name">
+                    <option :value="job.name" x-text="job.name"></option>
+                  </template>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">Step id</span>
+                <input class="field-input" :data-testid="'sequence-step-id-' + index"
+                       x-model="step.step_id" @input="validateSequenceSteps()"
+                       aria-label="step id" />
+              </label>
+              <div class="field">
+                <span class="field-label">Runs after</span>
+                <div class="flex flex-wrap gap-2" :data-testid="'sequence-step-deps-' + index">
+                  <template x-for="parent in sequenceParentOptions(step)" :key="parent">
+                    <label class="chip cursor-pointer">
+                      <input type="checkbox" :checked="(step.depends_on || []).includes(parent)"
+                             @change="toggleSequenceDependency(step, parent)"
+                             :aria-label="'depends on ' + parent" />
+                      <span x-text="parent"></span>
+                    </label>
+                  </template>
+                  <span class="text-xs text-muted" x-show="sequenceParentOptions(step).length === 0">
+                    No other steps yet
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <details class="mt-2">
+              <summary class="text-sm cursor-pointer">Advanced</summary>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                <label class="field-inline">
+                  <input type="checkbox" x-model="step.hold_after" aria-label="hold after this step" />
+                  <span>Hold after this step</span>
+                </label>
+                <label class="field">
+                  <span class="field-label">Wait before this step (seconds)</span>
+                  <input type="number" min="0" class="field-input" x-model.number="step.wait_seconds"
+                         aria-label="wait seconds" />
+                </label>
+              </div>
+            </details>
+
+            <template x-for="issue in sequenceIssuesFor(step.step_id)" :key="issue.field + issue.message">
+              <div class="text-xs text-danger mt-1" x-text="issue.message"></div>
+            </template>
+
+            <div class="mt-2 text-right">
+              <button class="btn btn-ghost btn-xs" :data-testid="'sequence-step-remove-' + index"
+                      @click="removeSequenceStep(index)">Remove step</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <button class="btn btn-secondary btn-sm mt-3" data-testid="sequence-add-step"
+              @click="addSequenceStep()">Add step</button>
+
+      <template x-for="issue in sequenceGlobalIssues" :key="issue.field + issue.message">
+        <div class="text-sm text-danger mt-2" data-testid="sequence-global-error" x-text="issue.message"></div>
+      </template>
+
+      <!-- Read-only graph preview, laid out by dependency depth. -->
+      <div class="mt-4" x-show="sequenceOrder.length" data-testid="sequence-graph-preview">
+        <div class="field-label">Execution order preview</div>
+        <div class="flex flex-col gap-2">
+          <template x-for="level in sequenceLevels" :key="level.index">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-muted w-16" x-text="'level ' + (level.index + 1)"></span>
+              <div class="flex flex-wrap gap-2">
+                <template x-for="step in level.steps" :key="step.step_id">
+                  <span class="chip" x-text="step.step_id"></span>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost" @click="sequenceEditorOpen = false">Cancel</button>
+        <button class="btn btn-primary" data-testid="sequence-save-btn"
+                :disabled="!sequenceIsValid || sequenceSaving"
+                @click="saveSequence()">Save</button>
+      </div>
+    </div>
+  </div>
+</div></template>

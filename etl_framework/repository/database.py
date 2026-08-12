@@ -328,6 +328,13 @@ def _ensure_compare_columns(bind) -> None:
         ensure_column(conn, "app_settings", "bo_download_dir", "ALTER TABLE app_settings ADD COLUMN bo_download_dir VARCHAR(1024) NOT NULL DEFAULT ''")
 
         ensure_column(conn, "job_selection_versions", "config_id", "ALTER TABLE job_selection_versions ADD COLUMN config_id INTEGER")
+        ensure_column(conn, "job_selection_versions", "sequence_ref",
+                      "ALTER TABLE job_selection_versions ADD COLUMN sequence_ref JSON")
+        if "scheduled_runs" in tables:
+            ensure_column(conn, "scheduled_runs", "sequence_id",
+                          "ALTER TABLE scheduled_runs ADD COLUMN sequence_id INTEGER")
+            ensure_column(conn, "scheduled_runs", "sequence_version",
+                          "ALTER TABLE scheduled_runs ADD COLUMN sequence_version INTEGER")
 
 
 def _backfill_schedule_selections(bind) -> None:

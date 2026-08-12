@@ -76,9 +76,47 @@ class JobSelectionVersion(Base):
     job_sequence = Column(JSON, nullable=False, default=list)
     run_settings_json = Column(JSON, nullable=False, default=dict)
     config_id = Column(Integer, nullable=True)
+    sequence_ref = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     selection = relationship("JobSelection", back_populates="versions")
+
+
+# ---------------------------------------------------------------------------
+# Execution Sequences
+# ---------------------------------------------------------------------------
+
+class ExecutionSequence(Base):
+    __tablename__ = "execution_sequences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=False, default="")
+    tags = Column(JSON, nullable=False, default=list)
+    archived = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    versions = relationship(
+        "ExecutionSequenceVersion", back_populates="sequence",
+        cascade="all, delete-orphan", lazy="select",
+        order_by="ExecutionSequenceVersion.version_number",
+    )
+
+
+class ExecutionSequenceVersion(Base):
+    __tablename__ = "execution_sequence_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sequence_id = Column(Integer, ForeignKey("execution_sequences.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    steps_json = Column(JSON, nullable=False, default=list)
+    preconditions_json = Column(JSON, nullable=True)
+    defaults_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    sequence = relationship("ExecutionSequence", back_populates="versions")
 
 
 class TestRun(Base):
@@ -297,6 +335,8 @@ class ScheduledRun(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     selection_id = Column(Integer, nullable=True, index=True)
     selection_version = Column(Integer, nullable=True)
+    sequence_id = Column(Integer, nullable=True, index=True)
+    sequence_version = Column(Integer, nullable=True)
 
 
 class SchedulerTelemetryEvent(Base):

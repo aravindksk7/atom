@@ -15,16 +15,20 @@ from api.schemas import (
     JobSelectionVersionOut,
     RunStatusOut,
     RunTrigger,
+    SequenceRef,
 )
 from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
+from api.services.job_env_validation import (
+    SINGLE_ENV_JOB_TYPES as _SINGLE_ENV_JOB_TYPES,  # noqa: F401 — back-compat re-export
+    job_name_of as _job_name_of,  # noqa: F401 — back-compat re-export
+    validate_env_requirements as _validate_env_requirements,
+)
+from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunRepository
+from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 
 router = APIRouter(tags=["selections"])
-
-# Job types whose execution only touches one environment (per the approved
-# design spec); everything else needs a target_env to compare against.
-_SINGLE_ENV_JOB_TYPES = {"bo_report", "freshness", "profile", "automic_job", "dbt_artifact", "schema_snapshot", "bo_job", "ds_job"}
 
 
 def _selection_out(selection) -> JobSelectionOut:
@@ -48,6 +52,7 @@ def _version_out(version) -> JobSelectionVersionOut:
         job_sequence=version.job_sequence or [],
         run_settings=version.run_settings_json or {},
         config_id=version.config_id,
+        sequence_ref=version.sequence_ref,
         created_at=version.created_at,
     )
 
@@ -55,6 +60,17 @@ def _version_out(version) -> JobSelectionVersionOut:
 def _validate_config_id_or_404(config_id: int | None, db: Session) -> None:
     if config_id is not None and ConfigRepository(db).get(config_id) is None:
         raise HTTPException(status_code=404, detail="Config not found")
+
+
+def _validate_sequence_ref_or_404(ref: SequenceRef | None, db: Session) -> dict | None:
+    if ref is None:
+        return None
+    repo = ExecutionSequenceRepository(db)
+    if repo.get(ref.sequence_id) is None:
+        raise HTTPException(status_code=404, detail="Execution sequence not found")
+    if ref.sequence_version is not None and repo.get_version(ref.sequence_id, ref.sequence_version) is None:
+        raise HTTPException(status_code=404, detail="Execution sequence version not found")
+    return ref.model_dump()
 
 
 def _detail_out(selection) -> JobSelectionDetailOut:
@@ -80,11 +96,12 @@ def create_selection(body: JobSelectionCreate, request: Request, db: Session = D
     if repo.get_by_name(body.name) is not None:
         raise HTTPException(status_code=409, detail="A job selection with this name already exists")
     _validate_config_id_or_404(body.config_id, db)
+    sequence_ref = _validate_sequence_ref_or_404(body.sequence_ref, db)
     job_sequence = _dump_job_sequence(body.job_sequence)
     selection = repo.create(
         name=body.name, description=body.description, tags=body.tags,
         job_sequence=job_sequence, run_settings=body.run_settings.model_dump(),
-        config_id=body.config_id,
+        config_id=body.config_id, sequence_ref=sequence_ref,
     )
     AuditService(db).log(
         request, "selection.created", "job_selection", selection.id,
@@ -124,12 +141,17 @@ def update_selection(
     repo.update_metadata(selection_id, name=body.name, description=body.description, tags=body.tags)
 
     config_id_set = "config_id" in body.model_fields_set
-    if body.job_sequence is not None or body.run_settings is not None or config_id_set:
+    sequence_ref_set = "sequence_ref" in body.model_fields_set
+    if body.job_sequence is not None or body.run_settings is not None or config_id_set or sequence_ref_set:
         if config_id_set:
             _validate_config_id_or_404(body.config_id, db)
         job_sequence = _dump_job_sequence(body.job_sequence) if body.job_sequence is not None else None
         run_settings = body.run_settings.model_dump() if body.run_settings is not None else None
-        version_kwargs = {"config_id": body.config_id} if config_id_set else {}
+        version_kwargs = {}
+        if config_id_set:
+            version_kwargs["config_id"] = body.config_id
+        if sequence_ref_set:
+            version_kwargs["sequence_ref"] = _validate_sequence_ref_or_404(body.sequence_ref, db)
         repo.create_new_version(selection_id, job_sequence, run_settings, **version_kwargs)
 
     db.refresh(selection)
@@ -165,30 +187,6 @@ def list_selection_runs(selection_id: int, db: Session = Depends(get_session)):
     ]
 
 
-def _job_name_of(step) -> str:
-    if isinstance(step, dict):
-        return step.get("job_name", "")
-    if hasattr(step, "job_name"):
-        return step.job_name
-    return str(step)
-
-
-def _validate_env_requirements(job_sequence: list, jobs_by_name: dict, target_env: str) -> None:
-    if target_env:
-        return
-    for step in job_sequence:
-        job_name = _job_name_of(step)
-        job = jobs_by_name.get(job_name)
-        if job is not None and job.job_type not in _SINGLE_ENV_JOB_TYPES:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Job '{job_name}' (type '{job.job_type}') requires a target_env; "
-                    "only single-environment job types can run with target_env omitted"
-                ),
-            )
-
-
 @router.post("/{selection_id}/launch", response_model=RunStatusOut, status_code=202)
 def launch_selection(
     selection_id: int,
@@ -209,15 +207,25 @@ def launch_selection(
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
 
+    resolved = None
+    if version.sequence_ref:
+        try:
+            resolved = resolve_sequence(db, SequenceRef.model_validate(version.sequence_ref))
+        except SequenceResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        job_sequence = resolved.as_linear_steps()
+    else:
+        job_sequence = version.job_sequence or []
+
     jobs_by_name = {j.name: j for j in JobRepository(db).list()}
-    _validate_env_requirements(version.job_sequence or [], jobs_by_name, body.target_env)
+    _validate_env_requirements(job_sequence, jobs_by_name, body.target_env)
 
     trigger = RunTrigger(
         source_env=body.source_env,
         target_env=body.target_env,
         source_connection=body.source_connection,
         target_connection=body.target_connection,
-        job_sequence=version.job_sequence or [],
+        job_sequence=job_sequence,
         # The selection remembers its own config (saved on the selection so
         # launching doesn't require re-picking one every time); an explicit
         # config_id on the launch request overrides it for a one-off run.
@@ -231,6 +239,8 @@ def launch_selection(
     config_snapshot = _snapshot_from_trigger(trigger, db)
     config_snapshot["job_sequence"] = _dump_job_sequence(ordered_jobs)
     config_snapshot["run_settings"] = trigger.run_settings.model_dump()
+    if resolved is not None:
+        config_snapshot["sequence"] = resolved.snapshot_meta()
 
     RunRepository(db).create_run(
         run_id=run_id,

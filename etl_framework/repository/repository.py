@@ -175,6 +175,7 @@ class JobSelectionRepository:
     def create(
         self, name: str, description: str, tags: list[str],
         job_sequence: list, run_settings: dict, config_id: int | None = None,
+        sequence_ref: dict | None = None,
     ) -> JobSelection:
         selection = JobSelection(name=name, description=description, tags=tags or [])
         self._db.add(selection)
@@ -182,7 +183,7 @@ class JobSelectionRepository:
         self._db.add(JobSelectionVersion(
             selection_id=selection.id, version_number=1,
             job_sequence=job_sequence or [], run_settings_json=run_settings or {},
-            config_id=config_id,
+            config_id=config_id, sequence_ref=sequence_ref,
         ))
         self._db.commit()
         self._db.refresh(selection)
@@ -235,7 +236,7 @@ class JobSelectionRepository:
 
     def create_new_version(
         self, selection_id: int, job_sequence: list | None, run_settings: dict | None,
-        config_id: int | None = _UNSET,
+        config_id: int | None = _UNSET, sequence_ref: dict | None = _UNSET,
     ) -> JobSelectionVersion | None:
         selection = self.get(selection_id)
         if selection is None:
@@ -255,6 +256,10 @@ class JobSelectionRepository:
             config_id=(
                 config_id if config_id is not _UNSET
                 else (current.config_id if current else None)
+            ),
+            sequence_ref=(
+                sequence_ref if sequence_ref is not _UNSET
+                else (current.sequence_ref if current else None)
             ),
         )
         self._db.add(version)

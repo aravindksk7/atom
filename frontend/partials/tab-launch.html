@@ -1259,7 +1259,44 @@
           </select>
           <div class="text-xs text-slate-500 mt-1">Credentials used for live jobs (SAP BO, Automic, SAP DS, etc.) whenever this selection is launched — saved with the selection, not asked again at launch time.</div>
         </div>
-        <div>
+        <div class="field" data-testid="selection-source-mode">
+          <span class="field-label">Jobs come from</span>
+          <label class="field-inline">
+            <input type="radio" value="inline" x-model="selectionSourceMode"
+                   @change="loadAvailableSequences()" aria-label="inline job list" />
+            <span>This selection's own job list</span>
+          </label>
+          <label class="field-inline">
+            <input type="radio" value="sequence" x-model="selectionSourceMode"
+                   @change="loadAvailableSequences()" aria-label="saved execution sequence" />
+            <span>A saved execution sequence</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="selectionSourceMode === 'sequence'">
+          <label class="field">
+            <span class="field-label">Sequence</span>
+            <select class="field-input" data-testid="selection-sequence-picker"
+                    x-model="selectionSequenceRef.sequence_id" aria-label="sequence">
+              <option :value="null">Select a sequence…</option>
+              <template x-for="seq in availableSequences" :key="seq.id">
+                <option :value="seq.id" x-text="seq.name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Version</span>
+            <select class="field-input" data-testid="selection-sequence-version"
+                    x-model="selectionSequenceRef.sequence_version" aria-label="sequence version">
+              <option :value="null">Always latest</option>
+              <template x-for="v in sequenceVersionOptions(selectionSequenceRef.sequence_id)" :key="v">
+                <option :value="v" x-text="'v' + v"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+
+        <div x-show="selectionSourceMode === 'inline'">
           <label  class="field-label" for="a11y-launch-jobs-cancel-save-launch-job-selection-source-env">Jobs</label>
           <div class="border rounded-lg max-h-64 overflow-y-auto">
             <template x-for="job in filteredJobList" :key="job.name">
@@ -1273,7 +1310,7 @@
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showSelectionModal = false" class="btn-secondary">Cancel</button>
-        <button @click="saveSelection()" :disabled="!selectionModal.name || !selectedSelectionJobNames.length" class="btn-primary">Save</button>
+        <button @click="saveSelection()" :disabled="!selectionModal.name || (selectionSourceMode === 'inline' ? !selectedSelectionJobNames.length : !selectionSequenceRef.sequence_id)" class="btn-primary">Save</button>
       </div>
     </div>
   </div>
@@ -1488,7 +1525,43 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
           </div>
         </div>
-        <div>
+        <div class="field" data-testid="schedule-target-mode">
+          <span class="field-label">Run</span>
+          <label class="field-inline">
+            <input type="radio" value="selection" x-model="scheduleTargetMode" aria-label="a job selection" />
+            <span>A job selection</span>
+          </label>
+          <label class="field-inline">
+            <input type="radio" value="sequence" x-model="scheduleTargetMode"
+                   @change="loadAvailableSequences()" aria-label="an execution sequence" />
+            <span>An execution sequence</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="scheduleTargetMode === 'sequence'">
+          <label class="field">
+            <span class="field-label">Sequence</span>
+            <select class="field-input" data-testid="schedule-sequence-picker"
+                    x-model="scheduleSequenceRef.sequence_id" aria-label="schedule sequence">
+              <option :value="null">Select a sequence…</option>
+              <template x-for="seq in availableSequences" :key="seq.id">
+                <option :value="seq.id" x-text="seq.name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Version</span>
+            <select class="field-input" data-testid="schedule-sequence-version"
+                    x-model="scheduleSequenceRef.sequence_version" aria-label="schedule sequence version">
+              <option :value="null">Latest at save time</option>
+              <template x-for="v in sequenceVersionOptions(scheduleSequenceRef.sequence_id)" :key="v">
+                <option :value="v" x-text="'v' + v"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+
+        <div x-show="scheduleTargetMode === 'selection'">
           <label  class="field-label" for="a11y-launch-job-selection">Job Selection *</label>
           <select x-model="scheduleModal.selection_id" class="field-input field-select" id="a11y-launch-job-selection">
             <option value="">— Select —</option>
@@ -1502,7 +1575,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showScheduleModal = false" class="btn-secondary">Cancel</button>
-        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr || !scheduleModal.selection_id" class="btn-primary">Save</button>
+        <button @click="saveSchedule()" :disabled="!scheduleModal.name || !scheduleModal.cron_expr || (scheduleTargetMode === 'selection' ? !scheduleModal.selection_id : !scheduleSequenceRef.sequence_id)" class="btn-primary">Save</button>
       </div>
     </div>
   </div>

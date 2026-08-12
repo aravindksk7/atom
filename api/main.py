@@ -13,6 +13,7 @@ from api.routes import aws_s3 as aws_s3_routes
 from api.routes import aws_glue as aws_glue_routes
 from api.routes import aws_athena as aws_athena_routes
 from api.routes import selections as selections_routes
+from api.routes import sequences as sequences_routes
 from api.routes import auth as auth_routes
 from api.routes import audit as audit_routes
 from api.routes import tokens, notifications, schedules, lineage as lineage_routes
@@ -71,6 +72,7 @@ app.include_router(schema_snapshot_routes.router, prefix="/api")
 app.include_router(contracts_routes.router, prefix="/api/contracts")
 app.include_router(logs_routes.router, prefix="/api/logs")
 app.include_router(selections_routes.router, prefix="/api/selections")
+app.include_router(sequences_routes.router, prefix="/api/sequences")
 app.include_router(coverage_routes.router, prefix="/api/coverage")
 app.include_router(gates_routes.router, prefix="/api/gates")
 app.include_router(expectations_routes.router)
