@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from pydantic import ValidationError
+
+from api.schemas import BOCompareRequest, ReconFileCompareRequest
+
 
 class ValidationSeverity(str, Enum):
     ERROR = "error"
@@ -227,6 +231,72 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
     elif job_type == "ds_job":
         if not params.get("job_name"):
             issues.append(ValidationIssue("params.job_name", "ds_job jobs require job_name"))
+    elif job_type == "compare":
+        compare_type = params.get("compare_type")
+        request = params.get("request")
+        if compare_type not in ("bo", "recon_file"):
+            issues.append(ValidationIssue(
+                "params.compare_type",
+                "compare jobs require compare_type of 'bo' or 'recon_file'",
+            ))
+        if not isinstance(request, dict):
+            issues.append(ValidationIssue(
+                "params.request",
+                "compare jobs require the compare request body in params.request",
+            ))
+        elif compare_type == "bo":
+            try:
+                parsed_bo = BOCompareRequest.model_validate(request)
+            except ValidationError as exc:
+                issues.append(ValidationIssue(
+                    "params.request",
+                    f"compare BO request is invalid: {_validation_error_message(exc)}",
+                ))
+            else:
+                for field, source, label in (
+                    ("params.request.source_a", parsed_bo.source_a, "Source A"),
+                    ("params.request.source_b", parsed_bo.source_b, "Source B"),
+                ):
+                    if source.source_type in ("upload", "run"):
+                        issues.append(ValidationIssue(
+                            field,
+                            f"compare job {label} uses a "
+                            f"{'past run' if source.source_type == 'run' else 'file upload'}, "
+                            "which cannot be re-run on a schedule - use a live, path, or api source",
+                        ))
+                    if source.source_type == "live" and not (source.doc_id or parsed_bo.doc_id):
+                        issues.append(ValidationIssue(
+                            field,
+                            f"compare job {label} live source requires doc_id",
+                        ))
+        elif compare_type == "recon_file":
+            try:
+                parsed_file = ReconFileCompareRequest.model_validate(request)
+            except ValidationError as exc:
+                issues.append(ValidationIssue(
+                    "params.request",
+                    f"compare recon_file request is invalid: {_validation_error_message(exc)}",
+                ))
+            else:
+                for field, stored, content, label in (
+                    ("params.request.source_a", parsed_file.stored_run_id, parsed_file.file_a_content_b64, "Source A"),
+                    ("params.request.source_b", parsed_file.stored_run_id_b, parsed_file.file_b_content_b64, "Source B"),
+                ):
+                    if stored or content:
+                        issues.append(ValidationIssue(
+                            field,
+                            f"compare job {label} uses a "
+                            f"{'stored run' if stored else 'file upload'}, "
+                            "which cannot be re-run on a schedule - use a file path",
+                        ))
+        for field in ("rules", "pass_condition", "depends_on"):
+            if params.get(field) or _get(job, field, None):
+                issues.append(ValidationIssue(
+                    f"params.{field}",
+                    f"{field} is ignored for compare jobs - compare runs do not go "
+                    "through the reconciliation job path",
+                    ValidationSeverity.WARNING,
+                ))
     elif job_type == "dbt_artifact":
         if not params.get("run_results_path"):
             issues.append(ValidationIssue("params.run_results_path", "dbt_artifact jobs require run_results_path"))
@@ -237,6 +307,15 @@ def raise_for_validation_issues(issues: list[ValidationIssue]) -> None:
     errors = [issue for issue in issues if issue.severity == ValidationSeverity.ERROR]
     if errors:
         raise ValueError("; ".join(f"{issue.field}: {issue.message}" for issue in errors))
+
+
+def _validation_error_message(exc: ValidationError) -> str:
+    first = exc.errors()[0]
+    location = ".".join(str(part) for part in first.get("loc", ()))
+    message = str(first.get("msg", "invalid request"))
+    if location:
+        return f"{location}: {message}"
+    return message
 
 
 def _get(job: Any, name: str, default: Any = None) -> Any:

@@ -473,7 +473,7 @@ class JobDefinition(BaseModel):
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
-        "aws_glue_catalog_compare", "aws_athena_query",
+        "aws_glue_catalog_compare", "aws_athena_query", "compare",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -564,6 +564,42 @@ class JobDefinition(BaseModel):
                     raise ValueError("reconciliation jobs require a query")
                 if not self.key_columns:
                     raise ValueError("reconciliation jobs require key_columns")
+        elif self.job_type == "compare":
+            compare_type = self.params.get("compare_type")
+            if compare_type not in ("bo", "recon_file"):
+                raise ValueError(
+                    "compare jobs require params.compare_type of 'bo' or 'recon_file'"
+                )
+            request = self.params.get("request")
+            if not isinstance(request, dict):
+                raise ValueError(
+                    "compare jobs require params.request holding the compare request body"
+                )
+            if compare_type == "bo":
+                parsed_bo = BOCompareRequest.model_validate(request)
+                for side, src in (("A", parsed_bo.source_a), ("B", parsed_bo.source_b)):
+                    if src.source_type in ("upload", "run"):
+                        raise ValueError(
+                            f"compare job Source {side} uses a "
+                            f"{'past run' if src.source_type == 'run' else 'file upload'}, "
+                            "which cannot be re-run on a schedule - use a live, path, or api source"
+                        )
+                    if src.source_type == "live" and not (src.doc_id or parsed_bo.doc_id):
+                        raise ValueError(
+                            f"compare job Source {side} live source requires doc_id"
+                        )
+            else:
+                parsed_file = ReconFileCompareRequest.model_validate(request)
+                for side, stored, content in (
+                    ("A", parsed_file.stored_run_id, parsed_file.file_a_content_b64),
+                    ("B", parsed_file.stored_run_id_b, parsed_file.file_b_content_b64),
+                ):
+                    if stored or content:
+                        raise ValueError(
+                            f"compare job Source {side} uses a "
+                            f"{'stored run' if stored else 'file upload'}, "
+                            "which cannot be re-run on a schedule - use a file path"
+                        )
         elif self.job_type == "freshness":
             if not self.params.get("timestamp_column"):
                 raise ValueError("freshness jobs require 'timestamp_column' in params")
@@ -577,6 +613,10 @@ class JobDefinition(BaseModel):
             _validate_job_file_source(self.params, "source")
             if not self.query.strip() and not _has_job_file_source(self.params, "source"):
                 raise ValueError(f"{self.job_type} jobs require a query or source file")
+        if self.job_type == "compare":
+            request = self.params.get("request") or {}
+            self.key_columns = list(request.get("key_columns") or [])
+            self.exclude_columns = list(request.get("exclude_columns") or [])
         return self
 
 

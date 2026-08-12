@@ -464,3 +464,45 @@ def test_run_schedule_records_telemetry_for_missing_selection_version(monkeypatc
         assert events[0].schedule_id == schedule_id
     finally:
         _db_module.SessionLocal = previous
+
+
+def test_run_schedule_passes_the_selections_config_id_into_the_run_snapshot(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+    from etl_framework.repository.repository import ConfigRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+
+        db = testing_session()
+        cfg = ConfigRepository(db).create("bo prod", "prod", {"host": "bo.example.com"})
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection",
+            description="",
+            tags=[],
+            job_sequence=["orders"],
+            run_settings={},
+            config_id=cfg.id,
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=1,
+        ))
+        schedule_id, schedule_name, config_id = schedule.id, schedule.name, cfg.id
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        svc._run_schedule(schedule_id, schedule_name)
+
+        assert len(executed) == 1
+        assert executed[0]["config_snapshot"]["config_id"] == config_id
+    finally:
+        _db_module.SessionLocal = previous

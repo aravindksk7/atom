@@ -142,6 +142,11 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             target_env=sched.target_env,
             job_sequence=version.job_sequence or [],
             run_settings=version.run_settings_json or {},
+            # Without this, a scheduled run resolves no Saved Config and every
+            # live job in it (bo_report, automic_job, compare) runs without
+            # credentials. Selection launch already does this -- see
+            # api/routes/selections.py's launch handler.
+            config_id=version.config_id,
         )
         started_at = datetime.now(timezone.utc)
         started_perf = time.perf_counter()

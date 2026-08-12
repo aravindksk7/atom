@@ -481,6 +481,8 @@ class RunExecutor:
             return self._build_case_cross_job(job)
         if job.job_type == "dbt_artifact":
             return self._build_case_dbt(job)
+        if job.job_type == "compare":
+            return self._build_case_compare(job)
         if job.job_type == "bo_report":
             if not self._settings.use_live_connections:
                 def run_job() -> ReconciliationResult:
@@ -1890,6 +1892,40 @@ class RunExecutor:
                 backend=self._build_backend(job),
             )
             return reconciler.reconcile(query="__api_source__", query_name=job.name)
+        return run_job
+
+    def _build_case_compare(self, job: JobDefinition):
+        def run_job() -> ReconciliationResult:
+            from api.schemas import BOCompareRequest, ReconFileCompareRequest
+            from api.services.compare_service import CompareService
+            from etl_framework.repository.repository import ConfigRepository
+
+            params = job.params or {}
+            compare_type = params.get("compare_type")
+            request = params.get("request") or {}
+            service = CompareService(self._db, ConfigRepository(self._db))
+            if compare_type == "bo":
+                parsed = BOCompareRequest.model_validate(request)
+                if not self._settings.use_live_connections and any(
+                    source.source_type in ("live", "api")
+                    for source in (parsed.source_a, parsed.source_b)
+                ):
+                    raise ValueError(
+                        "compare jobs with live or API sources require live connections to be enabled"
+                    )
+                result = service.compare_bo(parsed, self._run_id)
+            elif compare_type == "recon_file":
+                result = service.compare_recon_file(
+                    ReconFileCompareRequest.model_validate(request), job_name=job.name,
+                )
+            else:
+                raise ValueError(
+                    f"unknown compare_type '{compare_type}' for compare job '{job.name}'"
+                )
+            # Reports, cross-job assertions, and job-scoped result lookup all key
+            # on query_name == job name; the compare cores name results after
+            # label_a instead.
+            return dataclasses.replace(result, query_name=job.name)
         return run_job
 
     def _build_case_dbt(self, job: JobDefinition):

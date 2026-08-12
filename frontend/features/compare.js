@@ -22,6 +22,13 @@
     // Compare tab
     // -----------------------------------------------------------
     compareSubTab: 'bo',
+    saveJobModalOpen: false,
+    saveJobCompareType: '',
+    saveJobName: '',
+    saveJobDescription: '',
+    saveJobTags: '',
+    saveJobError: '',
+    saveJobSaving: false,
     reconMode: 'stored',
 
     boSourceAType: 'live',
@@ -453,6 +460,158 @@
       return type === 'live' && Boolean(src.docId) && !src.reportId;
     },
 
+    // Payload builders are shared by the Run buttons and Save as Job, so a
+    // saved job always sends exactly what an ad-hoc run would.
+    _buildBOComparePayload() {
+      return {
+        source_a: this._buildBOSource(this.boSourceAType, this.boSourceA),
+        source_b: this._buildBOSource(this.boSourceBType, this.boSourceB),
+        key_columns: this.boKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
+        exclude_columns: this.boExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
+        label_a: this.boSourceA.label || 'Source A',
+        label_b: this.boSourceB.label || 'Source B',
+        advanced: this._buildAdvanced('bo'),
+      };
+    },
+
+    _buildReconFilePayload() {
+      const payload = {
+        label_a: this.fileLabelA || 'Source A',
+        label_b: this.fileLabelB || 'Production Report',
+      };
+      if (this.fileCompareKeyColumns.trim()) {
+        payload.key_columns = this.fileCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      if (this.fileCompareExcludeColumns.trim()) {
+        payload.exclude_columns = this.fileCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      const applySource = (side, type, runId, path, content, fname) => {
+        const label = side === 'a' ? 'Source A' : 'Source B';
+        const suffix = side === 'a' ? '' : '_b';
+        if (type === 'run') {
+          if (!runId) throw new Error(`${label}: select a stored run`);
+          payload[`stored_run_id${suffix}`] = runId;
+        } else if (type === 'path') {
+          if (!(path || '').trim()) throw new Error(`${label}: enter a file path`);
+          payload[`file_${side}_path`] = path.trim();
+        } else {
+          if (!content) throw new Error(`${label}: upload a file`);
+          payload[`file_${side}_content_b64`] = content;
+          if (fname) payload[`file_${side}_name`] = fname;
+        }
+      };
+      applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A, this.fileNameA);
+      applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B, this.fileNameB);
+      if (this.reconSourceKindMismatch()) throw new Error(this.reconSourceKindWarning());
+      payload.advanced = this._buildAdvanced('file');
+      return payload;
+    },
+
+    _buildMultiFilePayload() {
+      const payload = {
+        label_a: this.mfCompareLabelA || 'Source A',
+        label_b: this.mfCompareLabelB || 'Source B',
+      };
+      if (this.mfCompareSourceMode === 'run') {
+        payload.run_id = this.mfCompareRunId;
+        payload.job_name = this.mfCompareJobName;
+      } else {
+        payload.file_mapping = this._buildMfCompareFileMapping();
+      }
+      if (this.mfCompareKeyColumns.trim()) {
+        payload.key_columns = this.mfCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      if (this.mfCompareExcludeColumns.trim()) {
+        payload.exclude_columns = this.mfCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return payload;
+    },
+
+    openSaveCompareAsJob(compareType) {
+      this.saveJobCompareType = compareType;
+      this.saveJobName = '';
+      this.saveJobDescription = '';
+      this.saveJobTags = '';
+      this.saveJobError = '';
+      this.saveJobModalOpen = true;
+    },
+
+    // Mirror of the server-side validator (api/schemas.py's compare branch), so
+    // a non-repeatable source is caught before the round trip. The server stays
+    // authoritative.
+    _assertCompareJobSourcesAreRepeatable(compareType, payload) {
+      if (compareType === 'bo') {
+        [['A', payload.source_a], ['B', payload.source_b]].forEach(([side, src]) => {
+          if (!src) return;
+          if (src.source_type === 'upload' || src.source_type === 'run') {
+            const what = src.source_type === 'upload' ? 'an upload' : 'a past run';
+            throw new Error(`Source ${side} is ${what} - a job that re-runs needs a live, path, or API source.`);
+          }
+        });
+        return;
+      }
+      [
+        ['A', payload.stored_run_id, payload.file_a_content_b64],
+        ['B', payload.stored_run_id_b, payload.file_b_content_b64],
+      ].forEach(([side, storedRun, content]) => {
+        if (storedRun || content) {
+          const what = storedRun ? 'a stored run' : 'an upload';
+          throw new Error(`Source ${side} is ${what} - a job that re-runs needs a file path.`);
+        }
+      });
+    },
+
+    _compareJobBody() {
+      // Multi-file saves as the reconciliation/multi_file job that already runs
+      // and already schedules - not as a `compare` job.
+      if (this.saveJobCompareType === 'multi_file') {
+        const payload = this._buildMultiFilePayload();
+        if (payload.run_id) {
+          throw new Error('A run-reference multi-file compare cannot be saved as a job - pick source and target roots instead.');
+        }
+        return {
+          job_type: 'reconciliation',
+          key_columns: payload.key_columns || [],
+          exclude_columns: payload.exclude_columns || [],
+          params: { source_mode: 'multi_file', file_mapping: payload.file_mapping },
+        };
+      }
+      const payload = this.saveJobCompareType === 'bo'
+        ? this._buildBOComparePayload()
+        : this._buildReconFilePayload();
+      this._assertCompareJobSourcesAreRepeatable(this.saveJobCompareType, payload);
+      return {
+        job_type: 'compare',
+        key_columns: payload.key_columns || [],
+        exclude_columns: payload.exclude_columns || [],
+        params: { compare_type: this.saveJobCompareType, request: payload },
+      };
+    },
+
+    async saveCompareAsJob() {
+      const name = (this.saveJobName || '').trim();
+      if (!name) { this.saveJobError = 'Enter a job name'; return; }
+      this.saveJobSaving = true;
+      this.saveJobError = '';
+      try {
+        const body = {
+          ...this._compareJobBody(),
+          name,
+          description: this.saveJobDescription || '',
+          tags: (this.saveJobTags || '').split(',').map(s => s.trim()).filter(Boolean),
+        };
+        await api('POST', '/api/jobs', body);
+        this.saveJobModalOpen = false;
+        this.toast('success', 'Saved as job',
+          `"${name}" is in the Job Catalog - add it to a selection to schedule it.`);
+        if (this.loadJobs) await this.loadJobs();
+      } catch (e) {
+        this.saveJobError = e.message || 'Could not save this compare as a job';
+      } finally {
+        this.saveJobSaving = false;
+      }
+    },
+
     async runBOComparison() {
       if (this._boSourceMissingReport(this.boSourceAType, this.boSourceA) ||
           this._boSourceMissingReport(this.boSourceBType, this.boSourceB)) {
@@ -464,15 +623,7 @@
       this.boCompareResult = null;
       if (this.boComparePollInterval) clearInterval(this.boComparePollInterval);
       try {
-        const payload = {
-          source_a: this._buildBOSource(this.boSourceAType, this.boSourceA),
-          source_b: this._buildBOSource(this.boSourceBType, this.boSourceB),
-          key_columns: this.boKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
-          exclude_columns: this.boExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
-          label_a: this.boSourceA.label || 'Source A',
-          label_b: this.boSourceB.label || 'Source B',
-          advanced: this._buildAdvanced('bo'),
-        };
+        const payload = this._buildBOComparePayload();
         const run = await api('POST', '/api/compare/bo-report', payload);
         this.boCompareRunId = run.run_id;
         this.boComparePollInterval = setInterval(() => this._pollBOCompare(), 3000);
@@ -604,35 +755,7 @@
       this.fileCompareResult = null;
       this.fileExpandedDiffs = {};
       try {
-        const payload = {
-          label_a: this.fileLabelA || 'Source A',
-          label_b: this.fileLabelB || 'Production Report',
-        };
-        if (this.fileCompareKeyColumns.trim()) {
-          payload.key_columns = this.fileCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
-        }
-        if (this.fileCompareExcludeColumns.trim()) {
-          payload.exclude_columns = this.fileCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
-        }
-        const applySource = (side, type, runId, path, content, fname) => {
-          const label = side === 'a' ? 'Source A' : 'Source B';
-          const suffix = side === 'a' ? '' : '_b';
-          if (type === 'run') {
-            if (!runId) throw new Error(`${label}: select a stored run`);
-            payload[`stored_run_id${suffix}`] = runId;
-          } else if (type === 'path') {
-            if (!(path || '').trim()) throw new Error(`${label}: enter a file path`);
-            payload[`file_${side}_path`] = path.trim();
-          } else {
-            if (!content) throw new Error(`${label}: upload a file`);
-            payload[`file_${side}_content_b64`] = content;
-            if (fname) payload[`file_${side}_name`] = fname;
-          }
-        };
-        applySource('a', this.fileSourceAType, this.fileRunIdA, this.filePathA, this.fileB64A, this.fileNameA);
-        applySource('b', this.fileSourceBType, this.fileRunIdB, this.filePathB, this.fileB64B, this.fileNameB);
-        if (this.reconSourceKindMismatch()) throw new Error(this.reconSourceKindWarning());
-        payload.advanced = this._buildAdvanced('file');
+        const payload = this._buildReconFilePayload();
         const run = await api('POST', '/api/compare/recon-file', payload);
         const poll = setInterval(async () => {
           try {
@@ -697,22 +820,7 @@
       this.mfCompareResult = null;
       this.mfCompareError = '';
       try {
-        const payload = {
-          label_a: this.mfCompareLabelA || 'Source A',
-          label_b: this.mfCompareLabelB || 'Source B',
-        };
-        if (this.mfCompareSourceMode === 'run') {
-          payload.run_id = this.mfCompareRunId;
-          payload.job_name = this.mfCompareJobName;
-        } else {
-          payload.file_mapping = this._buildMfCompareFileMapping();
-        }
-        if (this.mfCompareKeyColumns.trim()) {
-          payload.key_columns = this.mfCompareKeyColumns.split(',').map(s => s.trim()).filter(Boolean);
-        }
-        if (this.mfCompareExcludeColumns.trim()) {
-          payload.exclude_columns = this.mfCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
-        }
+        const payload = this._buildMultiFilePayload();
         const run = await api('POST', '/api/compare/multi-file', payload);
         const poll = setInterval(async () => {
           try {

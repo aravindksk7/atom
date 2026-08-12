@@ -91,7 +91,7 @@
           </div>
         </template>
         <template x-if="boSourceAType === 'path'">
-          <input x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
+          <input data-testid="compare-bo-source-a-path-input" x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
           <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" aria-label="compare bo source a upload input" />
@@ -157,7 +157,7 @@
           </div>
         </template>
         <template x-if="boSourceBType === 'path'">
-          <input x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
+          <input data-testid="compare-bo-source-b-path-input" x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
           <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" aria-label="compare bo source b upload input" />
@@ -254,6 +254,8 @@
         <span x-show="!boCompareLoading">Run BO Compare</span>
         <span x-show="boCompareLoading">Comparing...</span>
       </button>
+      <button data-testid="compare-bo-save-job-btn" @click="openSaveCompareAsJob('bo')"
+              class="btn-secondary btn-sm text-xs">Save as Job</button>
     </div>
 
     <template x-if="boCompareResult">
@@ -590,6 +592,8 @@
           <span x-show="!fileCompareLoading">Compare Files</span>
           <span x-show="fileCompareLoading">Comparing...</span>
         </button>
+        <button data-testid="compare-file-save-job-btn" @click="openSaveCompareAsJob('recon_file')"
+                class="btn-secondary btn-sm text-xs">Save as Job</button>
       </div>
       <template x-if="fileCompareResult">
         <div class="card">
@@ -1465,6 +1469,8 @@
         <span x-show="!mfCompareLoading">Run Comparison</span>
         <span x-show="mfCompareLoading">Running…</span>
       </button>
+      <button data-testid="compare-mf-save-job-btn" @click="openSaveCompareAsJob('multi_file')"
+              class="btn-secondary btn-sm text-xs">Save as Job</button>
     </div>
     <p x-show="mfComparePreviewError" x-text="mfComparePreviewError" class="text-xs text-red-600"></p>
     <div x-show="mfComparePreviewResult" class="text-xs space-y-1" data-testid="compare-mf-preview-result">
@@ -1506,4 +1512,35 @@
     </div>
   </div>
 
+  <!-- Save compare as Job -->
+  <div x-show="saveJobModalOpen" x-cloak class="modal-backdrop" @click.self="saveJobModalOpen = false"
+       data-testid="compare-save-job-modal">
+    <div class="modal-box w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="saveCompareJobTitle">
+      <h2 id="saveCompareJobTitle" class="text-lg font-bold mb-4">Save Compare as Job</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label" for="compare-save-job-name">Job name</label>
+          <input id="compare-save-job-name" data-testid="compare-save-job-name" x-model="saveJobName"
+                 class="field-input" placeholder="nightly_sales_bo_vs_prod" />
+        </div>
+        <div>
+          <label class="field-label" for="compare-save-job-description">Description</label>
+          <input id="compare-save-job-description" data-testid="compare-save-job-description"
+                 x-model="saveJobDescription" class="field-input" />
+        </div>
+        <div>
+          <label class="field-label" for="compare-save-job-tags">Tags (comma separated)</label>
+          <input id="compare-save-job-tags" data-testid="compare-save-job-tags"
+                 x-model="saveJobTags" class="field-input" placeholder="nightly, sales" />
+        </div>
+        <div x-show="saveJobError" data-testid="compare-save-job-error"
+             class="text-sm text-rose-600" x-text="saveJobError"></div>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button @click="saveJobModalOpen = false" class="btn-outline btn-sm">Cancel</button>
+        <button data-testid="compare-save-job-confirm" @click="saveCompareAsJob()"
+                :disabled="saveJobSaving" class="btn-primary btn-sm">Save Job</button>
+      </div>
+    </div>
+  </div>
 </div></template>

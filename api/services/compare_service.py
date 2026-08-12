@@ -19,7 +19,7 @@ from api.services.api_artifact import (
     build_api_response_sink,
     run_artifact_dir,
 )
-from api.services.file_source import read_tabular
+from api.services.file_source import read_tabular, resolve_allowed_path
 from api.services.frame_engine import FrameEngine
 from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
 from etl_framework.reconciliation.chunker import load_in_chunks
@@ -46,6 +46,121 @@ _SENTINEL_QUERY = "__file_source__"
 def _recon_kind_label(is_dataframe: bool) -> str:
     """Human-readable name for what a recon source loaded as, for error details."""
     return "a tabular file" if is_dataframe else "an HTML report or stored run"
+
+
+def _compare_report_stats(
+    stats_a: dict[str, dict],
+    stats_b: dict[str, dict],
+    label_a: str | None,
+    label_b: str | None,
+) -> list[tuple["ReconciliationResult", list["MismatchRecord"]]]:
+    """Compare report-shaped stats and return synthetic results plus details."""
+    from etl_framework.reconciliation.models import ReconciliationResult, MismatchRecord
+    from etl_framework.runner.state import TestStatus as TS
+
+    pairs = []
+    compared_metrics = (
+        "status", "source_row_count", "target_row_count", "total_issues",
+    )
+    for name in sorted(set(stats_a) | set(stats_b)):
+        a = stats_a.get(name, {})
+        b = stats_b.get(name, {})
+        differences = sum(a.get(metric) != b.get(metric) for metric in compared_metrics)
+        ok = bool(a and b and differences == 0)
+        result = ReconciliationResult(
+            query_name=name,
+            source_env=label_a,
+            target_env=label_b,
+            source_row_count=a.get("source_row_count", 0),
+            target_row_count=b.get("target_row_count", 0),
+            matched_count=0,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=0 if ok else max(1, differences),
+            mismatches=[],
+            status=TS.PASSED if ok else TS.FAILED,
+            executed_at=datetime.now(timezone.utc),
+            duration_seconds=0.0,
+            mismatch_summary={
+                "by_column": {
+                    metric: 1
+                    for metric in compared_metrics
+                    if a.get(metric) != b.get(metric)
+                },
+                "compared_rows_by_column": {
+                    metric: 1
+                    for metric in compared_metrics
+                },
+                "by_type": {
+                    "value_diff": max(0, differences),
+                    "missing_in_target": 0,
+                    "missing_in_source": 0,
+                },
+            },
+        )
+        records = [
+            MismatchRecord(
+                key_values={"test_name": name},
+                column_name=metric,
+                source_value=str(a.get(metric)) if a.get(metric) is not None else "",
+                target_value=str(b.get(metric)) if b.get(metric) is not None else "",
+                mismatch_type="stat_diff",
+            )
+            for metric in compared_metrics
+            if a.get(metric) != b.get(metric)
+        ]
+        pairs.append((result, records))
+    return pairs
+
+
+def aggregate_stat_results(
+    job_name: str,
+    results: list["ReconciliationResult"],
+    label_a: str,
+    label_b: str,
+) -> "ReconciliationResult":
+    """Fold per-test report comparisons into the one result a job case returns.
+
+    RunExecutor gives each job case exactly one ReconciliationResult, but a
+    report-shaped compare produces one per test name. Per-test detail is kept
+    under mismatch_summary["report_tests"] so Reports can still show which
+    test differed. No results at all is a failure, not a pass: two sources
+    that parsed to nothing is a broken job, and a scheduled job should go red
+    rather than silently green.
+    """
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus as TS
+
+    failed = [r for r in results if r.status != TS.PASSED]
+    return ReconciliationResult(
+        query_name=job_name,
+        source_env=label_a,
+        target_env=label_b,
+        source_row_count=sum(r.source_row_count for r in results),
+        target_row_count=sum(r.target_row_count for r in results),
+        matched_count=len(results) - len(failed),
+        missing_in_target_count=0,
+        missing_in_source_count=0,
+        value_mismatch_count=sum(r.value_mismatch_count for r in results) or (0 if results else 1),
+        mismatches=[],
+        status=TS.PASSED if (results and not failed) else TS.FAILED,
+        executed_at=datetime.now(timezone.utc),
+        duration_seconds=0.0,
+        mismatch_summary={
+            "report_tests": [
+                {
+                    "test_name": r.query_name,
+                    "status": r.status.value,
+                    "source_row_count": r.source_row_count,
+                    "target_row_count": r.target_row_count,
+                    "differing_metrics": sorted((r.mismatch_summary or {}).get("by_column", {})),
+                }
+                for r in results
+            ],
+        },
+    )
+
+
 _DEFAULT_COMPARE_MISMATCH_ROW_LIMIT = 5000
 _KEY_CANDIDATES = (
     "id",
@@ -136,47 +251,50 @@ class CompareService:
     # BO Report comparison
     # ------------------------------------------------------------------
 
+    def compare_bo(self, req: BOCompareRequest, run_id: str | None = None) -> "ReconciliationResult":
+        """Execute BO comparison and return a result without run bookkeeping."""
+        df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id, run_id)
+        df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id, run_id)
+        key_columns = req.key_columns
+        if not key_columns:
+            try:
+                key_columns = self._infer_key_columns(df_a, df_b)
+            except HTTPException:
+                df_a = df_a.copy()
+                df_b = df_b.copy()
+                df_a.insert(0, "__row__", range(1, len(df_a) + 1))
+                df_b.insert(0, "__row__", range(1, len(df_b) + 1))
+                key_columns = ["__row__"]
+        self._validate_key_columns(df_a, df_b, key_columns)
+        engine_a = FrameEngine(df_a, req.label_a)
+        engine_b = FrameEngine(df_b, req.label_b)
+        reconciler = _build_engine(
+            engine_a, engine_b,
+            key_columns=key_columns,
+            exclude_columns=req.exclude_columns or [],
+            mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
+            adv=getattr(req, "advanced", None),
+        )
+        return reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
+
+    def _persist_single_result(self, run_id: str, result: "ReconciliationResult") -> None:
+        """Store one result and close out its run as PASSED/FAILED."""
+        tr = self._repo.add_test_result(run_id, result)
+        if result.mismatches:
+            self._repo.add_mismatch_details(tr.id, result.mismatches)
+        MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
+        passed = 1 if result.status == TestStatus.PASSED else 0
+        self._repo.update_run_status(
+            run_id, "PASSED" if passed else "FAILED",
+            completed_at=datetime.now(timezone.utc),
+            total_tests=1, passed=passed, failed=0 if passed else 1,
+        )
+
     def run_bo_comparison(self, req: BOCompareRequest, run_id: str) -> None:
         """Execute BO comparison and persist as TestRun/TestResult/MismatchDetail."""
         try:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
-            df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id, run_id)
-            df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id, run_id)
-            key_columns = req.key_columns
-            if not key_columns:
-                try:
-                    key_columns = self._infer_key_columns(df_a, df_b)
-                except HTTPException:
-                    df_a = df_a.copy()
-                    df_b = df_b.copy()
-                    df_a.insert(0, "__row__", range(1, len(df_a) + 1))
-                    df_b.insert(0, "__row__", range(1, len(df_b) + 1))
-                    key_columns = ["__row__"]
-            self._validate_key_columns(df_a, df_b, key_columns)
-
-            engine_a = FrameEngine(df_a, req.label_a)
-            engine_b = FrameEngine(df_b, req.label_b)
-            reconciler = _build_engine(
-                engine_a, engine_b,
-                key_columns=key_columns,
-                exclude_columns=req.exclude_columns or [],
-                mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
-                adv=getattr(req, "advanced", None),
-            )
-            result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
-
-            tr = self._repo.add_test_result(run_id, result)
-            if result.mismatches:
-                self._repo.add_mismatch_details(tr.id, result.mismatches)
-            MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
-
-            passed = 1 if result.status == TestStatus.PASSED else 0
-            failed = 0 if passed else 1
-            self._repo.update_run_status(
-                run_id, "PASSED" if passed else "FAILED",
-                completed_at=datetime.now(timezone.utc),
-                total_tests=1, passed=passed, failed=failed,
-            )
+            self._persist_single_result(run_id, self.compare_bo(req, run_id))
         except Exception as exc:
             logger.exception("BO comparison failed for run %s", run_id)
             self._add_error_result(run_id, req.label_a or "bo_comparison", exc)
@@ -389,12 +507,11 @@ class CompareService:
 
         return _sort_frame(df_a), _sort_frame(df_b)
 
-    def _run_tabular_file_compare(
-        self, req: ReconFileCompareRequest, run_id: str,
+    def _tabular_file_result(
+        self, req: ReconFileCompareRequest,
         df_a: "pd.DataFrame", df_b: "pd.DataFrame",
-    ) -> None:
-        """Compare two DataFrames via ReconciliationEngine and store results."""
-        import pandas as pd
+    ) -> "ReconciliationResult":
+        """Reconcile two frames from a recon-file compare and return the result."""
         key_columns = req.key_columns
         if not key_columns:
             try:
@@ -421,18 +538,14 @@ class CompareService:
             mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
             adv=getattr(req, "advanced", None),
         )
-        result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")
-        tr = self._repo.add_test_result(run_id, result)
-        if result.mismatches:
-            self._repo.add_mismatch_details(tr.id, result.mismatches)
-        MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, [result])
-        passed = 1 if result.status == TestStatus.PASSED else 0
-        failed = 0 if passed else 1
-        self._repo.update_run_status(
-            run_id, "PASSED" if passed else "FAILED",
-            completed_at=datetime.now(timezone.utc),
-            total_tests=1, passed=passed, failed=failed,
-        )
+        return reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "file_a")
+
+    def _run_tabular_file_compare(
+        self, req: ReconFileCompareRequest, run_id: str,
+        df_a: "pd.DataFrame", df_b: "pd.DataFrame",
+    ) -> None:
+        """Compare two DataFrames via ReconciliationEngine and store results."""
+        self._persist_single_result(run_id, self._tabular_file_result(req, df_a, df_b))
 
     # ------------------------------------------------------------------
     # SQL-to-SQL comparison
@@ -489,6 +602,46 @@ class CompareService:
     # Reconciliation file comparison
     # ------------------------------------------------------------------
 
+    def _require_matching_recon_kinds(self, stats_a, stats_b) -> bool:
+        """Reject a tabular-vs-report compare; return True when both are frames."""
+        is_df_a = isinstance(stats_a, pd.DataFrame)
+        is_df_b = isinstance(stats_b, pd.DataFrame)
+        if is_df_a != is_df_b:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Source A resolved to {_recon_kind_label(is_df_a)} and "
+                    f"Source B resolved to {_recon_kind_label(is_df_b)}. "
+                    "Both sources must be the same type: two tabular files "
+                    "(.csv/.xlsx/.xls/.json/.xml/.tsv/.txt), or two report-shaped "
+                    "sources (HTML report or stored run)."
+                ),
+            )
+        return is_df_a
+
+    def compare_recon_file(
+        self, req: ReconFileCompareRequest, job_name: str | None = None,
+    ) -> "ReconciliationResult":
+        """Compare two recon-file sources and return exactly ONE result.
+
+        Tabular sources reconcile directly. Report-shaped sources (HTML, or a
+        stored run's per-test stats) compare test by test and are folded by
+        aggregate_stat_results(), because RunExecutor gives each job case one
+        result. The endpoint keeps its own per-test persistence in
+        run_recon_file_compare().
+        """
+        stats_a = self._load_recon_source(req, "a")
+        stats_b = self._load_recon_source(req, "b")
+        if self._require_matching_recon_kinds(stats_a, stats_b):
+            return self._tabular_file_result(req, stats_a, stats_b)
+        pairs = _compare_report_stats(stats_a, stats_b, req.label_a, req.label_b)
+        return aggregate_stat_results(
+            job_name or req.label_a or "recon_file",
+            [result for result, _ in pairs],
+            req.label_a,
+            req.label_b,
+        )
+
     def run_recon_file_compare(self, req: ReconFileCompareRequest, run_id: str) -> None:
         """Diff a production HTML report against a stored run or another file."""
         try:
@@ -496,94 +649,28 @@ class CompareService:
             stats_a = self._load_recon_source(req, "a")
             stats_b = self._load_recon_source(req, "b")
 
-            import pandas as pd
-            _is_df_a = isinstance(stats_a, pd.DataFrame)
-            _is_df_b = isinstance(stats_b, pd.DataFrame)
-            if _is_df_a != _is_df_b:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Source A resolved to {_recon_kind_label(_is_df_a)} and "
-                        f"Source B resolved to {_recon_kind_label(_is_df_b)}. "
-                        "Both sources must be the same type: two tabular files "
-                        "(.csv/.xlsx/.xls/.json/.xml/.tsv/.txt), or two report-shaped "
-                        "sources (HTML report or stored run)."
-                    ),
-                )
-            if _is_df_a:
+            if self._require_matching_recon_kinds(stats_a, stats_b):
                 self._run_tabular_file_compare(req, run_id, stats_a, stats_b)
                 return
 
-            all_names = sorted(set(stats_a) | set(stats_b))
             passed = failed = 0
             results = []
-            for name in all_names:
-                a = stats_a.get(name, {})
-                b = stats_b.get(name, {})
-                compared_metrics = (
-                    "status", "source_row_count", "target_row_count", "total_issues",
-                )
-                differences = sum(a.get(metric) != b.get(metric) for metric in compared_metrics)
-                status = "PASSED" if a and b and differences == 0 else "FAILED"
-                if status == "PASSED":
+            pairs = _compare_report_stats(stats_a, stats_b, req.label_a, req.label_b)
+            for result, records in pairs:
+                if result.status == TestStatus.PASSED:
                     passed += 1
                 else:
                     failed += 1
-                from etl_framework.reconciliation.models import ReconciliationResult, MismatchRecord
-                from etl_framework.runner.state import TestStatus as TS
-                synthetic = ReconciliationResult(
-                    query_name=name,
-                    source_env=req.label_a,
-                    target_env=req.label_b,
-                    source_row_count=a.get("source_row_count", 0),
-                    target_row_count=b.get("target_row_count", 0),
-                    matched_count=0,
-                    missing_in_target_count=0,
-                    missing_in_source_count=0,
-                    value_mismatch_count=0 if status == "PASSED" else max(1, differences),
-                    mismatches=[],
-                    status=TS.PASSED if status == "PASSED" else TS.FAILED,
-                    executed_at=datetime.now(timezone.utc),
-                    duration_seconds=0.0,
-                    mismatch_summary={
-                        "by_column": {
-                            metric: 1
-                            for metric in compared_metrics
-                            if a.get(metric) != b.get(metric)
-                        },
-                        "compared_rows_by_column": {
-                            metric: 1
-                            for metric in compared_metrics
-                        },
-                        "by_type": {
-                            "value_diff": max(0, differences),
-                            "missing_in_target": 0,
-                            "missing_in_source": 0,
-                        },
-                    },
-                )
-                tr = self._repo.add_test_result(run_id, synthetic)
-                if status != "PASSED":
-                    _mm = [
-                        MismatchRecord(
-                            key_values={"test_name": name},
-                            column_name=metric,
-                            source_value=str(a.get(metric)) if a.get(metric) is not None else "",
-                            target_value=str(b.get(metric)) if b.get(metric) is not None else "",
-                            mismatch_type="stat_diff",
-                        )
-                        for metric in compared_metrics
-                        if a.get(metric) != b.get(metric)
-                    ]
-                    if _mm:
-                        self._repo.add_mismatch_details(tr.id, _mm)
-                results.append(synthetic)
+                tr = self._repo.add_test_result(run_id, result)
+                if records:
+                    self._repo.add_mismatch_details(tr.id, records)
+                results.append(result)
 
             overall = "PASSED" if failed == 0 else "FAILED"
             self._repo.update_run_status(
                 run_id, overall,
                 completed_at=datetime.now(timezone.utc),
-                total_tests=len(all_names), passed=passed, failed=failed,
+                total_tests=len(pairs), passed=passed, failed=failed,
             )
             MetricsWriter(f"logs/metrics_{run_id}.json").write(run_id, results)
         except Exception as exc:
@@ -639,9 +726,8 @@ class CompareService:
             import base64
             html = base64.b64decode(b64).decode("utf-8", errors="replace")
         elif path:
-            from pathlib import Path
             try:
-                html = Path(path).read_text(encoding="utf-8")
+                html = resolve_allowed_path(path).read_text(encoding="utf-8")
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail=f"File not found: {path}")
         else:

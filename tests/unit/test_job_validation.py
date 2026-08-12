@@ -224,3 +224,163 @@ def test_aws_athena_query_requires_query_output_and_valid_options():
 def test_aws_athena_query_requires_positive_max_attempts():
     issues = validate_job_definition({"name": "athena_orders", "job_type": "aws_athena_query", "params": {"config_id": 1, "database": "curated", "query": "select 1", "output_location": "s3://out/", "max_attempts": 0}})
     assert any(issue.field == "params.max_attempts" for issue in issues)
+
+
+def test_compare_job_without_compare_type_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {"request": {}},
+    })
+
+    assert any(
+        i.field == "params.compare_type" and i.severity == ValidationSeverity.ERROR
+        for i in issues
+    )
+
+
+def test_compare_job_without_a_request_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {"compare_type": "bo"},
+    })
+
+    assert any(
+        i.field == "params.request" and i.severity == ValidationSeverity.ERROR
+        for i in issues
+    )
+
+
+def test_compare_job_warns_that_rules_are_ignored():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "bo",
+            "request": {"source_a": {}, "source_b": {}},
+            "rules": [{"rule_type": "not_null", "column": "id"}],
+        },
+    })
+
+    warnings = [i for i in issues if i.severity == ValidationSeverity.WARNING]
+    assert any("rules" in i.field for i in warnings)
+
+
+def test_a_valid_compare_job_reports_no_errors():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "bo",
+            "request": {
+                "source_a": {"source_type": "path", "file_path": "/data/a.csv"},
+                "source_b": {"source_type": "path", "file_path": "/data/b.csv"},
+            },
+        },
+    })
+
+    assert [i for i in issues if i.severity == ValidationSeverity.ERROR] == []
+
+
+def test_compare_bo_job_with_invalid_request_contents_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "bo",
+            "request": {
+                "source_a": {"source_type": "path"},
+                "source_b": {"source_type": "path", "file_path": "/data/b.csv"},
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request" and "file_path required for path source" in i.message for i in errors)
+
+
+def test_compare_bo_job_with_upload_source_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "bo",
+            "request": {
+                "source_a": {"source_type": "path", "file_path": "/data/a.csv"},
+                "source_b": {"source_type": "upload", "file_content_b64": "aWQK", "file_name": "b.csv"},
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request.source_b" and "file upload" in i.message for i in errors)
+
+
+def test_compare_bo_job_with_live_source_without_doc_id_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_compare",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "bo",
+            "request": {
+                "source_a": {"source_type": "live", "config_id": 1},
+                "source_b": {"source_type": "path", "file_path": "/data/b.csv"},
+                "key_columns": ["id"],
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request.source_a" and "doc_id" in i.message for i in errors)
+
+
+def test_compare_recon_file_job_with_invalid_request_contents_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_file_diff",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "recon_file",
+            "request": {
+                "file_a_path": "/data/a.csv",
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request" and "Source B requires exactly one" in i.message for i in errors)
+
+
+def test_compare_recon_file_job_with_stored_run_source_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_file_diff",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "recon_file",
+            "request": {
+                "stored_run_id": "run-1",
+                "file_b_path": "/data/b.csv",
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request.source_a" and "stored run" in i.message for i in errors)
