@@ -56,6 +56,7 @@
           <button data-testid="compare-bo-source-a-mode-path" @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-a-mode-upload" @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-a-mode-api" @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-a-mode-run" @click="boSourceAType = 'run'" :class="boSourceAType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
         <template x-if="boSourceAType === 'live'">
@@ -107,6 +108,9 @@
             </select>
           </div>
         </template>
+        <template x-if="boSourceAType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceA.jobName"></span>, Run: <span x-text="boSourceA.runId ? boSourceA.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
+        </template>
       </div>
 
       <div class="vs-divider">VS</div>
@@ -118,6 +122,7 @@
           <button data-testid="compare-bo-source-b-mode-path" @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-b-mode-upload" @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-b-mode-api" @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-b-mode-run" @click="boSourceBType = 'run'" :class="boSourceBType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
         <template x-if="boSourceBType === 'live'">
@@ -168,6 +173,9 @@
               <template x-for="name in configApiEndpointNames(boSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
             </select>
           </div>
+        </template>
+        <template x-if="boSourceBType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceB.jobName"></span>, Run: <span x-text="boSourceB.runId ? boSourceB.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
         </template>
       </div>
     </div>
