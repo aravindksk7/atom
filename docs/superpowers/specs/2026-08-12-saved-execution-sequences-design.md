@@ -195,6 +195,11 @@ Added: **`BLOCKED`** — the step never ran because an upstream trigger rule or 
 gate said so. Distinct from `CANCELLED` (human cancel, or `on_failure: stop`) and from
 `SKIPPED` (a human `skip` release action).
 
+Note that `BLOCKED` already exists as a **run** status, set today when a condition gate stops a
+linear sequence. The two levels coexist: a step is `BLOCKED` when its own gate refused it, and a
+run is `BLOCKED` when blocking is the most severe thing that happened to it (see aggregation
+below).
+
 ### Coordinator loop
 
 A single coordinator thread owns scheduling. Jobs execute in a `ThreadPoolExecutor`
@@ -238,12 +243,19 @@ Evaluated over the terminal statuses of a step's parents:
 
 | Rule | Fires when |
 |---|---|
-| `all_success` (default) | every parent's status is in that parent's `StepCondition.require_status`, defaulting to `["PASSED"]` when the parent has no `condition` |
+| `all_success` (default) | every parent reached a terminal status accepted by **this step's** `condition.require_status`, defaulting to `["PASSED"]` when this step has no `condition` |
 | `all_done` | every parent is terminal, whatever the outcome |
 | `any_success` | at least one parent succeeded |
 | `all_failed` | every parent failed — the alerting / cleanup branch |
 
 `SKIPPED` counts as **done** but **not success**. A step with no parents is always ready.
+
+**Condition direction.** A step's `condition` states what that step requires **of its parents**,
+checked before it runs. It does not describe the step's own success. This matches the existing
+linear executor, where `seq_step.condition` is evaluated against the preceding step's result
+(`api/services/run_executor.py`), so no saved sequence or selection changes meaning. The DAG
+generalises it in the only sensible way: the condition is evaluated against **every** parent's
+result and all must pass.
 
 ### `on_failure` vs `trigger_rule`
 
@@ -278,9 +290,13 @@ Release still requires `note` and `released_by`, and is audit-logged.
 
 ### Aggregate run status
 
-Precedence is unchanged: `ERROR` > `FAILED` > `CANCELLED` > `PASSED`. `BLOCKED` steps
-are **excluded** from pass/fail aggregation and reported separately in the summary, so a
-deliberately-unfired `all_failed` alert branch does not turn a clean run red.
+Precedence: `ERROR` > `FAILED` > `CANCELLED` > `BLOCKED` > `PASSED`. `BLOCKED` sits where
+today's linear executor already puts it — a run whose gate refused a step, with nothing worse
+having happened, is `BLOCKED`.
+
+`BLOCKED` steps are **excluded** from the pass/fail/slow/error counts and reported separately in
+the summary, so a deliberately-unfired `all_failed` alert branch does not turn a clean run red.
+A run is only `BLOCKED` when at least one step was blocked **and** no step errored or failed.
 
 ### SSE and webhooks
 
@@ -515,7 +531,8 @@ editor panel and the scheduler telemetry path for precondition skips.
 - Dynamic fan-out — a step expanding into N parallel instances at runtime
 - Cross-sequence dependencies, and nesting one sequence inside another as a step
 - Resuming a `CANCELLED` run from the point of failure
-- Hold timeout and auto-cancel — still deferred, as in the 2026-06-26 spec
+- Changing hold-timeout behaviour. It already exists and is **kept as-is**: `HOLD_TIMEOUT_SECONDS`
+  (default 86400) auto-cancels a step left held too long. The DAG executor preserves it per step.
 - Role-based or named-approver hold release; any authenticated user with a note suffices
 - File-existence preconditions, replaced by using the existing `freshness` job type as a
   DAG step
