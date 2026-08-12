@@ -3,9 +3,9 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
-from api.schemas import JobDefinition, PreviewFileMappingRequest
+from api.schemas import JobDefinition, JobRunSummaryOut, PreviewFileMappingRequest
 from etl_framework.repository.models import SavedJob
-from etl_framework.repository.repository import JobRepository
+from etl_framework.repository.repository import JobRepository, RunRepository
 from api.services.audit_service import AuditService
 from etl_framework.runner.job_validation import validate_job_definition
 
@@ -114,6 +114,21 @@ def list_jobs(db: Session = Depends(get_session)):
     if not jobs:
         return _SEED_JOBS
     return [_job_to_schema(job) for job in jobs]
+
+
+@router.get("/{name}/runs", response_model=list[JobRunSummaryOut])
+def list_job_runs(name: str, limit: int = 20, db: Session = Depends(get_session)):
+    results = RunRepository(db).list_results_for_job(name, limit=limit)
+    return [
+        JobRunSummaryOut(
+            run_id=r.run_id,
+            status=r.effective_status,
+            started_at=r.run.started_at if r.run else None,
+            completed_at=r.run.completed_at if r.run else None,
+            has_data_artifact=bool(r.data_artifact_path),
+        )
+        for r in results
+    ]
 
 
 @router.post("", response_model=JobDefinition, status_code=201)

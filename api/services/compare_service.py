@@ -268,6 +268,19 @@ class CompareService:
                 )
             finally:
                 client.logout()
+        if src.source_type == "run":
+            from api.services.run_data_artifact import load_job_result_frame
+
+            frame = load_job_result_frame(self._repo, src.run_id, src.job_name)
+            if frame is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"No comparable data artifact found for job '{src.job_name}' "
+                        f"in run {src.run_id}"
+                    ),
+                )
+            return frame
         if src.source_type == "api":
             return self._load_api_source(src, run_id, store_responses=store_responses)
         return read_tabular(
@@ -684,71 +697,75 @@ class CompareService:
     # Multi-file reconciliation (ad-hoc)
     # ------------------------------------------------------------------
 
+    def _load_multi_file_pairs_from_run(self, run_id: str, job_name: str) -> list[dict]:
+        """Look up the per-pair artifact paths a saved multi_file job's run
+        already persisted (see Task 7/8: RunExecutor's multi_file path calls
+        ``upload_store.persist_pair_artifacts`` per pair and
+        ``aggregate_reconciliation_results`` embeds the paths into
+        ``mismatch_summary['file_pairs']``), so a run-reference compare can
+        re-read those CSVs instead of re-discovering files from source/target
+        roots.
+        """
+        result = self._repo.get_result_for_job(run_id, job_name)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No result for job '{job_name}' in run {run_id}")
+        pairs = (result.mismatch_summary or {}).get("file_pairs") or []
+        usable = [p for p in pairs if p.get("source_artifact_path") and p.get("target_artifact_path")]
+        if not usable:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Job '{job_name}' in run {run_id} has no stored pair artifacts to compare against",
+            )
+        return usable
+
     def run_multi_file_compare(self, req: MultiFileCompareRequest, run_id: str) -> None:
         """Ad-hoc multi-file reconciliation: discover, pair, reconcile every
         pair sequentially, then persist ONE aggregate TestResult -- the same
         result shape RunExecutor's saved-job multi_file path already
         produces, so the Reports-tab rendering (Phase 4) works unchanged.
+
+        When req.run_id/req.job_name are set instead of req.file_mapping,
+        re-compares the pairs a saved multi_file job's run already persisted
+        (Task 7/8), instead of re-discovering files from source/target roots.
         """
         from etl_framework.reconciliation.compare_utils import resolve_key_columns
         from etl_framework.reconciliation.file_mapping import (
-            FileMappingSpec,
-            aggregate_reconciliation_results,
-            pair_files,
-            pair_files_automated,
+            DiscoveredFile, FileGroup, FileMappingResult, FilePair,
+            FileMappingSpec, aggregate_reconciliation_results, pair_files, pair_files_automated,
         )
         from api.services.multi_file_remote import RemoteFileSourceSession
 
         try:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
 
-            spec = FileMappingSpec.from_params({"file_mapping": req.file_mapping})
-            if spec.source.kind != "local" or spec.target.kind != "local":
-                raise ValueError(
-                    "Ad-hoc multi-file compare only supports 'local' source/target kinds; "
-                    "save a job instead for s3/sftp sources."
+            if req.run_id and req.job_name:
+                stored_pairs = self._load_multi_file_pairs_from_run(req.run_id, req.job_name)
+                match_on = tuple((stored_pairs[0].get("key") or {}).keys())
+                mapping = FileMappingResult(
+                    match_on=match_on,
+                    pairs=[
+                        FilePair(
+                            key=tuple((p.get("key") or {}).values()),
+                            source=FileGroup(key=(), files=[DiscoveredFile(
+                                path=p["source_artifact_path"],
+                                file_name=(p.get("source_files") or ["source.csv"])[0],
+                                tokens={},
+                            )]),
+                            target=FileGroup(key=(), files=[DiscoveredFile(
+                                path=p["target_artifact_path"],
+                                file_name=(p.get("target_files") or ["target.csv"])[0],
+                                tokens={},
+                            )]),
+                        )
+                        for p in stored_pairs
+                    ],
+                    unmatched_sources=[],
+                    unmatched_targets=[],
                 )
-
-            with RemoteFileSourceSession({}) as session:
-                source_files = session.discover(spec.source)
-                target_files = session.discover(spec.target)
-
-                if spec.strategy == "automated":
-                    source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
-                    target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
-                    mapping, _ = pair_files_automated(
-                        source_files, source_frames, target_files, target_frames, spec.automated,
-                    )
-                else:
-                    mapping = pair_files(source_files, target_files, spec.match_on)
-
-                if mapping.unmatched_sources or mapping.unmatched_targets:
-                    # NOTE: parenthesize the OR before the AND -- `a or b and c`
-                    # evaluates as `a or (b and c)` in Python, which would raise
-                    # on ANY unmatched source regardless of policy. Keep this as
-                    # two separate ifs (as below), not one combined expression.
-                    if spec.unmatched_policy == "fail":
-                        raise ValueError(
-                            f"multi-file compare has {len(mapping.unmatched_sources)} unmatched source "
-                            f"group(s) and {len(mapping.unmatched_targets)} unmatched target group(s)"
-                        )
-                    if spec.unmatched_policy == "warn":
-                        logger.warning(
-                            "multi-file compare for run '%s' proceeding with %d unmatched source "
-                            "group(s) and %d unmatched target group(s)",
-                            run_id, len(mapping.unmatched_sources), len(mapping.unmatched_targets),
-                        )
-                if not mapping.pairs:
-                    raise ValueError("multi-file compare matched zero file pairs")
-
                 pair_results = []
                 for pair in mapping.pairs:
-                    source_df = pd.concat(
-                        [session.read_file(f, spec.source) for f in pair.source.files], ignore_index=True,
-                    )
-                    target_df = pd.concat(
-                        [session.read_file(f, spec.target) for f in pair.target.files], ignore_index=True,
-                    )
+                    source_df = read_tabular(path=pair.source.files[0].path)
+                    target_df = read_tabular(path=pair.target.files[0].path)
                     source_df, target_df, resolved_keys = resolve_key_columns(
                         source_df, target_df, req.key_columns or [], req.exclude_columns or [],
                     )
@@ -762,8 +779,70 @@ class CompareService:
                         adv=req.advanced,
                     )
                     pair_results.append(reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "multi_file_compare"))
+                result = aggregate_reconciliation_results(req.label_a or "multi_file_compare", mapping, pair_results)
+            else:
+                spec = FileMappingSpec.from_params({"file_mapping": req.file_mapping})
+                if spec.source.kind != "local" or spec.target.kind != "local":
+                    raise ValueError(
+                        "Ad-hoc multi-file compare only supports 'local' source/target kinds; "
+                        "save a job instead for s3/sftp sources."
+                    )
 
-            result = aggregate_reconciliation_results(req.label_a or "multi_file_compare", mapping, pair_results)
+                with RemoteFileSourceSession({}) as session:
+                    source_files = session.discover(spec.source)
+                    target_files = session.discover(spec.target)
+
+                    if spec.strategy == "automated":
+                        source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
+                        target_frames = {f.path: session.read_file(f, spec.target) for f in target_files}
+                        mapping, _ = pair_files_automated(
+                            source_files, source_frames, target_files, target_frames, spec.automated,
+                        )
+                    else:
+                        mapping = pair_files(source_files, target_files, spec.match_on)
+
+                    if mapping.unmatched_sources or mapping.unmatched_targets:
+                        # NOTE: parenthesize the OR before the AND -- `a or b and c`
+                        # evaluates as `a or (b and c)` in Python, which would raise
+                        # on ANY unmatched source regardless of policy. Keep this as
+                        # two separate ifs (as below), not one combined expression.
+                        if spec.unmatched_policy == "fail":
+                            raise ValueError(
+                                f"multi-file compare has {len(mapping.unmatched_sources)} unmatched source "
+                                f"group(s) and {len(mapping.unmatched_targets)} unmatched target group(s)"
+                            )
+                        if spec.unmatched_policy == "warn":
+                            logger.warning(
+                                "multi-file compare for run '%s' proceeding with %d unmatched source "
+                                "group(s) and %d unmatched target group(s)",
+                                run_id, len(mapping.unmatched_sources), len(mapping.unmatched_targets),
+                            )
+                    if not mapping.pairs:
+                        raise ValueError("multi-file compare matched zero file pairs")
+
+                    pair_results = []
+                    for pair in mapping.pairs:
+                        source_df = pd.concat(
+                            [session.read_file(f, spec.source) for f in pair.source.files], ignore_index=True,
+                        )
+                        target_df = pd.concat(
+                            [session.read_file(f, spec.target) for f in pair.target.files], ignore_index=True,
+                        )
+                        source_df, target_df, resolved_keys = resolve_key_columns(
+                            source_df, target_df, req.key_columns or [], req.exclude_columns or [],
+                        )
+                        engine_a = FrameEngine(source_df, req.label_a)
+                        engine_b = FrameEngine(target_df, req.label_b)
+                        reconciler = _build_engine(
+                            engine_a, engine_b,
+                            key_columns=resolved_keys,
+                            exclude_columns=req.exclude_columns or [],
+                            mismatch_row_limit=_compare_mismatch_row_limit(req.advanced),
+                            adv=req.advanced,
+                        )
+                        pair_results.append(reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "multi_file_compare"))
+                result = aggregate_reconciliation_results(req.label_a or "multi_file_compare", mapping, pair_results)
+
             tr = self._repo.add_test_result(run_id, result)
             if result.mismatches:
                 self._repo.add_mismatch_details(tr.id, result.mismatches)

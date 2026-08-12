@@ -1359,3 +1359,46 @@ def test_column_stats_compare_api_source_type_end_to_end(client, monkeypatch):
     assert data["source_env"] == "Orders A"
     assert data["target_env"] == "Orders B"
     assert data["has_diffs"] is True
+
+
+# --- GET /api/jobs/{name}/runs ---
+
+def test_job_runs_endpoint_returns_recent_runs_for_that_job(client):
+    from etl_framework.repository.repository import RunRepository, JobRepository
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    db = SessionLocal()
+    JobRepository(db).create({
+        "name": "job_runs_test", "description": "", "tags": [], "job_type": "bo_report",
+        "query": "", "key_columns": [], "exclude_columns": [],
+        "source_env": None, "target_env": None, "params": {}, "enabled": True,
+    })
+    repo = RunRepository(db)
+    for run_id in ("run-x", "run-y"):
+        repo.create_run(run_id, "dev", "prod")
+        repo.add_test_result(run_id, ReconciliationResult(
+            query_name="job_runs_test", source_env="dev", target_env="prod",
+            source_row_count=1, target_row_count=1, matched_count=1,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=TestStatus.PASSED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        ))
+    db.close()
+
+    resp = client.get("/api/jobs/job_runs_test/runs")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert body[0]["run_id"] == "run-y"
+    assert body[0]["status"] == "PASSED"
+
+
+def test_job_runs_endpoint_returns_empty_list_for_unknown_job(client):
+    resp = client.get("/api/jobs/no_such_job/runs")
+
+    assert resp.status_code == 200
+    assert resp.json() == []

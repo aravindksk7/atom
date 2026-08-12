@@ -56,6 +56,7 @@
           <button data-testid="compare-bo-source-a-mode-path" @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-a-mode-upload" @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-a-mode-api" @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-a-mode-run" @click="boSourceAType = 'run'" :class="boSourceAType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
         <template x-if="boSourceAType === 'live'">
@@ -107,6 +108,9 @@
             </select>
           </div>
         </template>
+        <template x-if="boSourceAType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceA.jobName"></span>, Run: <span x-text="boSourceA.runId ? boSourceA.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
+        </template>
       </div>
 
       <div class="vs-divider">VS</div>
@@ -118,6 +122,7 @@
           <button data-testid="compare-bo-source-b-mode-path" @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-b-mode-upload" @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-b-mode-api" @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-b-mode-run" @click="boSourceBType = 'run'" :class="boSourceBType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
         <template x-if="boSourceBType === 'live'">
@@ -168,6 +173,9 @@
               <template x-for="name in configApiEndpointNames(boSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
             </select>
           </div>
+        </template>
+        <template x-if="boSourceBType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceB.jobName"></span>, Run: <span x-text="boSourceB.runId ? boSourceB.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
         </template>
       </div>
     </div>
@@ -1358,6 +1366,15 @@
         <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" id="a11y-compare-label-b" />
       </div>
     </div>
+    <div class="mode-row mb-3">
+      <button data-testid="compare-mf-mode-files" @click="mfCompareSourceMode = 'files'" :class="mfCompareSourceMode === 'files' ? 'pill active' : 'pill'">Server File Sets</button>
+      <button data-testid="compare-mf-mode-run" @click="mfCompareSourceMode = 'run'" :class="mfCompareSourceMode === 'run' ? 'pill active' : 'pill'">Past Run</button>
+    </div>
+    <div x-show="mfCompareSourceMode === 'run'" class="mb-3">
+      <span class="text-xs text-slate-400">Job: <span x-text="mfCompareJobName"></span>, Run: <span x-text="mfCompareRunId ? mfCompareRunId.substring(0, 8) + '…' : '(none selected)'"></span></span>
+    </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-strategy">Strategy</label>
@@ -1397,6 +1414,7 @@
         </label>
       </div>
     </div>
+    </div>
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-key-columns-comma-separated">Key Columns (comma-separated)</label>
@@ -1407,6 +1425,8 @@
         <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" id="a11y-compare-exclude-columns-comma-separated" />
       </div>
     </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="border-t border-slate-200 pt-3">
       <p class="text-xs font-medium text-slate-500 mb-1">Source server file set</p>
       <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Files are parsed as CSV, Excel, JSON, XML, TSV, or delimited text when supported by the parser.</p>
@@ -1428,8 +1448,10 @@
       </div>
     </div>
     <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>
+    </div>
     <div class="flex items-center gap-2">
-      <button @click="previewMfCompareMapping()"
+      <button x-show="mfCompareSourceMode === 'files'"
+              @click="previewMfCompareMapping()"
               :disabled="mfComparePreviewLoading"
               class="btn-secondary btn-sm text-xs px-3 py-1 disabled:opacity-40"
               data-testid="compare-mf-preview-btn">

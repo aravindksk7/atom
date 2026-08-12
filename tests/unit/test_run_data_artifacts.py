@@ -162,6 +162,37 @@ def test_resolve_run_data_artifact_returns_none_when_file_deleted(tmp_path, monk
     assert upload_store.resolve_run_data_artifact(str(tmp_path / "run-1" / "gone.csv")) is None
 
 
+def test_persist_pair_artifacts_writes_source_and_target_csvs(tmp_path, monkeypatch):
+    from api.services import upload_store
+    import pandas as pd
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    source_df = pd.DataFrame({"id": [1], "value": ["alpha"]})
+    target_df = pd.DataFrame({"id": [1], "value": ["alpha"]})
+
+    source_path, target_path = upload_store.persist_pair_artifacts(
+        "run-1", "regional_sales_recon", 0, source_df, target_df,
+    )
+
+    assert source_path is not None and target_path is not None
+    assert Path(source_path).read_text().strip().splitlines() == ["id,value", "1,alpha"]
+    assert Path(target_path).parent == tmp_path.resolve() / "run-1"
+
+
+def test_persist_pair_artifacts_sanitizes_job_name_in_filenames(tmp_path, monkeypatch):
+    from api.services import upload_store
+    import pandas as pd
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    df = pd.DataFrame({"id": [1]})
+
+    source_path, _ = upload_store.persist_pair_artifacts(
+        "run-1", "../../etc/passwd", 0, df, df,
+    )
+
+    assert Path(source_path).parent == tmp_path.resolve() / "run-1"
+
+
 # ---------------------------------------------------------------------------
 # bo_report run persists its download
 # ---------------------------------------------------------------------------
@@ -264,3 +295,152 @@ def test_run_status_out_flag_is_false_without_artifact():
     RunRepository(db).create_run("r-plain", "qa", "prod", {})
 
     assert _run_status_out(RunRepository(db).get_run("r-plain")).has_data_artifact is False
+
+
+# ---------------------------------------------------------------------------
+# Job-scoped artifact resolution (multi-job runs)
+# ---------------------------------------------------------------------------
+
+def test_resolve_job_result_artifact_finds_the_named_jobs_result(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    artifact_path = upload_store.persist_run_data_artifact("run-1", _CSV, "report.csv")
+
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="my_bo_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        data_artifact_path=artifact_path,
+    ))
+
+    resolved = resolve_job_result_artifact(repo, "run-1", "my_bo_job")
+
+    assert resolved is not None
+    assert resolved.read_bytes() == _CSV
+
+
+def test_resolve_job_result_artifact_returns_none_for_unknown_job(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+
+    assert resolve_job_result_artifact(repo, "run-1", "no_such_job") is None
+
+
+def test_resolve_job_result_artifact_returns_none_when_result_has_no_artifact(tmp_path, monkeypatch):
+    """A plain-SQL job inside a multi-job selection run has a TestResult but no
+    stored data_artifact_path — that must resolve to None, not raise."""
+    from api.services import upload_store
+    from api.services.run_data_artifact import resolve_job_result_artifact
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="plain_sql_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+    ))
+
+    assert resolve_job_result_artifact(repo, "run-1", "plain_sql_job") is None
+
+
+def test_load_job_result_frame_reads_the_artifact_as_a_dataframe(tmp_path, monkeypatch):
+    from api.services import upload_store
+    from api.services.run_data_artifact import load_job_result_frame
+    from etl_framework.repository.repository import RunRepository
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    artifact_path = upload_store.persist_run_data_artifact("run-1", _CSV, "report.csv")
+
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="my_bo_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        data_artifact_path=artifact_path,
+    ))
+
+    frame = load_job_result_frame(repo, "run-1", "my_bo_job")
+
+    assert frame is not None
+    assert list(frame["value"]) == ["alpha", "beta"]
+
+
+# ---------------------------------------------------------------------------
+# CompareService._load_bo_source resolves "run" sources
+# ---------------------------------------------------------------------------
+
+def test_bo_run_reference_source_reads_the_stored_jobs_pull(tmp_path, monkeypatch):
+    from api.schemas import SourceConfig, BOCompareRequest
+    from api.services.compare_service import CompareService
+    from etl_framework.repository.repository import ConfigRepository, RunRepository
+
+    db = _session()
+    run = _bo_report_run(db, tmp_path, monkeypatch)  # job name "sales_report"
+
+    other_csv = b"id,value\n1,alpha\n2,beta\n"
+    svc = CompareService(db, ConfigRepository(db))
+    compare_run_id = "compare-run-1"
+    RunRepository(db).create_run(compare_run_id, "Source A", "Source B")
+
+    req = BOCompareRequest(
+        source_a=SourceConfig(source_type="run", run_id=run.run_id, job_name="sales_report"),
+        source_b=SourceConfig(source_type="upload", file_content_b64=__import__("base64").b64encode(other_csv).decode(), file_name="b.csv"),
+        key_columns=["id"],
+    )
+    svc.run_bo_comparison(req, compare_run_id)
+
+    result = RunRepository(db).get_run(compare_run_id)
+    assert result.status == "PASSED"
+
+
+def test_bo_run_reference_source_404s_when_job_never_ran_in_that_run(tmp_path, monkeypatch):
+    from api.schemas import SourceConfig, BOCompareRequest
+    from api.services.compare_service import CompareService
+    from etl_framework.repository.repository import ConfigRepository, RunRepository
+    from fastapi import HTTPException
+    import pytest as _pytest
+
+    db = _session()
+    run = _bo_report_run(db, tmp_path, monkeypatch)
+
+    svc = CompareService(db, ConfigRepository(db))
+    req = BOCompareRequest(
+        source_a=SourceConfig(source_type="run", run_id=run.run_id, job_name="no_such_job"),
+        source_b=SourceConfig(source_type="upload", file_content_b64="aWQsdmFsdWUKMSxhbHBoYQo=", file_name="b.csv"),
+        key_columns=["id"],
+    )
+    with _pytest.raises(HTTPException) as exc_info:
+        svc._load_bo_source(req.source_a, None, None)
+    assert exc_info.value.status_code == 404

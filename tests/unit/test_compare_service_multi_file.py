@@ -244,3 +244,73 @@ def test_run_multi_file_compare_rejects_remote_kinds(tmp_path) -> None:
         assert "local" in (run.results[0].error_message or "").lower()
     finally:
         db.close()
+
+
+def test_run_multi_file_compare_from_run_reference(tmp_path, monkeypatch) -> None:
+    from api.services import file_source, upload_store
+    from api.services.compare_service import CompareService
+    from etl_framework.reconciliation.models import ReconciliationResult
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+    # read_tabular's path allow-list (file_source._UPLOAD_BASES) is separate
+    # from upload_store.UPLOAD_ROOT -- both must point at tmp_path, same as
+    # every other test in this file that reads persisted artifacts back.
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    source_path = upload_store.persist_run_data_artifact("prior-run", b"id,value\n1,alpha\n", "job_pair0_source.csv")
+    target_path = upload_store.persist_run_data_artifact("prior-run", b"id,value\n1,alpha\n", "job_pair0_target.csv")
+
+    db = _make_db()
+    try:
+        repo = RunRepository(db)
+        repo.create_run("prior-run", "source", "target")
+        repo.add_test_result("prior-run", ReconciliationResult(
+            query_name="regional_sales_recon", source_env="source", target_env="target",
+            source_row_count=1, target_row_count=1, matched_count=1,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+            mismatch_summary={
+                "file_pairs": [{
+                    "key": {"region": "east"},
+                    "source_files": ["sales_east.csv"], "target_files": ["fin_east.csv"],
+                    "source_artifact_path": source_path, "target_artifact_path": target_path,
+                }],
+            },
+        ))
+
+        svc = CompareService(db, ConfigRepository(db))
+        compare_run_id = "compare-run-1"
+        repo.create_run(compare_run_id, "Source A", "Source B")
+        req = MultiFileCompareRequest(run_id="prior-run", job_name="regional_sales_recon", key_columns=["id"])
+
+        svc.run_multi_file_compare(req, compare_run_id)
+
+        run = repo.get_run(compare_run_id)
+        assert run.status == "PASSED"
+    finally:
+        db.close()
+
+
+def test_run_multi_file_compare_from_run_reference_404s_on_unknown_job(tmp_path, monkeypatch) -> None:
+    from api.services import upload_store
+    from api.services.compare_service import CompareService
+
+    monkeypatch.setattr(upload_store, "UPLOAD_ROOT", tmp_path.resolve())
+
+    db = _make_db()
+    try:
+        repo = RunRepository(db)
+        repo.create_run("prior-run", "source", "target")
+
+        svc = CompareService(db, ConfigRepository(db))
+        compare_run_id = "compare-run-1"
+        repo.create_run(compare_run_id, "Source A", "Source B")
+        req = MultiFileCompareRequest(run_id="prior-run", job_name="no_such_job")
+
+        svc.run_multi_file_compare(req, compare_run_id)
+
+        run = repo.get_run(compare_run_id)
+        assert run.status == "ERROR"
+    finally:
+        db.close()

@@ -57,3 +57,33 @@ def load_row_diffable_frame(run) -> pd.DataFrame | None:
     except Exception:
         logger.warning("Unreadable run data artifact %s — falling back to run stats", path)
         return None
+
+
+def resolve_job_result_artifact(repo, run_id: str, job_name: str) -> Path | None:
+    """Path to one job's tabular artifact within a run, or None.
+
+    Unlike resolve_row_diffable_artifact, this looks at a single job's own
+    TestResult inside a possibly multi-job run, rather than requiring the
+    whole run to have exactly one result.
+    """
+    result = repo.get_result_for_job(run_id, job_name)
+    if result is None or not result.data_artifact_path:
+        return None
+    path = resolve_run_data_artifact(result.data_artifact_path)
+    if path is None or path.suffix.lower() not in TABULAR_EXTS:
+        return None
+    return path
+
+
+def load_job_result_frame(repo, run_id: str, job_name: str) -> pd.DataFrame | None:
+    """Read a job's stored run artifact as a frame, or None if unavailable."""
+    from api.services.file_source import _read_tabular_bytes
+
+    path = resolve_job_result_artifact(repo, run_id, job_name)
+    if path is None:
+        return None
+    try:
+        return _read_tabular_bytes(path.read_bytes(), path.suffix.lower())
+    except Exception:
+        logger.warning("Unreadable job result artifact %s — falling back", path)
+        return None

@@ -406,6 +406,24 @@ class RunRepository:
         self._db.refresh(tr)
         return tr
 
+    def get_result_for_job(self, run_id: str, job_name: str) -> TestResult | None:
+        return (
+            self._db.query(TestResult)
+            .filter(TestResult.run_id == run_id, TestResult.query_name == job_name)
+            .first()
+        )
+
+    def list_results_for_job(self, job_name: str, limit: int = 20, offset: int = 0) -> list[TestResult]:
+        return (
+            self._db.query(TestResult)
+            .join(TestRun, TestResult.run_id == TestRun.run_id)
+            .filter(TestResult.query_name == job_name)
+            .order_by(TestRun.id.desc())
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+
     def add_mismatch_details(
         self, test_result_id: int, mismatches: list[MismatchRecord]
     ) -> None:

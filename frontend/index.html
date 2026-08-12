@@ -1258,6 +1258,9 @@
                   :data-testid="'job-row-' + job.name + '-gate-verdict'"
                   x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
             <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
+            <button x-show="job.job_type === 'bo_report' || job.job_type === 'reconciliation'"
+                    @click.stop="openCompareForJob(job)" class="btn-secondary btn-sm text-xs"
+                    :data-testid="'job-row-' + job.name + '-compare-btn'">Compare</button>
             <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
             <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
@@ -2035,6 +2038,29 @@
         </div>
       </div>
 
+      <div x-show="jobModal.job_type === 'bo_report' || jobModal.job_type === 'reconciliation'" class="border-t pt-3 mt-3">
+        <button type="button" @click="showJobModalCompare = !showJobModalCompare" class="text-sm font-medium text-slate-600" data-testid="job-modal-compare-toggle">
+          Test Compare <span x-text="showJobModalCompare ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="showJobModalCompare" class="mt-2 space-y-2">
+          <button type="button" @click="runInlineJobCompare()" class="btn-secondary btn-sm text-xs" data-testid="job-modal-compare-run-btn">
+            Run Compare
+          </button>
+          <div x-show="boCompareResult && jobModal.job_type === 'bo_report'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(boCompareResult?.status)" x-text="boCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'bo'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="mfCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(mfCompareResult?.status)" x-text="mfCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'multi_file'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="fileCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(fileCompareResult?.status)" x-text="fileCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'recon'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-end gap-3 mt-6">
         <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
           <span x-show="!validateDefinitionLoading">Validate Definition</span>
@@ -2309,6 +2335,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </label>
           </template>
         </div>
+      </div>
+      <div x-show="compareRunIds.length === 2" class="flex items-center gap-2 mb-2">
+        <select x-model="selectionCompareJobName" class="field-input field-select text-xs" data-testid="selection-compare-job-select" aria-label="compare job">
+          <option value="">Whole run (mismatch diff)</option>
+          <template x-for="name in selectionCompareJobOptions" :key="name">
+            <option :value="name" x-text="name"></option>
+          </template>
+        </select>
+        <select x-show="selectionCompareJobName" x-model="selectionCompareType" class="field-input field-select text-xs" data-testid="selection-compare-type-select" aria-label="compare type">
+          <option value="mismatch_diff">Mismatch Diff</option>
+          <option value="bo">BO Report</option>
+          <option value="recon">Reconciliation</option>
+          <option value="multi_file">Multi-File</option>
+        </select>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showSelectionRunsModal = false" class="btn-secondary">Close</button>
@@ -4634,6 +4674,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <button data-testid="compare-bo-source-a-mode-path" @click="boSourceAType = 'path'" :class="boSourceAType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-a-mode-upload" @click="boSourceAType = 'upload'" :class="boSourceAType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-a-mode-api" @click="boSourceAType = 'api'" :class="boSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-a-mode-run" @click="boSourceAType = 'run'" :class="boSourceAType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-a-label-input" x-model="boSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
         <template x-if="boSourceAType === 'live'">
@@ -4685,6 +4726,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </select>
           </div>
         </template>
+        <template x-if="boSourceAType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceA.jobName"></span>, Run: <span x-text="boSourceA.runId ? boSourceA.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
+        </template>
       </div>
 
       <div class="vs-divider">VS</div>
@@ -4696,6 +4740,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <button data-testid="compare-bo-source-b-mode-path" @click="boSourceBType = 'path'" :class="boSourceBType === 'path' ? 'pill active' : 'pill'">Path</button>
           <button data-testid="compare-bo-source-b-mode-upload" @click="boSourceBType = 'upload'" :class="boSourceBType === 'upload' ? 'pill active' : 'pill'">Upload</button>
           <button data-testid="compare-bo-source-b-mode-api" @click="boSourceBType = 'api'" :class="boSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
+          <button data-testid="compare-bo-source-b-mode-run" @click="boSourceBType = 'run'" :class="boSourceBType === 'run' ? 'pill active' : 'pill'">Run</button>
         </div>
         <input data-testid="compare-bo-source-b-label-input" x-model="boSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
         <template x-if="boSourceBType === 'live'">
@@ -4746,6 +4791,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <template x-for="name in configApiEndpointNames(boSourceB.configId)" :key="name"><option :value="name" x-text="name"></option></template>
             </select>
           </div>
+        </template>
+        <template x-if="boSourceBType === 'run'">
+          <div class="text-xs text-slate-400">Job: <span x-text="boSourceB.jobName"></span>, Run: <span x-text="boSourceB.runId ? boSourceB.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
         </template>
       </div>
     </div>
@@ -5936,6 +5984,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <input x-model="mfCompareLabelB" class="field-input" placeholder="Source B" id="a11y-compare-label-b" />
       </div>
     </div>
+    <div class="mode-row mb-3">
+      <button data-testid="compare-mf-mode-files" @click="mfCompareSourceMode = 'files'" :class="mfCompareSourceMode === 'files' ? 'pill active' : 'pill'">Server File Sets</button>
+      <button data-testid="compare-mf-mode-run" @click="mfCompareSourceMode = 'run'" :class="mfCompareSourceMode === 'run' ? 'pill active' : 'pill'">Past Run</button>
+    </div>
+    <div x-show="mfCompareSourceMode === 'run'" class="mb-3">
+      <span class="text-xs text-slate-400">Job: <span x-text="mfCompareJobName"></span>, Run: <span x-text="mfCompareRunId ? mfCompareRunId.substring(0, 8) + '…' : '(none selected)'"></span></span>
+    </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-strategy">Strategy</label>
@@ -5975,6 +6032,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </label>
       </div>
     </div>
+    </div>
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-key-columns-comma-separated">Key Columns (comma-separated)</label>
@@ -5985,6 +6043,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <input x-model="mfCompareExcludeColumns" class="field-input" placeholder="note" id="a11y-compare-exclude-columns-comma-separated" />
       </div>
     </div>
+    <!-- file-mapping only: mfCompareSourceMode === 'files' -->
+    <div x-show="mfCompareSourceMode === 'files'">
     <div class="border-t border-slate-200 pt-3">
       <p class="text-xs font-medium text-slate-500 mb-1">Source server file set</p>
       <p class="text-xs text-slate-500 mb-2">Use a directory path the server can access. Files are parsed as CSV, Excel, JSON, XML, TSV, or delimited text when supported by the parser.</p>
@@ -6006,8 +6066,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </div>
     <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>
+    </div>
     <div class="flex items-center gap-2">
-      <button @click="previewMfCompareMapping()"
+      <button x-show="mfCompareSourceMode === 'files'"
+              @click="previewMfCompareMapping()"
               :disabled="mfComparePreviewLoading"
               class="btn-secondary btn-sm text-xs px-3 py-1 disabled:opacity-40"
               data-testid="compare-mf-preview-btn">

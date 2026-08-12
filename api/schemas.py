@@ -254,6 +254,21 @@ class RunStatusOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JobRunSummaryOut(BaseModel):
+    run_id: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    # NOTE: unlike RunStatusOut.has_data_artifact above, this is just raw,
+    # job-scoped truthiness of this TestResult's data_artifact_path column --
+    # it does NOT verify "exactly one tabular artifact for the run" or that
+    # the file still resolves on disk (see run_has_row_diffable_artifact).
+    # A swept or non-tabular artifact still reads as True here.
+    has_data_artifact: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 class TestSuiteTrigger(BaseModel):
     pytest_args: list[str] = []
 
@@ -796,7 +811,7 @@ class RunCompareOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SourceConfig(BaseModel):
-    source_type: Literal["live", "path", "upload", "api"]
+    source_type: Literal["live", "path", "upload", "api", "run"]
     config_id: int | None = None
     doc_id: str | None = None
     report_id: str | None = None
@@ -810,6 +825,11 @@ class SourceConfig(BaseModel):
     # params["bo_parameters"]. Without these, a prompted report exports with
     # whatever answers were last saved on the document.
     bo_parameters: list[BOParamAnswer] = Field(default_factory=list)
+    # For source_type == "run": re-use a past job's own persisted pull instead
+    # of fetching live/path/upload/api. job_name picks which job's TestResult
+    # inside that run to read — a run may hold many jobs' results.
+    run_id: str | None = None
+    job_name: str | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":
@@ -821,6 +841,8 @@ class SourceConfig(BaseModel):
             raise ValueError("file_content_b64 required for upload source")
         if self.source_type == "api" and (self.config_id is None or not self.api_endpoint_name):
             raise ValueError("config_id and api_endpoint_name required for api source")
+        if self.source_type == "run" and (not self.run_id or not self.job_name):
+            raise ValueError("run_id and job_name required for run source")
         return self
 
 
@@ -906,13 +928,31 @@ class MultiFileCompareRequest(BaseModel):
     ``etl_framework.reconciliation.file_mapping.FileMappingSpec.from_params``),
     but this phase only supports ``kind: "local"`` on both sides -- see the
     Phase 7 plan doc for why.
+
+    Alternatively, ``run_id`` + ``job_name`` re-compares the file pairs a
+    saved multi_file job's run already persisted, instead of re-discovering
+    files from ``file_mapping``'s source/target roots. Exactly one of
+    ``file_mapping`` or ``run_id``+``job_name`` must be set.
     """
     label_a: str = "Source A"
     label_b: str = "Source B"
     key_columns: list[str] | None = None
     exclude_columns: list[str] = Field(default_factory=list)
-    file_mapping: dict[str, Any] = Field(...)
+    file_mapping: dict[str, Any] | None = None
+    run_id: str | None = None
+    job_name: str | None = None
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "MultiFileCompareRequest":
+        has_run_ref = bool(self.run_id or self.job_name)
+        if has_run_ref and not (self.run_id and self.job_name):
+            raise ValueError("run_id and job_name must both be set for a run-reference multi-file compare")
+        if has_run_ref and self.file_mapping:
+            raise ValueError("file_mapping and run_id/job_name are mutually exclusive")
+        if not has_run_ref and not self.file_mapping:
+            raise ValueError("multi-file compare requires either file_mapping or run_id + job_name")
+        return self
 
 
 class PreviewFileMappingRequest(BaseModel):

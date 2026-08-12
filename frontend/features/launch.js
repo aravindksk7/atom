@@ -16,6 +16,7 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showJobModal: false,
+    showJobModalCompare: false,
     // The multi-file panel in tab-launch.html binds jobModal.mf_*_preview_creds.*
     // for 16 credential fields. Those bindings evaluate as soon as the Launch tab
     // mounts — long before newJob()/openJobModal() assigns the full shape — so the
@@ -81,6 +82,8 @@
     selectionRunsPanel: null,
     selectionRuns: [],
     compareRunIds: [],
+    selectionCompareJobName: '',
+    selectionCompareType: 'mismatch_diff', // 'mismatch_diff' | 'bo' | 'recon' | 'multi_file'
     scheduleModalEditing: false,
 
     jobSearchQuery: '',
@@ -186,6 +189,12 @@
         mfPreviewResult: null,
         mfPreviewError: '',
       };
+      this.showJobModalCompare = false;
+      // Prior Test Compare results belong to whichever job produced them --
+      // don't let a stale badge/link linger under a different job's identity.
+      this.boCompareResult = null;
+      this.mfCompareResult = null;
+      this.fileCompareResult = null;
       this.jobModalEditing = false;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -350,6 +359,12 @@
         mfPreviewResult: null,
         mfPreviewError: '',
       };
+      this.showJobModalCompare = false;
+      // Prior Test Compare results belong to whichever job produced them --
+      // don't let a stale badge/link linger under a different job's identity.
+      this.boCompareResult = null;
+      this.mfCompareResult = null;
+      this.fileCompareResult = null;
       this.jobModalEditing = true;
       this.validateJobResult = null;
       this.jobModalValidation = { sql: '', keyColumns: '', dependencies: '' };
@@ -1122,6 +1137,8 @@
     async openSelectionRuns(sel) {
       this.selectionRunsPanel = sel;
       this.compareRunIds = [];
+      this.selectionCompareJobName = '';
+      this.selectionCompareType = 'mismatch_diff';
       try {
         this.selectionRuns = await api('GET', `/api/selections/${sel.id}/runs`);
       } catch (e) {
@@ -1171,20 +1188,138 @@
       }
     },
 
+    get selectionCompareJobOptions() {
+      const sel = this.selectionRunsPanel;
+      if (!sel || this.compareRunIds.length !== 2) return [];
+      return (sel.job_sequence || [])
+        .map(item => item.job_name || item)
+        .filter(name => {
+          const job = (this.jobs || []).find(j => j.name === name);
+          return job && (job.job_type === 'bo_report' || job.job_type === 'reconciliation');
+        });
+    },
+
     compareSelectedRuns() {
       if (this.compareRunIds.length !== 2) {
         this.toast('warn', 'Select exactly two runs', 'Pick two runs to compare');
         return;
       }
-      this.mismatchDiffRunIdA = this.compareRunIds[0];
-      this.mismatchDiffRunIdB = this.compareRunIds[1];
-      this.mismatchDiffRunLabelA = 'Run A';
-      this.mismatchDiffRunLabelB = 'Run B';
-      this.mismatchDiffQueryName = '';
       this.showSelectionRunsModal = false;
-      this.currentView = 'compare';
-      this.compareSubTab = 'mmdiff';
-      this.runMismatchDiff();
+      if (this.selectionCompareType === 'mismatch_diff' || !this.selectionCompareJobName) {
+        this.mismatchDiffRunIdA = this.compareRunIds[0];
+        this.mismatchDiffRunIdB = this.compareRunIds[1];
+        this.mismatchDiffRunLabelA = 'Run A';
+        this.mismatchDiffRunLabelB = 'Run B';
+        this.mismatchDiffQueryName = this.selectionCompareJobName || '';
+        this.currentView = 'compare';
+        this.compareSubTab = 'mmdiff';
+        this.runMismatchDiff();
+        return;
+      }
+      const job = (this.jobs || []).find(j => j.name === this.selectionCompareJobName);
+      if (!job) return;
+      this.openCompareForJob(job, { runIdA: this.compareRunIds[0], runIdB: this.compareRunIds[1] });
+    },
+
+    async loadJobRuns(jobName) {
+      try {
+        return await api('GET', `/api/jobs/${encodeURIComponent(jobName)}/runs`);
+      } catch (e) {
+        this.toast('error', 'Could not load run history', e.message);
+        return [];
+      }
+    },
+
+    // Determine which Compare sub-tab a job's own compare type maps to.
+    // Only bo_report and reconciliation (incl. multi_file source_mode) jobs
+    // have a compare type at all -- callers must gate visibility on this too.
+    _compareSubTabForJob(job) {
+      if (job.job_type === 'bo_report') return 'bo';
+      if (job.job_type === 'reconciliation' && job.params?.source_mode === 'multi_file') return 'multi_file';
+      if (job.job_type === 'reconciliation') return 'recon';
+      return null;
+    },
+
+    // Shared prefill + navigate used by the Job Catalog Compare button, the
+    // Job modal's inline Test Compare section, and the Job Selections
+    // History bridge. `opts.runIdA`/`opts.runIdB` (run-vs-run) and
+    // `opts.navigate` (false keeps the caller on the current view, for the
+    // Job modal's inline run) are optional.
+    openCompareForJob(job, opts = {}) {
+      const subTab = this._compareSubTabForJob(job);
+      if (!subTab) {
+        this.toast('warn', 'No compare type for this job', `job_type '${job.job_type}' has no compare equivalent`);
+        return null;
+      }
+      if (subTab === 'bo') {
+        this.boSourceAType = opts.runIdA ? 'run' : 'live';
+        this.boSourceA = {
+          ...this.boSourceA,
+          runId: opts.runIdA || '', jobName: job.name,
+          docId: job.params?.report_id || '', reportId: job.params?.bo_report_id || '',
+          configId: this.boSourceA.configId,
+        };
+        this.boSourceBType = opts.runIdB ? 'run' : 'upload';
+        if (opts.runIdB) {
+          this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name };
+        } else {
+          // No run reference for Source B -- don't leave a prior session's
+          // Source B (or its exclude-columns filter) attached to this job.
+          this.boSourceB = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '' };
+          this.boExcludeColumns = '';
+        }
+        this.boKeyColumns = (job.key_columns || []).join(', ');
+      } else if (subTab === 'multi_file') {
+        this.mfCompareKeyColumns = (job.key_columns || []).join(', ');
+        this.mfCompareSourceMode = opts.runIdA ? 'run' : 'files';
+        this.mfCompareRunId = opts.runIdA || '';
+        this.mfCompareJobName = opts.runIdA ? job.name : '';
+      } else if (subTab === 'recon') {
+        this.reconMode = 'file';
+        this.fileSourceAType = opts.runIdA ? 'run' : 'path';
+        if (opts.runIdA) {
+          this.fileRunIdA = opts.runIdA;
+        } else {
+          // No run reference for Source A -- clear any prior session's file
+          // paths/uploads so this job isn't compared against stale data.
+          this.filePathA = ''; this.fileB64A = ''; this.fileNameA = '';
+        }
+        this.fileSourceBType = opts.runIdB ? 'run' : 'path';
+        if (opts.runIdB) {
+          this.fileRunIdB = opts.runIdB;
+        } else {
+          this.filePathB = ''; this.fileB64B = ''; this.fileNameB = '';
+        }
+        if (!opts.runIdA && !opts.runIdB) this.fileCompareExcludeColumns = '';
+        this.fileCompareKeyColumns = (job.key_columns || []).join(', ');
+      }
+      if (opts.navigate !== false) {
+        this.currentView = 'compare';
+        this.compareSubTab = subTab;
+      }
+      return subTab;
+    },
+
+    // Test Compare inside the Job modal: builds a job-shaped object from the
+    // in-progress (possibly unsaved) form state and drives the same Compare
+    // state/methods openCompareForJob uses, without navigating away.
+    async runInlineJobCompare() {
+      const m = this.jobModal;
+      const job = {
+        name: m.name, job_type: m.job_type,
+        key_columns: (m.key_columns_raw || '').split(',').map(s => s.trim()).filter(Boolean),
+        // report_id/bo_report_id are swapped relative to what they hold here:
+        // job.params.report_id is the BO *document* id and job.params.bo_report_id
+        // is the *page* id -- matches the existing job param convention read
+        // elsewhere in openCompareForJob, just easy to misread in isolation.
+        params: m.job_type === 'bo_report'
+          ? { report_id: m.bo_report_id, bo_report_id: m.bo_page_id }
+          : { source_mode: m.source_mode },
+      };
+      const subTab = this.openCompareForJob(job, { navigate: false });
+      if (subTab === 'bo') await this.runBOComparison();
+      else if (subTab === 'multi_file') await this.runMultiFileCompare();
+      else if (subTab === 'recon') await this.runFileCompare();
     },
 
     // ===========================================================

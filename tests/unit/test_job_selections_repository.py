@@ -133,3 +133,55 @@ def test_runs_for_selection_filters_by_selection_id():
     run_repo.create_run(run_id="r2", source_env="qa", target_env="")
     runs = repo.runs_for_selection(sel.id)
     assert [r.run_id for r in runs] == ["r1"]
+
+
+def test_get_result_for_job_returns_matching_test_result():
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+    repo.add_test_result("run-1", ReconciliationResult(
+        query_name="my_job", source_env="dev", target_env="prod",
+        source_row_count=1, target_row_count=1, matched_count=1,
+        missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+        mismatches=[], status=TestStatus.PASSED,
+        executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+    ))
+
+    result = repo.get_result_for_job("run-1", "my_job")
+
+    assert result is not None
+    assert result.query_name == "my_job"
+
+
+def test_get_result_for_job_returns_none_when_no_match():
+    db = _session()
+    repo = RunRepository(db)
+    repo.create_run("run-1", "dev", "prod")
+
+    assert repo.get_result_for_job("run-1", "nonexistent_job") is None
+
+
+def test_list_results_for_job_orders_most_recent_run_first():
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+    from datetime import datetime, timezone
+
+    db = _session()
+    repo = RunRepository(db)
+    for run_id in ("run-a", "run-b", "run-c"):
+        repo.create_run(run_id, "dev", "prod")
+        repo.add_test_result(run_id, ReconciliationResult(
+            query_name="my_job", source_env="dev", target_env="prod",
+            source_row_count=1, target_row_count=1, matched_count=1,
+            missing_in_target_count=0, missing_in_source_count=0, value_mismatch_count=0,
+            mismatches=[], status=TestStatus.PASSED,
+            executed_at=datetime.now(timezone.utc), duration_seconds=0.1,
+        ))
+
+    results = repo.list_results_for_job("my_job", limit=2)
+
+    assert [r.run_id for r in results] == ["run-c", "run-b"]

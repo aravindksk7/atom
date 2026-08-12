@@ -273,6 +273,9 @@
                   :data-testid="'job-row-' + job.name + '-gate-verdict'"
                   x-text="(jobGateVerdicts[job.name] || {}).verdict"></span>
             <button @click.stop="checkJobGate(job.name)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-gate-btn'">Gate</button>
+            <button x-show="job.job_type === 'bo_report' || job.job_type === 'reconciliation'"
+                    @click.stop="openCompareForJob(job)" class="btn-secondary btn-sm text-xs"
+                    :data-testid="'job-row-' + job.name + '-compare-btn'">Compare</button>
             <button @click.stop="openEditJobModal(job)" class="btn-secondary btn-sm text-xs" :data-testid="'job-row-' + job.name + '-edit-btn'">Edit</button>
             <button @click.stop="deleteJob(job.name)" class="btn-danger btn-sm text-xs" :data-testid="'job-row-' + job.name + '-delete-btn'">Del</button>
           </div>
@@ -1050,6 +1053,29 @@
         </div>
       </div>
 
+      <div x-show="jobModal.job_type === 'bo_report' || jobModal.job_type === 'reconciliation'" class="border-t pt-3 mt-3">
+        <button type="button" @click="showJobModalCompare = !showJobModalCompare" class="text-sm font-medium text-slate-600" data-testid="job-modal-compare-toggle">
+          Test Compare <span x-text="showJobModalCompare ? '▲' : '▼'"></span>
+        </button>
+        <div x-show="showJobModalCompare" class="mt-2 space-y-2">
+          <button type="button" @click="runInlineJobCompare()" class="btn-secondary btn-sm text-xs" data-testid="job-modal-compare-run-btn">
+            Run Compare
+          </button>
+          <div x-show="boCompareResult && jobModal.job_type === 'bo_report'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(boCompareResult?.status)" x-text="boCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'bo'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="mfCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode === 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(mfCompareResult?.status)" x-text="mfCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'multi_file'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+          <div x-show="fileCompareResult && jobModal.job_type === 'reconciliation' && jobModal.source_mode !== 'multi_file'" class="text-xs" data-testid="job-modal-compare-result">
+            <span class="badge" :class="statusBadgeClass(fileCompareResult?.status)" x-text="fileCompareResult?.status"></span>
+            <button type="button" @click="showJobModal = false; currentView = 'compare'; compareSubTab = 'recon'" class="btn-link btn-sm ml-2">View full results →</button>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-end gap-3 mt-6">
         <button @click="validateJobDefinition()" class="btn-secondary" :disabled="validateDefinitionLoading || !jobModal.name" data-testid="job-modal-validate-definition-btn">
           <span x-show="!validateDefinitionLoading">Validate Definition</span>
@@ -1324,6 +1350,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             </label>
           </template>
         </div>
+      </div>
+      <div x-show="compareRunIds.length === 2" class="flex items-center gap-2 mb-2">
+        <select x-model="selectionCompareJobName" class="field-input field-select text-xs" data-testid="selection-compare-job-select" aria-label="compare job">
+          <option value="">Whole run (mismatch diff)</option>
+          <template x-for="name in selectionCompareJobOptions" :key="name">
+            <option :value="name" x-text="name"></option>
+          </template>
+        </select>
+        <select x-show="selectionCompareJobName" x-model="selectionCompareType" class="field-input field-select text-xs" data-testid="selection-compare-type-select" aria-label="compare type">
+          <option value="mismatch_diff">Mismatch Diff</option>
+          <option value="bo">BO Report</option>
+          <option value="recon">Reconciliation</option>
+          <option value="multi_file">Multi-File</option>
+        </select>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showSelectionRunsModal = false" class="btn-secondary">Close</button>
