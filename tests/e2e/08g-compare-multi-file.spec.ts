@@ -1,7 +1,7 @@
 // tests/e2e/08g-compare-multi-file.spec.ts
 import { test, expect } from './fixtures';
 import path from 'node:path';
-import { authedContext, createMultiFileJob, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
+import { authedContext, createMultiFileJob, deleteJob } from './api-helpers';
 
 // Mirrors 17-multi-file-reconciliation.spec.ts's FIXTURE_DIR construction --
 // resolve_allowed_path() (api/services/file_source.py) resolves a relative
@@ -80,16 +80,12 @@ test.describe('08g compare / job catalog run-reference', () => {
   // adminToken is worker-scoped (fixtures.ts), so it's available to beforeAll/afterAll
   // hooks directly -- see 04-history.spec.ts for the full rationale.
   let jobName: string;
-  let runId: string;
 
   test.beforeAll(async ({ adminToken }) => {
     const ctx = await authedContext(adminToken);
     try {
       jobName = `e2e-mf-run-ref-${Date.now()}`;
       await createMultiFileJob(ctx, jobName);
-      const { run_id } = await triggerRun(ctx, [jobName]);
-      await waitForTerminal(ctx, run_id);
-      runId = run_id;
     } finally {
       await ctx.dispose();
     }
@@ -105,7 +101,7 @@ test.describe('08g compare / job catalog run-reference', () => {
     }
   });
 
-  test('Job Catalog Compare button jumps to the multi-file sub-tab prefilled from the job', async ({ authedPage }) => {
+  test('job catalog Compare button jumps to the multi-file sub-tab prefilled from the job', async ({ authedPage }) => {
     await authedPage.goto('/');
     await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
     await authedPage.locator('[data-testid="job-search-input"]').fill(jobName);
