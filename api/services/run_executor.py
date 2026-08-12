@@ -9,12 +9,13 @@ import logging
 import os
 from pathlib import Path
 import re
+import threading
 import time
 from typing import Any
 
 import pandas as pd
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
 from api.services.api_artifact import build_api_response_sink, run_artifact_dir
@@ -175,6 +176,59 @@ class SQLAlchemyQueryEngine:
         return False
 
 
+def normalize_to_dag(job_sequence: list) -> list["SequenceStepRef"]:
+    """Turn any accepted sequence shape into an explicit list of DAG steps.
+
+    A plain list has no dependency information, so it becomes a chain: step i
+    depends on step i-1. That reproduces linear order exactly -- the ready set
+    never holds more than one step -- while letting one code path serve both
+    plain sequences and real saved DAGs.
+    """
+    from api.schemas import SequenceStep, SequenceStepRef
+
+    normalized: list[SequenceStepRef] = []
+    previous_id: str | None = None
+    for i, item in enumerate(job_sequence):
+        if isinstance(item, SequenceStepRef):
+            normalized.append(item)
+            continue
+        if isinstance(item, str):
+            step = SequenceStep(job_name=item)
+        elif isinstance(item, dict):
+            step = SequenceStep(**item)
+        else:
+            step = item
+        step_id = f"step_{i}"
+        normalized.append(SequenceStepRef(
+            step_id=step_id,
+            job_name=step.job_name,
+            depends_on=[previous_id] if previous_id is not None else [],
+            hold_after=step.hold_after,
+            condition=step.condition,
+            wait_seconds=step.wait_seconds,
+            trigger_rule="all_success" if step.condition is not None else "all_done",
+        ))
+        previous_id = step_id
+    return normalized
+
+
+class _StepRepoAdapter:
+    """Translates the coordinator's step_id vocabulary to run_steps rows."""
+
+    def __init__(self, step_repo: RunStepRepository, run_id: str, lock: threading.Lock | None = None) -> None:
+        self._repo = step_repo
+        self._run_id = run_id
+        self._lock = lock or threading.Lock()
+
+    def set_status(self, step_id: str, status: str, **kwargs) -> None:
+        with self._lock:
+            self._repo.set_status_by_step_id(self._run_id, step_id, status, **kwargs)
+
+    def get_release(self, step_id: str) -> str | None:
+        with self._lock:
+            return self._repo.get_release_by_step_id(self._run_id, step_id)
+
+
 class RunExecutor:
     def __init__(
         self,
@@ -193,7 +247,12 @@ class RunExecutor:
         self._job_sequence = job_sequence
         self._settings = run_settings
         self._config_snapshot = config_snapshot or {}
+        self._dag_steps: list = []
+        self._legacy_chain = True
+        self._db_lock = threading.Lock()
+        self._worker_session_factory = None
         self._run_repo = RunRepository(db)
+
         self._job_repo = JobRepository(db)
 
     def execute(self) -> None:
@@ -214,92 +273,31 @@ class RunExecutor:
                 jobs_index = self._build_jobs_index()
                 self._validate_dependencies(steps, jobs_index)
                 step_repo = RunStepRepository(self._db)
-                step_repo.materialize_steps(self._run_id, steps)
+                step_repo.materialize_steps(self._run_id, self._dag_steps)
 
-                all_states: list[TestCaseState] = []
-                all_results: list[ReconciliationResult] = []
-                prev_result: ReconciliationResult | None = None
-                cancelled = False
-                blocked = False
+                outcome = self._build_dag_executor(step_repo, jobs_index).run()
 
-                for i, seq_step in enumerate(steps):
-                    # Condition gate: check immediate previous step's outcome before running this step.
-                    if seq_step.condition is not None and i > 0:
-                        if prev_result is None or not self._check_condition(seq_step.condition, prev_result):
-                            step_repo.cancel_remaining(self._run_id, from_index=i)
-                            blocked = True
-                            break
-
-                    if self._run_repo.is_cancel_requested(self._run_id):
-                        step_repo.cancel_remaining(self._run_id, from_index=i)
-                        cancelled = True
-                        break
-
-                    if seq_step.wait_seconds > 0 and self._sleep_with_cancel_check(
-                        seq_step.wait_seconds
-                    ):
-                        step_repo.cancel_remaining(self._run_id, from_index=i)
-                        cancelled = True
-                        break
-
-                    step_repo.update_status(self._run_id, i, "RUNNING")
-
-                    job_def = jobs_index.get(seq_step.job_name)
-                    if job_def is None:
-                        step_repo.update_status(self._run_id, i, "ERROR")
-                        continue
-
-                    case_fn = self._build_case(job_def)
-                    state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]
-                    all_states.append(state)
-
-                    step_results = self._persist_states([state])
-                    prev_result = step_results[0] if step_results else None
-                    all_results.extend(step_results)
-
-                    job_outcome = state.status.value if hasattr(state.status, "value") else str(state.status)
-                    step_repo.update_status(self._run_id, i, job_outcome)
-
-                    if self._run_repo.is_cancel_requested(self._run_id):
-                        step_repo.cancel_remaining(self._run_id, from_index=i + 1)
-                        cancelled = True
-                        break
-
-                    if seq_step.hold_after:
-                        step_repo.update_status(
-                            self._run_id, i, "HELD",
-                            held_at=datetime.now(timezone.utc),
-                        )
-                        self._fire_held_webhook(i, seq_step.job_name)
-                        release_action = self._poll_for_release(step_repo, i)
-                        if release_action == "cancel":
-                            step_repo.cancel_remaining(self._run_id, from_index=i + 1)
-                            cancelled = True
-                            break
-
-                if cancelled:
+                if outcome.cancelled:
                     self._run_repo.update_run_status(
-                        self._run_id,
-                        "CANCELLED",
+                        self._run_id, "CANCELLED",
                         completed_at=datetime.now(timezone.utc),
                     )
                     self._fire_webhooks("CANCELLED")
-                elif blocked:
-                    self._write_metrics(all_results)
+                elif outcome.blocked:
+                    self._write_metrics(outcome.results)
                     self._run_repo.update_run_status(
-                        self._run_id,
-                        "BLOCKED",
+                        self._run_id, "BLOCKED",
                         completed_at=datetime.now(timezone.utc),
-                        total_tests=len(all_states),
-                        passed=sum(1 for state in all_states if state.status == TestStatus.PASSED),
-                        failed=sum(1 for state in all_states if state.status == TestStatus.FAILED),
-                        slow=sum(1 for state in all_states if state.status == TestStatus.SLOW),
-                        error=sum(1 for state in all_states if state.status == TestStatus.ERROR),
+                        total_tests=len(outcome.states),
+                        passed=sum(1 for s in outcome.states if s.status == TestStatus.PASSED),
+                        failed=sum(1 for s in outcome.states if s.status == TestStatus.FAILED),
+                        slow=sum(1 for s in outcome.states if s.status == TestStatus.SLOW),
+                        error=sum(1 for s in outcome.states if s.status == TestStatus.ERROR),
                     )
                     self._fire_webhooks("BLOCKED")
                 else:
-                    self._write_metrics(all_results)
-                    self._complete_run(all_states)
+                    self._write_metrics(outcome.results)
+                    self._complete_run(outcome.states)
 
             except Exception as exc:
                 self._run_repo.update_run_status(
@@ -313,15 +311,17 @@ class RunExecutor:
                 set_run_id("")
 
     def _resolve_sequence_steps(self) -> list[SequenceStep]:
-        result: list[SequenceStep] = []
-        for item in self._job_sequence:
-            if isinstance(item, str):
-                result.append(SequenceStep(job_name=item))
-            elif isinstance(item, dict):
-                result.append(SequenceStep(**item))
-            else:
-                result.append(item)
-        return result
+        from api.schemas import SequenceStepRef
+
+        self._legacy_chain = not any(isinstance(step, SequenceStepRef) for step in self._job_sequence)
+        self._dag_steps = normalize_to_dag(self._job_sequence)
+        return [
+            SequenceStep(
+                job_name=s.job_name, hold_after=s.hold_after,
+                condition=s.condition, wait_seconds=s.wait_seconds,
+            )
+            for s in self._dag_steps
+        ]
 
     def _build_jobs_index(self) -> dict[str, JobDefinition]:
         index: dict[str, JobDefinition] = {job.name: job for job in _SEED_JOBS}
@@ -329,28 +329,67 @@ class RunExecutor:
         return index
 
     def _check_condition(self, condition: StepCondition, prev_result: ReconciliationResult) -> bool:
-        prev_status = prev_result.status.value if hasattr(prev_result.status, "value") else str(prev_result.status)
-        if condition.require_status and prev_status not in condition.require_status:
-            return False
-        if condition.max_mismatch_count is not None:
-            total = (
-                prev_result.value_mismatch_count
-                + prev_result.missing_in_target_count
-                + prev_result.missing_in_source_count
+        from api.services.sequence_conditions import evaluate_condition
+        return evaluate_condition(condition, prev_result)
+
+    def _build_dag_executor(self, step_repo: RunStepRepository, jobs_index: dict):
+        from api.services.dag_executor import DagExecutor
+
+        return DagExecutor(
+            steps=self._dag_steps,
+            step_repo=_StepRepoAdapter(step_repo, self._run_id, self._db_lock),
+            run_step=lambda step: self._run_dag_step(step, jobs_index),
+            is_cancel_requested=lambda: self._run_repo.is_cancel_requested(self._run_id),
+            on_held=lambda step: self._on_step_held(step_repo, step),
+            # Sequential mode pins the pool to one worker; the graph is still
+            # walked topologically.
+            max_workers=1 if self._settings.execution_mode == "sequential" else self._settings.max_workers,
+            hold_poll_interval=HOLD_POLL_INTERVAL_SECONDS,
+            hold_timeout=HOLD_TIMEOUT_SECONDS,
+            blocked_step_status="CANCELLED" if self._legacy_chain else "BLOCKED",
+            expire_all=self._db.expire_all,
+        )
+
+    def _run_dag_step(self, step, jobs_index: dict):
+        from api.services.dag_executor import StepOutcome
+
+        job_def = jobs_index.get(step.job_name)
+        if job_def is None:
+            return StepOutcome(status="ERROR", result=None, state=None)
+
+        if self._worker_session_factory is None:
+            self._worker_session_factory = sessionmaker(
+                bind=self._db.get_bind(),
+                autocommit=False,
+                autoflush=False,
             )
-            if total > condition.max_mismatch_count:
-                return False
-        if condition.min_row_count is not None and prev_result.source_row_count < condition.min_row_count:
-            return False
-        if condition.max_row_count is not None and prev_result.source_row_count > condition.max_row_count:
-            return False
-        if condition.max_value_mismatches is not None and prev_result.value_mismatch_count > condition.max_value_mismatches:
-            return False
-        if condition.max_missing_in_target is not None and prev_result.missing_in_target_count > condition.max_missing_in_target:
-            return False
-        if condition.max_missing_in_source is not None and prev_result.missing_in_source_count > condition.max_missing_in_source:
-            return False
-        return True
+        worker_db = self._worker_session_factory()
+        worker = RunExecutor(
+            db=worker_db,
+            run_id=self._run_id,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            job_sequence=[],
+            run_settings=self._settings,
+            config_snapshot=self._config_snapshot,
+        )
+        try:
+            case_fn = worker._build_case(job_def)
+            state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]
+            results = worker._persist_states([state])
+            status = state.status.value if hasattr(state.status, "value") else str(state.status)
+            return StepOutcome(status=status, result=results[0] if results else None, state=state)
+        finally:
+            worker_db.close()
+
+    def _on_step_held(self, step_repo: RunStepRepository, step) -> None:
+        with self._db_lock:
+            row = step_repo.get_step_by_step_id(self._run_id, step.step_id)
+            index = row.step_index if row is not None else 0
+            step_repo.update_status(
+                self._run_id, index, "HELD", held_at=datetime.now(timezone.utc),
+            )
+            self._fire_held_webhook(index, step.job_name)
 
     def _poll_for_release(self, step_repo: RunStepRepository, step_index: int) -> str:
         waited = 0.0

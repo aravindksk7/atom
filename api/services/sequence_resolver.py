@@ -36,10 +36,11 @@ class ResolvedSequence:
     defaults: SequenceDefaults
 
     def as_linear_steps(self) -> list[SequenceStep]:
-        """Downgrade to the shape the existing linear executor consumes.
+        """DEPRECATED -- returns a chain, discarding depends_on and trigger_rule.
 
-        DAG-only fields are dropped on purpose: Phase 1 rejects any non-default
-        value for them at save time, so nothing is silently lost here.
+        Kept only for callers that genuinely need the old flat shape (env
+        validation, config snapshots). Anything that EXECUTES the sequence must
+        use `.steps` so the DAG survives.
         """
         return [
             SequenceStep(

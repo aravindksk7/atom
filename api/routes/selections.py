@@ -213,7 +213,8 @@ def launch_selection(
             resolved = resolve_sequence(db, SequenceRef.model_validate(version.sequence_ref))
         except SequenceResolutionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        job_sequence = resolved.as_linear_steps()
+        job_sequence = resolved.as_linear_steps()   # flat shape, for env validation + snapshot
+        dag_steps = resolved.steps                  # real graph, for execution
     else:
         job_sequence = version.job_sequence or []
 
@@ -259,7 +260,7 @@ def launch_selection(
         },
     )
     background_tasks.add_task(
-        _execute_run, run_id, ordered_jobs, trigger.source_env, trigger.target_env,
-        trigger.run_settings, config_snapshot,
+        _execute_run, run_id, dag_steps if resolved is not None else ordered_jobs,
+        trigger.source_env, trigger.target_env, trigger.run_settings, config_snapshot,
     )
     return RunStatusOut(run_id=run_id, status="PENDING")

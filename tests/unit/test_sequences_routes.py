@@ -83,12 +83,22 @@ def test_create_rejects_empty_steps(client):
     assert resp.json()["detail"][0]["field"] == "steps"
 
 
-def test_create_rejects_phase2_trigger_rule(client):
+def test_create_accepts_a_trigger_rule(client):
     resp = _create(client, steps=[
-        {"step_id": "a", "job_name": "orders_recon", "depends_on": [], "trigger_rule": "all_done"},
+        {"step_id": "a", "job_name": "orders_recon", "depends_on": []},
+        {"step_id": "cleanup", "job_name": "load_orders", "depends_on": ["a"],
+         "trigger_rule": "all_done"},
+    ])
+    assert resp.status_code == 201, resp.text
+
+
+
+def test_create_still_rejects_retry_and_on_failure(client):
+    resp = _create(client, steps=[
+        {"step_id": "a", "job_name": "orders_recon", "depends_on": [], "max_retries": 3},
     ])
     assert resp.status_code == 422
-    assert resp.json()["detail"][0]["field"] == "trigger_rule"
+    assert resp.json()["detail"][0]["field"] == "max_retries"
 
 
 def test_create_rejects_phase4_preconditions(client):

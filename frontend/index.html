@@ -2860,6 +2860,25 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </div>
               </template>
             </div>
+            <div class="mt-3" data-testid="monitor-step-timeline">
+              <div class="field-label">Step timeline</div>
+              <template x-for="level in monitorStepLevels(runStepsCache[run.run_id])" :key="level.index">
+                <div class="flex items-start gap-3 py-1">
+                  <span class="text-xs text-muted w-16 pt-1" x-text="'level ' + (level.index + 1)"></span>
+                  <div class="flex flex-wrap gap-2">
+                    <template x-for="step in level.steps" :key="step.step_id || step.step_index">
+                      <div class="chip flex items-center gap-2"
+                           :data-testid="'monitor-step-' + (step.step_id || step.step_index)">
+                        <span x-text="step.step_id || step.job_name"></span>
+                        <span :class="monitorStepBadgeClass(step.status)" x-text="step.status"></span>
+                        <span class="text-xs text-muted" x-show="(step.attempt || 0) > 1"
+                              x-text="'try ' + step.attempt"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
         </template>
 

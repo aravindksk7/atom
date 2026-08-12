@@ -89,10 +89,10 @@ def test_topological_order_raises_on_cycle():
     assert set(exc.value.step_ids) == {"a", "b"}
 
 
-def test_phase1_rejects_non_default_trigger_rule():
+def test_trigger_rules_are_allowed_from_phase2():
     from api.services.sequence_validation import phase1_unsupported
-    errors = phase1_unsupported([_step("a", trigger_rule="all_done")], None)
-    assert any(e["field"] == "trigger_rule" for e in errors)
+    for rule in ("all_success", "all_done", "any_success", "all_failed"):
+        assert phase1_unsupported([_step("a", trigger_rule=rule)], None) == []
 
 
 def test_phase1_rejects_retry_and_on_failure():

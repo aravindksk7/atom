@@ -123,6 +123,7 @@ def _run_schedule(schedule_id: int, name: str) -> None:
                 )
                 return
             job_sequence = resolved.as_linear_steps()
+            dag_steps = resolved.steps
             run_settings = resolved.defaults.run_settings or {}
             config_id = resolved.defaults.config_id
             sequence_meta = resolved.snapshot_meta()
@@ -195,7 +196,7 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         )
         _execute_run(
             run_id=run_id,
-            job_sequence=trigger.job_sequence,
+            job_sequence=dag_steps if sequence_meta is not None else trigger.job_sequence,
             source_env=trigger.source_env,
             target_env=trigger.target_env,
             run_settings=trigger.run_settings,

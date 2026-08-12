@@ -1310,6 +1310,13 @@ class RunStepRepository:
                 hold_after=step.hold_after,
                 condition=cond,
                 wait_seconds=step.wait_seconds,
+                # DAG fields are absent on plain SequenceStep, which is still a
+                # valid input shape -- fall back to chain-equivalent defaults.
+                step_id=getattr(step, "step_id", None),
+                depends_on=list(getattr(step, "depends_on", []) or []),
+                trigger_rule=getattr(step, "trigger_rule", "all_success"),
+                max_retries=getattr(step, "max_retries", None),
+                on_failure=getattr(step, "on_failure", "skip_downstream"),
             )
             self._db.add(row)
             rows.append(row)
@@ -1324,6 +1331,28 @@ class RunStepRepository:
             .filter(RunStep.run_id == run_id, RunStep.step_index == step_index)
             .first()
         )
+
+    def get_step_by_step_id(self, run_id: str, step_id: str) -> RunStep | None:
+        return (
+            self._db.query(RunStep)
+            .filter(RunStep.run_id == run_id, RunStep.step_id == step_id)
+            .first()
+        )
+
+    def set_status_by_step_id(self, run_id: str, step_id: str, status: str, **kwargs) -> RunStep | None:
+        step = self.get_step_by_step_id(run_id, step_id)
+        if step is None:
+            return None
+        return self.update_status(run_id, step.step_index, status, **kwargs)
+
+    def get_release_by_step_id(self, run_id: str, step_id: str) -> str | None:
+        """The release action for a held step, or None while it is still held."""
+        step = self.get_step_by_step_id(run_id, step_id)
+        if step is None:
+            return "approve"
+        if step.status == "HELD":
+            return None
+        return step.release_action or "approve"
 
     def list_steps(self, run_id: str) -> list[RunStep]:
         return (

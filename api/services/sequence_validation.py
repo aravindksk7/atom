@@ -88,17 +88,13 @@ def validate_steps(
 
 
 # --- Phase gating -----------------------------------------------------------
-# Phase 1 stores the full step shape but only executes what the existing linear
-# executor supports. Each later phase deletes its block from this function.
+# Phase 3/4 features remain gated until their executor support arrives.
 
 def phase1_unsupported(
     steps: list["SequenceStepRef"], preconditions: "SequencePrecondition | None"
 ) -> list[dict]:
     errors: list[dict] = []
     for step in steps:
-        if step.trigger_rule != "all_success":
-            errors.append(_issue(step.step_id, "trigger_rule",
-                                 "Trigger rules other than 'all_success' arrive in Phase 2"))
         if step.max_retries is not None:
             errors.append(_issue(step.step_id, "max_retries", "Per-step retry arrives in Phase 3"))
         if step.retry_delay_seconds is not None:

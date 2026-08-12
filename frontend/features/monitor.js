@@ -41,8 +41,14 @@
             _progress: progress,
           });
         }
-        if (progress.held_step != null) {
-          this.loadRunSteps(progress.run_id);
+        if (Array.isArray(progress.steps) && progress.steps.length > 0) {
+          const existing = this.runStepsCache[progress.run_id];
+          if (existing && existing.length === progress.steps.length) {
+            const byId = Object.fromEntries(progress.steps.map(step => [step.step_id, step]));
+            this.runStepsCache[progress.run_id] = existing.map(step => ({ ...step, ...(byId[step.step_id] || {}) }));
+          } else {
+            this.loadRunSteps(progress.run_id);
+          }
         }
       });
       stream.addEventListener('done', async (event) => {
@@ -50,6 +56,7 @@
         const idx = this.activeRuns.findIndex(r => r.run_id === progress.run_id);
         if (idx >= 0) Object.assign(this.activeRuns[idx], { status: progress.status, _progress: progress });
         this.closeRunStream(progress.run_id);
+        await this.loadRunSteps(progress.run_id);
         await this.loadRuns();
       });
       stream.onerror = () => this.closeRunStream(run.run_id);
@@ -69,6 +76,7 @@
           const [status, progress] = await Promise.all([
             api('GET', `/api/runs/${run.run_id}/status`),
             api('GET', `/api/runs/${run.run_id}/progress`).catch(() => null),
+            this.loadRunSteps(run.run_id),
           ]);
           const idx = this.activeRuns.findIndex(r => r.run_id === run.run_id);
           if (idx >= 0) {
@@ -154,6 +162,38 @@
         PASSED: 'badge-green', FAILED: 'badge-rose', ERROR: 'badge-rose',
       };
       return map[status] || 'badge-gray';
+    },
+
+    // Steps grouped by dependency depth, so branches read as parallel rows.
+    // Takes the array because Monitor holds one list per run in runStepsCache.
+    monitorStepLevels(steps) {
+      const list = steps || [];
+      const byId = {};
+      for (const s of list) if (s.step_id) byId[s.step_id] = s;
+
+      const depthOf = (step, seen) => {
+        const parents = (step && step.depends_on) || [];
+        if (!parents.length) return 0;
+        if (seen.has(step.step_id)) return 0;
+        seen.add(step.step_id);
+        return 1 + Math.max(...parents.map((p) => (byId[p] ? depthOf(byId[p], seen) : 0)));
+      };
+
+      const levels = [];
+      for (const step of list) {
+        const d = depthOf(step, new Set());
+        (levels[d] = levels[d] || []).push(step);
+      }
+      return levels.map((s, index) => ({ index, steps: s || [] }));
+    },
+
+    monitorStepBadgeClass(status) {
+      if (status === 'BLOCKED') return 'badge badge-gray';
+      if (status === 'HELD') return 'badge badge-amber';
+      if (status === 'PASSED' || status === 'APPROVED') return 'badge badge-green';
+      if (status === 'FAILED' || status === 'ERROR') return 'badge badge-rose';
+      if (status === 'RUNNING') return 'badge badge-blue';
+      return 'badge';
     },
 
     };

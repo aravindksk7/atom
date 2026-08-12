@@ -335,6 +335,19 @@ def _ensure_compare_columns(bind) -> None:
                           "ALTER TABLE scheduled_runs ADD COLUMN sequence_id INTEGER")
             ensure_column(conn, "scheduled_runs", "sequence_version",
                           "ALTER TABLE scheduled_runs ADD COLUMN sequence_version INTEGER")
+        if "run_steps" in tables:
+            ensure_column(conn, "run_steps", "step_id",
+                          "ALTER TABLE run_steps ADD COLUMN step_id VARCHAR(255)")
+            ensure_column(conn, "run_steps", "depends_on",
+                          "ALTER TABLE run_steps ADD COLUMN depends_on JSON")
+            ensure_column(conn, "run_steps", "trigger_rule",
+                          "ALTER TABLE run_steps ADD COLUMN trigger_rule VARCHAR(20) NOT NULL DEFAULT 'all_success'")
+            ensure_column(conn, "run_steps", "attempt",
+                          "ALTER TABLE run_steps ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
+            ensure_column(conn, "run_steps", "max_retries",
+                          "ALTER TABLE run_steps ADD COLUMN max_retries INTEGER")
+            ensure_column(conn, "run_steps", "on_failure",
+                          "ALTER TABLE run_steps ADD COLUMN on_failure VARCHAR(20) NOT NULL DEFAULT 'skip_downstream'")
 
 
 def _backfill_schedule_selections(bind) -> None:

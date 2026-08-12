@@ -1307,6 +1307,10 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                 "percent_complete": min(percent, 100),
                 "current_step": current_step,
                 "held_step": held_step,
+                "steps": [
+                    {"step_id": s.step_id, "status": s.status, "attempt": s.attempt or 0}
+                    for s in steps
+                ],
             }
             payload_text = json.dumps(payload, default=str)
             if payload_text != last_payload:
@@ -1835,4 +1839,36 @@ def release_run_step(
     )
     if released is None:
         raise HTTPException(status_code=409, detail="Step could not be released")
+    return released
+
+
+@router.post(
+    "/{run_id}/steps/by-id/{step_id}/release",
+    response_model=RunStepOut,
+)
+def release_run_step_by_id(
+    run_id: str,
+    step_id: str,
+    body: RunStepReleaseRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Release a held step by its stable step_id.
+
+    The index-based route stays for backward compatibility; step_index is still
+    unique within a run, so both address the same row.
+    """
+    repo = RunStepRepository(db)
+    step = repo.get_step_by_step_id(run_id, step_id)
+    if step is None:
+        raise HTTPException(status_code=404, detail="Step not found")
+    released = repo.release_step(
+        run_id, step.step_index, body.action, body.note, body.released_by
+    )
+    if released is None:
+        raise HTTPException(status_code=409, detail="Step is not held")
+    AuditService(db).log(
+        request, "run.step_released", "run", None,
+        {"run_id": run_id, "step_id": step_id, "action": body.action},
+    )
     return released

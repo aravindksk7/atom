@@ -89,6 +89,10 @@ def test_frontend_api_run_lifecycle_smoke(client):
     assert launch_js.status_code == 200
     assert "job_sequence" in launch_js.text
     assert "run_settings" in launch_js.text
+    monitor_js = client.get("/features/monitor.js")
+    assert monitor_js.status_code == 200
+    assert "progress.steps" in monitor_js.text
+    assert "await this.loadRunSteps(progress.run_id)" in monitor_js.text
 
     jobs = client.get("/api/jobs")
     assert jobs.status_code == 200

@@ -335,6 +335,12 @@ class RunStepOut(BaseModel):
     hold_after: bool
     condition: dict[str, Any] | None = None
     wait_seconds: int
+    step_id: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+    trigger_rule: str = "all_success"
+    attempt: int = 0
+    max_retries: int | None = None
+    on_failure: str = "skip_downstream"
     held_at: datetime | None = None
     released_at: datetime | None = None
     released_by: str | None = None
