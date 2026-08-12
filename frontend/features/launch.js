@@ -82,6 +82,8 @@
     selectionRunsPanel: null,
     selectionRuns: [],
     compareRunIds: [],
+    selectionCompareJobName: '',
+    selectionCompareType: 'mismatch_diff', // 'mismatch_diff' | 'bo' | 'recon' | 'multi_file'
     scheduleModalEditing: false,
 
     jobSearchQuery: '',
@@ -1180,20 +1182,37 @@
       }
     },
 
+    get selectionCompareJobOptions() {
+      const sel = this.selectionRunsPanel;
+      if (!sel || this.compareRunIds.length !== 2) return [];
+      return (sel.job_sequence || [])
+        .map(item => item.job_name || item)
+        .filter(name => {
+          const job = (this.jobs || []).find(j => j.name === name);
+          return job && (job.job_type === 'bo_report' || job.job_type === 'reconciliation');
+        });
+    },
+
     compareSelectedRuns() {
       if (this.compareRunIds.length !== 2) {
         this.toast('warn', 'Select exactly two runs', 'Pick two runs to compare');
         return;
       }
-      this.mismatchDiffRunIdA = this.compareRunIds[0];
-      this.mismatchDiffRunIdB = this.compareRunIds[1];
-      this.mismatchDiffRunLabelA = 'Run A';
-      this.mismatchDiffRunLabelB = 'Run B';
-      this.mismatchDiffQueryName = '';
       this.showSelectionRunsModal = false;
-      this.currentView = 'compare';
-      this.compareSubTab = 'mmdiff';
-      this.runMismatchDiff();
+      if (this.selectionCompareType === 'mismatch_diff' || !this.selectionCompareJobName) {
+        this.mismatchDiffRunIdA = this.compareRunIds[0];
+        this.mismatchDiffRunIdB = this.compareRunIds[1];
+        this.mismatchDiffRunLabelA = 'Run A';
+        this.mismatchDiffRunLabelB = 'Run B';
+        this.mismatchDiffQueryName = this.selectionCompareJobName || '';
+        this.currentView = 'compare';
+        this.compareSubTab = 'mmdiff';
+        this.runMismatchDiff();
+        return;
+      }
+      const job = (this.jobs || []).find(j => j.name === this.selectionCompareJobName);
+      if (!job) return;
+      this.openCompareForJob(job, { runIdA: this.compareRunIds[0], runIdB: this.compareRunIds[1] });
     },
 
     async loadJobRuns(jobName) {
