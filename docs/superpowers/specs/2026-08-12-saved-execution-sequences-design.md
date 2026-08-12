@@ -290,9 +290,13 @@ Release still requires `note` and `released_by`, and is audit-logged.
 
 ### Aggregate run status
 
-Precedence: `ERROR` > `FAILED` > `CANCELLED` > `BLOCKED` > `PASSED`. `BLOCKED` sits where
-today's linear executor already puts it — a run whose gate refused a step, with nothing worse
-having happened, is `BLOCKED`.
+Precedence: `CANCELLED` > `BLOCKED` > `ERROR` > `FAILED` > `SLOW` > `PASSED`.
+
+`BLOCKED` outranking `ERROR` and `FAILED` looks wrong at first glance and is deliberate: it is
+what the linear executor does today. A gate only refuses a step *because* an upstream step
+failed, so a blocked run almost always contains a failure too — reporting it as `FAILED` would
+hide the fact that the rest of the pipeline never ran, which is the more important thing to
+know. Changing this would also silently reclassify historical runs in existing reports.
 
 `BLOCKED` steps are **excluded** from the pass/fail/slow/error counts and reported separately in
 the summary, so a deliberately-unfired `all_failed` alert branch does not turn a clean run red.
