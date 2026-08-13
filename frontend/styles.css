@@ -2027,6 +2027,18 @@ mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2p
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.28);
 }
+.help-badge-cat {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 0.25rem;
+  background: var(--surface-2, rgba(255,255,255,0.08));
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
 .help-section-title {
   margin: 0;
   font-family: var(--font-display);

@@ -7102,6 +7102,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div class="help-section-head">
             <span class="help-badge" x-text="String(i + 1).padStart(2, '0')"></span>
             <div>
+              <template x-if="s.category">
+                <span class="help-badge-cat" x-text="s.category"></span>
+              </template>
               <h2 class="help-section-title" x-text="s.title"></h2>
               <p class="help-section-intro" x-text="s.intro"></p>
             </div>
@@ -7115,6 +7118,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <p class="help-step-text" x-text="step.text"></p>
                   <template x-if="step.where">
                     <div class="help-where"><span class="help-where-label">Where</span><span x-text="step.where"></span></div>
+                  </template>
+                  <template x-if="step.when">
+                    <div class="help-where"><span class="help-where-label">When to use</span><span x-text="step.when"></span></div>
                   </template>
                   <template x-if="step.tip">
                     <div class="help-callout tip"><span class="help-callout-label">Tip</span><span x-text="step.tip"></span></div>
