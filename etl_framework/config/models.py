@@ -67,8 +67,11 @@ class EnvironmentConfig(BaseModel):
     @classmethod
     def set_db_type_defaults(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if data.get("db_type") == "netezza" and "db_port" not in data:
-                data["db_port"] = 5480
+            if data.get("db_type") == "netezza":
+                if "db_port" not in data or data.get("db_port") == 1433:
+                    data["db_port"] = 5480
+                if "db_driver" not in data or "SQL Server" in str(data.get("db_driver")):
+                    data["db_driver"] = "nzpy"
         return data
 
     @field_validator("db_port")

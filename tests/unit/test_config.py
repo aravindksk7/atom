@@ -1,6 +1,6 @@
 import pytest
 from etl_framework.exceptions import ConfigurationError
-from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.models import EnvironmentConfig, resolve_connection
 from etl_framework.config.loader import ConfigLoader
 from api.routes.configs import _preserve_masked_secrets
 
@@ -233,4 +233,32 @@ def test_environment_config_netezza_defaults():
     )
     assert config.db_type == "netezza"
     assert config.db_port == 5480
+
+
+def test_resolve_connection_netezza_named_connection():
+    config_dict = {
+        "db_type": "mssql",
+        "db_host": "default-sql-server",
+        "db_port": 1433,
+        "db_name": "defaultdb",
+        "db_user": "sqluser",
+        "db_password": "sqlpassword",
+        "connections": {
+            "netezza_dw": {
+                "db_type": "netezza",
+                "db_driver": "nzpy",
+                "db_host": "netezza.internal",
+                "db_name": "dw_analytics",
+                "db_user": "nz_admin",
+                "db_password": "nz_password",
+            }
+        }
+    }
+    env = resolve_connection(config_dict, "netezza_dw", env_name="dev")
+    assert env.db_type == "netezza"
+    assert env.db_driver == "nzpy"
+    assert env.db_port == 5480
+    assert env.db_host == "netezza.internal"
+    assert env.db_name == "dw_analytics"
+
 
