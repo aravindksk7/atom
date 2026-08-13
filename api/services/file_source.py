@@ -9,7 +9,7 @@ from typing import Any
 from xml.etree import ElementTree
 
 import pandas as pd
-from pandas.errors import ParserError
+from pandas.errors import EmptyDataError, ParserError
 from fastapi import HTTPException
 
 _WINDOWS_TEMP_BASE = Path("C:/temp") if os.name == "nt" else None
@@ -73,13 +73,18 @@ _SUPPORTED_FORMATS_DETAIL = "Use .csv, .xlsx, .xls, .json, .xml, or .tsv"
 def _read_csv_bytes(raw: bytes) -> pd.DataFrame:
     try:
         return pd.read_csv(io.BytesIO(raw))
+    except EmptyDataError:
+        return pd.DataFrame()
     except ParserError:
         text = raw.decode("utf-8-sig", errors="replace")
         lines = text.splitlines()
         start, delimiter = _find_csv_header(lines)
         if start is None:
             raise
-        return pd.read_csv(io.StringIO("\n".join(lines[start:])), sep=delimiter)
+        try:
+            return pd.read_csv(io.StringIO("\n".join(lines[start:])), sep=delimiter)
+        except EmptyDataError:
+            return pd.DataFrame()
 
 
 def _find_csv_header(lines: list[str]) -> tuple[int | None, str]:
@@ -418,7 +423,10 @@ def _read_tabular_bytes(raw: bytes, ext: str, combine_sheets: bool = False) -> p
     if ext == ".xml":
         return _read_xml_bytes(raw)
     if ext in (".tsv", ".txt"):
-        return pd.read_csv(io.BytesIO(raw), sep="\t")
+        try:
+            return pd.read_csv(io.BytesIO(raw), sep="\t")
+        except EmptyDataError:
+            return pd.DataFrame()
     raise HTTPException(
         status_code=400,
         detail=f"Unsupported file format '{ext}'. {_SUPPORTED_FORMATS_DETAIL}",

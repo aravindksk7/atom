@@ -937,3 +937,24 @@ def test_multi_file_pair_reconciliation_survives_artifact_persistence_failure(tm
         "persist" in record.message.lower() and "pair" in record.message.lower()
         for record in caplog.records
     )
+
+
+def test_read_tabular_handles_empty_files(tmp_path, monkeypatch) -> None:
+    """Empty CSV, DAT, TSV, and TXT files must return an empty DataFrame without raising EmptyDataError."""
+    from api.services.file_source import read_tabular, _read_tabular_bytes, _UPLOAD_BASE, _UPLOAD_BASES
+    import pandas as pd
+
+    monkeypatch.setattr("api.services.file_source._UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr("api.services.file_source._UPLOAD_BASES", (tmp_path.resolve(),))
+
+    for ext in [".csv", ".dat", ".tsv", ".txt"]:
+        f = tmp_path / f"empty_file{ext}"
+        f.write_bytes(b"")
+        df = read_tabular(path=str(f))
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+
+        df_bytes = _read_tabular_bytes(b"", ext)
+        assert isinstance(df_bytes, pd.DataFrame)
+        assert df_bytes.empty
+
