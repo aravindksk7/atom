@@ -79,7 +79,10 @@
       newSequenceStep() {
         return {
           step_id: '', job_name: '', depends_on: [],
+          trigger_rule: 'all_success',
           hold_after: false, wait_seconds: 0, condition: null,
+          max_retries: null, retry_delay_seconds: null,
+          on_failure: 'skip_downstream',
         };
       },
 
@@ -163,6 +166,14 @@
       // ===== SAVING =====
       async saveSequence() {
         if (!this.sequenceIsValid) return;
+        // A blank retry box means "inherit the run settings", which the API
+        // expresses as null -- '' and NaN both fail schema validation.
+        for (const step of this.sequenceSteps) {
+          for (const key of ['max_retries', 'retry_delay_seconds']) {
+            const value = step[key];
+            if (value === '' || value === undefined || Number.isNaN(value)) step[key] = null;
+          }
+        }
         this.sequenceSaving = true;
         const tags = this.sequenceMeta.tags_raw
           .split(',').map((t) => t.trim()).filter(Boolean);

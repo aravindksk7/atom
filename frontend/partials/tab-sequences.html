@@ -131,6 +131,17 @@
                   </span>
                 </div>
               </div>
+              <label class="field" x-show="(step.depends_on || []).length > 0">
+                <span class="field-label">Run this step when</span>
+                <select class="field-input" :data-testid="'sequence-step-trigger-' + index"
+                        x-model="step.trigger_rule" @change="validateSequenceSteps()"
+                        aria-label="trigger rule">
+                  <option value="all_success">All parents succeeded</option>
+                  <option value="all_done">All parents finished, whatever the outcome</option>
+                  <option value="any_success">At least one parent succeeded</option>
+                  <option value="all_failed">All parents failed</option>
+                </select>
+              </label>
             </div>
 
             <details class="mt-2">
@@ -145,7 +156,32 @@
                   <input type="number" min="0" class="field-input" x-model.number="step.wait_seconds"
                          aria-label="wait seconds" />
                 </label>
+                <label class="field">
+                  <span class="field-label">Retries on error</span>
+                  <input type="number" min="0" max="10" class="field-input"
+                         :data-testid="'sequence-step-retries-' + index"
+                         x-model.number="step.max_retries" placeholder="Inherit from run settings"
+                         aria-label="max retries" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Delay between retries (seconds)</span>
+                  <input type="number" min="0" class="field-input"
+                         x-model.number="step.retry_delay_seconds" placeholder="Inherit from run settings"
+                         aria-label="retry delay seconds" />
+                </label>
+                <label class="field">
+                  <span class="field-label">If this step fails</span>
+                  <select class="field-input" :data-testid="'sequence-step-onfailure-' + index"
+                          x-model="step.on_failure" aria-label="on failure">
+                    <option value="skip_downstream">Carry on — dependent steps decide for themselves</option>
+                    <option value="continue">Carry on and don't count this failure against the run</option>
+                    <option value="stop">Stop the whole run</option>
+                  </select>
+                </label>
               </div>
+              <p class="text-xs text-muted mt-2">
+                Only errors are retried. A failed data comparison is a real result, so re-running it cannot change the outcome.
+              </p>
             </details>
 
             <template x-for="issue in sequenceIssuesFor(step.step_id)" :key="issue.field + issue.message">
