@@ -95,19 +95,17 @@ def test_trigger_rules_are_allowed_from_phase2():
         assert phase1_unsupported([_step("a", trigger_rule=rule)], None) == []
 
 
-def test_phase1_rejects_retry_and_on_failure():
+def test_retry_and_on_failure_are_allowed_from_phase3():
     from api.services.sequence_validation import phase1_unsupported
-    errors = phase1_unsupported(
-        [_step("a", max_retries=2, on_failure="stop")], None
-    )
-    assert {e["field"] for e in errors} == {"max_retries", "on_failure"}
+    steps = [_step("a", max_retries=2, retry_delay_seconds=1.5, on_failure="stop")]
+    assert phase1_unsupported(steps, None) == []
 
 
-def test_phase1_rejects_preconditions():
+def test_preconditions_are_still_gated():
     from api.schemas import SequencePrecondition
     from api.services.sequence_validation import phase1_unsupported
     errors = phase1_unsupported([_step("a")], SequencePrecondition(weekdays=[0]))
-    assert any(e["field"] == "preconditions" for e in errors)
+    assert [e["field"] for e in errors] == ["preconditions"]
 
 
 def test_phase1_allows_defaults():

@@ -93,15 +93,15 @@ def test_create_accepts_a_trigger_rule(client):
 
 
 
-def test_create_still_rejects_retry_and_on_failure(client):
+def test_create_accepts_retry_and_failure_policy(client):
     resp = _create(client, steps=[
-        {"step_id": "a", "job_name": "orders_recon", "depends_on": [], "max_retries": 3},
+        {"step_id": "a", "job_name": "orders_recon", "depends_on": [],
+         "max_retries": 3, "retry_delay_seconds": 10, "on_failure": "continue"},
     ])
-    assert resp.status_code == 422
-    assert resp.json()["detail"][0]["field"] == "max_retries"
+    assert resp.status_code == 201, resp.text
 
 
-def test_create_rejects_phase4_preconditions(client):
+def test_create_still_rejects_preconditions(client):
     resp = client.post("/api/sequences", json={
         "name": "gated", "steps": CHAIN, "preconditions": {"weekdays": [0]},
     })

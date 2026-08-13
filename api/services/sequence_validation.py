@@ -93,14 +93,11 @@ def validate_steps(
 def phase1_unsupported(
     steps: list["SequenceStepRef"], preconditions: "SequencePrecondition | None"
 ) -> list[dict]:
-    errors: list[dict] = []
-    for step in steps:
-        if step.max_retries is not None:
-            errors.append(_issue(step.step_id, "max_retries", "Per-step retry arrives in Phase 3"))
-        if step.retry_delay_seconds is not None:
-            errors.append(_issue(step.step_id, "retry_delay_seconds", "Per-step retry arrives in Phase 3"))
-        if step.on_failure != "skip_downstream":
-            errors.append(_issue(step.step_id, "on_failure", "Failure policy arrives in Phase 3"))
+    """Fields the executor cannot honour yet.
+
+    Trigger rules opened in Phase 2; retry and failure policy in Phase 3. Only
+    sequence preconditions remain, and they arrive in Phase 4.
+    """
     if preconditions is not None:
-        errors.append(_issue(None, "preconditions", "Sequence preconditions arrive in Phase 4"))
-    return errors
+        return [_issue(None, "preconditions", "Sequence preconditions arrive in Phase 4")]
+    return []
