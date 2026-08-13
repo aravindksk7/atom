@@ -153,6 +153,7 @@ class EnvironmentConfig(BaseModel):
 
 class ConnectionEntry(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
+    db_type: Literal["mssql", "netezza"] | None = None
     db_host: str | None = None
     db_port: int | None = None
     db_name: str | None = None

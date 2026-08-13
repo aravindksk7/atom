@@ -98,7 +98,10 @@
         automic_password: d.automic_password || '',
         connections: Object.entries(d.connections || {}).map(([name, entry]) => ({
           name,
+          db_type: entry.db_type || '',
+          db_driver: entry.db_driver || '',
           db_host: entry.db_host || '',
+          db_port: entry.db_port || '',
           db_name: entry.db_name || '',
           db_user: entry.db_user || '',
           db_password: entry.db_password || '',
@@ -183,7 +186,10 @@
           m.connections
             .filter(c => c.name.trim())
             .map(c => [c.name.trim(), {
+              ...(c.db_type ? { db_type: c.db_type } : {}),
+              ...(c.db_driver ? { db_driver: c.db_driver } : {}),
               ...(c.db_host ? { db_host: c.db_host } : {}),
+              ...(c.db_port ? { db_port: Number(c.db_port) } : {}),
               ...(c.db_name ? { db_name: c.db_name } : {}),
               ...(c.db_user ? { db_user: c.db_user } : {}),
               ...(c.db_password ? { db_password: c.db_password } : {}),
@@ -248,7 +254,7 @@
       const idx = this.configModal.connections.length + 1;
       this.configModal.connections.push({
         name: `connection_${idx}`,
-        db_host: '', db_name: '', db_user: '', db_password: '',
+        db_type: '', db_driver: '', db_host: '', db_port: '', db_name: '', db_user: '', db_password: '',
         expanded: true,
       });
     },

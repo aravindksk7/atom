@@ -472,7 +472,17 @@
                 <button @click="removeNamedConnection(idx)" type="button" class="text-red-400 text-xs px-1">✕</button>
               </div>
               <div x-show="conn.expanded" class="p-3 grid-2">
+                <div>
+                  <label class="field-label">DB Type</label>
+                  <select x-model="conn.db_type" @change="if (conn.db_type === 'netezza' && !conn.db_port) conn.db_port = 5480; if (conn.db_type === 'netezza' && (!conn.db_driver || conn.db_driver.includes('SQL Server'))) conn.db_driver = 'nzpy';" class="field-input field-select">
+                    <option value="">(inherits default)</option>
+                    <option value="mssql">Microsoft SQL Server</option>
+                    <option value="netezza">IBM Netezza</option>
+                  </select>
+                </div>
+                <div><label class="field-label">DB Driver</label><input x-model="conn.db_driver" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB Host</label><input x-model="conn.db_host" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
+                <div><label class="field-label">DB Port</label><input x-model="conn.db_port" type="number" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
