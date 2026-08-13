@@ -28,11 +28,24 @@ def client(monkeypatch, engine):
     from api.main import app
     from etl_framework.repository import database as _db_module
     from etl_framework.repository.repository import JobRepository, TokenRepository
+    from etl_framework.repository.database import get_db
+    from api.dependencies import get_session
 
-    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", Session)
     monkeypatch.setattr("api.routes.selections._execute_run", lambda *a, **k: None)
 
-    with Session(engine) as db:
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session] = override_get_db
+
+    with Session() as db:
         raw, _ = TokenRepository(db).create("test-runner")
         JobRepository(db).create({
             "name": "orders_recon", "description": "", "tags": [],
@@ -41,7 +54,10 @@ def client(monkeypatch, engine):
             "enabled": True,
         })
 
-    return TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+    yield TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_session, None)
 
 
 STEPS = [{"step_id": "a", "job_name": "orders_recon", "depends_on": []}]
