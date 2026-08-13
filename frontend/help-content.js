@@ -806,6 +806,13 @@
           text: '"If this step fails" controls the blast radius. The default lets dependent steps decide for themselves through their own trigger rules. "Don\'t count this failure" lets a step fail without turning the whole run red. "Stop the whole run" cancels everything still to come.',
           warn: 'Stopping cancels every branch, including ones that had nothing to do with the failed step.',
         },
+        {
+          title: 'Gate the whole sequence',
+          text: 'Preconditions decide whether a sequence may start at all. Restrict it to a time window, to certain days, or to running only after another job has succeeded recently. Times and days use the application timezone, and a window whose end is earlier than its start wraps past midnight.',
+          where: 'Sequences tab → Preconditions',
+          tip: 'To wait for a file to arrive, add a freshness job as the first step instead — you then see the check in the run with its own status.',
+          warn: 'A refused gate means no run is recorded at all. For a schedule, look in Scheduler Reports for the skipped entry and its reason.',
+        },
       ],
     },
     {
