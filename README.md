@@ -22,10 +22,27 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch tab for setup instructions and a ready-to-copy `.gitlab-ci.yml` snippet._
 <!-- ATOM:JOB-STATUS:END -->
 
-## Contents
+## Table of Contents
 
+- [Executive Summary & Quick Start](#executive-summary--quick-start)
 - [CI/CD Job Status](#cicd-job-status)
+- [ETL Testing for Dummies — Core Concepts](#etl-testing-for-dummies--core-concepts)
+- [Tab-by-Tab & Option-by-Option Deep Dive](#tab-by-tab--option-by-option-deep-dive)
+  - [Config](#config-tab)
+  - [Launch](#launch-tab)
+  - [Monitor](#monitor-tab)
+  - [History](#history-tab)
+  - [Compare](#compare-deep-dive)
+  - [Differences](#differences-tab)
+  - [Contracts](#contracts-tab)
+  - [Reports](#reports-tab)
+  - [Adapters](#adapters-tab)
+  - [Logs](#logs-tab)
+  - [Sequences](#sequences-tab)
+- [Task-Based Scenario Walkthroughs](#task-based-scenario-walkthroughs)
+- [Which Option When? Decision Matrices](#which-option-when-decision-matrices)
 - [Capabilities](#capabilities)
+- [AWS Data Platform Testing](#aws-data-platform-testing)
 - [Architecture](#architecture)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -36,32 +53,417 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - [Docker Or Service Deployment](#docker-or-service-deployment)
 - [Database And Storage](#database-and-storage)
 - [Using The Web UI](#using-the-web-ui)
-  - [Job Launcher — Step-By-Step](#job-launcher--step-by-step)
-  - [Creating And Managing Jobs](#creating-and-managing-jobs)
-  - [Job Design, Scheduling, And Automation](#job-design-scheduling-and-automation)
-  - [Job Types Reference](#job-types-reference)
-  - [Multi-File Reconciliation](#multi-file-reconciliation)
-  - [Run Settings Reference](#run-settings-reference)
 - [Reports, Metrics, And Logs](#reports-metrics-and-logs)
-  - [Global Logs Tab](#global-logs-tab)
-- [Compare Tab](#compare-tab)
-  - [BO Report Compare](#bo-report-compare)
-  - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
-  - [Recon File Compare](#recon-file-compare)
-  - [Multi-File](#multi-file)
-  - [SQL Direct Compare](#sql-direct-compare)
-  - [Advanced Compare Options](#advanced-compare-options)
-  - [Column Stats](#column-stats)
-  - [Mismatch Diff](#mismatch-diff)
+- [Compare Tab Reference](#compare-tab)
 - [Data Contracts](#data-contracts)
 - [Write-Audit-Publish Gate](#write-audit-publish-gate)
 - [Rules-As-Code & Schema Compatibility](#rules-as-code--schema-compatibility)
+- [API Reference & CLI Options](#api-reference--cli-options)
 - [API Usage](#api-usage)
 - [ETL Test Capabilities](#etl-test-capabilities)
 - [Testing](#testing)
-  - [Isolated Transform Testing (TransformCase)](#isolated-transform-testing-transformcase)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
+- [Minimal First Run](#minimal-first-run)
+
+## Executive Summary & Quick Start
+
+ETL Test Framework answers a simple question: **did the right data arrive in the right place?** It compares source data with target data, applies quality rules, records explainable differences, and can stop a release when data is unsafe. Start in simulation mode to learn the workflow, then add live connections when you are ready.
+
+```powershell
+cd C:\atom
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Open `http://127.0.0.1:8000`, complete [token bootstrap](#authentication), leave **Use Live Connections** off, select a seed job in **Launch**, and choose **Run Tests**. Watch it in **Monitor**, inspect it in **History**, and open **Reports** for the human-readable result.
+
+## ETL Testing for Dummies — Core Concepts
+
+### Source vs Target
+
+The **source** is where data starts: an operational database, REST response, SAP BO report, CSV, S3 object, or another upstream system. The **target** is where the pipeline puts the processed data. Testing compares the two sides after accounting for intended transformations. Give the framework stable key columns, such as `order_id`, so it knows which source row belongs with which target row.
+
+### Reconciliation
+
+Reconciliation is an accounting exercise for data. It asks:
+
+1. Are rows missing from either side?
+2. Do matching rows contain the same values?
+3. Are row counts, schemas, and aggregates sensible?
+
+A pass means the configured conditions were met, not that two systems are magically identical. Excluded columns, numeric tolerance, null behavior, and pass conditions define what “same enough” means.
+
+### Data Quality Rules
+
+A reconciliation compares two datasets; a **DQ rule** checks whether one dataset obeys a promise. Examples include “`customer_id` is never null,” “invoice IDs are unique,” “amount is between 0 and 1,000,000,” and “freshness is under 24 hours.” Use `error` severity for release-blocking promises and `warn` for useful signals that should not block the run.
+
+### Hash Prechecks
+
+A hash precheck creates a compact fingerprint of each side before doing expensive row-by-row work. Equal fingerprints provide a fast pass path. Different fingerprints do **not** explain the problem; they tell the framework to continue to the detailed comparison. Disable it only while diagnosing hashing behavior or when a backend cannot provide stable hashes.
+
+### Baseline Pinning
+
+A baseline is a known run saved as a reference point. Pin a trusted run after validation, then compare later runs with it to spot regressions. Pinning does not alter data or make future differences acceptable; it gives the team a stable “before” snapshot.
+
+### Data Contracts
+
+A data contract names the producer, owner, consumers, SLA, and expected quality of a job. When its source job fails or becomes overdue, the framework opens a breach and can notify subscribers. Version bumps make changed expectations visible instead of silently redefining success.
+
+### Write-Audit-Publish (WAP) Gates
+
+WAP protects consumers from partially validated data:
+
+1. **Write** new data to a staging location.
+2. **Audit** it with reconciliation, DQ rules, contracts, and required job status.
+3. **Publish** only when the gate returns `PUBLISH`; otherwise keep it staged with `HOLD` and reasons.
+
+The framework evaluates the audit decision; your orchestrator or deployment pipeline performs the physical publish.
+
+## Tab-by-Tab & Option-by-Option Deep Dive
+
+The UI is organized by task. The blocks below explain what each control means without keeping every field visible at once.
+
+### Config Tab
+
+Store reusable environment details before creating jobs. Secrets are encrypted at rest; prefer `secret://` references or protected environment variables in automation.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Saved Configs / Name | Selects an existing environment bundle or gives a new bundle a reusable name. |
+| Source / Target | Defines the two environment labels and their connection values. |
+| DB host, port, name, user, password, driver | Configures live database access. Passwords are secret fields. |
+| Named Connections | Adds aliases such as `hr_db` and `finance_db` so one environment can query multiple databases. Jobs select aliases with `source_connection` and `target_connection`. |
+| REST API Endpoints | Saves a named URL, HTTP method, headers, parameters, response records path, timeout, and optional auth reference for API jobs. |
+| SAP BO / Automic fields | Stores adapter server, repository, authentication, and connection settings. |
+| Use SSL / Verify SSL | Enables TLS and controls certificate verification. Keep verification on outside controlled development. |
+| File-source credentials | Stores S3/SFTP credential references used by multi-file discovery and preview. |
+| Save / Update / Delete / Test | Persists, changes, removes, or checks a configuration. Test before enabling live runs. |
+| Security Tokens | Creates, lists, activates, or revokes API bearer tokens. Copy a newly created token immediately. |
+| Webhooks | Registers event URLs, subscribed event types, active state, and optional HMAC secret. |
+
+</details>
+
+### Launch Tab
+
+Create reusable jobs, select jobs or saved sequences, tune one run, schedule it, and launch it.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Saved Config / Source Env / Target Env | Chooses credentials and the environment pair for this run. |
+| Use Live Connections | Off uses deterministic simulation; on queries configured external systems. |
+| Job Catalog search / tags / status | Narrows the catalog and selects jobs to run. |
+| Name / Description / Tags | Identifies and documents a reusable job. Name must be unique. |
+| Job Type | Chooses the executor and reveals type-specific fields; see the matrix below. |
+| Source Query / Target Query | SQL used to obtain each side of a reconciliation. |
+| Source / Target Connection | Chooses a named connection alias rather than the environment default. |
+| Source / Target File or API Endpoint | Chooses file inputs or saved REST endpoint definitions. |
+| Key Columns | Stable columns used to match rows one-to-one. |
+| Exclude Columns | Ignores volatile or intentionally different fields such as load timestamps. |
+| Parameters | Type-specific JSON/settings such as BO IDs, file pairing, API paths, and pass conditions. |
+| DQ Rules | Adds rule type, column, thresholds/pattern/operator, and `error` or `warn` severity. |
+| Depends On | Requires named upstream jobs and determines topological execution order. |
+| Parallel / Sequential | Runs independent jobs concurrently for speed or one at a time for deterministic load. |
+| Max Workers | Caps concurrent job or multi-file-pair work. |
+| Max Duration | Times out a job after the configured seconds; `0` disables the limit. |
+| Max Retries / Retry Delay / Retry On | Retries errors and/or timeouts with backoff. |
+| Float Tolerance | Treats small numeric differences inside the threshold as equal. |
+| Null Equals Null | Decides whether null on both sides counts as equal. |
+| Hash Precheck | Enables the fast fingerprint check before detailed comparison. |
+| Chunk Size | Processes large comparisons in bounded batches; `0` uses normal in-memory behavior. |
+| Schema Mismatch Policy | `warn` compares common columns and records the mismatch; `error` stops the job. |
+| Metrics / HTML Report | Enables generated operational metrics and report artifacts. |
+| Fail Fast | Stops scheduling more work after the first blocking failure. |
+| Health Check | Tests live connectivity before jobs begin. |
+| Save Selection | Saves a reusable set of jobs and run settings. |
+| Schedule Name / Cron / Enabled | Creates a recurring launch; **Run Now** triggers it outside its cron time. |
+| Run Tests | Submits the selected jobs and opens a tracked run. |
+
+</details>
+
+### Monitor Tab
+
+Follow active work through Server-Sent Events (SSE). Use it for live status, not long-term analysis.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Active run cards | Show run ID, environments, start time, overall state, and progress. |
+| Job progress | Shows `PENDING`, `RUNNING`, `PASSED`, `FAILED`, `ERROR`, `SKIPPED`, or `CANCELLED` per job. |
+| Live event/log stream | Displays incremental SSE messages without browser polling. |
+| Cancel | Requests cooperative cancellation; the current executor step may finish first. |
+| Run test suite | Starts pytest as a tracked run with collected, passed, failed, and error counters. |
+
+</details>
+
+### History Tab
+
+Investigate completed and in-progress runs, pin trusted baselines, and inspect trends and lineage.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Search / status / run type / date filters | Narrows run history. |
+| Run detail | Opens job results, timings, counts, errors, and mismatch summaries. |
+| Mismatch rows | Expands differing keys and values; links to acceptance and drill-down workflows. |
+| Pin Baseline | Marks the run as the job’s trusted comparison reference. |
+| Compare to Baseline | Diffs a selected run against the pinned run. |
+| Profile & Schema | Shows column profiles, schema snapshots, and drift history. |
+| Trends / flaky score | Displays duration/status trends and jobs whose outcomes frequently flip. |
+| Lineage DAG | Visualizes job dependencies and upstream/downstream impact. |
+| Segment Drill-down | Re-queries row counts by selected low-cardinality segments. |
+| Audit Log / Export / Delete | Reviews actions, downloads results, or removes a run subject to permissions. |
+
+</details>
+
+### Compare Deep Dive
+
+Use this tab for an immediate comparison that may not need a saved launch workflow.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Subtab or field | What it does |
+|---|---|
+| BO Report | Fetches source and target SAP BO documents/reports and compares exported content. |
+| Reconciliation | Runs dual-environment SQL reconciliation with keys, excludes, and tolerance. |
+| Recon File | Uploads or references two tabular/report files and compares them. |
+| Multi-File | Discovers groups on each side and pairs by tokens or structural similarity. |
+| SQL Direct | Executes source and target SQL immediately without first saving a catalog job. |
+| Column Stats | Compares counts, nulls, distinct values, and numeric summaries by column. |
+| Mismatch Diff | Compares mismatches from two runs to show introduced, resolved, and unchanged issues. |
+| Config / Environment / Connection | Chooses credentials and source/target locations. |
+| Report / Document / Prompt values | Selects BO content and supplies refresh prompts. |
+| Query / File / Sheet / Delimiter / Header | Defines the data extracted from each side. |
+| Key / Exclude Columns | Controls row matching and omitted fields. |
+| Float Tolerance / Null handling | Defines value equality. |
+| Backend | Selects the available comparison engine for dataset size and compatibility. |
+| Preview Mapping | Shows proposed multi-file pairs before execution. |
+| Unmatched Policy | `fail`, `warn`, or `ignore` when a discovered file group exists on only one side. |
+| Download / Export | Saves comparison results and mismatch details. |
+
+</details>
+
+### Differences Tab
+
+Search and triage mismatches across runs rather than opening each run separately.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Run / job / status selectors | Defines the mismatch population. |
+| Free-text / column / type filters | Finds a value, affected column, or mismatch category. |
+| Sort / page size / pagination | Controls result ordering and volume. |
+| Row detail | Shows key, source value, target value, and character-level changes. |
+| Accept / Reject | Marks a known difference accepted or returns it to unresolved state. |
+| Note / Accepted By | Records the reason and reviewer identity for auditability. |
+| Bulk Accept / Bulk Reject | Applies the action to the current selected mismatch set. |
+| Export | Downloads the filtered differences. |
+
+</details>
+
+### Contracts Tab
+
+Define ownership and SLA expectations, then manage breaches.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Name / Source Job | Identifies the contract and job whose outcomes enforce it. |
+| Owner / Consumers | Records accountable producer and downstream users. |
+| SLA Hours | Maximum acceptable interval before an overdue breach. |
+| Breach Severity | Sets the operational importance of a breach. |
+| Active | Soft-enables or disables enforcement while retaining history. |
+| Status | Shows `OK`, `BREACHED`, or `OVERDUE`. |
+| Breach History | Shows open/resolved times, duration, type, and escalation state. |
+| Resolve / note | Closes a breach with an auditable explanation. |
+| Minor / Major Version Bump | Records a compatible or breaking expectation change with a note. |
+| Rules-as-Code sync | Applies version-controlled expectation suites and reports missing/invalid jobs. |
+
+</details>
+
+### Reports Tab
+
+Turn a run into material for humans, dashboards, and audit records.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Run selector | Chooses the run represented by every report panel. |
+| HTML Report | Opens the themed summary and per-job details. |
+| PDF / CSV export | Downloads a portable or machine-readable artifact when available. |
+| Metrics | Shows counts, durations, status, and comparison measurements. |
+| Metric drift | Compares recent metrics with prior observations. |
+| Search / filters | Narrows report content and run-scoped logs. |
+
+</details>
+
+### Adapters Tab
+
+Browse external schedulers/reporting systems and import their objects into framework workflows.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Saved Config / adapter type | Chooses SAP BO or Automic connection details. |
+| Test / Refresh | Checks connectivity and reloads remote objects. |
+| BO folders / documents / reports | Browses repository content and selects an exportable report. |
+| BO prompts / format / download | Supplies refresh values and retrieves report output. |
+| Automic search / filters | Finds jobs by name, folder, client, or type. |
+| Import selected | Creates framework jobs from selected Automic objects. |
+| Live connections | Must be enabled for real adapter execution. |
+
+</details>
+
+### Logs Tab
+
+Troubleshoot the service itself. Unlike run logs in Reports, this tab is server-wide.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Search | Filters message text. |
+| Level chips | Shows all messages or only `ERROR`, `WARN`, `INFO`, or `DEBUG`. |
+| Run ID | Narrows global logs to messages associated with one run. |
+| Result limit | Caps returned entries. |
+| Auto-refresh | Reloads the latest log entries every five seconds. |
+
+</details>
+
+### Sequences Tab
+
+Build reusable ordered workflows with dependencies and conditions.
+
+<details><summary>Field & Option Breakdown</summary>
+
+| Field or option | What it does |
+|---|---|
+| Name / Description | Identifies the saved sequence. |
+| Add Step / Job | Adds a catalog job to the workflow. |
+| Order / dependencies | Defines prerequisites; the DAG must remain acyclic. |
+| Require Status | Runs a step only when required upstream statuses are present. |
+| Continue / stop behavior | Controls whether later eligible work proceeds after failure. |
+| Validate DAG | Detects missing jobs, cycles, and invalid dependencies before saving. |
+| Save / Clone / Delete | Manages reusable sequence definitions. |
+| Run | Sends the sequence to Launch with selected config, environments, and run settings. |
+
+</details>
+
+## Task-Based Scenario Walkthroughs
+
+### SQL Reconciliation
+
+1. In **Config**, save source and target database details and use **Test** on both.
+2. In **Launch**, create a `reconciliation` job and enter source and target SQL.
+3. Set stable **Key Columns**, exclude intended technical columns, and add DQ rules.
+4. Start with simulation mode; then enable **Use Live Connections** and run the job.
+5. Watch **Monitor**, open **History**, and inspect missing/value mismatch rows.
+6. Accept only documented business exceptions; fix the pipeline for unexplained differences.
+7. Pin the first trusted passing run as the baseline.
+
+### SAP BO Report Compare
+
+1. Save SAP BO credentials, CMS URL, and the correct authentication type in **Config**.
+2. Use **Adapters** to test access and identify document/report IDs.
+3. Open **Compare > BO Report**, choose source and target configs, reports, export format, and prompt values.
+4. Run the comparison and inspect sheets, row counts, schema, and value differences.
+5. For recurring checks, create a `bo_report` job in **Launch** with the same IDs and schedule it.
+
+### REST API Data Sources
+
+1. In **Config > REST API Endpoints**, save each endpoint’s URL, method, headers/auth reference, parameters, records path, and timeout.
+2. Test endpoints with non-production credentials and confirm the records path returns a list of objects.
+3. Create an `api_reconciliation` job in **Launch** and select the source endpoint.
+4. Define the target query/endpoint, key columns, pagination/response parameters, and DQ rules.
+5. Run live, then inspect request errors in **Logs** and data differences in **History**.
+6. Never place bearer tokens directly in job JSON; use saved secret fields or secret references.
+
+### Multi-File Reconciliation
+
+1. Create a `reconciliation` job and choose multi-file source mode; the UI may label this workflow `multi_file_reconciliation`.
+2. Define each side as local, S3, or SFTP and provide path/prefix and filename pattern.
+3. Choose explicit token matching for predictable names or automated structural matching for inconsistent names.
+4. Set readiness polling for live local spools and an unmatched policy (`fail`, `warn`, or `ignore`).
+5. Select **Preview Mapping** and verify every proposed pair before saving.
+6. Run with a sensible **Max Workers** value, then inspect each pair’s isolated result and unmatched groups.
+
+### CI/CD Quality Gates
+
+1. Save the job or sequence, run it once manually, and resolve configuration failures.
+2. Store `ETL_BASE_URL` and `ETL_API_TOKEN` as protected CI secrets.
+3. Trigger the run through `POST /api/runs`, retain its run ID, and poll until terminal status.
+4. If the runner shares framework storage, execute `python -m etl_framework.runner.cli --gate-run <run_id>`.
+5. Treat exit `0` as publish, `1` as failed, `2` as cancelled, `3` as error, and `4` as not found.
+6. If CI has HTTP-only access, gate directly on API run/gate status instead of the local CLI.
+7. Preserve reports and mismatch exports as build artifacts; do not publish when the decision is `HOLD`.
+
+## Which Option When? Decision Matrices
+
+### Job Types
+
+| Job type | Choose it when | Main inputs | Important note |
+|---|---|---|---|
+| `reconciliation` | Comparing source and target SQL, files, or multi-file groups as a reusable job | Queries/files, keys, excludes, tolerance | Canonical general-purpose executor. |
+| `bo_report` | Refreshing and comparing SAP BusinessObjects report output | Config, report/document IDs, prompts, export format | Requires live SAP BO access. |
+| `sql_direct` | Performing a quick ad-hoc two-query comparison | Source/target SQL and connections | Primarily a Compare workflow; save as reconciliation for scheduling. |
+| `multi_file_reconciliation` | Pairing and reconciling many files from local/S3/SFTP | Sources, patterns, pairing strategy, unmatched policy | UI/workflow name; persisted jobs use `reconciliation` with `params.source_mode: "multi_file"`. |
+| `api_reconciliation` | Reconciling REST API records with a target dataset | Saved endpoint, records path, target, keys | Use secret references for authentication. |
+
+### Compare Subtabs
+
+| Subtab | Choose it when | Avoid it when |
+|---|---|---|
+| BO Report | Both sides are SAP BO report exports | You only need raw database queries. |
+| Reconciliation | You need a full ad-hoc source/target compare | The check must be scheduled; save a job instead. |
+| Recon File | You have exactly two local tabular or report files | You have batches requiring pairing. |
+| Multi-File | Each side contains many related files | File pairing cannot be reviewed or made deterministic. |
+| SQL Direct | You want the shortest path from two SQL statements to a diff | You need reusable catalog metadata and dependencies. |
+| Column Stats | Aggregate profile differences are more useful than every row | Exact row-level evidence is required. |
+| Mismatch Diff | You need to know which failures are new or resolved between runs | You have not yet produced two comparable run results. |
+
+### Schema Mismatch Policies
+
+The current run API accepts `warn` and `error`. Names such as `strict` and `ignore_extra_target` are common policy vocabulary, but map them explicitly as shown rather than sending unsupported values.
+
+| Policy | Choose it when | Framework setting |
+|---|---|---|
+| `strict` | Any missing, extra, renamed, or incompatible column must block release | `error` |
+| `error` | You want immediate failure on source/target schema mismatch | `error` |
+| `warn` | You want the mismatch recorded while common columns are compared | `warn` |
+| `ignore_extra_target` | Audit columns intentionally exist only on target | Use `warn`, then document/exclude intentional columns; there is no separate API enum. |
+| `ignore_extra_source` | Source carries fields intentionally not loaded | Use `warn`, then document/exclude intentional columns; there is no separate API enum. |
+| `ignore` / `coerce` | A different tool uses these labels | Not accepted by current `RunSettings`; normalize to `warn` or `error` before submission. |
+
+### DQ Rule Categories
+
+| Category | Choose it when | Typical rules | Trade-off |
+|---|---|---|---|
+| Basic | Checking clear row/column promises on every run | `not_null`, `unique`, `row_count_min`, `row_count_max`, `match_regex`, `no_whitespace` | Easy to explain and usually inexpensive. |
+| Advanced | Detecting statistical, distribution, relationship, or drift problems | `completeness_ratio`, percentile, z-score, IQR, Grubbs, cross-column, referential, anomaly rules | Needs enough data and carefully tuned thresholds. |
+| Custom SQL | Business logic cannot be expressed safely with a built-in rule | `custom_sql`, `custom_sql_assert` | Most flexible, but database-specific and requires review for cost and safety. |
+
+## API Reference & CLI Options
+
+The detailed, copyable endpoint examples remain in [API Usage](#api-usage), including token management, jobs, runs, SSE, cancellation, baselines, mismatches, trends, lineage, profiles, and exports. Complete runner and quality-gate commands are in [Testing](#testing) and [Write-Audit-Publish Gate](#write-audit-publish-gate). The most common automation command is:
+
+```powershell
+python -m etl_framework.runner.cli --gate-run <run_id>
+```
+
+Do not remove the existing examples below when updating this guide; they are the operational API and CLI reference.
+
 
 ## Capabilities
 
