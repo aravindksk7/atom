@@ -127,6 +127,16 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             run_settings = resolved.defaults.run_settings or {}
             config_id = resolved.defaults.config_id
             sequence_meta = resolved.snapshot_meta()
+            from api.services.sequence_preconditions import check_for_session
+
+            gate = check_for_session(db, resolved.preconditions)
+            if not gate.ok:
+                logger.info("Schedule '%s' skipped: %s", name, gate.reason)
+                record_scheduler_event(
+                    db, sched, "skipped", "CANCELLED",
+                    error_summary=f"Precondition not met: {gate.reason}",
+                )
+                return
             selection_id = None
             selection_version = None
         else:

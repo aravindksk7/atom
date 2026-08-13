@@ -25,6 +25,7 @@ from api.services.job_env_validation import (
     validate_env_requirements as _validate_env_requirements,
 )
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
+from api.services.sequence_preconditions import check_for_session as check_preconditions
 from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunRepository
 from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 
@@ -215,6 +216,9 @@ def launch_selection(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         job_sequence = resolved.as_linear_steps()   # flat shape, for env validation + snapshot
         dag_steps = resolved.steps                  # real graph, for execution
+        gate = check_preconditions(db, resolved.preconditions)
+        if not gate.ok:
+            raise HTTPException(status_code=422, detail=gate.reason)
     else:
         job_sequence = version.job_sequence or []
 
