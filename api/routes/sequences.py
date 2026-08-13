@@ -18,7 +18,6 @@ from api.schemas import (
 from api.services.audit_service import AuditService
 from api.services.sequence_validation import (
     SequenceCycleError,
-    phase1_unsupported,
     topological_order,
     validate_steps,
 )
@@ -33,7 +32,7 @@ def _known_job_names(db: Session) -> set[str]:
 
 
 def _check_or_422(db: Session, steps, preconditions) -> None:
-    errors = validate_steps(steps, _known_job_names(db)) + phase1_unsupported(steps, preconditions)
+    errors = validate_steps(steps, _known_job_names(db))
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
@@ -117,9 +116,7 @@ def create_sequence(
 # Registered before /{sequence_id} so "validate" is never read as an id.
 @router.post("/validate", response_model=SequenceValidateResponse)
 def validate_sequence(body: SequenceValidateRequest, db: Session = Depends(get_session)):
-    errors = validate_steps(body.steps, _known_job_names(db)) + phase1_unsupported(
-        body.steps, body.preconditions
-    )
+    errors = validate_steps(body.steps, _known_job_names(db))
     if errors:
         return SequenceValidateResponse(ok=False, errors=errors, order=[])
     try:

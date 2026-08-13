@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:  # pragma: no cover
-    from api.schemas import SequencePrecondition, SequenceStepRef
+    from api.schemas import SequenceStepRef
 
 
 class SequenceCycleError(Exception):
@@ -85,19 +85,3 @@ def validate_steps(
             errors.append(_issue(None, "depends_on", str(exc).replace("Dependency cycle", "Dependency cycle detected")))
 
     return errors
-
-
-# --- Phase gating -----------------------------------------------------------
-# Phase 3/4 features remain gated until their executor support arrives.
-
-def phase1_unsupported(
-    steps: list["SequenceStepRef"], preconditions: "SequencePrecondition | None"
-) -> list[dict]:
-    """Fields the executor cannot honour yet.
-
-    Trigger rules opened in Phase 2; retry and failure policy in Phase 3. Only
-    sequence preconditions remain, and they arrive in Phase 4.
-    """
-    if preconditions is not None:
-        return [_issue(None, "preconditions", "Sequence preconditions arrive in Phase 4")]
-    return []

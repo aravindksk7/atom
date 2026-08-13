@@ -87,27 +87,3 @@ def test_topological_order_raises_on_cycle():
     with pytest.raises(SequenceCycleError) as exc:
         topological_order(steps)
     assert set(exc.value.step_ids) == {"a", "b"}
-
-
-def test_trigger_rules_are_allowed_from_phase2():
-    from api.services.sequence_validation import phase1_unsupported
-    for rule in ("all_success", "all_done", "any_success", "all_failed"):
-        assert phase1_unsupported([_step("a", trigger_rule=rule)], None) == []
-
-
-def test_retry_and_on_failure_are_allowed_from_phase3():
-    from api.services.sequence_validation import phase1_unsupported
-    steps = [_step("a", max_retries=2, retry_delay_seconds=1.5, on_failure="stop")]
-    assert phase1_unsupported(steps, None) == []
-
-
-def test_preconditions_are_still_gated():
-    from api.schemas import SequencePrecondition
-    from api.services.sequence_validation import phase1_unsupported
-    errors = phase1_unsupported([_step("a")], SequencePrecondition(weekdays=[0]))
-    assert [e["field"] for e in errors] == ["preconditions"]
-
-
-def test_phase1_allows_defaults():
-    from api.services.sequence_validation import phase1_unsupported
-    assert phase1_unsupported([_step("a", hold_after=True, wait_seconds=5)], None) == []

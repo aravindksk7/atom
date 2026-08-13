@@ -101,12 +101,28 @@ def test_create_accepts_retry_and_failure_policy(client):
     assert resp.status_code == 201, resp.text
 
 
-def test_create_still_rejects_preconditions(client):
+def test_create_accepts_preconditions(client):
     resp = client.post("/api/sequences", json={
-        "name": "gated", "steps": CHAIN, "preconditions": {"weekdays": [0]},
+        "name": "gated", "steps": CHAIN,
+        "preconditions": {
+            "time_window": {"start": "01:00", "end": "05:00"},
+            "weekdays": [0, 1, 2, 3, 4],
+        },
     })
-    assert resp.status_code == 422
-    assert resp.json()["detail"][0]["field"] == "preconditions"
+    assert resp.status_code == 201, resp.text
+
+    detail = client.get(f"/api/sequences/{resp.json()['id']}").json()
+    stored = detail["versions"][0]["preconditions"]
+    assert stored["time_window"] == {"start": "01:00", "end": "05:00"}
+    assert stored["weekdays"] == [0, 1, 2, 3, 4]
+
+
+def test_validate_endpoint_accepts_preconditions(client):
+    resp = client.post("/api/sequences/validate", json={
+        "steps": CHAIN, "preconditions": {"weekdays": [0]},
+    })
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
 
 
 def test_get_returns_detail_with_versions(client):
