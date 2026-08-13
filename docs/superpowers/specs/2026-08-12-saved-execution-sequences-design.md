@@ -118,8 +118,17 @@ class SequencePrecondition(BaseModel):
 `time_window` whose `end` is earlier than its `start` wraps past midnight.
 
 `require_run_success` is satisfied when a `TestResult` for `job_name` with a status in
-`{PASSED, SLOW}` exists on a run completed within the last `within_hours` hours. It looks
-across all runs, not only runs of this sequence.
+`{PASSED, SLOW}` has an `executed_at` within the last `within_hours` hours. It looks across all
+runs, not only runs of this sequence. (`TestResult.executed_at` rather than the parent run's
+completion time: it records when the job itself ran, which is what the gate is actually asking
+about, and it needs no join.)
+
+**Preconditions are evaluated before a run is created**, not inside the executor. A gate that
+fails means nothing happened at all — no run row, no cancelled history entry. A weekday-gated
+nightly schedule would otherwise manufacture a cancelled run every weekend, and an ad-hoc launch
+outside its window would return `202 Accepted` for a run that immediately dies. Both callers —
+selection launch and the scheduler — call one shared checker; see §5 for what each does on
+failure.
 
 There is deliberately **no** file-existence precondition. The repo already has a
 `freshness` job type; "the file arrived" is expressed as step 1 of the DAG with the rest
@@ -211,7 +220,6 @@ step runs inline with no pool involvement — which is the path every chain-shap
 resolve ref -> version -> steps
 validate DAG (cycles, unknown deps, unknown jobs) -> fail fast
 materialize run_steps rows as PENDING
-evaluate preconditions -> on failure: run CANCELLED with reason, no step runs
 
 loop until nothing pending and nothing in flight:
     if cancel_requested:
@@ -460,7 +468,7 @@ trigger rules, and the retry/failure policy.
 | A `job_name` in the sequence no longer exists or is disabled | Resolve-time failure. The run fails immediately, naming every missing job. No step runs — never a half-executed DAG. |
 | A schedule's pinned `sequence_version` is gone | `record_scheduler_event(..., "skipped", "ERROR", ...)`, matching the existing missing-selection-version path in `api/services/scheduler.py`. |
 | A sequence is archived while a schedule references it | Scheduler skips with a telemetry event. Archiving does not delete. |
-| A precondition fails | Run ends `CANCELLED` with the failing precondition in the error message; scheduler records a `skipped` event. |
+| A precondition fails | **No run is created.** An ad-hoc or selection launch returns 422 naming the failing gate; the scheduler records its existing `skipped` telemetry event and fires nothing. |
 | A cycle somehow reaches the executor | Resolve-time validation raises before materializing `run_steps`. |
 | `DELETE` on a referenced sequence | 409 listing the referencing selections and schedules. |
 
