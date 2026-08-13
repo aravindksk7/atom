@@ -17,22 +17,41 @@ class DBEngine:
         if _engine is not None:
             self._engine = _engine
         else:
-            # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
-            # (a behavior change from Driver 17, which defaulted to no encryption), so
-            # it rejects self-signed/internal CA certs unless TrustServerCertificate is
-            # set. Driver 17 doesn't need this — leave its connection string unchanged.
-            trust_cert = "TrustServerCertificate=yes;" if "18" in env_config.db_driver else ""
-            params = urllib.parse.quote_plus(
-                f"DRIVER={{{env_config.db_driver}}};"
-                f"SERVER={env_config.db_host},{env_config.db_port};"
-                f"DATABASE={env_config.db_name};"
-                f"UID={env_config.db_user};"
-                f"PWD={env_config.db_password};"
-                f"Connect Timeout={env_config.db_connect_timeout};"
-                f"{trust_cert}"
-            )
+            if getattr(env_config, "db_type", "mssql") == "netezza":
+                if env_config.db_driver.lower() == "nzpy":
+                    connection_url = (
+                        f"netezza+nzpy://{env_config.db_user}:{env_config.db_password}"
+                        f"@{env_config.db_host}:{env_config.db_port}/{env_config.db_name}"
+                    )
+                else:
+                    params = urllib.parse.quote_plus(
+                        f"DRIVER={{{env_config.db_driver}}};"
+                        f"SERVER={env_config.db_host};"
+                        f"PORT={env_config.db_port};"
+                        f"DATABASE={env_config.db_name};"
+                        f"UID={env_config.db_user};"
+                        f"PWD={env_config.db_password};"
+                    )
+                    connection_url = f"netezza+pyodbc:///?odbc_connect={params}"
+            else:
+                # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
+                # (a behavior change from Driver 17, which defaulted to no encryption), so
+                # it rejects self-signed/internal CA certs unless TrustServerCertificate is
+                # set. Driver 17 doesn't need this — leave its connection string unchanged.
+                trust_cert = "TrustServerCertificate=yes;" if "18" in env_config.db_driver else ""
+                params = urllib.parse.quote_plus(
+                    f"DRIVER={{{env_config.db_driver}}};"
+                    f"SERVER={env_config.db_host},{env_config.db_port};"
+                    f"DATABASE={env_config.db_name};"
+                    f"UID={env_config.db_user};"
+                    f"PWD={env_config.db_password};"
+                    f"Connect Timeout={env_config.db_connect_timeout};"
+                    f"{trust_cert}"
+                )
+                connection_url = f"mssql+pyodbc:///?odbc_connect={params}"
+
             self._engine = create_engine(
-                f"mssql+pyodbc:///?odbc_connect={params}",
+                connection_url,
                 pool_size=env_config.db_pool_size,
                 max_overflow=env_config.db_pool_overflow,
                 pool_timeout=env_config.db_pool_timeout,

@@ -1,11 +1,13 @@
 """Tests for DBEngine — real SQLAlchemy connection wrapper."""
 from __future__ import annotations
 
+import urllib.parse
 import pytest
 from unittest.mock import patch, MagicMock
 from sqlalchemy import create_engine, text
 
 from etl_framework.config.models import EnvironmentConfig
+from etl_framework.db.engine import DBEngine
 
 
 @pytest.fixture
@@ -81,3 +83,52 @@ def test_db_engine_build_connection_string_uses_config_fields(cfg):
     assert "localhost" in captured["conn_str"]
     assert "testdb" in captured["conn_str"]
     assert "sa" in captured["conn_str"]
+
+
+def test_db_engine_netezza_nzpy_connection_url(monkeypatch):
+    captured_urls = []
+
+    def fake_create_engine(url, **kwargs):
+        captured_urls.append(url)
+        return MagicMock()
+
+    monkeypatch.setattr("etl_framework.db.engine.create_engine", fake_create_engine)
+
+    config = EnvironmentConfig(
+        name="netezza_dev",
+        db_type="netezza",
+        db_host="netezza.host",
+        db_port=5480,
+        db_name="analytics",
+        db_user="nz_user",
+        db_password="nz_password",
+        db_driver="nzpy",
+    )
+    engine = DBEngine(config)
+    assert captured_urls[0] == "netezza+nzpy://nz_user:nz_password@netezza.host:5480/analytics"
+
+
+def test_db_engine_netezza_pyodbc_connection_url(monkeypatch):
+    captured_urls = []
+
+    def fake_create_engine(url, **kwargs):
+        captured_urls.append(url)
+        return MagicMock()
+
+    monkeypatch.setattr("etl_framework.db.engine.create_engine", fake_create_engine)
+
+    config = EnvironmentConfig(
+        name="netezza_dev",
+        db_type="netezza",
+        db_host="netezza.host",
+        db_port=5480,
+        db_name="analytics",
+        db_user="nz_user",
+        db_password="nz_password",
+        db_driver="NetezzaSQL",
+    )
+    engine = DBEngine(config)
+    assert captured_urls[0].startswith("netezza+pyodbc:///?odbc_connect=")
+    assert "DRIVER%3D%7BNetezzaSQL%7D" in captured_urls[0] or "DRIVER={NetezzaSQL}" in urllib.parse.unquote(captured_urls[0])
+    assert "SERVER%3Dnetezza.host" in captured_urls[0] or "SERVER=netezza.host" in urllib.parse.unquote(captured_urls[0])
+
