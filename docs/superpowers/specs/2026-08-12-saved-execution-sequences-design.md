@@ -265,8 +265,13 @@ These govern different scopes and never overlap. `trigger_rule` governs a single
 | `on_failure` | Effect |
 |---|---|
 | `stop` | Abort the run. Stop scheduling, drain in-flight, mark the remainder `CANCELLED`. |
-| `continue` | Run keeps scheduling. Each descendant is decided purely by its own trigger rule. |
-| `skip_downstream` (default) | Force every transitive descendant `BLOCKED`, overriding their trigger rules. |
+| `skip_downstream` (default) | Trigger rules decide each descendant, and the failure counts toward the run's status. This is what the executor already does, so every sequence saved before Phase 3 keeps its exact behaviour. |
+| `continue` | Scheduling is identical to `skip_downstream`, but this step's failure is **excluded from run-status aggregation** — the step is allowed to fail without turning the run red. The CI `continue-on-error` idea. |
+
+An earlier draft defined `skip_downstream` as force-blocking every transitive descendant and
+`continue` as "trigger rules decide". That was wrong on contact with the code: trigger rules
+already decide under the default, so the two values described one behaviour, and redefining the
+default would have silently changed every stored sequence.
 
 ### Retry
 
@@ -277,6 +282,12 @@ window. Each attempt increments `run_steps.attempt`; the final row records the l
 attempt's status.
 
 `max_retries` and `retry_delay_seconds` fall back to the run-level values when null.
+
+Step-level retry **replaces** the ad-hoc retry wrapper inside `_build_case_reconciliation`,
+which retried on exception with exponential backoff for reconciliation jobs only, recorded no
+attempt count, and ignored `retry_on`. One retry mechanism, applied uniformly to every job type,
+with the attempt count visible in `run_steps` and the UI. Since run-level `max_retries` defaults
+to 0, removing the wrapper changes nothing for a default run.
 
 ### Release actions in a DAG
 
