@@ -791,6 +791,21 @@
           text: 'In a job selection, switch "Jobs come from" to "A saved execution sequence". In a schedule, switch "Run" to "An execution sequence". A selection can follow the latest version; a schedule always pins the version it was saved with.',
           where: 'Launch tab → Selections and Schedules',
         },
+        {
+          title: 'Choose when a step runs',
+          text: 'A step with dependencies has a "Run this step when" setting. The default waits for every parent to succeed. "All parents finished" runs regardless of outcome, which is how you build a cleanup step. "All parents failed" is how you build an alert branch that only fires when things went wrong.',
+          where: 'Sequences tab → step row',
+        },
+        {
+          title: 'Retry transient errors',
+          text: 'Set "Retries on error" to re-run a step that errored. Leave it blank to inherit the run settings. Only errors are retried — a failed data comparison is a real result, and running it again cannot change it.',
+          tip: 'Retries happen on the step\'s own thread, so a waiting retry never holds up other branches.',
+        },
+        {
+          title: 'Decide what a failure means',
+          text: '"If this step fails" controls the blast radius. The default lets dependent steps decide for themselves through their own trigger rules. "Don\'t count this failure" lets a step fail without turning the whole run red. "Stop the whole run" cancels everything still to come.',
+          warn: 'Stopping cancels every branch, including ones that had nothing to do with the failed step.',
+        },
       ],
     },
     {
