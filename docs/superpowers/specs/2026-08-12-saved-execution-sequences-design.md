@@ -117,11 +117,15 @@ class SequencePrecondition(BaseModel):
 (`SettingsRepository.get_timezone()`, the same source APScheduler already uses). A
 `time_window` whose `end` is earlier than its `start` wraps past midnight.
 
-`require_run_success` is satisfied when a `TestResult` for `job_name` with a status in
-`{PASSED, SLOW}` has an `executed_at` within the last `within_hours` hours. It looks across all
-runs, not only runs of this sequence. (`TestResult.executed_at` rather than the parent run's
-completion time: it records when the job itself ran, which is what the gate is actually asking
+`require_run_success` is satisfied when the **most recent** `TestResult` for `job_name` has an
+`executed_at` within the last `within_hours` hours **and** a status in `{PASSED, SLOW}`. It looks
+across all runs, not only runs of this sequence. (`TestResult.executed_at` rather than the parent
+run's completion time: it records when the job itself ran, which is what the gate is asking
 about, and it needs no join.)
+
+Newest-run semantics, not "any success in the window": if the job passed five hours ago and
+failed one hour ago, the gate refuses. The latest attempt describes the current state of the
+data, which is the thing a downstream sequence actually depends on.
 
 **Preconditions are evaluated before a run is created**, not inside the executor. A gate that
 fails means nothing happened at all — no run row, no cancelled history entry. A weekday-gated
