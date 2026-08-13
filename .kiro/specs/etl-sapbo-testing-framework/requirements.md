@@ -67,11 +67,11 @@ A lightweight, production-ready ETL and SAP BusinessObjects (BO) testing framewo
 
 ### Requirement 3: Database Connection Management
 
-**User Story:** As a data engineer, I want the framework to manage SQL Server database connections reliably, so that queries can be executed against both environments without manual connection handling.
+**User Story:** As a data engineer, I want the framework to manage SQL Server and IBM Netezza database connections reliably, so that queries can be executed against both environments without manual connection handling.
 
 #### Acceptance Criteria
 
-1. THE DB_Engine SHALL establish a SQLAlchemy connection to a SQL Server database using parameters from the environment configuration (host, port, database name, username, password, driver).
+1. THE DB_Engine SHALL establish a SQLAlchemy connection to a SQL Server or IBM Netezza database (`db_type: netezza`) using parameters from the environment configuration (host, port, database name, username, password, driver, db_type). Connection to Netezza databases SHALL be supported using `nzpy` or `pyodbc` with Netezza ODBC drivers.
 2. WHEN a database connection cannot be established within the configured timeout, THE DB_Engine SHALL raise a `DatabaseConnectionError` identifying the environment name and connection parameters (excluding passwords).
 3. THE DB_Engine SHALL use connection pooling with configurable pool size and overflow limits.
 4. WHEN a SQL query is executed, THE DB_Engine SHALL return results as a `pandas.DataFrame`.
