@@ -455,7 +455,7 @@
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
-            <select x-model="timezoneDraft" @change="timezoneDraftDirty = true" class="field-input field-select flex-1" aria-label="timezonedraft">
+            <select x-model="timezoneDraft" class="field-input field-select flex-1" aria-label="timezonedraft">
               <template x-for="tz in timezoneOptions" :key="tz">
                 <option :value="tz" x-text="tz"></option>
               </template>
@@ -484,7 +484,7 @@
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
-            <input type="text" x-model="boDownloadDirDraft" @input="boDownloadDirDraftDirty = true" placeholder="C:\reports\sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft" data-testid="bo-download-dir-input">
+            <input type="text" x-model="boDownloadDirDraft" placeholder="C:\reports\sapbo" class="field-input flex-1" aria-label="bodownloaddirdraft" data-testid="bo-download-dir-input">
             <button @click="saveBoDownloadDirSetting()" :disabled="boDownloadDirSaving || boDownloadDirDraft === boDownloadDir" class="btn-primary btn-sm" data-testid="bo-download-dir-save-btn">
               <span x-show="!boDownloadDirSaving">Save</span>
               <span x-show="boDownloadDirSaving">Saving…</span>

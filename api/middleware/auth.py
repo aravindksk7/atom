@@ -50,6 +50,9 @@ def _is_exempt(path: str, method: str) -> bool:
     for pattern in _EXEMPT_PATTERNS:
         if pattern.match(path):
             return True
+    # Allow unauthenticated GET /api/settings to read regional timezone and settings
+    if path == "/api/settings" and method == "GET":
+        return True
     # Bootstrap: allow unauthenticated POST /api/tokens only
     if path == "/api/tokens" and method == "POST":
         return True

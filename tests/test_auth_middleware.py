@@ -36,6 +36,18 @@ def test_post_api_tokens_is_exempt():
     assert resp.status_code != 401
 
 
+def test_get_api_settings_is_exempt():
+    client = TestClient(make_app(), raise_server_exceptions=False)
+    resp = client.get("/api/settings")
+    assert resp.status_code != 401
+
+
+def test_put_api_settings_is_not_exempt():
+    client = TestClient(make_app(), raise_server_exceptions=False)
+    resp = client.put("/api/settings", json={"timezone": "Australia/Sydney"})
+    assert resp.status_code == 401
+
+
 def test_get_api_tokens_is_not_exempt():
     client = TestClient(make_app(), raise_server_exceptions=False)
     resp = client.get("/api/tokens")
