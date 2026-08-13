@@ -18,6 +18,19 @@
       sequenceOrder: [],               // topological step_id order when valid
       sequenceSaving: false,
 
+      // Preconditions are edited as a flat form and converted on save, because
+      // the API wants absent gates to be null rather than empty objects.
+      sequencePreconditions: {
+        time_window_enabled: false, time_window_start: '', time_window_end: '',
+        weekdays_enabled: false, weekdays: [],
+        require_run_enabled: false, require_run_job: '', require_run_hours: 24,
+      },
+      weekdayOptions: [
+        { value: 0, label: 'Mon' }, { value: 1, label: 'Tue' }, { value: 2, label: 'Wed' },
+        { value: 3, label: 'Thu' }, { value: 4, label: 'Fri' }, { value: 5, label: 'Sat' },
+        { value: 6, label: 'Sun' },
+      ],
+
       // ===== DERIVED =====
       get sequenceIsValid() {
         return this.sequenceSteps.length > 0 && this.sequenceIssues.length === 0;
@@ -76,6 +89,60 @@
       },
 
       // ===== EDITING =====
+      emptyPreconditions() {
+        return {
+          time_window_enabled: false, time_window_start: '', time_window_end: '',
+          weekdays_enabled: false, weekdays: [],
+          require_run_enabled: false, require_run_job: '', require_run_hours: 24,
+        };
+      },
+
+      loadPreconditionsForm(stored) {
+        const form = this.emptyPreconditions();
+        if (!stored) return form;
+        if (stored.time_window) {
+          form.time_window_enabled = true;
+          form.time_window_start = stored.time_window.start;
+          form.time_window_end = stored.time_window.end;
+        }
+        if (stored.weekdays) {
+          form.weekdays_enabled = true;
+          form.weekdays = [...stored.weekdays];
+        }
+        if (stored.require_run_success) {
+          form.require_run_enabled = true;
+          form.require_run_job = stored.require_run_success.job_name;
+          form.require_run_hours = stored.require_run_success.within_hours;
+        }
+        return form;
+      },
+
+      buildPreconditionsPayload() {
+        const f = this.sequencePreconditions;
+        const payload = {};
+        if (f.time_window_enabled && f.time_window_start && f.time_window_end) {
+          payload.time_window = { start: f.time_window_start, end: f.time_window_end };
+        }
+        if (f.weekdays_enabled && f.weekdays.length) {
+          payload.weekdays = [...f.weekdays].sort((a, b) => a - b);
+        }
+        if (f.require_run_enabled && f.require_run_job) {
+          payload.require_run_success = {
+            job_name: f.require_run_job,
+            within_hours: Number(f.require_run_hours) || 1,
+          };
+        }
+        // No gates enabled means no preconditions at all, which the API
+        // expresses as null -- an empty object would be a meaningless gate set.
+        return Object.keys(payload).length ? payload : null;
+      },
+
+      toggleWeekday(day) {
+        const at = this.sequencePreconditions.weekdays.indexOf(day);
+        if (at === -1) this.sequencePreconditions.weekdays.push(day);
+        else this.sequencePreconditions.weekdays.splice(at, 1);
+      },
+
       newSequenceStep() {
         return {
           step_id: '', job_name: '', depends_on: [],
@@ -94,6 +161,7 @@
         this.sequenceEditorMode = 'create';
         this.sequenceMeta = { name: '', description: '', tags_raw: '' };
         this.sequenceSteps = [this.newSequenceStep()];
+        this.sequencePreconditions = this.emptyPreconditions();
         this.sequenceIssues = [];
         this.sequenceOrder = [];
         this.sequenceEditorOpen = true;
@@ -109,6 +177,7 @@
           tags_raw: (this.selectedSequence.tags || []).join(', '),
         };
         this.sequenceSteps = JSON.parse(JSON.stringify(latest ? latest.steps : []));
+        this.sequencePreconditions = this.loadPreconditionsForm(latest ? latest.preconditions : null);
         this.sequenceIssues = [];
         this.sequenceOrder = [];
         this.sequenceEditorOpen = true;
@@ -177,6 +246,7 @@
         this.sequenceSaving = true;
         const tags = this.sequenceMeta.tags_raw
           .split(',').map((t) => t.trim()).filter(Boolean);
+        const preconditions = this.buildPreconditionsPayload();
         try {
           if (this.sequenceEditorMode === 'create') {
             const created = await api('POST', '/api/sequences', {
@@ -184,12 +254,14 @@
               description: this.sequenceMeta.description,
               tags,
               steps: this.sequenceSteps,
+              preconditions,
             });
             await this.loadSequences();
             await this.selectSequence(created);
           } else {
             await api('POST', `/api/sequences/${this.selectedSequence.id}/versions`, {
               steps: this.sequenceSteps,
+              preconditions,
             });
             await this.loadSequences();
             await this.selectSequence(this.selectedSequence);

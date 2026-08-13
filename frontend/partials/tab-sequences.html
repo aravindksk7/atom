@@ -94,6 +94,73 @@
         </label>
       </div>
 
+<details class="card card-compact mb-3" data-testid="sequence-preconditions">
+  <summary class="text-sm cursor-pointer">Preconditions — when may this sequence run?</summary>
+  <p class="text-xs text-muted mt-2">
+    Checked once before the sequence starts. If a gate says no, nothing runs and no run is recorded.
+  </p>
+
+  <label class="field-inline mt-3">
+    <input type="checkbox" x-model="sequencePreconditions.time_window_enabled"
+           data-testid="precondition-window-toggle" aria-label="restrict to a time window" />
+    <span>Only within a time window</span>
+  </label>
+  <div class="grid grid-cols-2 gap-3" x-show="sequencePreconditions.time_window_enabled">
+    <label class="field">
+      <span class="field-label">From</span>
+      <input type="time" class="field-input" data-testid="precondition-window-start"
+             x-model="sequencePreconditions.time_window_start" aria-label="window start" />
+    </label>
+    <label class="field">
+      <span class="field-label">Until</span>
+      <input type="time" class="field-input" data-testid="precondition-window-end"
+             x-model="sequencePreconditions.time_window_end" aria-label="window end" />
+    </label>
+  </div>
+  <p class="text-xs text-muted" x-show="sequencePreconditions.time_window_enabled">
+    Uses the application timezone. An end time earlier than the start wraps past midnight.
+  </p>
+
+  <label class="field-inline mt-3">
+    <input type="checkbox" x-model="sequencePreconditions.weekdays_enabled"
+           data-testid="precondition-weekdays-toggle" aria-label="restrict to weekdays" />
+    <span>Only on certain days</span>
+  </label>
+  <div class="flex flex-wrap gap-2" x-show="sequencePreconditions.weekdays_enabled"
+       data-testid="precondition-weekdays">
+    <template x-for="day in weekdayOptions" :key="day.value">
+      <label class="chip cursor-pointer">
+        <input type="checkbox" :checked="sequencePreconditions.weekdays.includes(day.value)"
+               @change="toggleWeekday(day.value)" :aria-label="day.label" />
+        <span x-text="day.label"></span>
+      </label>
+    </template>
+  </div>
+
+  <label class="field-inline mt-3">
+    <input type="checkbox" x-model="sequencePreconditions.require_run_enabled"
+           data-testid="precondition-upstream-toggle" aria-label="require a recent successful job" />
+    <span>Only after another job has succeeded recently</span>
+  </label>
+  <div class="grid grid-cols-2 gap-3" x-show="sequencePreconditions.require_run_enabled">
+    <label class="field">
+      <span class="field-label">Job</span>
+      <select class="field-input" data-testid="precondition-upstream-job"
+              x-model="sequencePreconditions.require_run_job" aria-label="upstream job">
+        <option value="">Select a job…</option>
+        <template x-for="job in jobs" :key="job.name">
+          <option :value="job.name" x-text="job.name"></option>
+        </template>
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">Within the last (hours)</span>
+      <input type="number" min="1" class="field-input" data-testid="precondition-upstream-hours"
+             x-model.number="sequencePreconditions.require_run_hours" aria-label="within hours" />
+    </label>
+  </div>
+</details>
+
       <div class="space-y-3" data-testid="sequence-step-editor">
         <template x-for="(step, index) in sequenceSteps" :key="index">
           <div class="card card-compact">
