@@ -348,6 +348,9 @@ class RunExecutor:
             hold_timeout=HOLD_TIMEOUT_SECONDS,
             blocked_step_status="CANCELLED" if self._legacy_chain else "BLOCKED",
             expire_all=self._db.expire_all,
+            default_max_retries=self._settings.max_retries,
+            default_retry_delay_seconds=self._settings.retry_delay_seconds,
+            retry_on=list(self._settings.retry_on or []),
         )
 
     def _run_dag_step(self, step, jobs_index: dict):
@@ -573,21 +576,7 @@ class RunExecutor:
                 use_hash_precheck=self._settings.use_hash_precheck,
             )
 
-        max_retries = self._settings.max_retries
-        retry_delay = self._settings.retry_delay_seconds
-
-        def run_with_retry() -> ReconciliationResult:
-            import time
-            for attempt in range(max_retries + 1):
-                try:
-                    return run_job()
-                except Exception:
-                    if attempt == max_retries:
-                        raise
-                    time.sleep(retry_delay * (2 ** attempt))
-            raise RuntimeError("unreachable")  # pragma: no cover
-
-        return run_with_retry
+        return run_job
 
     def _build_case_file_reconciliation(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
