@@ -19,6 +19,11 @@ from api.services.sequence_conditions import ParentOutcome, parent_satisfies, tr
 # Statuses a step can reach without ever having run.
 NON_RUNNING_STATUSES = frozenset({"BLOCKED", "CANCELLED"})
 
+# RunSettings.retry_on tokens mapped to runner statuses. There is no TIMEOUT in
+# TestStatus today -- a timeout surfaces as ERROR -- so "timeout" matches nothing
+# and is accepted only so the setting stays forward-compatible.
+RETRYABLE_STATUS_BY_TOKEN = {"error": frozenset({"ERROR"}), "timeout": frozenset()}
+
 
 @dataclass(frozen=True)
 class StepOutcome:
@@ -51,6 +56,9 @@ class DagExecutor:
         expire_all: Callable[[], None] | None = None,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], None] | None = None,
+        default_max_retries: int = 0,
+        default_retry_delay_seconds: float = 0.0,
+        retry_on: list[str] | None = None,
     ) -> None:
         import time as _time
 
@@ -67,6 +75,13 @@ class DagExecutor:
         self._expire_all = expire_all or (lambda: None)
         self._clock = clock or _time.monotonic
         self._sleep = sleep or _time.sleep
+        self._default_max_retries = default_max_retries
+        self._default_retry_delay = default_retry_delay_seconds
+        self._retryable: frozenset[str] = frozenset().union(
+            *(RETRYABLE_STATUS_BY_TOKEN.get(token, frozenset())
+              for token in (retry_on if retry_on is not None else ["error"]))
+        )
+        self._attempts: dict[str, int] = {}
 
         self._children: dict[str, list[str]] = {s.step_id: [] for s in self._steps}
         for step in self._steps:
@@ -166,6 +181,21 @@ class DagExecutor:
             return False
         return True
 
+    def _retry_budget(self, step) -> tuple[int, float]:
+        """Per-step retry settings, falling back to the run-level defaults."""
+        limit = step.max_retries if step.max_retries is not None else self._default_max_retries
+        delay = (
+            step.retry_delay_seconds
+            if step.retry_delay_seconds is not None
+            else self._default_retry_delay
+        )
+        return max(0, int(limit or 0)), float(delay or 0.0)
+
+    def _should_retry(self, status: str, attempt: int, limit: int) -> bool:
+        # FAILED is a real data mismatch and SLOW already passed -- neither is
+        # retryable however generous the budget.
+        return status in self._retryable and attempt <= limit
+
     def _execute(self, step_id: str):
         self._pending.remove(step_id)
         self._mark(step_id, "RUNNING")
@@ -178,7 +208,19 @@ class DagExecutor:
             if self._is_cancelled():
                 self._outcome.cancelled = True
                 return StepOutcome(status="CANCELLED", result=None, state=None)
-        return self._run_step(step)
+
+        limit, delay = self._retry_budget(step)
+        attempt = 0
+        while True:
+            outcome = self._run_step(step)
+            attempt += 1
+            self._attempts[step_id] = attempt
+            if not self._should_retry(outcome.status, attempt, limit):
+                return outcome
+            self._sleep(delay)
+            if self._is_cancelled():
+                self._outcome.cancelled = True
+                return outcome
 
     def _finish(self, step_id: str, outcome: StepOutcome) -> None:
         step = self._by_id[step_id]
@@ -199,7 +241,11 @@ class DagExecutor:
 
     def _settle(self, step_id: str, status: str) -> None:
         self._final[step_id] = status
-        self._mark(step_id, status)
+        attempt = self._attempts.get(step_id)
+        if attempt is not None:
+            self._repo.set_status(step_id, status, attempt=attempt)
+        else:
+            self._mark(step_id, status)
 
     # --- holds --------------------------------------------------------------
 
