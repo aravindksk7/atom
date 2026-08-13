@@ -609,8 +609,19 @@
         </div>
         <div class="divider"></div>
         <div class="grid-2">
+          <div>
+            <label class="field-label" for="a11y-config-db-type">DB Type</label>
+            <select x-model="configModal.db_type" @change="configModal.db_port = (configModal.db_type === 'netezza' ? 5480 : 1433); if (configModal.db_type === 'netezza' && configModal.db_driver.includes('SQL Server')) configModal.db_driver = 'nzpy';" class="field-input field-select" data-testid="config-modal-db-type-select" id="a11y-config-db-type">
+              <option value="mssql">Microsoft SQL Server</option>
+              <option value="netezza">IBM Netezza</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="a11y-config-db-driver">DB Driver</label>
+            <input x-model="configModal.db_driver" class="field-input" :placeholder="configModal.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server'" data-testid="config-modal-db-driver-input" id="a11y-config-db-driver" />
+          </div>
           <div><label  class="field-label" for="a11y-config-db-host">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" id="a11y-config-db-host" /></div>
-          <div><label  class="field-label" for="a11y-config-db-port">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" placeholder="1433" data-testid="config-modal-db-port-input" id="a11y-config-db-port" /></div>
+          <div><label  class="field-label" for="a11y-config-db-port">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" :placeholder="configModal.db_type === 'netezza' ? '5480' : '1433'" data-testid="config-modal-db-port-input" id="a11y-config-db-port" /></div>
           <div><label  class="field-label" for="a11y-config-db-name">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" id="a11y-config-db-name" /></div>
           <div><label  class="field-label" for="a11y-config-db-user">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" id="a11y-config-db-user" /></div>
           <div><label  class="field-label" for="a11y-config-db-password">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" id="a11y-config-db-password" /></div>

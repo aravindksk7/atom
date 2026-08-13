@@ -57,6 +57,8 @@
     openNewConfigModal() {
       this.configModal = {
         id: null, name: '', env_name: 'dev',
+        db_type: 'mssql',
+        db_driver: 'ODBC Driver 17 for SQL Server',
         db_host: 'localhost', db_port: 1433, db_name: '', db_user: '', db_password: '',
         db_connect_timeout: 15,
         bo_url: '', bo_user: '', bo_password: '', bo_auth_type: 'secEnterprise', bo_timeout: 60,
@@ -76,7 +78,9 @@
       const d = cfg.config_data || {};
       this.configModal = {
         id: cfg.id, name: cfg.name, env_name: cfg.env_name,
-        db_host: d.db_host || '', db_port: d.db_port || 1433,
+        db_type: d.db_type || 'mssql',
+        db_driver: d.db_driver || (d.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server'),
+        db_host: d.db_host || '', db_port: d.db_port || (d.db_type === 'netezza' ? 5480 : 1433),
         db_name: d.db_name || '', db_user: d.db_user || '', db_password: d.db_password || '',
         db_connect_timeout: d.db_connect_timeout || 15,
         bo_url: d.bo_url || '', bo_user: d.bo_user || '', bo_password: d.bo_password || '',
@@ -147,12 +151,13 @@
     _configDataFromModal() {
       const m = this.configModal;
       const data = {
+        db_type: m.db_type || 'mssql',
         db_host: m.db_host || 'localhost',
-        db_port: Number(m.db_port) || 1433,
+        db_port: Number(m.db_port) || (m.db_type === 'netezza' ? 5480 : 1433),
         db_name: m.db_name || '',
         db_user: m.db_user || '',
         db_password: m.db_password || '',
-        db_driver: 'ODBC Driver 17 for SQL Server',
+        db_driver: m.db_driver || (m.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server'),
         db_pool_size: 5, db_pool_overflow: 10, db_pool_timeout: 30,
         db_pool_recycle: 3600,
         db_connect_timeout: Number(m.db_connect_timeout) || 15,
