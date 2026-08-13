@@ -416,7 +416,7 @@ def test_bo_report_answers_fixed_parameters_before_download():
     # doc_id is the report_id param; DateTime value is tz-converted to UTC "...Z"
     inst.answer_document_parameters.assert_called_once_with(
         "101",
-        [{"id": 0, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}],
+        [{"id": 0, "type": "DateTime", "value": "2026-06-02T00:00:00.000Z"}],
     )
 
 

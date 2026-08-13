@@ -73,7 +73,7 @@ def test_load_bo_source_answers_date_prompt_before_downloading(monkeypatch):
     assert calls == ["answer", "download"]
     doc_id, built = client.answer_document_parameters.call_args.args
     assert doc_id == "101"
-    assert built == [{"id": 5, "type": "DateTime", "value": "2026-06-01T23:00:00.000Z"}]
+    assert built == [{"id": 5, "type": "DateTime", "value": "2026-06-02T00:00:00.000Z"}]
     assert isinstance(frame, pd.DataFrame)
 
 

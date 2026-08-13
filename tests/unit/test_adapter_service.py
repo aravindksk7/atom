@@ -237,7 +237,7 @@ def test_download_bo_report_answers_parameters_before_downloading(monkeypatch):
     assert out.content == b"XLSXBYTES"
     assert calls == ["answer", "download"]  # answer strictly before download
     built = fake.answer_document_parameters.call_args[0][1]
-    assert built[0]["value"] == "2026-06-01T23:00:00.000Z"  # tz-converted
+    assert built[0]["value"] == "2026-06-02T00:00:00.000Z"  # calendar date preserved
 
 
 # ---------------------------------------------------------------------------

@@ -52,12 +52,12 @@ def build_parameter_answers(answers: list[dict], tz: str) -> list[dict]:
     """Return prompt answers with each `value` finalized for the BO PUT body.
 
     `answers`: list of {"id": int, "type": str, "value": str}. For a DateTime
-    prompt whose value is a bare ISO date (YYYY-MM-DD), convert local midnight
-    in `tz` to a UTC "...000Z" string. Everything else passes through verbatim.
+    prompt whose value is a bare ISO date (YYYY-MM-DD), format as UTC midnight
+    ("YYYY-MM-DDT00:00:00.000Z") so the selected calendar date is preserved
+    regardless of regional timezone settings. Everything else passes through verbatim.
     `type` is also mapped from the listing's vocabulary to the one the answer
     PUT accepts (see _ANSWER_TYPE_ALIASES).
     """
-    zone = ZoneInfo(tz)
     built: list[dict] = []
     for answer in answers:
         value = answer["value"]
@@ -66,12 +66,7 @@ def build_parameter_answers(answers: list[dict], tz: str) -> list[dict]:
         # YYYY-MM-DD to BO.
         ptype = _answer_type(answer.get("type"))
         if ptype == "DateTime" and _DATE_ONLY.match(str(value)):
-            local_midnight = datetime.combine(
-                datetime.strptime(value, "%Y-%m-%d").date(),
-                time(0, 0),
-                tzinfo=zone,
-            )
-            value = local_midnight.astimezone(_UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            value = f"{value}T00:00:00.000Z"
         built.append({
             "id": answer["id"],
             "type": ptype,
