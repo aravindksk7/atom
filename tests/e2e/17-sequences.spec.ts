@@ -72,4 +72,30 @@ test.describe('Execution sequences', () => {
     await expect(page.getByTestId('sequence-global-error')).toContainText(/cycle/i);
     await expect(page.getByTestId('sequence-save-btn')).toBeDisabled();
   });
+
+  test('preconditions round-trip through the editor', async ({ authedPage: page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sequences' }).click();
+    await page.getByTestId('sequence-new-btn').click();
+    await page.getByTestId('sequence-name-input').fill('e2e-gated');
+
+    await page.getByTestId('sequence-step-job-0').selectOption({ index: 1 });
+
+    await page.getByTestId('sequence-preconditions').click();   // open the details
+    await page.getByTestId('precondition-window-toggle').check();
+    await page.getByTestId('precondition-window-start').fill('01:00');
+    await page.getByTestId('precondition-window-end').fill('05:00');
+    await page.getByTestId('precondition-weekdays-toggle').check();
+    await page.getByTestId('precondition-weekdays').getByRole('checkbox').first().check();
+
+    await page.getByTestId('sequence-save-btn').click();
+    await expect(page.getByTestId('sequence-row-e2e-gated')).toBeVisible();
+
+    // Reopen and confirm the values survived the round trip.
+    await page.getByTestId('sequence-row-e2e-gated').click();
+    await page.getByTestId('sequence-edit-btn').click();
+    await page.getByTestId('sequence-preconditions').click();
+    await expect(page.getByTestId('precondition-window-start')).toHaveValue('01:00');
+    await expect(page.getByTestId('precondition-window-end')).toHaveValue('05:00');
+  });
 });
