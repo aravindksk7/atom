@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 # Credential fields across EnvironmentConfig, ConnectionEntry, and
 # ApiEndpointEntry. Shared by api/routes/configs.py (response masking) and
@@ -19,6 +19,7 @@ class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = ""
+    db_type: Literal["mssql", "netezza"] = "mssql"
     db_host: str
     db_port: int = 1433
     db_name: str = ""
@@ -61,6 +62,14 @@ class EnvironmentConfig(BaseModel):
     aws_session_token: str = ""
     aws_endpoint_url: str = ""
     aws_verify_ssl: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_db_type_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("db_type") == "netezza" and "db_port" not in data:
+                data["db_port"] = 5480
+        return data
 
     @field_validator("db_port")
     @classmethod

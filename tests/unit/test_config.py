@@ -1,5 +1,6 @@
 import pytest
 from etl_framework.exceptions import ConfigurationError
+from etl_framework.config.models import EnvironmentConfig
 from etl_framework.config.loader import ConfigLoader
 from api.routes.configs import _preserve_masked_secrets
 
@@ -218,3 +219,18 @@ def test_loader_merges_base_overlay(tmp_path):
     assert envs["dev"].db_host == "shared-host"
     assert envs["dev"].db_name == "dev_db"
     assert envs["qa"].db_host == "qa-override"
+
+
+def test_environment_config_netezza_defaults():
+    config = EnvironmentConfig(
+        name="qa_netezza",
+        db_type="netezza",
+        db_host="netezza.example.com",
+        db_name="testdb",
+        db_user="admin",
+        db_password="secretpassword",
+        db_driver="nzpy",
+    )
+    assert config.db_type == "netezza"
+    assert config.db_port == 5480
+
