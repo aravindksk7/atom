@@ -44,6 +44,22 @@ test.describe('11 help', () => {
     await expect(authedPage.locator('text=Read gate exit codes')).toBeVisible();
   });
 
+  test('Compare help is visible and searchable', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+
+    await expect(authedPage.locator('text=Compare').first()).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('All tabs');
+    await expect(authedPage.locator('text=Compare all tabs in a BO document')).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('Column Stats');
+    await expect(authedPage.locator('text=Use Column Stats for large tables')).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('Mismatch Diff');
+    await expect(authedPage.locator('text=Compare mismatches across runs')).toBeVisible();
+  });
+
   test('Help deep-link loads content on first paint and after reload', async ({ authedPage }) => {
     await authedPage.goto('/?tab=help');
     await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();

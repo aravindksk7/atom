@@ -48,7 +48,11 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
   - [BO Report Compare](#bo-report-compare)
   - [Reconciliation Dual-Environment Compare](#reconciliation-dual-environment-compare)
   - [Recon File Compare](#recon-file-compare)
-  - [Multi-File Compare](#multi-file-compare)
+  - [Multi-File](#multi-file)
+  - [SQL Direct Compare](#sql-direct-compare)
+  - [Advanced Compare Options](#advanced-compare-options)
+  - [Column Stats](#column-stats)
+  - [Mismatch Diff](#mismatch-diff)
 - [Data Contracts](#data-contracts)
 - [Write-Audit-Publish Gate](#write-audit-publish-gate)
 - [Rules-As-Code & Schema Compatibility](#rules-as-code--schema-compatibility)
@@ -120,7 +124,7 @@ _No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch 
 - **Shadow run profile** — set `run_settings.run_profile` to `"shadow"` (default `"full"`) to reconcile a `shadow_sample_frac` sample (default `0.02`) of rows instead of the full dataset, wrapping the comparison backend in `SamplingBackend` for cheap, fast per-PR checks.
 - **Rules-as-code** — export job DQ rules to versioned YAML suites in `expectations/`, review them in PRs, and sync them back with `POST /api/expectations/sync`. Schema snapshot diffs now include a `compatibility` verdict (`full` / `non_breaking` / `risky` / `breaking`).
 - **Multi-file reconciliation** — a `reconciliation` job can compare many files per side (`params.source_mode: "multi_file"`) instead of one query/file: pair files by filename token (`match_on`) or let the framework guess pairs by structural similarity (`strategy: "automated"`), read from local disk, S3, or SFTP, poll for a live spool to finish writing, and run every matched pair in parallel with per-pair failure isolation. See [Multi-File Reconciliation](#multi-file-reconciliation).
-- **Ad-hoc multi-file compare** — the Compare tab's **Multi-File** sub-tab runs the same file-pairing/reconciliation logic as a one-off comparison, no saved job required — `POST /api/compare/multi-file` (local sources only). See [Multi-File Compare](#multi-file-compare).
+- **Ad-hoc multi-file compare** — the Compare tab's **Multi-File** sub-tab runs the same file-pairing/reconciliation logic as a one-off comparison, no saved job required — `POST /api/compare/multi-file` (local sources only). See [Multi-File](#multi-file).
 - **Encrypted config secrets at rest** — `db_password`, `bo_password`, `automic_password`, and REST API endpoint secrets (`api_key`, `bearer_token`, `basic_password`) are encrypted in the config's stored JSON using the same Fernet key as webhook signing (`WEBHOOK_ENCRYPTION_KEY`); encryption/decryption is transparent to every existing API/UI consumer.
 - **App-timezone-aware timestamps everywhere** — every timestamp shown in the UI (including the scheduler grid's next-run time, the Compare tab's run picker, and contract breach/version history) is converted through the DB-configured app timezone instead of showing raw UTC or the browser's local time.
 - **AWS S3 storage & schema validation** — read object metadata, count rows across CSV/JSON/Parquet/ORC (S3 Select for row/text formats, pyarrow footer for columnar), discover Hive-style partition schemes, and validate file format with optional schema assertion. See [AWS Data Platform Testing](#aws-data-platform-testing).
@@ -583,7 +587,7 @@ A saved config can also define named REST API endpoints under an `api_endpoints`
 
 **Where it's used:**
 
-- **Compare tab** — both **BO Report Compare** and **Column Stats Compare** accept `source_type: "api"` for either side, referencing `config_id` + `api_endpoint_name`. See [Compare Tab](#compare-tab).
+- **Compare tab** — both **BO Report Compare** and **Column Stats** accept `source_type: "api"` for either side, referencing `config_id` + `api_endpoint_name`. See [Compare Tab](#compare-tab).
 - **Jobs** — the `api_reconciliation` job type reconciles `source_api_endpoint` against `target_api_endpoint`. See [Job Types Reference](#job-types-reference).
 - **Adapters tab / API** — `POST /api/adapters/rest-api/test` checks connectivity (one page only); `POST /api/adapters/rest-api/preview` fetches a sample of rows to confirm parsing before wiring it into a job or comparison.
 - **Web UI** — the Config modal has an **API Endpoints** section (parallel to Named Connections) for adding, editing, testing, and previewing endpoints on a saved config.
@@ -1825,7 +1829,7 @@ Step by step:
 6. Click **Preview Mapping** to run real discovery + pairing and see the resulting pairs and unmatched groups before saving — this works for `local`, `s3`, and `sftp` sources. For `s3`/`sftp`, extra **preview-only credential fields** appear (AWS access key/secret/region/endpoint for s3; host/port/username/password for sftp) — fill those in to let the preview call actually connect. These preview credentials are sent inline for that one call only and are **never saved** with the job; they are separate from the `credentials_ref` typed in step 5, which is what the saved job uses for its own real execution later.
 7. Save the job once the preview looks right (or skip preview and save directly if you already trust the mapping).
 
-For running a one-off multi-file comparison without saving a job first, see [Multi-File Compare](#multi-file-compare) in the Compare tab.
+For running a one-off multi-file comparison without saving a job first, see [Multi-File](#multi-file) in the Compare tab.
 
 **Current limitations:**
 
@@ -1943,7 +1947,7 @@ Use this tab to:
 
 Use this tab for first-class comparison workflows.
 
-BO Report mode, Reconciliation (dual-env) mode, and Recon File Compare mode — see the [Compare Tab](#compare-tab) section.
+BO Report, Reconciliation, SQL, Column Stats, Mismatch Diff, and Multi-File workflows — see the [Compare Tab](#compare-tab) section.
 
 ### Contracts
 
@@ -1997,7 +2001,16 @@ GET /api/logs?run_id=<run_id>&q=schema_check&level=ERROR&limit=500
 
 ## Compare Tab
 
-The **Compare** tab provides three first-class comparison modes for ad-hoc analysis that does not fit the standard job-driven run workflow. Each mode produces a standard `TestRun` record (visible in History with full mismatch details, export, and baseline support).
+The **Compare** tab provides ad-hoc comparison workflows that do not need to start from the standard job-driven Launch flow. Most compare modes create a durable `TestRun` record visible in History with mismatch details, exports, and baseline support; lighter analysis modes return focused diff views directly in the Compare tab.
+
+| Subtab | Use when | Primary output |
+|---|---|---|
+| **BO Report** | You need to compare SAP BusinessObjects exports, uploaded report files, server-side report files, API rows, or a previously stored run side-by-side. | Row-level compare run with mismatch details. |
+| **Reconciliation** | You need to launch the same saved jobs against two environment/config pairs and compare run outcomes. | Paired runs linked by `pair_id`. |
+| **SQL** | You need an ad-hoc row diff between two SQL queries without saving a reconciliation job. | Row-level compare run with mismatch details. |
+| **Column Stats** | You need fast distribution/aggregate drift checks for large tables where full row diffs are too expensive. | Per-column metric diffs. |
+| **Mismatch Diff** | You need to compare mismatch sets between two historical runs. | New, resolved, and persistent mismatch groups. |
+| **Multi-File** | You need a one-off local folder-to-folder file reconciliation without saving a job first. | Persisted multi-file run with per-pair breakdown. |
 
 ---
 
@@ -2011,34 +2024,51 @@ Each side (Source A, Source B) can be any combination of:
 
 | Source Type | When to use | Required inputs |
 |---|---|---|
-| `live` | Fetch the report directly from a live SAP BO server | Saved config (with BO URL/credentials), Document ID, Report/Page ID, Download format (`csv`/`xlsx`/`xls`) |
-| `path` | Read a previously downloaded file from a file system path | Absolute file path on the server |
-| `upload` | Upload a file directly from your browser | File contents (CSV, XLSX, or XLS) |
-| `api` | Fetch data from a named REST API endpoint defined on a saved config | Saved config, endpoint name (from the config's `api_endpoints` map) — see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) |
+| `live` | Fetch the report directly from a live SAP BO server | Saved config with BO URL/credentials, Document ID, Report/Page selection or **All tabs (whole document)**, and export format (`csv`/`xlsx`/`xls`) |
+| `path` | Read a previously downloaded file from a server-side file path | Absolute file path allowed by the server file policy |
+| `upload` | Upload a file directly from your browser | File contents (`.csv`, `.xlsx`, `.xls`, `.json`, `.xml`, `.tsv`, or `.txt`) |
+| `api` | Fetch data from a named REST API endpoint defined on a saved config | Saved config and endpoint name from the config's `api_endpoints` map; see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) |
+| `run` | Reuse comparable data from a previous run selected in the Compare UI | Run ID plus the selected job/result context (`job_name`) so the service can load that run's stored comparable artifact |
 
 **Steps (UI):**
 
 1. Open the **Compare** tab and select **BO Report**.
-2. For **Source A**: select the source type, then fill in the required fields.
-   - For `live`: pick a saved config, enter the Document ID and Report ID, choose the download format.
+2. For **Source A**: select `Live`, `Path`, `Upload`, `API`, or `Run`, then fill in the fields shown for that mode.
+   - For `live`: pick a saved config, select a document, then choose a specific report tab or **All tabs (whole document)**.
    - For `path`: enter the full server-side path to the report file.
-   - For `upload`: click **Browse** and select a CSV/XLSX/XLS file from your computer.
-3. Repeat for **Source B**.
-4. Optionally enter **Key Columns** — the columns used to join the two report outputs. If left blank, the engine attempts to infer a key column from common ID-like column names (`id`, `employee_id`, `order_id`, etc.). If no key can be inferred automatically, key columns are required.
-5. Optionally enter **Exclude Columns** — columns present in both outputs that should not be compared (e.g. report run timestamps or page numbers).
-6. Optionally set **Label A** and **Label B** — human-readable names shown in History and mismatch details.
-7. Click **Compare**. The comparison runs and the result is stored as a run with `run_type = bo_comparison`.
+   - For `upload`: click **Browse** and select a supported tabular file from your computer.
+   - For `api`: select the config and named API endpoint to fetch rows from.
+   - For `run`: select a previous run/result from the UI picker when comparing against stored output.
+3. Repeat for **Source B**; source types can be mixed, such as live QA BO vs uploaded prod export.
+4. Enter **Key Columns** when the row identity is known. If left blank, the engine attempts to infer a key column from common ID-like column names (`id`, `employee_id`, `order_id`, etc.). If no key can be inferred automatically, key columns are required.
+5. Enter **Exclude Columns** for values that should not participate in value comparison, such as extract timestamp, report runtime, batch ID, or sheet label columns.
+6. Open **Advanced Options** when you need tolerance, normalization, sampling, backend, or storage-volume controls; see [Advanced Compare Options](#advanced-compare-options).
+7. Optionally set **Label A** and **Label B** so History and mismatch details show meaningful names.
+8. Click **Run BO Compare**. The comparison runs and the result is stored as a run with `run_type = bo_comparison`.
+
+**Compare across all BO tabs:**
+
+Choose **All tabs (whole document)** in the live report selector when the business question is document-level parity: every tab/page in the BO document should match between environments or versions. This is useful for multi-tab WebI documents where downstream users consume the whole workbook, not one report tab.
+
+Use a specific report tab instead when you only need one page, when the document export is too large for an ad-hoc check, or when different tabs have unrelated schemas that would make a whole-document row diff noisy.
+
+All-tabs exports can be larger and slower than single-tab exports. They can also include tab-specific columns, blank sections, or differently ordered sheets, so set **Key Columns**, **Exclude Columns**, and string normalization deliberately before treating mismatches as defects.
+
+In the UI, **All tabs (whole document)** is distinct from leaving the report selector blank. Blank means no report was selected and the UI should warn you. **All tabs (whole document)** intentionally requests the document-level export. API callers should only omit or send an empty `report_id` when they intentionally want the whole-document export.
 
 **Options:**
 
 | Option | Description |
 |---|---|
-| `key_columns` | Join columns; auto-inferred from well-known names if omitted |
-| `exclude_columns` | Columns to skip during value comparison |
-| `label_a` / `label_b` | Display names for each source in mismatch details |
-| `doc_id` | Document-level BO ID (can be set once at the top instead of per-source) |
-| `report_id` | Report/page-level BO ID (same as above) |
-| `api_endpoint_name` | Endpoint name (from the config's `api_endpoints` map) when a side uses `source_type: "api"` |
+| `source_a` / `source_b` | Source descriptors for each side; each side chooses one source type and its required fields. |
+| `source_type` | One of `live`, `path`, `upload`, `api`, or `run`, depending on the UI/API path in use. |
+| `key_columns` | Join columns; auto-inferred from well-known names if omitted. |
+| `exclude_columns` | Columns to skip during value comparison. |
+| `label_a` / `label_b` | Display names for each source in mismatch details. |
+| `doc_id` | Document-level BO ID for live BO sources. |
+| `report_id` | Report/page-level BO ID; omit or send empty only when intentionally comparing **All tabs (whole document)**. |
+| `api_endpoint_name` | Endpoint name from the config's `api_endpoints` map when a side uses `source_type: "api"`. |
+| `advanced` | Optional [Advanced compare options](#advanced-compare-options) block. |
 
 **API:**
 
@@ -2060,6 +2090,18 @@ $body = @{
   exclude_columns = @("report_generated_at")
   label_a         = "Dev BO"
   label_b         = "Prod File"
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report" -Body $body -ContentType "application/json" -Headers $h
+```
+
+For a live BO whole-document comparison, intentionally request the all-tabs export by leaving `report_id` empty on the live source:
+
+```powershell
+$body = @{
+  source_a = @{ source_type = "live"; config_id = 1; doc_id = "FI_DOC_001"; report_id = ""; format = "xlsx" }
+  source_b = @{ source_type = "live"; config_id = 2; doc_id = "FI_DOC_001"; report_id = ""; format = "xlsx" }
+  key_columns = @("account_id", "period")
+  exclude_columns = @("refresh_time", "sheet_name")
 } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report" -Body $body -ContentType "application/json" -Headers $h
 ```
@@ -2190,7 +2232,7 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/recon-fil
 
 ---
 
-### Multi-File Compare
+### Multi-File
 
 Run a one-off, multi-file reconciliation (see [Multi-File Reconciliation](#multi-file-reconciliation)) without creating a saved job first. Use this to sanity-check a file-pairing strategy or run a single ad-hoc comparison across several files per side.
 
@@ -2272,7 +2314,7 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/sql" -Bod
 
 ### Advanced Compare Options
 
-All three tabular compare modes (BO Report, Recon File, SQL Direct) accept an optional `advanced` block that controls the comparison engine in detail. In the UI these options appear in an **Advanced Options** accordion on each compare panel.
+Tabular compare modes that run row-level diffs, including BO Report, Recon File, and SQL Direct, accept an optional `advanced` block that controls the comparison engine in detail. In the UI these options appear in an **Advanced Options** accordion on each compare panel. Use them when the default strict row comparison is too noisy, too slow, or stores more mismatch detail than you need.
 
 | Option | Default | Description |
 |---|---|---|
@@ -2286,6 +2328,22 @@ All three tabular compare modes (BO Report, Recon File, SQL Direct) accept an op
 | `sample_frac` | `null` | When set (0.01–1.0) both source and target DataFrames are randomly sampled to this fraction before comparison. Useful for quick smoke-tests on very large datasets. |
 | `parallel_columns` | `false` | When `true`, value comparison is distributed across `parallel_workers` threads — one thread per column. Speeds up wide tables (100+ columns). |
 | `parallel_workers` | `4` | Thread-pool size used when `parallel_columns` is `true`. |
+
+**Which advanced option should I use?**
+
+| Situation | Option(s) to use | Guidance |
+|---|---|---|
+| You want the safest default compare. | `comparison_backend: "pandas"` | Use Pandas unless you have installed and validated another backend. It supports all normalization options and works in the default environment. |
+| Large row counts make Pandas slow. | `comparison_backend: "polars"` | Use Polars when `polars` is installed and the workload is mostly straightforward typed columns. Re-run a known sample before making it the default for a workflow. |
+| Very wide tables or SQL-friendly local analysis are slow. | `comparison_backend: "duckdb"` | Use DuckDB when `duckdb` is installed and the data is wide enough that an in-process SQL engine is faster. Keep Pandas for small ad-hoc checks. |
+| Numeric values differ by harmless rounding. | `float_tolerance` | Set a global tolerance such as `1e-6` for general floating-point noise. Keep it as small as the business rule allows. |
+| Different numeric columns have different precision rules. | `column_tolerances` | Use per-column overrides for currency, percentages, weights, rates, or tax fields. Example: `price:0.01, tax:0.005`. |
+| Timestamps differ by rounding or extract timing. | `datetime_tolerance_seconds` | Set the allowed seconds of drift, such as `1` for sub-second rounding or `60` for minute-bucketed exports. |
+| Human-entered text differs only by casing. | `case_insensitive_columns` | Enable only for columns where `Open`, `OPEN`, and `open` mean the same business value. Pandas backend only. |
+| Vendor exports add inconsistent spaces. | `whitespace_normalize_columns` | Enable for names, descriptions, or status labels where leading/trailing or repeated internal spaces are not material. Pandas backend only. |
+| A large compare produces too many stored detail rows. | `mismatch_row_limit` | Lower this to cap stored detail volume. Aggregate mismatch counts still report the full issue count. |
+| You need a quick smoke check before a full compare. | `sample_frac` | Use a fraction from `0.01` to `1.0`. Sampling is not a full reconciliation and should not be used as final evidence for high-risk releases. |
+| A table has hundreds of columns. | `parallel_columns`, `parallel_workers` | Enable parallel column comparison for wide tables. Leave it off for small or narrow compares to avoid thread overhead. |
 
 **Mismatch delta fields**
 
@@ -2322,14 +2380,14 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report
 
 ---
 
-### Column Stats Compare
+### Column Stats
 
 The **Column Stats** sub-tab computes aggregate statistics for each column (row count, null count, distinct count, min, max, mean, std dev, sum) in two data sources and reports which metrics have drifted beyond tolerance. This is useful for very large tables where a full row-level diff is too expensive but distribution-level drift still needs to be detected.
 
 **Steps (UI):**
 
 1. Open the **Compare** tab and select **Column Stats**.
-2. Configure **Source A** and **Source B** (same upload / path / live / api options as BO Compare).
+2. Configure **Source A** and **Source B** (same Upload / Path / Live / API options as BO Report).
 3. Set **Float Tolerance** (default `1e-9`) and **Row Count Tolerance** (default `0`, meaning exact row counts are required).
 4. Optionally set a **Query/Report name** for labelling.
 5. Click **Compute Column Stats**.
@@ -2371,7 +2429,7 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/column-st
 
 ---
 
-### Cross-Run Mismatch Diff
+### Mismatch Diff
 
 The **Mismatch Diff** sub-tab compares the mismatch sets of two previously stored runs and classifies each mismatch into one of three categories:
 
