@@ -455,6 +455,9 @@
         </template>
         <template x-if="activeTokenIsAdmin">
           <div class="flex items-center gap-2">
+            <!-- Displaying the saved zone rather than the first option depends on
+                 the x-model/x-for option re-sync in app.js -- see the comment
+                 above app(). -->
             <select x-model="timezoneDraft" class="field-input field-select flex-1" aria-label="timezonedraft">
               <template x-for="tz in timezoneOptions" :key="tz">
                 <option :value="tz" x-text="tz"></option>

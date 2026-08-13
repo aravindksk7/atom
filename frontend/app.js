@@ -121,6 +121,49 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// ---------------------------------------------------------------------------
+// <select> elements whose <option>s come from x-for
+// ---------------------------------------------------------------------------
+// Alpine applies x-model to a <select> while walking that element -- which is
+// before a nested <template x-for> has produced any <option>. Assigning a value
+// to an option-less select silently no-ops; the options render a moment later
+// and the browser falls back to the first one. Component state stays correct,
+// so nothing ever re-triggers x-model and the control is left displaying the
+// wrong choice -- a saved timezone reading back as "UTC", a picked config
+// reading back as "— None —" every time an x-if tab subtree remounts.
+//
+// Watching for the options themselves repairs every such select at once,
+// including ones added by markup written later, instead of each one needing its
+// own $nextTick re-sync that new markup has to remember to repeat.
+document.addEventListener('alpine:init', () => {
+  const resync = (select) => {
+    const expr = select.getAttribute('x-model');
+    if (!expr) return;
+    let want;
+    try {
+      want = window.Alpine.evaluate(select, expr);
+    } catch (_) {
+      return;
+    }
+    // Nullish/empty is "nothing chosen" -- the browser's own fallback to the
+    // first option (— None —, — Select —) already renders that correctly.
+    if (want === null || want === undefined || want === '') return;
+    const value = String(want);
+    if (select.value === value) return;
+    // Never blank the control: assigning a value no option carries clears the
+    // selection outright, which reads worse than the fallback being corrected.
+    if (!Array.from(select.options).some((o) => o.value === value)) return;
+    select.value = value;
+  };
+  new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.addedNodes.length && record.target instanceof HTMLSelectElement) {
+        resync(record.target);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+});
+
 function app() {
   return _appRaw();
 }
@@ -399,6 +442,7 @@ function _appRaw() {
       });
       this.$watch('sqlConfigA', () => { this.sqlConnectionA = null; });
       this.$watch('sqlConfigB', () => { this.sqlConnectionB = null; });
+      this.initSessionSettingsPersistence();
       this._applyDeepLink();
     },
 
@@ -1065,6 +1109,28 @@ function _appRaw() {
         COMPLETED: 'badge-green',
       };
       return 'badge ' + (map[status] || 'badge-gray');
+    },
+
+    // Every key loadSessionSettings() restores. Registered from init() *after*
+    // that restore, so replaying saved values back into the component doesn't
+    // immediately rewrite the same payload, and after the config_id watcher
+    // above so a restored config keeps its connections instead of the watcher
+    // nulling them and persisting the loss.
+    //
+    // Alpine's $watch JSON.stringify's the watched value, so naming the
+    // launchSettings object is enough to see changes to its fields.
+    initSessionSettingsPersistence() {
+      [
+        'launchSettings',
+        'compareSubTab',
+        'reconMode',
+        'boSourceAType',
+        'boSourceBType',
+        'boKeyColumns',
+        'boExcludeColumns',
+        'historyFilterStatus',
+        'historyFilterRunType',
+      ].forEach((key) => this.$watch(key, () => this.saveSessionSettings()));
     },
 
     saveSessionSettings() {
