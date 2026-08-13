@@ -288,7 +288,7 @@ class RunExecutor:
                     self._run_repo.update_run_status(
                         self._run_id, "BLOCKED",
                         completed_at=datetime.now(timezone.utc),
-                        total_tests=len(outcome.states),
+                        total_tests=len(outcome.states) + len(outcome.tolerated_states),
                         passed=sum(1 for s in outcome.states if s.status == TestStatus.PASSED),
                         failed=sum(1 for s in outcome.states if s.status == TestStatus.FAILED),
                         slow=sum(1 for s in outcome.states if s.status == TestStatus.SLOW),
@@ -297,7 +297,7 @@ class RunExecutor:
                     self._fire_webhooks("BLOCKED")
                 else:
                     self._write_metrics(outcome.results)
-                    self._complete_run(outcome.states)
+                    self._complete_run(outcome.states, outcome.tolerated_states)
 
             except Exception as exc:
                 self._run_repo.update_run_status(
@@ -2164,7 +2164,8 @@ class RunExecutor:
         with span("api.run_executor.write_metrics", {"run_id": self._run_id}):
             MetricsWriter(f"logs/metrics_{self._run_id}.json").write(self._run_id, results)
 
-    def _complete_run(self, states: list[TestCaseState]) -> None:
+    def _complete_run(self, states: list[TestCaseState], tolerated: list | None = None) -> None:
+        tolerated = tolerated or []
         passed = sum(1 for state in states if state.status == TestStatus.PASSED)
         failed = sum(1 for state in states if state.status == TestStatus.FAILED)
         slow = sum(1 for state in states if state.status == TestStatus.SLOW)
@@ -2181,7 +2182,7 @@ class RunExecutor:
             self._run_id,
             final_status,
             completed_at=datetime.now(timezone.utc),
-            total_tests=len(states),
+            total_tests=len(states) + len(tolerated),
             passed=passed,
             failed=failed,
             slow=slow,

@@ -19,6 +19,9 @@ from api.services.sequence_conditions import ParentOutcome, parent_satisfies, tr
 # Statuses a step can reach without ever having run.
 NON_RUNNING_STATUSES = frozenset({"BLOCKED", "CANCELLED"})
 
+# Statuses that count as a step having failed, for on_failure purposes.
+FAILURE_STATUSES = frozenset({"FAILED", "ERROR"})
+
 # RunSettings.retry_on tokens mapped to runner statuses. There is no TIMEOUT in
 # TestStatus today -- a timeout surfaces as ERROR -- so "timeout" matches nothing
 # and is accepted only so the setting stays forward-compatible.
@@ -36,6 +39,7 @@ class StepOutcome:
 @dataclass
 class DagOutcome:
     states: list = field(default_factory=list)
+    tolerated_states: list = field(default_factory=list)
     results: list = field(default_factory=list)
     cancelled: bool = False
     blocked: bool = False
@@ -225,8 +229,15 @@ class DagExecutor:
     def _finish(self, step_id: str, outcome: StepOutcome) -> None:
         step = self._by_id[step_id]
         self._outcomes[step_id] = ParentOutcome(status=outcome.status, result=outcome.result)
+
+        failed = outcome.status in FAILURE_STATUSES
         if outcome.state is not None:
-            self._outcome.states.append(outcome.state)
+            # continue-on-error: the step still reports its own status, but its
+            # failure is kept out of the run's pass/fail arithmetic.
+            if failed and step.on_failure == "continue":
+                self._outcome.tolerated_states.append(outcome.state)
+            else:
+                self._outcome.states.append(outcome.state)
         if outcome.result is not None:
             self._outcome.results.append(outcome.result)
 
@@ -238,6 +249,9 @@ class DagExecutor:
             return
 
         self._settle(step_id, outcome.status)
+
+        if failed and step.on_failure == "stop":
+            self._outcome.cancelled = True
 
     def _settle(self, step_id: str, status: str) -> None:
         self._final[step_id] = status
