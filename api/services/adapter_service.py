@@ -16,7 +16,7 @@ from api.services.bo_archive import save_bo_download
 from api.services.api_exchange import capture_exchange
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
-from etl_framework.exceptions import BOAPIError, ReportNotFoundError
+from etl_framework.exceptions import AutomicAPIError, BOAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
@@ -47,6 +47,15 @@ def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
         body = (exc.response_body or "").strip()
         if body:
             return f"SAP BO API error {exc.http_status}: {body}"
+        return str(exc)
+    if isinstance(exc, AutomicAPIError):
+        # AutomicAPIError.__str__ is only "<status> at <url>", so the
+        # response body -- which carries the actual diagnosis, e.g. an
+        # unrecognised response envelope -- would otherwise never reach the
+        # operator. Same treatment BOAPIError already gets above.
+        body = (exc.response_body or "").strip()
+        if body:
+            return f"Automic API error {exc.http_status}: {body}"
         return str(exc)
     if isinstance(exc, requests_exc.ProxyError) or "ProxyError" in msg:
         return (

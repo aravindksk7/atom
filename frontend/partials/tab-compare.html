@@ -1397,9 +1397,14 @@
       </div>
     </div>
     <div x-show="mfCompareStrategy === 'explicit'">
-      <label  class="field-label" for="a11y-compare-match-on-comma-separated-tokens">Match On (comma-separated tokens)</label>
+      <label  class="field-label" for="a11y-compare-match-on-comma-separated-tokens">Match On (comma-separated tokens) *</label>
       <input x-model="mfCompareMatchOnRaw" class="field-input" placeholder="region, date"
              data-testid="compare-mf-match-on-input" id="a11y-compare-match-on-comma-separated-tokens" />
+      <div class="text-xs text-muted mt-1">
+        The <code>{token}</code> names from your patterns to pair files on — e.g. <code>region, date</code>
+        for <code>sales_{region}_{date}.csv</code>. Leave blank only for tokenless glob patterns
+        (<code>sales_*.csv</code>), where every file on each side is compared as one combined set.
+      </div>
     </div>
     <div x-show="mfCompareStrategy === 'automated'" class="grid-2">
       <div>

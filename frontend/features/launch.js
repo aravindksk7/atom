@@ -67,6 +67,8 @@
     // Schedules
     // -----------------------------------------------------------
     schedules: [],
+    schedulesError: '',
+    jobSelectionsError: '',
     schedulerStats: null,
     schedulerStatsLoading: false,
     schedulerStatsError: '',
@@ -938,7 +940,15 @@
     // SCHEDULES
     // ===========================================================
     async loadSchedules() {
-      try { this.schedules = await api('GET', '/api/schedules'); } catch {}
+      // Don't swallow the error: an empty `schedules` renders identically
+      // whether none exist or the request 401'd/500'd, which sends the user
+      // off creating things that already exist. Keep the message.
+      this.schedulesError = '';
+      try {
+        this.schedules = await api('GET', '/api/schedules');
+      } catch (e) {
+        this.schedulesError = e.message || 'Unable to load schedules';
+      }
       await this.loadSchedulerStats();
     },
 
@@ -1082,7 +1092,15 @@
     },
 
     async loadJobSelections() {
-      try { this.jobSelections = await api('GET', '/api/selections'); } catch {}
+      // Same reasoning as loadSchedules(): a failed fetch must not be
+      // indistinguishable from "you have no job selections yet" — that empty
+      // state is what the New Schedule modal keys its guidance off.
+      this.jobSelectionsError = '';
+      try {
+        this.jobSelections = await api('GET', '/api/selections');
+      } catch (e) {
+        this.jobSelectionsError = e.message || 'Unable to load job selections';
+      }
       await this.loadAvailableSequences();
     },
 

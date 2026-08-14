@@ -1454,7 +1454,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <div class="flex justify-end mb-3">
       <button @click="openNewScheduleModal()" class="btn-primary">+ New Schedule</button>
     </div>
-    <template x-if="schedules.length === 0">
+    <template x-if="schedulesError">
+      <div class="alert-error mb-4" data-testid="schedules-load-error"
+           x-text="'Could not load schedules: ' + schedulesError"></div>
+    </template>
+    <template x-if="schedules.length === 0 && !schedulesError">
       <div class="card empty-state">
         <div class="empty-state-icon">🕒</div>
         <div class="empty-state-title">No schedules yet</div>
@@ -1569,7 +1573,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option :value="sel.id" x-text="sel.name + ' (v' + sel.latest_version + ', ' + sel.job_count + ' jobs)'"></option>
             </template>
           </select>
-          <div class="text-xs text-amber-600" x-show="jobSelections.length === 0">You need at least one Job Selection first — create one in the Job Selections tab.</div>
+          <div class="text-xs text-red-600" x-show="jobSelectionsError" data-testid="schedule-selections-error"
+               x-text="'Could not load job selections: ' + jobSelectionsError"></div>
+          <div class="text-xs text-amber-600" x-show="jobSelections.length === 0 && !jobSelectionsError">You need at least one Job Selection first — create one in the Job Selections tab.</div>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" aria-label="schedulemodal enabled" /> Enabled</label>
       </div>

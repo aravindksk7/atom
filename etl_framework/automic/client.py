@@ -89,6 +89,23 @@ class AutomicClient:
         return {ident: (self.get_status_by_run_id(ident) if id_type == "run_id" else self.get_status_by_job_name(ident)) for ident in identifiers}
 
     def search_jobs(self, filter: str) -> list[dict]:
-        url = f"{self._base_url}/api/v1/jobs?filter={filter}&limit=100"
+        from urllib.parse import quote
+
+        url = f"{self._base_url}/api/v1/jobs?filter={quote(filter, safe='*')}&limit=100"
         data = self._request("GET", url)
-        return data.get("data", [])
+        # `data.get("data", [])` used to mask a wrong endpoint or a changed
+        # response envelope as "no jobs matched", which is what an operator
+        # sees in the browse dialog. An absent "data" key means we did not
+        # reach the API we think we did; a present-but-empty one is a real
+        # empty result and stays a plain [].
+        if "data" not in data:
+            raise AutomicAPIError(
+                http_status=200,
+                response_body=(
+                    "response has no 'data' key; keys were: "
+                    f"{sorted(data)!r}. Check that automic_url points at the "
+                    "Automic REST API root."
+                ),
+                url=url,
+            )
+        return data["data"]

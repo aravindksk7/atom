@@ -383,6 +383,27 @@ class FileMappingSpec:
             if strategy == "automated"
             else None
         )
+        if strategy == "explicit" and not match_on:
+            # An empty match_on collapses every discovered file on a side into
+            # one group (see pair_files), producing a single aggregate pair
+            # instead of one per file set. That is a legitimate mode for
+            # tokenless glob patterns -- "compare this bucket against that
+            # one" -- so it stays allowed there. But a pattern that declares
+            # {tokens} and then keys on none of them is a contradiction: the
+            # tokens exist precisely to pair on. Left unchecked it silently
+            # reports one row for N files, with no unmatched groups to hint
+            # at why (both sides share the same empty key).
+            shared_tokens = sorted(
+                set(compile_token_pattern(source.pattern).groupindex)
+                & set(compile_token_pattern(target.pattern).groupindex)
+            )
+            if shared_tokens:
+                raise ValueError(
+                    "file_mapping.match_on is required when strategy is "
+                    "'explicit' and the patterns declare tokens; otherwise "
+                    "every file collapses into a single pair. Available on "
+                    f"both sides: {', '.join(shared_tokens)}"
+                )
         return cls(
             strategy=strategy,
             match_on=match_on,

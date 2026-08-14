@@ -703,3 +703,66 @@ def test_aggregate_reconciliation_results_counts_passed_failed_errored_pairs_ind
     assert summary["pairs_failed"] == 1
     assert summary["pairs_errored"] == 1
     assert summary["pairs_passed"] + summary["pairs_failed"] + summary["pairs_errored"] == summary["pairs_total"]
+
+
+# --- explicit strategy with no match_on -----------------------------------
+#
+# Leaving Match On blank is legitimate for tokenless glob patterns ("compare
+# this bucket of files against that one"), and pair_files supports it. But a
+# pattern that *declares* tokens and then keys on none of them silently
+# collapses every discovered file into a single pair -- which surfaced on-prem
+# as "compare multiple files only shows one record instead of all files".
+# Declaring tokens is a statement of pairing intent; reject the contradiction.
+
+def test_file_mapping_spec_rejects_explicit_strategy_with_tokens_but_no_match_on() -> None:
+    params = {
+        "file_mapping": {
+            "strategy": "explicit",
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}_{date}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}_{date}.dat"},
+        }
+    }
+
+    with pytest.raises(ValueError, match="match_on"):
+        FileMappingSpec.from_params(params)
+
+
+def test_file_mapping_spec_rejection_names_the_available_tokens() -> None:
+    params = {
+        "file_mapping": {
+            "strategy": "explicit",
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.dat"},
+        }
+    }
+
+    with pytest.raises(ValueError) as excinfo:
+        FileMappingSpec.from_params(params)
+    assert "region" in str(excinfo.value)
+
+
+def test_file_mapping_spec_allows_empty_match_on_for_tokenless_glob_patterns() -> None:
+    """The supported 'no pairing key at all' mode must keep working."""
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "strategy": "explicit",
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_data_*.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_data_*.dat"},
+        }
+    })
+
+    assert spec.match_on == ()
+
+
+def test_file_mapping_spec_allows_empty_match_on_for_automated_strategy() -> None:
+    """Automated pairing derives pairs by similarity, never from match_on."""
+    spec = FileMappingSpec.from_params({
+        "file_mapping": {
+            "strategy": "automated",
+            "source": {"kind": "local", "root": "/spool", "pattern": "sales_{region}.csv"},
+            "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.dat"},
+            "automated_mapping": {"similarity_threshold": 0.7, "signals": ["filename_tokens"]},
+        }
+    })
+
+    assert spec.match_on == ()

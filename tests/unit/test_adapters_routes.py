@@ -406,6 +406,15 @@ def test_automic_client_search_jobs_returns_list():
 
 
 def test_automic_client_search_jobs_empty_response():
+    """A filter that matches nothing returns [].
+
+    This used to mock `{}` -- a response with no "data" key at all -- and
+    assert []. That conflated "the scheduler has no matching jobs" with "we
+    got an envelope we don't recognise", which is how a wrong automic_url
+    reached operators as "No jobs found for that filter." The genuinely-empty
+    case is `{"data": []}`; the malformed case now raises (see
+    test_automic_search_jobs_raises_when_response_has_no_data_key).
+    """
     from unittest.mock import patch
     from etl_framework.automic.client import AutomicClient
     from etl_framework.config.models import EnvironmentConfig
@@ -415,7 +424,7 @@ def test_automic_client_search_jobs_empty_response():
         automic_url="http://automic.test", automic_user="u", automic_password="p",
     )
     client = AutomicClient(env)
-    with patch.object(client, "_request", return_value={}):
+    with patch.object(client, "_request", return_value={"data": []}):
         result = client.search_jobs("NONEXISTENT_*")
     assert result == []
 
@@ -548,3 +557,58 @@ def test_download_route_sends_neither_header_when_disabled(client, mock_adapter_
 
     assert "x-saved-path" not in resp.headers
     assert "x-save-error" not in resp.headers
+
+
+# --- Automic search envelope ----------------------------------------------
+#
+# search_jobs used to do `data.get("data", [])`, so any response whose shape
+# didn't match the expected envelope degraded to an empty list and surfaced in
+# the UI as "No jobs found for that filter." — indistinguishable from a real
+# empty result. On-prem that turned a wrong-endpoint/wrong-envelope error into
+# a silent "the scheduler has no jobs to select".
+
+def test_automic_search_jobs_raises_when_response_has_no_data_key():
+    from unittest.mock import patch
+    from etl_framework.automic.client import AutomicClient
+    from etl_framework.config.models import EnvironmentConfig
+    from etl_framework.exceptions import AutomicAPIError
+
+    env = EnvironmentConfig(
+        name="test", db_host="host", db_password="pass",
+        automic_url="http://automic.test", automic_user="u", automic_password="p",
+    )
+    client = AutomicClient(env)
+    with patch.object(client, "_request", return_value={"jobs": [{"name": "X"}]}):
+        with pytest.raises(AutomicAPIError) as excinfo:
+            client.search_jobs("ETL_*")
+    assert "no 'data' key" in excinfo.value.response_body
+    assert "jobs" in excinfo.value.response_body  # names the keys we did get
+
+
+def test_friendly_error_surfaces_automic_response_body():
+    """AutomicAPIError.__str__ drops response_body — the operator-facing
+    message must not, or the diagnosis never leaves the server."""
+    from api.services.adapter_service import _friendly_error
+    from etl_framework.exceptions import AutomicAPIError
+
+    exc = AutomicAPIError(
+        http_status=200,
+        response_body="response has no 'data' key; keys were: ['jobs']",
+        url="http://automic.test/api/v1/jobs",
+    )
+    assert "no 'data' key" in _friendly_error(exc)
+
+
+def test_automic_search_jobs_returns_empty_for_genuinely_empty_data():
+    """`{"data": []}` is a real 'nothing matched' answer — not a contract error."""
+    from unittest.mock import patch
+    from etl_framework.automic.client import AutomicClient
+    from etl_framework.config.models import EnvironmentConfig
+
+    env = EnvironmentConfig(
+        name="test", db_host="host", db_password="pass",
+        automic_url="http://automic.test", automic_user="u", automic_password="p",
+    )
+    client = AutomicClient(env)
+    with patch.object(client, "_request", return_value={"data": []}):
+        assert client.search_jobs("ETL_*") == []

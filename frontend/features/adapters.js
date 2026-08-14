@@ -412,7 +412,18 @@
     // ===========================================================
 
     async searchAutomic() {
-      if (!this.browseAutomicConfigId || !this.browseAutomicFilter.trim()) return;
+      // Bailing out silently made a missing config or empty filter look
+      // identical to "the scheduler has no jobs" — the button just did
+      // nothing. Say which field is missing instead.
+      this.browseAutomicError = '';
+      if (!this.browseAutomicConfigId) {
+        this.browseAutomicError = 'Select a config first.';
+        return;
+      }
+      if (!this.browseAutomicFilter.trim()) {
+        this.browseAutomicError = 'Enter a filter to search for (e.g. ETL_*).';
+        return;
+      }
       this.browseAutomicLoading = true;
       this.browseAutomicResults = [];
       this.browseAutomicSelected = [];

@@ -714,7 +714,14 @@ Optional extras:
 pip install -e ".[json-logging]"
 pip install -e ".[tracing]"
 pip install -e ".[metrics]"
+pip install -e ".[netezza]"
 ```
+
+`[netezza]` is required for any environment with `db_type: netezza`, for both
+the `nzpy` and the ODBC driver. It pulls in `nzalchemy`, which supplies the
+SQLAlchemy dialect itself — the `nzpy` driver alone registers none, and
+connecting without it fails with
+`Can't load plugin: sqlalchemy.dialects:netezza.nzpy`.
 
 All common extras:
 
