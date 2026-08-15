@@ -1408,7 +1408,7 @@ Create, edit, enable, disable, and manually trigger cron-scheduled runs without 
 | Field | Description |
 |---|---|
 | Name | Human-readable label for the schedule |
-| Cron expression | Standard 5-field cron (e.g. `0 6 * * 1-5` = weekdays at 06:00) |
+| Cron expression | Standard 5-field cron (`min hour dom month dow`). Examples: `0 6 * * *` (6am daily), `0 6 * * 1-5` (weekdays at 06:00), `*/15 * * * *` (every 15 min). Times adhere to application timezone (**Config** tab). |
 | Source / Target Env | Environment pair labels used for every triggered run |
 | Config | Saved config to use |
 | Job names | Comma-separated or JSON list of jobs |

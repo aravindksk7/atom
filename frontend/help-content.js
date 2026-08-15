@@ -139,6 +139,12 @@
           where: 'CI/CD pipeline scripts (GitHub Actions / Jenkins)',
           when: 'Blocking broken data pipelines from promoting to production.',
         },
+        {
+          title: 'Cron Expression & Recurring Schedules',
+          text: 'Schedule recurring test runs using standard 5-field APScheduler cron expressions (min hour dom month dow — e.g. 0 6 * * * = 6am daily, 0 6 * * 1-5 = weekdays at 06:00, */15 * * * * = every 15 min). Runs fire according to the application timezone set in Config. Use Run Now to trigger immediately.',
+          where: 'Launch -> Schedules sub-tab (+ New Schedule)',
+          when: 'Automating recurring data quality checks and daily reconciliation jobs.',
+        },
       ],
     },
     {
