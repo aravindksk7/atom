@@ -1,8 +1,42 @@
-<template x-if="currentView === 'compare'"><div>
+<template x-if="currentView === 'compare'"><div class="compare-tab-container">
   <div class="section-header">
     <div>
       <div class="section-title">Compare</div>
       <div class="section-sub">Compare BO reports, paired environment runs, and generated reconciliation reports</div>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-4 border rounded bg-white shadow-sm">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+      <div>
+        <label class="field-label" for="compare-source-type">Source Type</label>
+        <select id="compare-source-type" x-model="compareSourceType" class="field-input field-select">
+          <option value="aws_glue">AWS Glue Catalog</option>
+          <option value="aws_athena">AWS Athena Query</option>
+          <option value="upload">Upload file</option>
+          <option value="live">Live BO</option>
+          <option value="path">File path</option>
+          <option value="api">API endpoint</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label" for="compare-target-type">Target Type</label>
+        <select id="compare-target-type" x-model="compareTargetType" class="field-input field-select">
+          <option value="aws_glue">AWS Glue Catalog</option>
+          <option value="aws_athena">AWS Athena Query</option>
+          <option value="upload">Upload file</option>
+          <option value="live">Live BO</option>
+          <option value="path">File path</option>
+          <option value="api">API endpoint</option>
+        </select>
+      </div>
+    </div>
+    <div x-show="compareSourceType === 'aws_athena' || compareTargetType === 'aws_athena'" class="athena-query-container mb-3">
+      <label class="field-label" for="athena-sql-input">Athena SQL Query</label>
+      <textarea id="athena-sql-input" x-model="athenaSqlInput" class="field-input" rows="3" placeholder="SELECT * FROM test_db.sales"></textarea>
+    </div>
+    <div class="flex justify-end">
+      <button id="btn-run-compare" class="btn-primary">Run Compare</button>
     </div>
   </div>
 

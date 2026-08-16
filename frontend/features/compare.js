@@ -22,6 +22,9 @@
     // Compare tab
     // -----------------------------------------------------------
     compareSubTab: 'bo',
+    compareSourceType: 'aws_glue',
+    compareTargetType: 'aws_glue',
+    athenaSqlInput: '',
     saveJobModalOpen: false,
     saveJobCompareType: '',
     saveJobName: '',
