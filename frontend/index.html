@@ -5054,6 +5054,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <option value="aws_athena">AWS Athena Query</option>
           <option value="upload">Upload file</option>
           <option value="live">Live BO</option>
+          <option value="sap_bo_report">SAP BO Report</option>
           <option value="path">File path</option>
           <option value="api">API endpoint</option>
         </select>
@@ -5065,6 +5066,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <option value="aws_athena">AWS Athena Query</option>
           <option value="upload">Upload file</option>
           <option value="live">Live BO</option>
+          <option value="sap_bo_report">SAP BO Report</option>
           <option value="path">File path</option>
           <option value="api">API endpoint</option>
         </select>
@@ -5073,6 +5075,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <div x-show="compareSourceType === 'aws_athena' || compareTargetType === 'aws_athena'" class="athena-query-container mb-3">
       <label class="field-label" for="athena-sql-input">Athena SQL Query</label>
       <textarea id="athena-sql-input" x-model="athenaSqlInput" class="field-input" rows="3" placeholder="SELECT * FROM test_db.sales"></textarea>
+    </div>
+    <div x-show="compareSourceType === 'sap_bo_report' || compareTargetType === 'sap_bo_report'" class="sapbo-prompt-fields mb-3">
+      <label class="field-label">SAP BO Report Prompts</label>
+      <input type="text" class="field-input" placeholder="Prompt values" />
     </div>
     <div class="flex justify-end">
       <button id="btn-run-compare" class="btn-primary">Run Compare</button>
@@ -5085,7 +5091,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <button data-testid="compare-subtab-sql" @click="compareSubTab = 'sql'" :class="compareSubTab === 'sql' ? 'sub-tab active' : 'sub-tab'">SQL</button>
     <button data-testid="compare-subtab-colstats" @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
     <button data-testid="compare-subtab-mmdiff" @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
-    <button data-testid="compare-subtab-multifile" @click="compareSubTab = 'multi_file'" :class="compareSubTab === 'multi_file' ? 'sub-tab active' : 'sub-tab'">Multi-File</button>
+    <button id="tab-multi-file-compare" data-testid="compare-subtab-multifile" @click="compareSubTab = 'multi_file'" :class="compareSubTab === 'multi_file' ? 'sub-tab active' : 'sub-tab'">Multi-File</button>
   </div>
 
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
@@ -6432,7 +6438,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </template>
   </div>
 
-  <div x-show="compareSubTab === 'multi_file'" class="space-y-4">
+  <div x-show="compareSubTab === 'multi_file'" class="multi-file-mapping-panel space-y-4">
     <div class="grid-2">
       <div>
         <label  class="field-label" for="a11y-compare-label-a">Label A</label>
