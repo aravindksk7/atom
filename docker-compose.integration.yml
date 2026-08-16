@@ -88,3 +88,21 @@ services:
     # attempt (a later task) retries, which is a sufficient readiness gate
     # here -- unlike MinIO, there's no seed *script* to gate a real readiness
     # check on for this service.
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: atom-localstack-integration
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,glue,athena
+      - AWS_DEFAULT_REGION=us-east-1
+
+  gitlab:
+    build:
+      context: ./docker/gitlab-mock
+    image: atom-gitlab-mock:latest
+    container_name: atom-gitlab-integration
+    ports:
+      - "18080:18080"
+
