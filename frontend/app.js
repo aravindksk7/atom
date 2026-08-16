@@ -444,13 +444,15 @@ function _appRaw() {
       this.$watch('sqlConfigB', () => { this.sqlConnectionB = null; });
       this.initSessionSettingsPersistence();
       if (window.location.hash) {
-        const hashView = window.location.hash.replace('#', '');
+        const rawHash = window.location.hash.replace('#', '');
+        const hashView = rawHash === 'launch' ? 'jobs' : rawHash;
         if (hashView && this.tabs && this.tabs.some(t => t.id === hashView)) {
           this.currentView = hashView;
         }
       }
       window.addEventListener('hashchange', () => {
-        const hashView = window.location.hash.replace('#', '');
+        const rawHash = window.location.hash.replace('#', '');
+        const hashView = rawHash === 'launch' ? 'jobs' : rawHash;
         if (hashView && this.tabs && this.tabs.some(t => t.id === hashView)) {
           this.currentView = hashView;
         }

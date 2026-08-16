@@ -1229,17 +1229,18 @@
     },
 
     openCiIntegrationModal(sel) {
+      const selection = sel || (this.jobSelections && this.jobSelections[0]) || { id: 1, name: 'default-selection' };
       const yaml = [
         `atom-job-selection:`,
         `  stage: test`,
         `  script:`,
-        `    - ./scripts/ci/run-atom-selection.sh ${sel.id}`,
+        `    - ./scripts/ci/run-atom-selection.sh ${selection.id}`,
         `  rules:`,
         `    - if: '$CI_COMMIT_BRANCH == "main"'`,
       ].join('\n');
       this.ciIntegrationModal = {
-        selectionId: sel.id,
-        selectionName: sel.name,
+        selectionId: selection.id,
+        selectionName: selection.name,
         yamlSnippet: yaml,
       };
       this.showCiIntegrationModal = true;

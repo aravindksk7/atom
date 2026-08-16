@@ -6,6 +6,7 @@
       <div class="section-sub">Select jobs, configure settings, and trigger a run</div>
     </div>
     <div class="flex items-center gap-3">
+      <button @click="openCiIntegrationModal()" class="btn-secondary btn-sm text-xs" id="btn-gitlab-ci-snippet">GitLab CI</button>
       <div class="flex rounded-lg border border-slate-200 overflow-hidden">
         <button @click="launchSubTab='jobs'" class="sub-tab" :class="launchSubTab==='jobs' ? 'active' : ''">Jobs</button>
         <button @click="launchSubTab='selections'; loadJobSelections()" class="sub-tab" :class="launchSubTab==='selections' ? 'active' : ''">Job Selections</button>
@@ -1344,7 +1345,7 @@
   </div>
 
   <!-- CI/CD Integration Modal -->
-  <div x-show="showCiIntegrationModal" x-cloak class="modal-backdrop" @click.self="showCiIntegrationModal = false">
+  <div x-show="showCiIntegrationModal" x-cloak class="modal-backdrop gitlab-ci-modal" @click.self="showCiIntegrationModal = false">
     <div class="modal-box w-full max-w-2xl" x-ref="ciIntegrationDialog" role="dialog" aria-modal="true" aria-labelledby="ciIntegrationModalTitle">
       <h2 id="ciIntegrationModalTitle" class="text-lg font-bold mb-4">CI/CD Integration — <span x-text="ciIntegrationModal.selectionName"></span></h2>
       <div class="space-y-3 text-sm">
@@ -1359,7 +1360,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <div>
           <div class="label">STEP 3 — Copy this into .gitlab-ci.yml</div>
-          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono" x-text="ciIntegrationModal.yamlSnippet"></pre>
+          <pre class="bg-slate-50 border rounded p-2 text-xs font-mono gitlab-ci-snippet-code" x-text="ciIntegrationModal.yamlSnippet"></pre>
           <button @click="copyCiYamlSnippet()" class="btn-primary btn-sm text-xs mt-2">Copy snippet</button>
         </div>
       </div>
