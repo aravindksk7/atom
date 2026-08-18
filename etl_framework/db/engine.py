@@ -101,7 +101,15 @@ class DBEngine:
         if _engine is not None:
             self._engine = _engine
         else:
-            if getattr(env_config, "db_type", "mssql") == "netezza":
+            db_type = getattr(env_config, "db_type", "mssql")
+            if db_type == "oracle":
+                user = urllib.parse.quote_plus(env_config.db_user)
+                pwd = urllib.parse.quote_plus(env_config.db_password)
+                connection_url = (
+                    f"oracle+oracledb://{user}:{pwd}"
+                    f"@{env_config.db_host}:{env_config.db_port}/?service_name={env_config.db_name}"
+                )
+            elif db_type == "netezza":
                 _ensure_netezza_dialect()
                 if env_config.db_driver.lower() == "nzpy":
                     connection_url = (
