@@ -66,3 +66,25 @@ def test_oracle_connection_model_serialization():
     assert data["db_driver"] == "oracledb"
 
 
+def test_oracle_full_reconciliation_workflow_dryrun():
+    env = EnvironmentConfig(
+        name="prod_oracle",
+        db_type="oracle",
+        db_host="oracle.internal",
+        db_port=1521,
+        db_name="ORCLSERVICE",
+        db_user="etl_user",
+        db_password="secret_password",
+    )
+    assert env.db_driver == "oracledb"
+    assert env.db_port == 1521
+
+    # Verify query builder for Oracle
+    hash_q = build_hash_query("SELECT id, amount FROM sales", ["id"], dialect="oracle")
+    chunk_q = build_chunk_query("SELECT id, amount FROM sales", ["id"], 0, 500, dialect="oracle")
+
+    assert '"id"' in hash_q
+    assert "OFFSET 0 ROWS FETCH NEXT 500 ROWS ONLY" in chunk_q
+
+
+
