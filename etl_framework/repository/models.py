@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from etl_framework.repository.database import Base
+from etl_framework.config.models import EnvironmentConfig as ConnectionConfig
 
 
 def _utcnow() -> datetime:

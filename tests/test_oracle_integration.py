@@ -48,3 +48,21 @@ def test_oracle_chunk_query():
     assert "OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY" in query
 
 
+def test_oracle_connection_model_serialization():
+    from etl_framework.repository.models import ConnectionConfig
+
+    conn = ConnectionConfig(
+        db_type="oracle",
+        db_host="oracle.example.com",
+        db_port=1521,
+        db_name="ORCLPDB1",
+        db_user="sys",
+        db_password="password",
+        db_driver="oracledb",
+    )
+    data = conn.model_dump()
+    assert data["db_type"] == "oracle"
+    assert data["db_port"] == 1521
+    assert data["db_driver"] == "oracledb"
+
+
