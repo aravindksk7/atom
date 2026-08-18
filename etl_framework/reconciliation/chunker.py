@@ -3,22 +3,22 @@ import pandas as pd
 from etl_framework.db.sql_utils import quote_identifier, reject_mutating_sql
 
 
-def _validate_columns(columns: list[str]) -> None:
+def _validate_columns(columns: list[str], dialect: str = "sqlserver") -> None:
     for col in columns:
-        quote_identifier(col, "sqlserver")
+        quote_identifier(col, dialect)
 
 
-def _quote_col(col: str) -> str:
-    """Wrap a column name in MSSQL square-bracket quoting."""
-    return quote_identifier(col.strip(), "sqlserver")
+def _quote_col(col: str, dialect: str = "sqlserver") -> str:
+    """Wrap a column name in identifier quoting for the given dialect."""
+    return quote_identifier(col.strip(), dialect)
 
 
-def build_hash_query(base_query: str, key_columns: list[str]) -> str:
+def build_hash_query(base_query: str, key_columns: list[str], dialect: str = "sqlserver") -> str:
     if not key_columns:
         raise ValueError("key_columns must not be empty")
-    _validate_columns(key_columns)
+    _validate_columns(key_columns, dialect)
     base_query = reject_mutating_sql(base_query)
-    key_list = ", ".join(_quote_col(c) for c in key_columns)
+    key_list = ", ".join(_quote_col(c, dialect) for c in key_columns)
     return (
         f"SELECT {key_list}, "
         f"CHECKSUM_AGG(CHECKSUM(*)) OVER () AS hash_value "
@@ -31,12 +31,13 @@ def build_chunk_query(
     key_columns: list[str],
     offset: int,
     chunk_size: int,
+    dialect: str = "sqlserver",
 ) -> str:
     if not key_columns:
         raise ValueError("key_columns must not be empty")
-    _validate_columns(key_columns)
+    _validate_columns(key_columns, dialect)
     base_query = reject_mutating_sql(base_query)
-    order_cols = ", ".join(_quote_col(c) for c in key_columns)
+    order_cols = ", ".join(_quote_col(c, dialect) for c in key_columns)
     return (
         f"SELECT * FROM ({base_query}) AS _base "
         f"ORDER BY {order_cols} "

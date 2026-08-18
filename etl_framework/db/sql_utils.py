@@ -53,13 +53,14 @@ def validate_identifiers(identifiers: Iterable[str]) -> list[str]:
 
 
 def quote_identifier(identifier: str, dialect: str = "sqlserver") -> str:
-    if dialect.lower() in {"sqlserver", "mssql"}:
+    d = dialect.lower()
+    if d in {"sqlserver", "mssql"}:
         cleaned = identifier.strip()
         if not _BRACKET_SAFE_RE.fullmatch(cleaned):
             raise ValueError(f"Invalid SQL identifier: {identifier!r}")
         return f"[{cleaned}]"
     validate_identifier(identifier)
-    if dialect.lower() == "mysql":
+    if d == "mysql":
         return f"`{identifier}`"
     return '"' + identifier.replace('"', '""') + '"'
 
