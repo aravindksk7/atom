@@ -16,6 +16,15 @@
     configModal: {},
     configValidation: null,
 
+    // Schema Explorer
+    schemaExplorerId: null,
+    schemaExplorerConnection: '',
+    schemaExplorerData: [],
+    schemaExplorerLoading: false,
+    schemaExpandedSchemas: {},
+    schemaExpandedTables: {},
+    schemaTablePreviews: {},
+
     // -----------------------------------------------------------
     // Config – YAML import
     // -----------------------------------------------------------
@@ -522,6 +531,117 @@
       } catch (e) {
         this.toast('error', 'Ping failed', e.message);
       }
+    },
+
+    getSchemaConnections(configId) {
+      const cfg = this.configs.find(c => c.id === configId);
+      if (!cfg) return [];
+      const d = cfg.config_data || {};
+      const conns = [];
+      const mainType = d.db_type || 'mssql';
+      const mainHost = d.db_host || 'default';
+      const mainDb = d.db_name || '';
+      conns.push({ name: '', label: `Main DB: ${mainDb || mainHost} (${mainType})` });
+      if (d.connections && typeof d.connections === 'object') {
+        for (const [name, conn] of Object.entries(d.connections)) {
+          const type = conn.db_type || mainType;
+          const host = conn.db_host || mainHost;
+          const db = conn.db_name || host;
+          conns.push({ name, label: `Connection: ${name} (${db} / ${type})` });
+        }
+      }
+      return conns;
+    },
+
+    async openSchemaExplorer(cfg, connectionName = null) {
+      if (this.schemaExplorerId === cfg.id && (connectionName === null || connectionName === this.schemaExplorerConnection)) {
+        this.closeSchemaExplorer();
+        return;
+      }
+      this.schemaExplorerId = cfg.id;
+      this.schemaExplorerConnection = connectionName || '';
+      this.schemaExplorerData = [];
+      this.schemaExpandedSchemas = {};
+      this.schemaExpandedTables = {};
+      this.schemaTablePreviews = {};
+      this.schemaExplorerLoading = true;
+      try {
+        const qs = connectionName ? `?connection_name=${encodeURIComponent(connectionName)}` : '';
+        this.schemaExplorerData = await api('GET', `/api/configs/${cfg.id}/schema${qs}`);
+        const schemas = [...new Set(this.schemaExplorerData.map(t => t.schema))];
+        this.schemaExpandedSchemas = Object.fromEntries(schemas.map(s => [s, true]));
+      } catch (e) {
+        this.toast('error', 'Schema load failed', e.message);
+        this.schemaExplorerId = null;
+      } finally {
+        this.schemaExplorerLoading = false;
+      }
+    },
+
+    closeSchemaExplorer() {
+      this.schemaExplorerId = null;
+      this.schemaExplorerConnection = '';
+      this.schemaExplorerData = [];
+      this.schemaTablePreviews = {};
+    },
+
+    toggleSchemaGroup(schema) {
+      this.schemaExpandedSchemas[schema] = !this.schemaExpandedSchemas[schema];
+    },
+
+    toggleSchemaTable(key) {
+      this.schemaExpandedTables[key] = !this.schemaExpandedTables[key];
+    },
+
+    async previewSchemaTable(configId, schema, table) {
+      const key = `${schema}.${table}`;
+      this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: 'loading' };
+      try {
+        const cfg = this.configs.find(c => c.id === configId);
+        let dbType = 'mssql';
+        if (cfg) {
+          const d = cfg.config_data || {};
+          const connName = this.schemaExplorerConnection;
+          if (connName && d.connections && d.connections[connName]) {
+            dbType = d.connections[connName].db_type || d.db_type || 'mssql';
+          } else {
+            dbType = d.db_type || 'mssql';
+          }
+        }
+        let query = '';
+        if (dbType === 'mssql') {
+          query = `SELECT * FROM [${schema}].[${table}]`;
+        } else {
+          query = `SELECT * FROM "${schema}"."${table}"`;
+        }
+        const result = await api('POST', `/api/configs/${configId}/preview-query`, {
+          query: query,
+          limit: 50,
+          connection_name: this.schemaExplorerConnection || undefined,
+        });
+        this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: result };
+      } catch (e) {
+        this.schemaTablePreviews = { ...this.schemaTablePreviews, [key]: `error:${e.message}` };
+      }
+    },
+
+    useTableInJob(schema, table) {
+      const cfg = this.configs.find(c => c.id === this.schemaExplorerId);
+      let dbType = 'mssql';
+      if (cfg) {
+        const d = cfg.config_data || {};
+        const connName = this.schemaExplorerConnection;
+        if (connName && d.connections && d.connections[connName]) {
+          dbType = d.connections[connName].db_type || d.db_type || 'mssql';
+        } else {
+          dbType = d.db_type || 'mssql';
+        }
+      }
+      const query = dbType === 'mssql' ? `SELECT * FROM [${schema}].[${table}]` : `SELECT * FROM "${schema}"."${table}"`;
+      sessionStorage.setItem('etl_pending_query', query);
+      this.activeTab = 'launch';
+      this.$nextTick(() => this.openNewJobModal());
+      this.toast('info', 'Query pre-filled', 'Finish the job setup');
     },
 
     };

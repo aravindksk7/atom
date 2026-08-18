@@ -322,31 +322,70 @@ def _build_env(cfg, connection_name: str | None = None) -> EnvironmentConfig:
 
 
 @router.get("/{config_id}/schema")
-def get_db_schema(config_id: int, db: Session = Depends(get_session)):
+def get_db_schema(config_id: int, connection_name: str | None = None, db: Session = Depends(get_session)):
     """Return all tables and columns visible to this config's database credentials."""
     repo = ConfigRepository(db)
     cfg = repo.get(config_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="Config not found")
     try:
-        env = _build_env(cfg)
+        env = _build_env(cfg, connection_name)
+        db_type = getattr(env, "db_type", "mssql")
         from etl_framework.db.engine import DBEngine
         engine = DBEngine(env)
-        df = engine.execute_query(
-            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
-            "FROM INFORMATION_SCHEMA.COLUMNS "
-            "ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
-        )
+
+        if db_type == "oracle":
+            query = (
+                "SELECT OWNER AS TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
+                "FROM ALL_TAB_COLUMNS "
+                "ORDER BY OWNER, TABLE_NAME, COLUMN_ID"
+            )
+        elif db_type == "netezza":
+            query = (
+                "SELECT SCHEMA AS TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
+                "FROM INFORMATION_SCHEMA.COLUMNS "
+                "ORDER BY SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+            )
+        else:
+            query = (
+                "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
+                "FROM INFORMATION_SCHEMA.COLUMNS "
+                "ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+            )
+
+        try:
+            df = engine.execute_query(query)
+        except Exception:
+            if db_type == "netezza":
+                df = engine.execute_query(
+                    "SELECT SCHEMA AS TABLE_SCHEMA, TABLENAME AS TABLE_NAME, "
+                    "ATTNAME AS COLUMN_NAME, FORMAT_TYPE AS DATA_TYPE "
+                    "FROM _V_SYS_COLUMNS "
+                    "ORDER BY SCHEMA, TABLENAME, ATTNUM"
+                )
+            else:
+                raise
+
         engine.dispose()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"DB connection failed: {exc}")
 
+    col_map = {str(c).upper(): c for c in df.columns}
+    schema_col = col_map.get("TABLE_SCHEMA", df.columns[0] if len(df.columns) > 0 else "TABLE_SCHEMA")
+    table_col = col_map.get("TABLE_NAME", df.columns[1] if len(df.columns) > 1 else "TABLE_NAME")
+    column_col = col_map.get("COLUMN_NAME", df.columns[2] if len(df.columns) > 2 else "COLUMN_NAME")
+    type_col = col_map.get("DATA_TYPE", df.columns[3] if len(df.columns) > 3 else "DATA_TYPE")
+
     tables: dict[tuple, list] = {}
     for _, row in df.iterrows():
-        key = (str(row["TABLE_SCHEMA"]), str(row["TABLE_NAME"]))
+        s_val = str(row[schema_col]) if row[schema_col] is not None else ""
+        t_val = str(row[table_col]) if row[table_col] is not None else ""
+        c_val = str(row[column_col]) if row[column_col] is not None else ""
+        ty_val = str(row[type_col]) if row[type_col] is not None else ""
+        key = (s_val, t_val)
         if key not in tables:
             tables[key] = []
-        tables[key].append({"name": str(row["COLUMN_NAME"]), "type": str(row["DATA_TYPE"])})
+        tables[key].append({"name": c_val, "type": ty_val})
 
     return [{"schema": k[0], "table": k[1], "columns": cols} for k, cols in tables.items()]
 
@@ -354,6 +393,7 @@ def get_db_schema(config_id: int, db: Session = Depends(get_session)):
 class _PreviewRequest(BaseModel):
     query: str
     limit: int = 50
+    connection_name: str | None = None
 
 
 @router.post("/{config_id}/preview-query")
@@ -365,10 +405,16 @@ def preview_query(config_id: int, body: _PreviewRequest, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Config not found")
 
     limit = max(1, min(200, body.limit))
-    safe_sql = f"SELECT TOP {limit} * FROM ({body.query}) AS _preview"
-
     try:
-        env = _build_env(cfg)
+        env = _build_env(cfg, body.connection_name)
+        db_type = getattr(env, "db_type", "mssql")
+        if db_type == "oracle":
+            safe_sql = f"SELECT * FROM ({body.query}) FETCH FIRST {limit} ROWS ONLY"
+        elif db_type == "netezza":
+            safe_sql = f"SELECT * FROM ({body.query}) AS _preview LIMIT {limit}"
+        else:
+            safe_sql = f"SELECT TOP {limit} * FROM ({body.query}) AS _preview"
+
         from etl_framework.db.engine import DBEngine
         engine = DBEngine(env)
         df = engine.execute_query(safe_sql)

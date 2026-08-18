@@ -216,13 +216,29 @@
 
   <!-- Schema Explorer Panel -->
   <template x-if="schemaExplorerId !== null">
-    <div class="card mt-3">
-      <div class="flex items-center justify-between mb-3">
-        <div class="font-semibold text-slate-700">
-          Schema Explorer —
-          <span x-text="configs.find(c => c.id === schemaExplorerId)?.name ?? ''"></span>
+    <div class="card mt-3" data-testid="schema-explorer-panel">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div class="flex items-center gap-3">
+          <div class="font-semibold text-slate-700">
+            Schema Explorer —
+            <span x-text="configs.find(c => c.id === schemaExplorerId)?.name ?? ''"></span>
+          </div>
+          <template x-if="getSchemaConnections(schemaExplorerId).length > 1">
+            <div class="flex items-center gap-1.5 text-xs text-slate-600">
+              <label for="schema-explorer-conn-select" class="font-medium">Data Source:</label>
+              <select id="schema-explorer-conn-select"
+                      x-model="schemaExplorerConnection"
+                      @change="openSchemaExplorer(configs.find(c => c.id === schemaExplorerId), schemaExplorerConnection)"
+                      class="field-input field-select text-xs py-1 px-2"
+                      data-testid="schema-explorer-connection-select">
+                <template x-for="conn in getSchemaConnections(schemaExplorerId)" :key="conn.name">
+                  <option :value="conn.name" x-text="conn.label"></option>
+                </template>
+              </select>
+            </div>
+          </template>
         </div>
-        <button @click="closeSchemaExplorer()" class="text-muted hover:text-slate-700 text-sm">✕ Close</button>
+        <button @click="closeSchemaExplorer()" class="text-muted hover:text-slate-700 text-sm" data-testid="schema-explorer-close-btn">✕ Close</button>
       </div>
 
       <div x-show="schemaExplorerLoading" class="text-muted text-sm">Loading schema…</div>
