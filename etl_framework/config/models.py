@@ -19,7 +19,7 @@ class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = ""
-    db_type: Literal["mssql", "netezza"] = "mssql"
+    db_type: Literal["mssql", "netezza", "oracle"] = "mssql"
     db_host: str
     db_port: int = 1433
     db_name: str = ""
@@ -72,6 +72,11 @@ class EnvironmentConfig(BaseModel):
                     data["db_port"] = 5480
                 if "db_driver" not in data or "SQL Server" in str(data.get("db_driver")):
                     data["db_driver"] = "nzpy"
+            elif data.get("db_type") == "oracle":
+                if "db_port" not in data or data.get("db_port") == 1433:
+                    data["db_port"] = 1521
+                if "db_driver" not in data or "SQL Server" in str(data.get("db_driver")):
+                    data["db_driver"] = "oracledb"
         return data
 
     @field_validator("db_port")
@@ -156,7 +161,7 @@ class EnvironmentConfig(BaseModel):
 
 class ConnectionEntry(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    db_type: Literal["mssql", "netezza"] | None = None
+    db_type: Literal["mssql", "netezza", "oracle"] | None = None
     db_host: str | None = None
     db_port: int | None = None
     db_name: str | None = None
