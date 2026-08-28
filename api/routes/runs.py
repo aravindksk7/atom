@@ -594,9 +594,17 @@ def get_run_logs(
 
 @router.get("/{run_id}/report", response_class=FileResponse)
 def get_run_report(run_id: str, db: Session = Depends(get_session)):
-    service = ArtifactService(repository=RunRepository(db))
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    service = ArtifactService(repository=repo)
     report_path = service.generate_html_report(run_id)
-    return FileResponse(report_path, media_type="text/html")
+    return FileResponse(
+        report_path,
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(run, "html")}"'},
+    )
 
 
 @router.get("/{run_id}/progress", response_model=RunProgressOut)
@@ -754,7 +762,7 @@ def download_mismatches(
         return FileResponse(
             report_path,
             media_type="text/html",
-            headers={"Content-Disposition": f'attachment; filename="report_{run_id}.html"'},
+            headers={"Content-Disposition": f'attachment; filename="{export_filename(run, "html")}"'},
         )
 
     rows = collect_mismatch_rows(repo, snapshot)
@@ -793,7 +801,7 @@ def download_all_differences(
     return FileResponse(
         path,
         media_type=media_type_for(fmt),
-        headers={"Content-Disposition": f'attachment; filename="{export_filename(run_id, fmt)}"'},
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(run, fmt)}"'},
     )
 
 
@@ -866,10 +874,13 @@ def download_difference_export(
     path = Path(job.artifact_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Export artifact not found")
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
     return FileResponse(
         path,
         media_type=media_type_for(job.format),
-        headers={"Content-Disposition": f'attachment; filename="{export_filename(run_id, job.format, export_id)}"'},
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(run, job.format, export_id)}"'},
     )
 
 

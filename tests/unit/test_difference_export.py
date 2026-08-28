@@ -605,3 +605,97 @@ def test_list_runs_includes_report_name(monkeypatch):
         assert detail_resp.json()["report_name"].startswith("nightly_recon_")
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def _seed_completed_run(engine, config_name="Nightly Recon"):
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("test-runner")
+        run_id = str(uuid.uuid4())
+        run = RunRepository(db).create_run(run_id, "dev", "prod", {"config_name": config_name})
+        run.status = "PASSED"
+        run.started_at = datetime(2026, 8, 28, 14, 30, 5, tzinfo=timezone.utc)
+        db.commit()
+    return raw, run_id
+
+
+def test_report_route_uses_report_name_convention(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from etl_framework.repository.database import Base, get_db
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    def override_get_db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        raw, run_id = _seed_completed_run(engine)
+        client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+
+        resp = client.get(f"/api/runs/{run_id}/report")
+        assert resp.status_code == 200
+        disposition = resp.headers["content-disposition"]
+        assert "nightly_recon_2026-08-28_14-30-05" in disposition
+        assert disposition.endswith('.html"')
+
+        resp2 = client.get(f"/api/runs/{run_id}/mismatches/download", params={"format": "html"})
+        assert resp2.status_code == 200
+        assert "nightly_recon_2026-08-28_14-30-05" in resp2.headers["content-disposition"]
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_exports_download_route_uses_report_name_convention(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from etl_framework.repository.database import Base, get_db
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+    from api.services import difference_export as de
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    # run_difference_export_job() opens its own session via a module-level
+    # `SessionLocal` name bound at import time (not routed through the
+    # FastAPI get_db dependency override), so it must be patched separately
+    # or the background export job hits the real on-disk database.
+    monkeypatch.setattr(de, "SessionLocal", sessionmaker(bind=engine))
+
+    def override_get_db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        raw, run_id = _seed_completed_run(engine)
+        client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+
+        create_resp = client.post(f"/api/runs/{run_id}/exports", json={"format": "csv"})
+        assert create_resp.status_code == 202
+        export_id = create_resp.json()["export_id"]
+
+        status_resp = client.get(f"/api/runs/{run_id}/exports/{export_id}")
+        assert status_resp.json()["status"] == "COMPLETED"
+
+        download_resp = client.get(f"/api/runs/{run_id}/exports/{export_id}/download")
+        assert download_resp.status_code == 200
+        assert "nightly_recon_2026-08-28_14-30-05" in download_resp.headers["content-disposition"]
+    finally:
+        app.dependency_overrides.pop(get_db, None)
