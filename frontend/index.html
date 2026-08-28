@@ -3914,6 +3914,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <thead>
             <tr>
               <th scope="col">Run ID</th>
+              <th scope="col">Report Name</th>
               <th scope="col">Status</th>
               <th scope="col">Environments</th>
               <th scope="col">Started</th>
@@ -3928,6 +3929,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
+                <td class="text-xs font-mono text-slate-600" x-text="run.report_name" :data-testid="'history-run-report-name-' + run.run_id"></td>
                 <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
