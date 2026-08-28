@@ -957,6 +957,35 @@ class AutomicLookupRequest(BaseModel):
     id_type: Literal["run_id", "job_name"] = "job_name"
 
 
+class SAPDSTestRequest(BaseModel):
+    config_id: int
+
+
+class SAPDSLookupRequest(BaseModel):
+    config_id: int
+    identifier: str
+    id_type: Literal["run_id", "job_name"] = "job_name"
+    repository: str | None = None
+
+
+class SAPDSJobStatusOut(BaseModel):
+    identifier: str
+    identifier_type: str
+    repository: str
+    status: str
+    environment: str
+    checked_at: datetime
+
+
+class SAPDSJobCreateRequest(BaseModel):
+    name: str
+    job_name: str
+    repository: str | None = None
+    poll_interval_s: float = 5.0
+    timeout_s: float = 600.0
+
+
+
 class BOJobCreateRequest(BaseModel):
     name: str
     title: str

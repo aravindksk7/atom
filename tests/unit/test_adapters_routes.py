@@ -612,3 +612,34 @@ def test_automic_search_jobs_returns_empty_for_genuinely_empty_data():
     client = AutomicClient(env)
     with patch.object(client, "_request", return_value={"data": []}):
         assert client.search_jobs("ETL_*") == []
+
+
+def test_sapds_schemas():
+    from api.schemas import (
+        SAPDSTestRequest,
+        SAPDSLookupRequest,
+        SAPDSJobStatusOut,
+        SAPDSJobCreateRequest,
+    )
+    req = SAPDSTestRequest(config_id=1)
+    assert req.config_id == 1
+
+    lookup = SAPDSLookupRequest(config_id=1, identifier="JOB_1")
+    assert lookup.id_type == "job_name"
+    assert lookup.repository is None
+
+    status = SAPDSJobStatusOut(
+        identifier="JOB_1",
+        identifier_type="job_name",
+        repository="REPO1",
+        status="COMPLETED",
+        environment="dev",
+        checked_at=datetime.now(timezone.utc),
+    )
+    assert status.repository == "REPO1"
+
+    create = SAPDSJobCreateRequest(name="my_job", job_name="JOB_1")
+    assert create.repository is None
+    assert create.poll_interval_s == 5.0
+    assert create.timeout_s == 600.0
+
