@@ -100,13 +100,16 @@ def run_display_label_for(run: Any) -> str:
 
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
+_SLUG_MAX_LENGTH = 80
 
 
 def _slug(text: str) -> str:
     """Filesystem/URL-safe token: lowercase, non-alphanumeric runs collapsed to a
-    single underscore, no leading/trailing underscore."""
+    single underscore, no leading/trailing underscore, capped in length so a long
+    config name can't produce a filename that exceeds OS path-component limits
+    (see api/services/upload_store.py:safe_filename for the same concern)."""
     lowered = str(text or "").strip().lower()
-    collapsed = _SLUG_INVALID.sub("_", lowered).strip("_")
+    collapsed = _SLUG_INVALID.sub("_", lowered).strip("_")[:_SLUG_MAX_LENGTH].strip("_")
     return collapsed or "run"
 
 

@@ -1223,7 +1223,12 @@
         }
         const blob = await resp.blob();
         const disposition = resp.headers.get('content-disposition') || '';
-        const fallback = `all_differences_${runId}.${format === 'parquet' ? 'parquet' : 'csv'}`;
+        // Rarely hit -- the server always sets Content-Disposition now (see
+        // export_filename in api/services/difference_export.py). This fallback
+        // can't compute the full report-name convention client-side (it doesn't
+        // have the run's config_snapshot/started_at loaded here), so it just
+        // avoids the old, now-inconsistent "all_differences_" prefix.
+        const fallback = `report_${runId}.${format === 'parquet' ? 'parquet' : 'csv'}`;
         const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
         triggerDownload(blob, filename);
         this.differenceExports = { ...this.differenceExports, [key]: { status: 'DOWNLOADED' } };

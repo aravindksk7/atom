@@ -151,6 +151,16 @@ class TestReportNameBase:
         )
         assert report_name_base_for(run) == "nightly_recon_2026-08-28_14-30-05"
 
+    def test_caps_the_length_of_a_very_long_config_name(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(
+            started_at=self.STARTED,
+            config_snapshot={"config_name": "x" * 300},
+        )
+        stem = name.rsplit("_", 6)[0]  # strip the "_YYYY-MM-DD_HH-MM-SS" timestamp suffix
+        assert len(stem) <= 80
+
 
 def test_snapshot_exposes_the_report_name_for_downloads():
     from api.services.run_report import build_run_report_snapshot
