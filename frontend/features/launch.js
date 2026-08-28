@@ -154,7 +154,7 @@
         source_file_path: '', target_file_path: '',
         source_file_label: '', target_file_label: '',
         target_source_mode: 'path', target_file_b64: '', target_file_name: '',
-        key_columns_raw: 'id', tags_raw: '', enabled: true,
+        key_columns_raw: 'id', exclude_columns_raw: '', tags_raw: '', enabled: true,
         depends_on_raw: '', rules: [],
         bo_report_id: '', bo_page_id: '', bo_format: 'xlsx', bo_parameters: [],
         automic_job_name: '', automic_run_id: '',
@@ -284,6 +284,7 @@
         name: job.name, description: job.description || '',
         job_type: job.job_type || 'reconciliation',
         query: job.query || '', key_columns_raw: (job.key_columns || ['id']).join(', '),
+        exclude_columns_raw: (job.exclude_columns || []).join(', '),
         source_mode: job.params?.source_mode || (job.params?.source_file_path || job.params?.file_a_path ? 'files' : 'sql'),
         source_file_path: job.params?.source_file_path || job.params?.file_a_path || '',
         target_file_path: job.params?.target_file_path || job.params?.file_b_path || '',
@@ -693,6 +694,9 @@
       const keyColumns = ['reconciliation', 'bo_report', 'api_reconciliation'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
+      const excludeColumns = ['reconciliation', 'bo_report', 'api_reconciliation'].includes(m.job_type)
+        ? (m.exclude_columns_raw || '').split(',').map(s => s.trim()).filter(Boolean)
+        : [];
       const pc = {};
       if (m.pass_min_row_count !== '') pc.min_row_count = Number(m.pass_min_row_count);
       if (m.pass_max_row_count !== '') pc.max_row_count = Number(m.pass_max_row_count);
@@ -706,6 +710,7 @@
         job_type: m.job_type,
         query: ['reconciliation', 'freshness', 'profile', 'schema_snapshot'].includes(m.job_type) && !usesFileSource && !usesBoLive && !usesMultiFile ? m.query : '',
         key_columns: keyColumns,
+        exclude_columns: excludeColumns,
         tags: m.tags_raw.split(',').map(s => s.trim()).filter(Boolean),
         enabled: m.enabled,
         depends_on: m.depends_on_raw.split(',').map(s => s.trim()).filter(Boolean),
@@ -1312,12 +1317,18 @@
     },
 
     // Determine which Compare sub-tab a job's own compare type maps to.
-    // Only bo_report and reconciliation (incl. multi_file source_mode) jobs
-    // have a compare type at all -- callers must gate visibility on this too.
+    // bo_report, reconciliation (incl. multi_file source_mode), and compare
+    // (saved via the Compare tab's "Save as Job" button) jobs have a compare
+    // type -- callers must gate visibility on this too.
     _compareSubTabForJob(job) {
       if (job.job_type === 'bo_report') return 'bo';
       if (job.job_type === 'reconciliation' && job.params?.source_mode === 'multi_file') return 'multi_file';
       if (job.job_type === 'reconciliation') return 'recon';
+      if (job.job_type === 'compare') {
+        if (job.params?.compare_type === 'bo') return 'bo';
+        if (job.params?.compare_type === 'recon_file') return 'recon';
+        return null;
+      }
       return null;
     },
 
@@ -1332,7 +1343,37 @@
         this.toast('warn', 'No compare type for this job', `job_type '${job.job_type}' has no compare equivalent`);
         return null;
       }
-      if (subTab === 'bo') {
+      // A job_type 'compare' job (saved via the Compare tab's "Save as Job"
+      // button) carries its whole config in params.request -- prefill from
+      // that instead of the bo_report/reconciliation param shapes below, and
+      // remember it so a later "Save as Job" updates this job instead of
+      // creating a duplicate. Any other prefill (a fresh compare, or a
+      // bo_report/reconciliation job) is not an edit of a compare job.
+      this.editingCompareJob = job.job_type === 'compare' ? job : null;
+      if (job.job_type === 'compare' && subTab === 'bo') {
+        const req = job.params?.request || {};
+        const a = this._hydrateBOSourceFromConfig(req.source_a);
+        const b = this._hydrateBOSourceFromConfig(req.source_b);
+        this.boSourceAType = a.type;
+        this.boSourceA = { ...a.src, label: req.label_a || 'Source A' };
+        this.boSourceBType = b.type;
+        this.boSourceB = { ...b.src, label: req.label_b || 'Source B' };
+        this.boKeyColumns = (req.key_columns || []).join(', ');
+        this.boExcludeColumns = (req.exclude_columns || []).join(', ');
+        this._applyAdvancedToPrefix('bo', req.advanced);
+      } else if (job.job_type === 'compare' && subTab === 'recon') {
+        const req = job.params?.request || {};
+        this.reconMode = 'file';
+        this.fileSourceAType = 'path';
+        this.filePathA = req.file_a_path || ''; this.fileB64A = ''; this.fileNameA = '';
+        this.fileSourceBType = 'path';
+        this.filePathB = req.file_b_path || ''; this.fileB64B = ''; this.fileNameB = '';
+        this.fileLabelA = req.label_a || 'Source A';
+        this.fileLabelB = req.label_b || 'Production Report';
+        this.fileCompareKeyColumns = (req.key_columns || []).join(', ');
+        this.fileCompareExcludeColumns = (req.exclude_columns || []).join(', ');
+        this._applyAdvancedToPrefix('file', req.advanced);
+      } else if (subTab === 'bo') {
         this.boSourceAType = opts.runIdA ? 'run' : 'live';
         this.boSourceA = {
           ...this.boSourceA,
@@ -1562,6 +1603,7 @@
         source_file_label: m.source_file_label,
         target_file_label: m.target_file_label,
         key_columns_raw: m.key_columns_raw,
+        exclude_columns_raw: m.exclude_columns_raw,
         tags_raw: m.tags_raw,
         enabled: m.enabled,
         depends_on_raw: m.depends_on_raw,

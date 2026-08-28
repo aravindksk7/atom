@@ -636,6 +636,44 @@ def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: Diff
             )
 
 
+def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -> None:
+    """Recompute a job saved via the Compare tab's "Save as Job" button
+    (job_type == 'compare') from its own params, the same way a
+    'compare_request_type'-tagged ad-hoc run does. Job-executed compare runs
+    never get that snapshot key set (only the ad-hoc /api/compare/* endpoints
+    do), so without this the caller's job_type == 'reconciliation' filter
+    would silently drop the job and export zero rows for it.
+    """
+    params = saved.params or {}
+    compare_type = params.get("compare_type")
+    payload = dict(params.get("request") or {})
+    svc = CompareService(db, ConfigRepository(db))
+    if compare_type == "bo":
+        req = BOCompareRequest(**payload)
+        df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id, store_responses=False)
+        df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id, store_responses=False)
+    elif compare_type == "recon_file":
+        req = ReconFileCompareRequest(**payload)
+        source_a = svc._load_recon_source(req, "a")
+        source_b = svc._load_recon_source(req, "b")
+        if not (isinstance(source_a, pd.DataFrame) and isinstance(source_b, pd.DataFrame)):
+            # Report-shaped (HTML/stored-run stats) sources compare test-by-test,
+            # not row-by-row -- there is no tabular difference set to add here.
+            return
+        df_a, df_b = source_a, source_b
+    else:
+        return
+    _write_tabular_differences(
+        df_a,
+        df_b,
+        key_columns=req.key_columns or [],
+        exclude_columns=req.exclude_columns or [],
+        options=req.advanced,
+        test_name=saved.name,
+        writer=writer,
+    )
+
+
 def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWriter) -> None:
     snapshot = run.config_snapshot or {}
     job_names = snapshot.get("job_sequence") or [result.query_name for result in run.results]
@@ -653,7 +691,12 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
     for item in job_names:
         job_name = item.get("job_name") if isinstance(item, dict) else str(item)
         saved = db.query(SavedJob).filter(SavedJob.name == job_name).first()
-        if saved is None or saved.job_type != "reconciliation":
+        if saved is None:
+            continue
+        if saved.job_type == "compare":
+            _write_compare_job(db, saved, writer)
+            continue
+        if saved.job_type != "reconciliation":
             continue
         job = executor._job_to_definition(saved)
         if job.params.get("source_mode") == "bo_live":

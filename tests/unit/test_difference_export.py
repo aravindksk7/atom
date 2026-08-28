@@ -244,6 +244,109 @@ def test_write_reconciliation_run_skips_bo_live_job_instead_of_self_comparing(tm
     assert row["test_name"] == "normal_job"
 
 
+def test_write_reconciliation_run_recomputes_a_compare_job_instead_of_skipping_it(tmp_path, monkeypatch):
+    """A job saved via the Compare tab's "Save as Job" button has job_type
+    'compare', not 'reconciliation' -- _write_reconciliation_run's per-job loop
+    used to require job_type == 'reconciliation' and silently `continue` past
+    anything else (mirroring the bo_live skip above), which meant Full HTML
+    Report / differences export produced zero rows for every job-executed
+    'compare' run, even though the run itself found real mismatches."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.reconciliation.models import ReconciliationResult
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+    from etl_framework.runner.state import TestStatus
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    src = tmp_path / "src.csv"
+    tgt = tmp_path / "tgt.csv"
+    src.write_text("id,amount\n1,10\n2,20\n", encoding="utf-8")
+    tgt.write_text("id,amount\n1,10\n2,99\n", encoding="utf-8")
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "compare_job",
+            "description": "",
+            "tags": [],
+            "job_type": "compare",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None, "target_env": None,
+            "params": {
+                "compare_type": "recon_file",
+                "request": {
+                    "file_a_path": str(src),
+                    "file_b_path": str(tgt),
+                    "label_a": "Source A",
+                    "label_b": "Source B",
+                    "key_columns": ["id"],
+                    "exclude_columns": [],
+                },
+            },
+            "enabled": True,
+        })
+
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-compare-job-export",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={
+                "compare_request_type": "unknown",
+                "request": {},
+                "job_sequence": ["compare_job"],
+            },
+        )
+        # The run's own real execution found a genuine mismatch -- re-exporting
+        # must not silently contradict that with zero rows.
+        repo.add_test_result(run.run_id, ReconciliationResult(
+            query_name="compare_job",
+            source_env="qa",
+            target_env="prod",
+            source_row_count=2,
+            target_row_count=2,
+            matched_count=1,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=1,
+            mismatches=[],
+            status=TestStatus.FAILED,
+            executed_at=datetime.now(timezone.utc),
+            duration_seconds=0.1,
+        ))
+        run_id = run.run_id
+
+    out_path = tmp_path / "diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+    assert row_count == len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["test_name"] == "compare_job"
+    assert row["column_name"] == "amount"
+
+
 def test_media_type_for_html():
     from api.services.difference_export import media_type_for
 

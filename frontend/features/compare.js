@@ -32,6 +32,11 @@
     saveJobTags: '',
     saveJobError: '',
     saveJobSaving: false,
+    // The compare job (job_type 'compare') currently loaded for editing via
+    // openCompareForJob, if any -- set by launch.js's openCompareForJob, read
+    // by openSaveCompareAsJob/saveCompareAsJob to update it in place (PUT)
+    // instead of creating a duplicate (POST).
+    editingCompareJob: null,
     reconMode: 'stored',
 
     boSourceAType: 'live',
@@ -428,6 +433,47 @@
       return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
     },
 
+    // Reverse of _buildBOSource -- turns a saved compare job's SourceConfig
+    // (params.request.source_a/source_b) back into boSourceAType/boSourceA
+    // shape. Saved compare jobs only ever hold 'live', 'path', or 'api'
+    // sources (_assertCompareJobSourcesAreRepeatable rejects 'upload'/'run'
+    // at save time), so those are the only three handled here.
+    _hydrateBOSourceFromConfig(cfg) {
+      const base = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: '', endpointName: '', parameters: [], runId: '', jobName: '' };
+      if (!cfg) return { type: 'live', src: base };
+      if (cfg.source_type === 'path') {
+        return { type: 'path', src: { ...base, filePath: cfg.file_path || '' } };
+      }
+      if (cfg.source_type === 'api') {
+        return { type: 'api', src: { ...base, configId: cfg.config_id ?? '', endpointName: cfg.api_endpoint_name || '' } };
+      }
+      return {
+        type: 'live',
+        src: {
+          ...base,
+          configId: cfg.config_id ?? '',
+          docId: cfg.doc_id || '',
+          reportId: cfg.report_id || '',
+          parameters: (cfg.bo_parameters || []).map(p => ({ ...p })),
+        },
+      };
+    },
+
+    // Reverse of _buildAdvanced -- turns an AdvancedCompareOptions object back
+    // into the `${prefix}FloatTolerance` etc. raw form fields.
+    _applyAdvancedToPrefix(prefix, adv) {
+      adv = adv || {};
+      this[`${prefix}FloatTolerance`] = adv.float_tolerance != null ? String(adv.float_tolerance) : '1e-9';
+      this[`${prefix}ColumnTolerances`] = Object.entries(adv.column_tolerances || {}).map(([k, v]) => `${k}:${v}`).join(', ');
+      this[`${prefix}DatetimeTolerance`] = adv.datetime_tolerance_seconds ?? 0;
+      this[`${prefix}CaseInsensitiveColumns`] = (adv.case_insensitive_columns || []).join(', ');
+      this[`${prefix}WhitespaceNormalizeColumns`] = (adv.whitespace_normalize_columns || []).join(', ');
+      this[`${prefix}Backend`] = adv.comparison_backend || 'pandas';
+      this[`${prefix}MismatchRowLimit`] = adv.mismatch_row_limit ?? 5000;
+      this[`${prefix}SampleFrac`] = adv.sample_frac != null ? String(adv.sample_frac) : '';
+      this[`${prefix}ParallelColumns`] = Boolean(adv.parallel_columns);
+    },
+
     _parseColumnTolerances(raw) {
       const out = {};
       (raw || '').split(',').forEach(part => {
@@ -532,11 +578,29 @@
 
     openSaveCompareAsJob(compareType) {
       this.saveJobCompareType = compareType;
+      // Only reuse editingCompareJob as an update target when it actually
+      // matches the sub-tab being saved from -- e.g. editing a 'bo' job then
+      // switching to the recon_file sub-tab without saving must not silently
+      // overwrite the 'bo' job with an unrelated recon_file config.
+      if (this.editingCompareJob && this.editingCompareJob.params?.compare_type !== compareType) {
+        this.editingCompareJob = null;
+      }
+      const editing = this.editingCompareJob;
+      this.saveJobName = editing ? editing.name : '';
+      this.saveJobDescription = editing ? (editing.description || '') : '';
+      this.saveJobTags = editing ? (editing.tags || []).join(', ') : '';
+      this.saveJobError = '';
+      this.saveJobModalOpen = true;
+    },
+
+    // Escape hatch out of the update-in-place flow: keeps the form's current
+    // values but saves them as a brand new job instead of overwriting the one
+    // that was loaded for editing.
+    saveCompareAsNewJob() {
+      this.editingCompareJob = null;
       this.saveJobName = '';
       this.saveJobDescription = '';
       this.saveJobTags = '';
-      this.saveJobError = '';
-      this.saveJobModalOpen = true;
     },
 
     // Mirror of the server-side validator (api/schemas.py's compare branch), so
@@ -596,6 +660,7 @@
       if (!name) { this.saveJobError = 'Enter a job name'; return; }
       this.saveJobSaving = true;
       this.saveJobError = '';
+      const isUpdate = Boolean(this.editingCompareJob);
       try {
         const body = {
           ...this._compareJobBody(),
@@ -603,10 +668,17 @@
           description: this.saveJobDescription || '',
           tags: (this.saveJobTags || '').split(',').map(s => s.trim()).filter(Boolean),
         };
-        await api('POST', '/api/jobs', body);
+        if (isUpdate) {
+          await api('PUT', `/api/jobs/${encodeURIComponent(this.editingCompareJob.name)}`, body);
+        } else {
+          await api('POST', '/api/jobs', body);
+        }
         this.saveJobModalOpen = false;
-        this.toast('success', 'Saved as job',
-          `"${name}" is in the Job Catalog - add it to a selection to schedule it.`);
+        this.editingCompareJob = null;
+        this.toast('success', isUpdate ? 'Job updated' : 'Saved as job',
+          isUpdate
+            ? `"${name}" was updated.`
+            : `"${name}" is in the Job Catalog - add it to a selection to schedule it.`);
         if (this.loadJobs) await this.loadJobs();
       } catch (e) {
         this.saveJobError = e.message || 'Could not save this compare as a job';

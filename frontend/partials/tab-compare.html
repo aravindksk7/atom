@@ -523,7 +523,7 @@
             </div>
           </template>
           <template x-if="fileSourceAType === 'path'">
-            <input x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" aria-label="c reports run a html" />
+            <input data-testid="compare-file-source-a-path-input" x-model="filePathA" class="field-input" placeholder="C:\reports\run_a.html" aria-label="c reports run a html" />
           </template>
           <template x-if="fileSourceAType === 'upload'">
             <div>
@@ -553,7 +553,7 @@
             </div>
           </template>
           <template x-if="fileSourceBType === 'path'">
-            <input x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" aria-label="c reports production html" />
+            <input data-testid="compare-file-source-b-path-input" x-model="filePathB" class="field-input" placeholder="C:\reports\production.html" aria-label="c reports production html" />
           </template>
           <template x-if="fileSourceBType === 'upload'">
             <div>
@@ -567,11 +567,11 @@
         <div class="grid-2">
           <div>
             <label  class="field-label" for="a11y-compare-key-columns-comma-separated-tabular-files-only">Key Columns <span class="text-slate-400 font-normal">(comma-separated, tabular files only)</span></label>
-            <input x-model="fileCompareKeyColumns" class="field-input" placeholder="id, order_id" id="a11y-compare-key-columns-comma-separated-tabular-files-only" />
+            <input data-testid="compare-file-key-columns-input" x-model="fileCompareKeyColumns" class="field-input" placeholder="id, order_id" id="a11y-compare-key-columns-comma-separated-tabular-files-only" />
           </div>
           <div>
             <label  class="field-label" for="a11y-compare-exclude-columns-2">Exclude Columns</label>
-            <input x-model="fileCompareExcludeColumns" class="field-input" placeholder="sequence_number, updated_at, etl_ts" id="a11y-compare-exclude-columns-2" />
+            <input data-testid="compare-file-exclude-columns-input" x-model="fileCompareExcludeColumns" class="field-input" placeholder="sequence_number, updated_at, etl_ts" id="a11y-compare-exclude-columns-2" />
           </div>
         </div>
         <!-- Advanced Options accordion -->
@@ -1561,12 +1561,16 @@
   <div x-show="saveJobModalOpen" x-cloak class="modal-backdrop" @click.self="saveJobModalOpen = false"
        data-testid="compare-save-job-modal">
     <div class="modal-box w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="saveCompareJobTitle">
-      <h2 id="saveCompareJobTitle" class="text-lg font-bold mb-4">Save Compare as Job</h2>
+      <h2 id="saveCompareJobTitle" class="text-lg font-bold mb-4" x-text="editingCompareJob ? 'Update Job' : 'Save Compare as Job'"></h2>
+      <div x-show="editingCompareJob" data-testid="compare-save-job-editing-note" class="text-xs text-slate-500 mb-3">
+        Updating "<span x-text="editingCompareJob?.name"></span>".
+        <button type="button" data-testid="compare-save-job-as-new" @click="saveCompareAsNewJob()" class="btn-link">Save as a new job instead</button>
+      </div>
       <div class="space-y-3">
         <div>
           <label class="field-label" for="compare-save-job-name">Job name</label>
           <input id="compare-save-job-name" data-testid="compare-save-job-name" x-model="saveJobName"
-                 class="field-input" placeholder="nightly_sales_bo_vs_prod" />
+                 :disabled="!!editingCompareJob" class="field-input" placeholder="nightly_sales_bo_vs_prod" />
         </div>
         <div>
           <label class="field-label" for="compare-save-job-description">Description</label>
@@ -1584,7 +1588,7 @@
       <div class="flex justify-end gap-2 mt-4">
         <button @click="saveJobModalOpen = false" class="btn-outline btn-sm">Cancel</button>
         <button data-testid="compare-save-job-confirm" @click="saveCompareAsJob()"
-                :disabled="saveJobSaving" class="btn-primary btn-sm">Save Job</button>
+                :disabled="saveJobSaving" class="btn-primary btn-sm" x-text="editingCompareJob ? 'Update Job' : 'Save Job'"></button>
       </div>
     </div>
   </div>

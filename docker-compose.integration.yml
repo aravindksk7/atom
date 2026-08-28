@@ -97,6 +97,7 @@ services:
     environment:
       - SERVICES=s3,glue,athena
       - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
 
   gitlab:
     build:
