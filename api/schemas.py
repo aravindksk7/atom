@@ -389,6 +389,10 @@ class RunStatusOut(BaseModel):
     # 00a638ef"). Computed server-side so the UI and the downloadable HTML report
     # cannot drift -- see api/services/run_label.py.
     label: str = ""
+    # Download/report name stem ("nightly_recon_2026-08-28_14-30-05"). Computed
+    # the same way as label; export_filename() in difference_export.py appends
+    # a short run id on top of this for the actual download filename.
+    report_name: str = ""
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None

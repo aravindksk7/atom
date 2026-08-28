@@ -188,6 +188,7 @@ def _run_status_out(run) -> RunStatusOut:
     return RunStatusOut(
         run_id=snapshot.run_id,
         label=snapshot.run_label,
+        report_name=snapshot.report_name,
         status=snapshot.status,
         started_at=snapshot.started_at,
         completed_at=snapshot.completed_at,
@@ -1399,6 +1400,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
     results = [_test_result_out(r) for r in snapshot.results]
     return RunDetailOut(
         run_id=snapshot.run_id,
+        report_name=snapshot.report_name,
         status=snapshot.status,
         started_at=snapshot.started_at,
         completed_at=snapshot.completed_at,

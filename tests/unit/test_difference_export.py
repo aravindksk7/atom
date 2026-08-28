@@ -544,3 +544,45 @@ def test_recomputed_difference_export_handles_sftp_multi_file_jobs(tmp_path, mon
     assert row_count == 1
     assert json.loads(rows[0]["key_values"])["__pair__"] == {"region": "east"}
     assert rows[0]["column_name"] == "amount"
+
+
+def test_list_runs_includes_report_name(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+    from etl_framework.repository.database import Base, get_db
+    from etl_framework.repository import database as _db_module
+    import etl_framework.repository.models  # noqa: F401
+    from etl_framework.repository.repository import RunRepository, TokenRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    def override_get_db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with Session(engine) as db:
+            raw, _ = TokenRepository(db).create("test-runner")
+            run_id = str(uuid.uuid4())
+            RunRepository(db).create_run(run_id, "dev", "prod", {"config_name": "Nightly Recon"})
+
+        client = TestClient(app, headers={"Authorization": f"Bearer {raw}"})
+        resp = client.get("/api/runs")
+        assert resp.status_code == 200
+        rows = [r for r in resp.json() if r["run_id"] == run_id]
+        assert len(rows) == 1
+        assert rows[0]["report_name"].startswith("nightly_recon_")
+
+        detail_resp = client.get(f"/api/runs/{run_id}")
+        assert detail_resp.status_code == 200
+        assert detail_resp.json()["report_name"].startswith("nightly_recon_")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
