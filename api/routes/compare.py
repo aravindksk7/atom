@@ -167,8 +167,7 @@ def _run_matrix_bg(req: MatrixCompareRequest, run_id: str) -> None:
         from api.services.compare_service import CompareService
         from etl_framework.repository.repository import ConfigRepository
         svc = CompareService(db, ConfigRepository(db))
-        if hasattr(svc, "run_matrix_comparison"):
-            svc.run_matrix_comparison(req, run_id)
+        svc.run_matrix_comparison(req, run_id)
     except Exception:
         logger.exception("Matrix comparison background task failed for run_id=%s", run_id)
     finally:
