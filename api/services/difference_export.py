@@ -25,6 +25,7 @@ from api.services.compare_service import CompareService, _load_in_chunks
 from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
 from api.services.run_executor import RunExecutor
+from api.services.run_label import report_name_base_for, short_run_id
 from etl_framework.config.models import resolve_connection
 from etl_framework.db.engine import DBEngine
 from etl_framework.reconciliation.compare_utils import (
@@ -242,7 +243,7 @@ def media_type_for(fmt: str) -> str:
     return "text/csv"
 
 
-def export_filename(run_id: str, fmt: str, export_id: str | None = None) -> str:
+def export_filename(run: Any, fmt: str, export_id: str | None = None) -> str:
     if fmt == "parquet":
         suffix = "parquet"
     elif fmt == "json":
@@ -251,14 +252,14 @@ def export_filename(run_id: str, fmt: str, export_id: str | None = None) -> str:
         suffix = "html"
     else:
         suffix = "csv"
-    stem = f"all_differences_{run_id}"
+    stem = f"{report_name_base_for(run)}_{short_run_id(run.run_id)}"
     if export_id:
         stem += f"_{export_id}"
     return f"{stem}.{suffix}"
 
 
 def write_stored_differences(db: Session, run: TestRun, fmt: str) -> tuple[Path, int]:
-    path = export_dir(run.run_id) / export_filename(run.run_id, fmt, f"stored_{uuid.uuid4().hex[:8]}")
+    path = export_dir(run.run_id) / export_filename(run, fmt, f"stored_{uuid.uuid4().hex[:8]}")
     with DifferenceWriter(path, fmt) as writer:
         for result in run.results:
             for mismatch in (
@@ -351,7 +352,7 @@ def run_difference_export_job(export_id: str) -> None:
         if run is None:
             raise RuntimeError("Run not found")
 
-        path = export_dir(job.run_id) / export_filename(job.run_id, job.format, job.export_id)
+        path = export_dir(job.run_id) / export_filename(run, job.format, job.export_id)
         if job.format == "html":
             row_count = write_full_html_report(db, run, path)
         else:

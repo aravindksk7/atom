@@ -2,11 +2,23 @@
 from __future__ import annotations
 
 import json
+import types
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+def _fake_run(run_id="run-1", config_name=None):
+    return types.SimpleNamespace(
+        run_id=run_id,
+        started_at=datetime(2026, 8, 28, 14, 30, 5, tzinfo=timezone.utc),
+        source_env="dev",
+        target_env="prod",
+        config_snapshot={"config_name": config_name} if config_name else None,
+    )
 
 
 def test_writer_json_format_writes_one_object_per_line(tmp_path):
@@ -62,16 +74,16 @@ def test_media_type_for_json():
 def test_export_filename_json_uses_jsonl_suffix():
     from api.services.difference_export import export_filename
 
-    name = export_filename("run-1", "json", "exp-1")
+    name = export_filename(_fake_run(), "json", "exp-1")
     assert name.endswith(".jsonl")
-    assert "run-1" in name and "exp-1" in name
+    assert "dev_to_prod_2026-08-28_14-30-05" in name and "run-1" in name and "exp-1" in name
 
 
 def test_export_filename_csv_and_parquet_unaffected():
     from api.services.difference_export import export_filename
 
-    assert export_filename("run-1", "csv").endswith(".csv")
-    assert export_filename("run-1", "parquet").endswith(".parquet")
+    assert export_filename(_fake_run(), "csv").endswith(".csv")
+    assert export_filename(_fake_run(), "parquet").endswith(".parquet")
 
 
 def test_create_export_job_accepts_json_format(monkeypatch):
@@ -253,9 +265,16 @@ def test_media_type_for_html():
 def test_export_filename_html_uses_html_suffix():
     from api.services.difference_export import export_filename
 
-    name = export_filename("run-1", "html", "exp-1")
+    name = export_filename(_fake_run(), "html", "exp-1")
     assert name.endswith(".html")
     assert "run-1" in name and "exp-1" in name
+
+
+def test_export_filename_uses_config_name_when_present():
+    from api.services.difference_export import export_filename
+
+    name = export_filename(_fake_run(config_name="Nightly Recon"), "csv")
+    assert name.startswith("nightly_recon_2026-08-28_14-30-05_run-1")
 
 
 def test_create_export_job_accepts_html_format(monkeypatch):
