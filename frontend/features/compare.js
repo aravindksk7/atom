@@ -1264,7 +1264,12 @@
         if (status.status === 'COMPLETED') {
           const { blob, disposition } = await apiBlob(`/api/runs/${runId}/exports/${exportId}/download`);
           const ext = format === 'parquet' ? 'parquet' : format === 'html' ? 'html' : 'csv';
-          const fallback = `all_differences_${runId}_${exportId}.${ext}`;
+          // Rarely hit -- the server always sets Content-Disposition now (see
+          // export_filename in api/services/difference_export.py). This fallback
+          // can't compute the full report-name convention client-side (it doesn't
+          // have the run's config_snapshot/started_at loaded here), so it just
+          // avoids the old, now-inconsistent "all_differences_" prefix.
+          const fallback = `report_${runId}_${exportId}.${ext}`;
           const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
           triggerDownload(blob, filename);
           this.differenceExports = { ...this.differenceExports, [key]: { ...status, status: 'DOWNLOADED' } };
