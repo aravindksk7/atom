@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from requests import exceptions as requests_exc
 
-from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut
+from api.schemas import AdapterTestOut, AutomicJobStatusOut, BOAuthSessionOut, BODocOut, BODocRanOnOut, BOParamOut, BOReportOut, SAPDSJobStatusOut
 from api.services.api_artifact import adhoc_artifact_dir, build_api_response_sink
 from api.services.bo_archive import save_bo_download
 from api.services.api_exchange import capture_exchange
@@ -21,6 +21,7 @@ from etl_framework.repository.repository import ConfigRepository
 from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
 from etl_framework.sap_bo.parameters import build_parameter_answers
+from etl_framework.sap_ds.client import DSRestClient
 
 # SAP BO CALs (concurrent access licenses) are pooled server-side and only
 # freed on logoff. Serialize all BO client use to one at a time so parallel
@@ -447,3 +448,42 @@ class AdapterService:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
         return [AutomicJobSummary(name=j["name"], status=j.get("status", "UNKNOWN")) for j in raw]
+
+    # ------------------------------------------------------------------
+    # SAP Data Services
+    # ------------------------------------------------------------------
+
+    def test_ds_connection(self, config_id: int) -> AdapterTestOut:
+        start = time.monotonic()
+        try:
+            env = self._get_env_config(config_id)
+            if not env.ds_url:
+                return AdapterTestOut(ok=False, message="SAP DS URL is not configured", latency_ms=0)
+            client = DSRestClient(env)
+            client.login()
+            try:
+                pass
+            finally:
+                client.logout()
+            latency = int((time.monotonic() - start) * 1000)
+            return AdapterTestOut(ok=True, message="Connected successfully to SAP DS API", latency_ms=max(1, latency))
+        except Exception as exc:
+            return AdapterTestOut(ok=False, message=_friendly_error(exc), latency_ms=0)
+
+    def lookup_ds_job(self, config_id: int, identifier: str, id_type: str, repository: str | None = None) -> SAPDSJobStatusOut:
+        from datetime import datetime, timezone
+        env = self._get_env_config(config_id)
+        repo = repository or env.ds_repository
+        try:
+            client = DSRestClient(env)
+            status = client.get_job_status(identifier, repository=repo)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+        return SAPDSJobStatusOut(
+            identifier=identifier,
+            identifier_type=id_type,
+            repository=repo,
+            status=status.value,
+            environment=env.name,
+            checked_at=datetime.now(timezone.utc),
+        )

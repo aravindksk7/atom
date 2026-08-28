@@ -18,6 +18,10 @@ def _make_saved_config(bo_url="http://bo.example.com"):
         "bo_url": bo_url,
         "bo_user": "admin",
         "bo_password": "pass",
+        "ds_url": "http://ds.example.com",
+        "ds_user": "admin",
+        "ds_password": "pass",
+        "ds_repository": "REPO_DEFAULT",
     }
     return cfg
 
@@ -559,3 +563,29 @@ def test_download_bo_report_still_returns_bytes_when_the_copy_fails(service, tmp
     assert result.content == b"PK\x03\x04"
     assert result.saved_path is None
     assert result.save_error
+
+
+# ---------------------------------------------------------------------------
+# test_ds_connection & lookup_ds_job
+# ---------------------------------------------------------------------------
+
+def test_test_ds_connection_success(service):
+    with patch("api.services.adapter_service.DSRestClient") as mock_ds:
+        instance = mock_ds.return_value
+        res = service.test_ds_connection(1)
+        assert res.ok is True
+        assert "Connected successfully" in res.message
+        instance.login.assert_called_once()
+        instance.logout.assert_called_once()
+
+
+def test_lookup_ds_job_success(service):
+    from etl_framework.runner.state import TestStatus
+    with patch("api.services.adapter_service.DSRestClient") as mock_ds:
+        instance = mock_ds.return_value
+        instance.get_job_status.return_value = TestStatus.PASSED
+        res = service.lookup_ds_job(1, "JOB_DEMO", "job_name", repository="REPO_TEST")
+        assert res.identifier == "JOB_DEMO"
+        assert res.status == "PASSED"
+        assert res.repository == "REPO_TEST"
+
