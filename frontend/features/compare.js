@@ -121,6 +121,20 @@
     fileDiffFilter: {},
     expandedCell: {},
 
+    matrixSourceAType: 'file',
+    matrixSourceBType: 'sql',
+    matrixSourceA: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source A' },
+    matrixSourceB: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source B' },
+    matrixKeyColumns: '',
+    matrixExcludeColumns: '',
+    matrixNumericTolerance: '0.0',
+    matrixIgnoreCase: false,
+    matrixTrimWhitespace: true,
+    matrixCompareLoading: false,
+    matrixCompareRunId: null,
+    matrixCompareResult: null,
+    matrixComparePollInterval: null,
+
     // Advanced compare options (shared shape for BO, File, SQL)
     boAdvancedOpen: false,
     boFloatTolerance: '1e-9',
@@ -898,6 +912,97 @@
       } catch (e) {
         this.toast('error', 'SQL compare failed', e.message);
         this.sqlCompareLoading = false;
+      }
+    },
+
+    handleMatrixFileUpload(event, side) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const bytes = new Uint8Array(e.target.result);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        const src = side === 'a' ? this.matrixSourceA : this.matrixSourceB;
+        src.fileB64 = btoa(binary);
+        src.fileName = file.name;
+      };
+      reader.readAsArrayBuffer(file);
+    },
+
+    _buildMatrixSourceSpec(type, src) {
+      const spec = { source_type: type };
+      if (type === 'sql') {
+        if (src.configId) spec.config_id = parseInt(src.configId, 10);
+        if (src.connectionName) spec.connection_name = src.connectionName;
+        if (src.queryOrTable) spec.query_or_table = src.queryOrTable;
+      } else if (type === 'file') {
+        if (src.filePath) spec.file_path = src.filePath;
+        if (src.fileB64) spec.file_b64 = src.fileB64;
+        if (src.fileName) spec.file_name = src.fileName;
+      } else if (type === 'aws_athena') {
+        if (src.configId) spec.config_id = parseInt(src.configId, 10);
+        if (src.athenaQuery || src.queryOrTable) spec.query_or_table = src.athenaQuery || src.queryOrTable;
+      } else if (type === 'sap_bo') {
+        if (src.configId) spec.config_id = parseInt(src.configId, 10);
+        if (src.docId) spec.bo_doc_id = src.docId;
+        if (src.reportId) spec.bo_report_id = src.reportId;
+      } else if (type === 'api') {
+        if (src.configId) spec.config_id = parseInt(src.configId, 10);
+        if (src.endpointUrl) spec.endpoint_url = src.endpointUrl;
+        spec.http_method = src.httpMethod || 'GET';
+      }
+      return spec;
+    },
+
+    _buildMatrixComparePayload() {
+      return {
+        source_a: this._buildMatrixSourceSpec(this.matrixSourceAType, this.matrixSourceA),
+        source_b: this._buildMatrixSourceSpec(this.matrixSourceBType, this.matrixSourceB),
+        label_a: this.matrixSourceA.label || 'Source A',
+        label_b: this.matrixSourceB.label || 'Source B',
+        key_columns: this.matrixKeyColumns ? this.matrixKeyColumns.split(',').map(s => s.trim()).filter(Boolean) : [],
+        exclude_columns: this.matrixExcludeColumns ? this.matrixExcludeColumns.split(',').map(s => s.trim()).filter(Boolean) : [],
+        numeric_tolerance: parseFloat(this.matrixNumericTolerance) || 0.0,
+        ignore_case: !!this.matrixIgnoreCase,
+        trim_whitespace: !!this.matrixTrimWhitespace,
+      };
+    },
+
+    async runMatrixCompare() {
+      this.matrixCompareLoading = true;
+      this.matrixCompareResult = null;
+      if (this.matrixComparePollInterval) clearInterval(this.matrixComparePollInterval);
+      try {
+        const payload = this._buildMatrixComparePayload();
+        const run = await api('POST', '/api/compare/matrix', payload);
+        this.matrixCompareRunId = run.run_id;
+        this.matrixComparePollInterval = setInterval(() => this._pollMatrixCompare(), 3000);
+        await this._pollMatrixCompare();
+        await this.loadRuns();
+      } catch (e) {
+        this.toast('error', 'Matrix comparison failed', e.message);
+        this.matrixCompareLoading = false;
+      }
+    },
+
+    async _pollMatrixCompare() {
+      if (!this.matrixCompareRunId) return;
+      try {
+        const status = await api('GET', `/api/runs/${this.matrixCompareRunId}/status`);
+        if (this.isTerminalStatus(status.status)) {
+          clearInterval(this.matrixComparePollInterval);
+          this.matrixComparePollInterval = null;
+          this.matrixCompareResult = await api('GET', `/api/runs/${this.matrixCompareRunId}`);
+          this.matrixCompareLoading = false;
+          await this.loadRuns();
+        }
+      } catch (e) {
+        clearInterval(this.matrixComparePollInterval);
+        this.matrixComparePollInterval = null;
+        this.matrixCompareLoading = false;
       }
     },
 
