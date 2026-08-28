@@ -43,6 +43,8 @@ test.describe('04 history', () => {
     const row = authedPage.locator(`[data-testid="history-run-row-${runId}"]`);
     await expect(row).toBeVisible();
     await expect(row).toContainText('FAILED');
+    await expect(row.locator(`[data-testid="history-run-report-name-${runId}"]`))
+      .toHaveText(/^\S+_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
   });
 
   test('status filter narrows the list and Clear resets it', async ({ authedPage }) => {
