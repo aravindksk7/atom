@@ -2,11 +2,11 @@
   <div class="section-header">
     <div>
       <div class="section-title">Integration Hub</div>
-      <div class="section-sub">Browse SAP BO reports and Automic jobs, then push to Job Catalog</div>
+      <div class="section-sub">Browse SAP BO reports, SAP Data Services jobs, and Automic jobs, then push to Job Catalog</div>
     </div>
   </div>
 
-  <div class="grid-2 gap-6">
+  <div class="grid-3 gap-6">
 
     <!-- SAP BO Panel -->
     <div>
@@ -143,6 +143,73 @@
                   </div>
                 </template>
               </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- SAP DS Panel -->
+    <div>
+      <div class="card mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-slate-700">SAP Data Services</div>
+          <span class="badge badge-purple">Management Console</span>
+        </div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label class="field-label" for="a11y-adapters-config-ds">Config</label>
+            <select x-model="dsConfigId" class="field-input field-select" data-testid="ds-config-select" id="a11y-adapters-config-ds">
+              <option value="">— Select —</option>
+              <template x-for="cfg in configs" :key="cfg.id">
+                <option :value="cfg.id" x-text="cfg.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button @click="testDSConnection()" :disabled="!dsConfigId || dsTesting" class="btn-primary w-full" data-testid="ds-test-connection-btn">
+              <span x-show="!dsTesting">Test Connection</span>
+              <span x-show="dsTesting">Testing…</span>
+            </button>
+          </div>
+        </div>
+        <template x-if="dsTestResult">
+          <div :class="dsTestResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
+               class="border rounded-lg p-2 text-sm mb-3" data-testid="ds-test-result">
+            <span x-text="dsTestResult.ok ? '✓ ' + dsTestResult.message : '✗ ' + dsTestResult.message"></span>
+            <span x-show="dsTestResult.latency_ms" class="text-muted ml-2" x-text="dsTestResult.latency_ms + 'ms'"></span>
+          </div>
+        </template>
+        <div class="border-t pt-3 mt-3">
+          <div class="font-medium text-xs text-slate-500 uppercase tracking-wider mb-2">Job Status Lookup</div>
+          <div class="grid-2 mb-2 gap-2">
+            <div>
+              <label class="field-label" for="a11y-ds-id-type">Lookup Type</label>
+              <select x-model="dsIdType" class="field-input field-select" id="a11y-ds-id-type">
+                <option value="job_name">Job Name</option>
+                <option value="run_id">Run ID</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="a11y-ds-repository">Repository (Optional)</label>
+              <input x-model="dsRepository" class="field-input" placeholder="Config Default" id="a11y-ds-repository" />
+            </div>
+          </div>
+          <div class="flex gap-2 mb-3">
+            <input x-model="dsIdentifier" class="field-input" :placeholder="dsIdType === 'run_id' ? 'e.g. run-123' : 'e.g. JOB_ETL_NIGHTLY'" data-testid="ds-identifier-input" />
+            <button @click="lookupSAPDS()" :disabled="!dsConfigId || !dsIdentifier || dsLoading" class="btn-primary flex-shrink-0" data-testid="ds-lookup-btn">
+              <span x-show="!dsLoading">Lookup</span>
+              <span x-show="dsLoading">…</span>
+            </button>
+          </div>
+          <template x-if="dsResult">
+            <div class="border rounded-lg p-3 text-sm" :class="dsResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'" data-testid="ds-result">
+              <div class="flex items-center justify-between">
+                <span class="font-medium" x-text="dsResult.identifier"></span>
+                <span class="badge" :class="statusBadgeClass(dsResult.status)" x-text="dsResult.status"></span>
+              </div>
+              <div class="text-muted mt-1" x-text="'Repo: ' + (dsResult.repository || 'default') + ' · Env: ' + dsResult.environment + ' · Checked: ' + fmtDate(dsResult.checked_at)"></div>
+              <button @click="addSAPDSJob()" class="btn-primary btn-sm mt-2">+ Add to Job Catalog</button>
             </div>
           </template>
         </div>

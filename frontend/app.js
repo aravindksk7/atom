@@ -255,7 +255,7 @@ function _appRaw() {
     // History / Profile & Schema / Trends / Lineage / Mismatch distribution
     // state moved to features/history.js (merged in app())
 
-    // Adapters – SAP BO / Automic state moved to features/adapters.js
+    // Adapters – SAP BO / Automic / SAP DS state moved to features/adapters.js
     // (merged in app())
 
     // Reports tab state moved to features/reports.js (merged in app())
@@ -873,7 +873,7 @@ function _appRaw() {
       }
     },
 
-    // Adapters (SAP BO / Automic) methods moved to features/adapters.js
+    // Adapters (SAP BO / Automic / SAP DS) methods moved to features/adapters.js
     // (merged in app())
 
     // Reports tab methods (resetReportArtifacts, switchReportView,

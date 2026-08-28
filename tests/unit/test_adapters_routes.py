@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from api.schemas import (
     AdapterTestOut, BODocOut, BODocRanOnOut, BOAuthSessionOut, BOReportOut,
-    BOParamOut, AutomicJobStatusOut, JobDefinition,
+    BOParamOut, AutomicJobStatusOut, JobDefinition, SAPDSJobStatusOut,
 )
 from api.services.adapter_service import BOReportDownload
 from etl_framework.repository.database import Base
@@ -71,6 +71,13 @@ def mock_adapter_service():
         identifier="MY_JOB", identifier_type="job_name",
         status="PASSED", environment="dev",
         checked_at=datetime.now(timezone.utc),
+    )
+    svc.test_ds_connection.return_value = AdapterTestOut(
+        ok=True, message="SAP DS connection successful", latency_ms=10
+    )
+    svc.lookup_ds_job.return_value = SAPDSJobStatusOut(
+        identifier="JOB_1", identifier_type="job_name", repository="REPO1",
+        status="COMPLETED", environment="dev", checked_at=datetime.now(timezone.utc)
     )
     app.dependency_overrides[get_adapter_service] = lambda: svc
     yield svc
@@ -612,3 +619,77 @@ def test_automic_search_jobs_returns_empty_for_genuinely_empty_data():
     client = AutomicClient(env)
     with patch.object(client, "_request", return_value={"data": []}):
         assert client.search_jobs("ETL_*") == []
+
+
+# ---------------------------------------------------------------------------
+# SAP DS routes
+# ---------------------------------------------------------------------------
+
+def test_test_sap_ds_connection_returns_200(client):
+    resp = client.post("/api/adapters/sap-ds/test", json={"config_id": 1})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["message"] == "SAP DS connection successful"
+
+
+def test_lookup_sap_ds_job_returns_status(client):
+    resp = client.post("/api/adapters/sap-ds/lookup", json={
+        "config_id": 1, "identifier": "JOB_1", "id_type": "job_name", "repository": "REPO1"
+    })
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "COMPLETED"
+    assert resp.json()["identifier"] == "JOB_1"
+    assert resp.json()["repository"] == "REPO1"
+
+
+def test_create_job_from_sap_ds_returns_201(client):
+    with patch("api.routes.adapters.JobRepository") as MockRepo, \
+         patch("api.routes.adapters.AuditService"):
+        MockRepo.return_value.upsert.return_value = MagicMock()
+        resp = client.post("/api/adapters/jobs/from-sap-ds", json={
+            "name": "my_ds_job",
+            "job_name": "JOB_1",
+            "repository": "REPO1",
+            "poll_interval_s": 10.0,
+            "timeout_s": 300.0,
+        })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["name"] == "my_ds_job"
+    assert data["job_type"] == "ds_job"
+    assert data["tags"] == ["ds_job"]
+    assert data["params"]["job_name"] == "JOB_1"
+    assert data["params"]["repository"] == "REPO1"
+    assert data["params"]["poll_interval_s"] == 10.0
+    assert data["params"]["timeout_s"] == 300.0
+
+
+def test_sapds_schemas():
+    from api.schemas import (
+        SAPDSTestRequest,
+        SAPDSLookupRequest,
+        SAPDSJobStatusOut,
+        SAPDSJobCreateRequest,
+    )
+    req = SAPDSTestRequest(config_id=1)
+    assert req.config_id == 1
+
+    lookup = SAPDSLookupRequest(config_id=1, identifier="JOB_1")
+    assert lookup.id_type == "job_name"
+    assert lookup.repository is None
+
+    status = SAPDSJobStatusOut(
+        identifier="JOB_1",
+        identifier_type="job_name",
+        repository="REPO1",
+        status="COMPLETED",
+        environment="dev",
+        checked_at=datetime.now(timezone.utc),
+    )
+    assert status.repository == "REPO1"
+
+    create = SAPDSJobCreateRequest(name="my_job", job_name="JOB_1")
+    assert create.repository is None
+    assert create.poll_interval_s == 5.0
+    assert create.timeout_s == 600.0
+

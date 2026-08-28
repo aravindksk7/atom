@@ -3918,6 +3918,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <thead>
             <tr>
               <th scope="col">Run ID</th>
+              <th scope="col">Report Name</th>
               <th scope="col">Status</th>
               <th scope="col">Environments</th>
               <th scope="col">Started</th>
@@ -3932,6 +3933,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span x-text="runLabel(run)" :title="run.run_id"></span>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
+                <td class="text-xs font-mono text-slate-600" x-text="run.report_name" :data-testid="'history-run-report-name-' + run.run_id"></td>
                 <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
@@ -3962,11 +3964,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="section-header">
     <div>
       <div class="section-title">Integration Hub</div>
-      <div class="section-sub">Browse SAP BO reports and Automic jobs, then push to Job Catalog</div>
+      <div class="section-sub">Browse SAP BO reports, SAP Data Services jobs, and Automic jobs, then push to Job Catalog</div>
     </div>
   </div>
 
-  <div class="grid-2 gap-6">
+  <div class="grid-3 gap-6">
 
     <!-- SAP BO Panel -->
     <div>
@@ -4103,6 +4105,73 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </div>
                 </template>
               </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- SAP DS Panel -->
+    <div>
+      <div class="card mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-slate-700">SAP Data Services</div>
+          <span class="badge badge-purple">Management Console</span>
+        </div>
+        <div class="grid-2 mb-3">
+          <div>
+            <label class="field-label" for="a11y-adapters-config-ds">Config</label>
+            <select x-model="dsConfigId" class="field-input field-select" data-testid="ds-config-select" id="a11y-adapters-config-ds">
+              <option value="">— Select —</option>
+              <template x-for="cfg in configs" :key="cfg.id">
+                <option :value="cfg.id" x-text="cfg.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button @click="testDSConnection()" :disabled="!dsConfigId || dsTesting" class="btn-primary w-full" data-testid="ds-test-connection-btn">
+              <span x-show="!dsTesting">Test Connection</span>
+              <span x-show="dsTesting">Testing…</span>
+            </button>
+          </div>
+        </div>
+        <template x-if="dsTestResult">
+          <div :class="dsTestResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
+               class="border rounded-lg p-2 text-sm mb-3" data-testid="ds-test-result">
+            <span x-text="dsTestResult.ok ? '✓ ' + dsTestResult.message : '✗ ' + dsTestResult.message"></span>
+            <span x-show="dsTestResult.latency_ms" class="text-muted ml-2" x-text="dsTestResult.latency_ms + 'ms'"></span>
+          </div>
+        </template>
+        <div class="border-t pt-3 mt-3">
+          <div class="font-medium text-xs text-slate-500 uppercase tracking-wider mb-2">Job Status Lookup</div>
+          <div class="grid-2 mb-2 gap-2">
+            <div>
+              <label class="field-label" for="a11y-ds-id-type">Lookup Type</label>
+              <select x-model="dsIdType" class="field-input field-select" id="a11y-ds-id-type">
+                <option value="job_name">Job Name</option>
+                <option value="run_id">Run ID</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="a11y-ds-repository">Repository (Optional)</label>
+              <input x-model="dsRepository" class="field-input" placeholder="Config Default" id="a11y-ds-repository" />
+            </div>
+          </div>
+          <div class="flex gap-2 mb-3">
+            <input x-model="dsIdentifier" class="field-input" :placeholder="dsIdType === 'run_id' ? 'e.g. run-123' : 'e.g. JOB_ETL_NIGHTLY'" data-testid="ds-identifier-input" />
+            <button @click="lookupSAPDS()" :disabled="!dsConfigId || !dsIdentifier || dsLoading" class="btn-primary flex-shrink-0" data-testid="ds-lookup-btn">
+              <span x-show="!dsLoading">Lookup</span>
+              <span x-show="dsLoading">…</span>
+            </button>
+          </div>
+          <template x-if="dsResult">
+            <div class="border rounded-lg p-3 text-sm" :class="dsResult.status==='PASSED' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'" data-testid="ds-result">
+              <div class="flex items-center justify-between">
+                <span class="font-medium" x-text="dsResult.identifier"></span>
+                <span class="badge" :class="statusBadgeClass(dsResult.status)" x-text="dsResult.status"></span>
+              </div>
+              <div class="text-muted mt-1" x-text="'Repo: ' + (dsResult.repository || 'default') + ' · Env: ' + dsResult.environment + ' · Checked: ' + fmtDate(dsResult.checked_at)"></div>
+              <button @click="addSAPDSJob()" class="btn-primary btn-sm mt-2">+ Add to Job Catalog</button>
             </div>
           </template>
         </div>
@@ -5115,6 +5184,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <button data-testid="compare-subtab-colstats" @click="compareSubTab = 'colstats'" :class="compareSubTab === 'colstats' ? 'sub-tab active' : 'sub-tab'">Column Stats</button>
     <button data-testid="compare-subtab-mmdiff" @click="compareSubTab = 'mmdiff'" :class="compareSubTab === 'mmdiff' ? 'sub-tab active' : 'sub-tab'">Mismatch Diff</button>
     <button id="tab-multi-file-compare" data-testid="compare-subtab-multifile" @click="compareSubTab = 'multi_file'" :class="compareSubTab === 'multi_file' ? 'sub-tab active' : 'sub-tab'">Multi-File</button>
+    <button id="tab-matrix-compare" data-testid="compare-subtab-matrix" @click="compareSubTab = 'matrix'" :class="compareSubTab === 'matrix' ? 'sub-tab active' : 'sub-tab'">Matrix</button>
   </div>
 
   <div class="flex items-center gap-2 p-3 border-b bg-slate-50 mb-4 rounded">
@@ -6617,6 +6687,230 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
       </template>
     </div>
+  </div>
+
+  <div x-show="compareSubTab === 'matrix'" id="matrix-compare-container" class="space-y-4">
+    <div class="compare-source-grid">
+      <!-- Source A Card -->
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source A</div>
+        <div class="mode-row mb-3">
+          <button data-testid="compare-matrix-source-a-mode-sql" @click="matrixSourceAType = 'sql'" :class="matrixSourceAType === 'sql' ? 'pill active' : 'pill'">SQL</button>
+          <button data-testid="compare-matrix-source-a-mode-file" @click="matrixSourceAType = 'file'" :class="matrixSourceAType === 'file' ? 'pill active' : 'pill'">File</button>
+          <button data-testid="compare-matrix-source-a-mode-athena" @click="matrixSourceAType = 'aws_athena'" :class="matrixSourceAType === 'aws_athena' ? 'pill active' : 'pill'">Athena</button>
+          <button data-testid="compare-matrix-source-a-mode-bo" @click="matrixSourceAType = 'sap_bo'" :class="matrixSourceAType === 'sap_bo' ? 'pill active' : 'pill'">SAP BO</button>
+          <button data-testid="compare-matrix-source-a-mode-api" @click="matrixSourceAType = 'api'" :class="matrixSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
+        </div>
+        <input data-testid="compare-matrix-source-a-label-input" x-model="matrixSourceA.label" class="field-input mb-2" placeholder="Source A label" aria-label="source a label" />
+
+        <template x-if="matrixSourceAType === 'sql'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-a-config-select" x-model="matrixSourceA.configId" class="field-input field-select mb-2" aria-label="source a config">
+              <option value="">Select config / connection</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <textarea data-testid="compare-matrix-source-a-query-textarea" x-model="matrixSourceA.queryOrTable" class="field-input" rows="3" placeholder="SELECT * FROM table_a" aria-label="sql query a"></textarea>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceAType === 'file'">
+          <div class="space-y-2">
+            <input data-testid="compare-matrix-source-a-path-input" x-model="matrixSourceA.filePath" class="field-input mb-2" placeholder="C:\path\to\file_a.csv" aria-label="file path a" />
+            <input data-testid="compare-matrix-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.parquet" @change="handleMatrixFileUpload($event, 'a')" class="field-input" aria-label="file upload a" />
+            <div x-show="matrixSourceA.fileName" class="text-xs text-emerald-600 mt-1" x-text="matrixSourceA.fileName + ' loaded'"></div>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceAType === 'aws_athena'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-a-athena-config" x-model="matrixSourceA.configId" class="field-input field-select mb-2" aria-label="athena config a">
+              <option value="">Select Athena config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <textarea data-testid="compare-matrix-source-a-athena-query-textarea" x-model="matrixSourceA.athenaQuery" class="field-input" rows="3" placeholder="SELECT * FROM athena_db.table_a" aria-label="athena query a"></textarea>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceAType === 'sap_bo'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-a-bo-config" x-model="matrixSourceA.configId" class="field-input field-select mb-2" aria-label="bo config a">
+              <option value="">Select BO config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <input data-testid="compare-matrix-source-a-bo-doc" x-model="matrixSourceA.docId" class="field-input mb-2" placeholder="Document ID / Name" aria-label="bo doc id a" />
+            <input data-testid="compare-matrix-source-a-bo-report" x-model="matrixSourceA.reportId" class="field-input" placeholder="Report ID / Name" aria-label="bo report id a" />
+          </div>
+        </template>
+
+        <template x-if="matrixSourceAType === 'api'">
+          <div class="space-y-2">
+            <input data-testid="compare-matrix-source-a-api-url-input" x-model="matrixSourceA.endpointUrl" class="field-input mb-2" placeholder="https://api.example.com/data_a" aria-label="api url a" />
+            <select x-model="matrixSourceA.httpMethod" class="field-input field-select" aria-label="http method a">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+        </template>
+      </div>
+
+      <div class="vs-divider">VS</div>
+
+      <!-- Source B Card -->
+      <div class="card compare-source-card">
+        <div class="compare-card-title">Source B</div>
+        <div class="mode-row mb-3">
+          <button data-testid="compare-matrix-source-b-mode-sql" @click="matrixSourceBType = 'sql'" :class="matrixSourceBType === 'sql' ? 'pill active' : 'pill'">SQL</button>
+          <button data-testid="compare-matrix-source-b-mode-file" @click="matrixSourceBType = 'file'" :class="matrixSourceBType === 'file' ? 'pill active' : 'pill'">File</button>
+          <button data-testid="compare-matrix-source-b-mode-athena" @click="matrixSourceBType = 'aws_athena'" :class="matrixSourceBType === 'aws_athena' ? 'pill active' : 'pill'">Athena</button>
+          <button data-testid="compare-matrix-source-b-mode-bo" @click="matrixSourceBType = 'sap_bo'" :class="matrixSourceBType === 'sap_bo' ? 'pill active' : 'pill'">SAP BO</button>
+          <button data-testid="compare-matrix-source-b-mode-api" @click="matrixSourceBType = 'api'" :class="matrixSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
+        </div>
+        <input data-testid="compare-matrix-source-b-label-input" x-model="matrixSourceB.label" class="field-input mb-2" placeholder="Source B label" aria-label="source b label" />
+
+        <template x-if="matrixSourceBType === 'sql'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-b-config-select" x-model="matrixSourceB.configId" class="field-input field-select mb-2" aria-label="source b config">
+              <option value="">Select config / connection</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <textarea data-testid="compare-matrix-source-b-query-textarea" x-model="matrixSourceB.queryOrTable" class="field-input" rows="3" placeholder="SELECT * FROM table_b" aria-label="sql query b"></textarea>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceBType === 'file'">
+          <div class="space-y-2">
+            <input data-testid="compare-matrix-source-b-path-input" x-model="matrixSourceB.filePath" class="field-input mb-2" placeholder="C:\path\to\file_b.csv" aria-label="file path b" />
+            <input data-testid="compare-matrix-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.parquet" @change="handleMatrixFileUpload($event, 'b')" class="field-input" aria-label="file upload b" />
+            <div x-show="matrixSourceB.fileName" class="text-xs text-emerald-600 mt-1" x-text="matrixSourceB.fileName + ' loaded'"></div>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceBType === 'aws_athena'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-b-athena-config" x-model="matrixSourceB.configId" class="field-input field-select mb-2" aria-label="athena config b">
+              <option value="">Select Athena config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <textarea data-testid="compare-matrix-source-b-athena-query-textarea" x-model="matrixSourceB.athenaQuery" class="field-input" rows="3" placeholder="SELECT * FROM athena_db.table_b" aria-label="athena query b"></textarea>
+          </div>
+        </template>
+
+        <template x-if="matrixSourceBType === 'sap_bo'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-b-bo-config" x-model="matrixSourceB.configId" class="field-input field-select mb-2" aria-label="bo config b">
+              <option value="">Select BO config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <input data-testid="compare-matrix-source-b-bo-doc" x-model="matrixSourceB.docId" class="field-input mb-2" placeholder="Document ID / Name" aria-label="bo doc id b" />
+            <input data-testid="compare-matrix-source-b-bo-report" x-model="matrixSourceB.reportId" class="field-input" placeholder="Report ID / Name" aria-label="bo report id b" />
+          </div>
+        </template>
+
+        <template x-if="matrixSourceBType === 'api'">
+          <div class="space-y-2">
+            <input data-testid="compare-matrix-source-b-api-url-input" x-model="matrixSourceB.endpointUrl" class="field-input mb-2" placeholder="https://api.example.com/data_b" aria-label="api url b" />
+            <select x-model="matrixSourceB.httpMethod" class="field-input field-select" aria-label="http method b">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- General Settings Card -->
+    <div class="card space-y-3">
+      <div class="grid-2">
+        <div>
+          <label class="field-label" for="matrix-key-columns">Key Columns <span class="text-slate-400 font-normal">(comma-separated)</span></label>
+          <input id="matrix-key-columns" data-testid="matrix-key-columns-input" x-model="matrixKeyColumns" class="field-input" placeholder="id, user_id" />
+        </div>
+        <div>
+          <label class="field-label" for="matrix-exclude-columns">Exclude Columns <span class="text-slate-400 font-normal">(comma-separated)</span></label>
+          <input id="matrix-exclude-columns" data-testid="matrix-exclude-columns-input" x-model="matrixExcludeColumns" class="field-input" placeholder="created_at, etl_ts" />
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="field-label" for="matrix-numeric-tolerance">Numeric Tolerance</label>
+          <input id="matrix-numeric-tolerance" data-testid="matrix-numeric-tolerance-input" x-model="matrixNumericTolerance" type="number" step="any" class="field-input" placeholder="0.0" />
+        </div>
+        <div class="flex items-center gap-2 pt-6">
+          <input id="matrix-ignore-case" data-testid="matrix-ignore-case-checkbox" type="checkbox" x-model="matrixIgnoreCase" class="rounded" />
+          <label for="matrix-ignore-case" class="text-sm">Ignore Case</label>
+        </div>
+        <div class="flex items-center gap-2 pt-6">
+          <input id="matrix-trim-whitespace" data-testid="matrix-trim-whitespace-checkbox" type="checkbox" x-model="matrixTrimWhitespace" class="rounded" />
+          <label for="matrix-trim-whitespace" class="text-sm">Trim Whitespace</label>
+        </div>
+      </div>
+      <div class="flex justify-end">
+        <button id="btn-run-matrix-compare" data-testid="btn-run-matrix-compare" @click="runMatrixCompare()" :disabled="matrixCompareLoading" class="btn-primary">
+          <span x-show="!matrixCompareLoading">Run Matrix Compare</span>
+          <span x-show="matrixCompareLoading">Comparing...</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Matrix Compare Result Card -->
+    <template x-if="matrixCompareResult">
+      <div class="card space-y-3" id="matrix-compare-results" data-testid="matrix-compare-results">
+        <div class="flex items-center justify-between border-b pb-2">
+          <h3 class="text-sm font-semibold text-slate-700">Matrix Comparison Result</h3>
+          <span data-testid="matrix-compare-status-badge" class="badge" :class="statusBadgeClass(matrixCompareResult.status)" x-text="matrixCompareResult.status"></span>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+          <div class="p-3 bg-slate-50 border rounded">
+            <div class="text-xs text-slate-500 font-medium">Source Rows</div>
+            <div data-testid="matrix-source-rows-count" class="text-lg font-bold text-slate-800" x-text="matrixCompareResult.results?.[0]?.source_row_count ?? matrixCompareResult.source_row_count ?? 0"></div>
+          </div>
+          <div class="p-3 bg-slate-50 border rounded">
+            <div class="text-xs text-slate-500 font-medium">Target Rows</div>
+            <div data-testid="matrix-target-rows-count" class="text-lg font-bold text-slate-800" x-text="matrixCompareResult.results?.[0]?.target_row_count ?? matrixCompareResult.target_row_count ?? 0"></div>
+          </div>
+          <div class="p-3 bg-rose-50 border border-rose-200 rounded">
+            <div class="text-xs text-rose-600 font-medium">Missing Rows</div>
+            <div data-testid="matrix-missing-rows-count" class="text-lg font-bold text-rose-700" x-text="(matrixCompareResult.results?.[0]?.missing_in_target_count || 0) + (matrixCompareResult.results?.[0]?.missing_in_source_count || 0)"></div>
+          </div>
+          <div class="p-3 bg-amber-50 border border-amber-200 rounded">
+            <div class="text-xs text-amber-600 font-medium">Mismatches</div>
+            <div data-testid="matrix-mismatched-count" class="text-lg font-bold text-amber-700" x-text="matrixCompareResult.results?.[0]?.value_mismatch_count || 0"></div>
+          </div>
+        </div>
+
+        <template x-if="matrixCompareResult.results && matrixCompareResult.results.length">
+          <table data-testid="matrix-compare-results-table" class="data-table mt-2">
+            <thead>
+              <tr>
+                <th scope="col">Query / Label</th>
+                <th scope="col">Status</th>
+                <th scope="col">Source Rows</th>
+                <th scope="col">Target Rows</th>
+                <th scope="col">Missing in Target</th>
+                <th scope="col">Missing in Source</th>
+                <th scope="col">Mismatches</th>
+                <th scope="col">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in matrixCompareResult.results" :key="r.id">
+                <tr>
+                  <td class="font-mono text-xs" x-text="r.query_name || 'matrix_test'"></td>
+                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                  <td x-text="r.source_row_count ?? '-'"></td>
+                  <td x-text="r.target_row_count ?? '-'"></td>
+                  <td x-text="r.missing_in_target_count ?? 0"></td>
+                  <td x-text="r.missing_in_source_count ?? 0"></td>
+                  <td x-text="r.value_mismatch_count ?? 0"></td>
+                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2) + 's' : '-'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </template>
   </div>
 
   <!-- Save compare as Job -->

@@ -31,6 +31,10 @@ from api.schemas import (
     BOTestRequest,
     RestApiPreviewRequest,
     RestApiTestRequest,
+    SAPDSJobCreateRequest,
+    SAPDSJobStatusOut,
+    SAPDSLookupRequest,
+    SAPDSTestRequest,
 )
 from api.services.adapter_service import AdapterService, SAPBOAuthContext
 from api.services.bo_archive import EXT_MAP as _EXT_MAP
@@ -295,6 +299,26 @@ def search_automic_jobs(
 
 
 # ---------------------------------------------------------------------------
+# SAP Data Services (SAP DS)
+# ---------------------------------------------------------------------------
+
+@router.post("/sap-ds/test", response_model=AdapterTestOut)
+def test_ds_connection(
+    body: SAPDSTestRequest,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.test_ds_connection(body.config_id)
+
+
+@router.post("/sap-ds/lookup", response_model=SAPDSJobStatusOut)
+def lookup_ds_job(
+    body: SAPDSLookupRequest,
+    service: AdapterService = Depends(get_adapter_service),
+):
+    return service.lookup_ds_job(body.config_id, body.identifier, body.id_type, body.repository)
+
+
+# ---------------------------------------------------------------------------
 # REST API endpoints
 # ---------------------------------------------------------------------------
 
@@ -406,3 +430,33 @@ def bulk_create_jobs_from_automic(
         except Exception as exc:
             errors[job_name] = str(exc)
     return AutomicBulkImportResponse(imported=imported, errors=errors)
+
+
+@router.post("/jobs/from-sap-ds", response_model=JobDefinition, status_code=201)
+def create_job_from_sap_ds(
+    body: SAPDSJobCreateRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    job_data = {
+        "name": body.name,
+        "description": f"SAP DS Job: {body.job_name}",
+        "tags": ["ds_job"],
+        "job_type": "ds_job",
+        "query": "",
+        "key_columns": [],
+        "exclude_columns": [],
+        "params": {
+            "job_name": body.job_name,
+            "repository": body.repository or "",
+            "poll_interval_s": body.poll_interval_s,
+            "timeout_s": body.timeout_s,
+        },
+        "enabled": True,
+    }
+    JobRepository(db).upsert(job_data)
+    AuditService(db).log(
+        request, "job.created", "job", body.name,
+        {"source": "sap_ds", "params": job_data["params"]},
+    )
+    return JobDefinition(**job_data)

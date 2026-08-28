@@ -389,6 +389,10 @@ class RunStatusOut(BaseModel):
     # 00a638ef"). Computed server-side so the UI and the downloadable HTML report
     # cannot drift -- see api/services/run_label.py.
     label: str = ""
+    # Download/report name stem ("nightly_recon_2026-08-28_14-30-05"). Computed
+    # the same way as label; export_filename() in difference_export.py appends
+    # a short run id on top of this for the actual download filename.
+    report_name: str = ""
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -957,6 +961,35 @@ class AutomicLookupRequest(BaseModel):
     id_type: Literal["run_id", "job_name"] = "job_name"
 
 
+class SAPDSTestRequest(BaseModel):
+    config_id: int
+
+
+class SAPDSLookupRequest(BaseModel):
+    config_id: int
+    identifier: str
+    id_type: Literal["run_id", "job_name"] = "job_name"
+    repository: str | None = None
+
+
+class SAPDSJobStatusOut(BaseModel):
+    identifier: str
+    identifier_type: str
+    repository: str
+    status: str
+    environment: str
+    checked_at: datetime
+
+
+class SAPDSJobCreateRequest(BaseModel):
+    name: str
+    job_name: str
+    repository: str | None = None
+    poll_interval_s: float = 5.0
+    timeout_s: float = 600.0
+
+
+
 class BOJobCreateRequest(BaseModel):
     name: str
     title: str
@@ -1197,6 +1230,35 @@ class SQLCompareRequest(BaseModel):
     exclude_columns: list[str] = Field(default_factory=list)
     chunk_size: int = Field(default=10_000, ge=0)
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
+
+
+class DataSourceSpec(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    source_type: Literal["sql", "file", "aws_athena", "aws_glue", "sap_bo", "api"] | str
+    config_id: int | None = None
+    connection_name: str | None = None
+    query_or_table: str | None = None
+    file_path: str | None = None
+    file_b64: str | None = None
+    file_name: str | None = None
+    endpoint_url: str | None = None
+    http_method: str | None = "GET"
+    headers: dict[str, str] | None = None
+    bo_doc_id: str | None = None
+    bo_report_id: str | None = None
+
+
+class MatrixCompareRequest(BaseModel):
+    source_a: DataSourceSpec
+    source_b: DataSourceSpec
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+    key_columns: list[str] = Field(default_factory=list)
+    exclude_columns: list[str] = Field(default_factory=list)
+    numeric_tolerance: float = 0.0
+    ignore_case: bool = False
+    trim_whitespace: bool = True
 
 
 class MismatchAcceptRequest(BaseModel):

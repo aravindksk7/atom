@@ -12,7 +12,7 @@ from api.schemas import (
     BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest,
     ColumnStatsRequest, ColumnStatsOut, ColumnStatsDiffOut,
     MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
-    AdvancedCompareOptions, MultiFileCompareRequest,
+    AdvancedCompareOptions, MultiFileCompareRequest, MatrixCompareRequest,
 )
 from api.services.api_artifact import (
     adhoc_artifact_dir,
@@ -23,6 +23,7 @@ from api.services.file_source import read_tabular, resolve_allowed_path
 from api.services.frame_engine import FrameEngine
 from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
 from etl_framework.reconciliation.chunker import load_in_chunks
+from etl_framework.reconciliation.data_sources import extract_data_source
 from etl_framework.reconciliation.engine import ReconciliationEngine
 from etl_framework.repository.models import TestResult
 from etl_framework.repository.repository import ConfigRepository, RunRepository
@@ -952,6 +953,68 @@ class CompareService:
                 completed_at=datetime.now(timezone.utc),
                 total_tests=1, error=1,
             )
+
+    # ------------------------------------------------------------------
+    # Matrix comparison
+    # ------------------------------------------------------------------
+
+    def compare_matrix(self, req: MatrixCompareRequest) -> "ReconciliationResult":
+        """Execute matrix comparison between source_a and source_b and return result."""
+        spec_a = req.source_a.model_dump() if hasattr(req.source_a, "model_dump") else req.source_a
+        spec_b = req.source_b.model_dump() if hasattr(req.source_b, "model_dump") else req.source_b
+        df_a = extract_data_source(spec_a, self._db)
+        df_b = extract_data_source(spec_b, self._db)
+
+        key_columns = req.key_columns
+        if not key_columns:
+            try:
+                key_columns = self._infer_key_columns(df_a, df_b)
+            except HTTPException:
+                df_a, df_b = self._sort_for_positional_compare(
+                    df_a,
+                    df_b,
+                    req.exclude_columns or [],
+                )
+                df_a = df_a.copy()
+                df_b = df_b.copy()
+                df_a.insert(0, "__row__", range(1, len(df_a) + 1))
+                df_b.insert(0, "__row__", range(1, len(df_b) + 1))
+                key_columns = ["__row__"]
+        self._validate_key_columns(df_a, df_b, key_columns)
+
+        compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
+        adv = AdvancedCompareOptions(
+            float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
+            case_insensitive_columns=compare_cols if req.ignore_case else [],
+            whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
+        )
+
+        engine_a = FrameEngine(df_a, req.label_a)
+        engine_b = FrameEngine(df_b, req.label_b)
+        reconciler = _build_engine(
+            engine_a, engine_b,
+            key_columns=key_columns,
+            exclude_columns=req.exclude_columns or [],
+            mismatch_row_limit=_compare_mismatch_row_limit(adv),
+            adv=adv,
+        )
+        return reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "matrix_comparison")
+
+    def run_matrix_comparison(self, req: MatrixCompareRequest, run_id: str) -> None:
+        """Execute matrix comparison and persist into RunRepository for run_id."""
+        try:
+            self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
+            result = self.compare_matrix(req)
+            self._persist_single_result(run_id, result)
+        except Exception as exc:
+            logger.exception("Matrix comparison failed for run %s", run_id)
+            self._add_error_result(run_id, req.label_a or "matrix_comparison", exc)
+            self._repo.update_run_status(
+                run_id, "ERROR",
+                completed_at=datetime.now(timezone.utc),
+                total_tests=1, error=1,
+            )
+            raise
 
     # ------------------------------------------------------------------
     # Column Stats comparison
