@@ -150,3 +150,24 @@ class TestReportNameBase:
             config_snapshot={"config_name": "Nightly Recon"},
         )
         assert report_name_base_for(run) == "nightly_recon_2026-08-28_14-30-05"
+
+
+def test_snapshot_exposes_the_report_name_for_downloads():
+    from api.services.run_report import build_run_report_snapshot
+
+    run = types.SimpleNamespace(
+        run_id=RUN_ID,
+        status="FAILED",
+        started_at=datetime(2026, 8, 28, 14, 30, 5, tzinfo=timezone.utc),
+        completed_at=None,
+        source_env="dev",
+        target_env="prod",
+        config_snapshot={"config_name": "Nightly Recon"},
+        run_type="reconciliation",
+        pair_id=None,
+        results=[],
+        total_tests=0, passed=0, failed=0, slow=0, error=0,
+    )
+    snapshot = build_run_report_snapshot(run)
+
+    assert snapshot.report_name == "nightly_recon_2026-08-28_14-30-05"

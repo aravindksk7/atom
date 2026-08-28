@@ -194,6 +194,19 @@ class RunReportSnapshot:
         )
 
     @property
+    def report_name(self) -> str:
+        """Download/report name stem, e.g. "nightly_recon_2026-08-28_14-30-05".
+        Derived rather than stored -- see api/services/run_label.py."""
+        from api.services.run_label import report_name_base
+
+        return report_name_base(
+            started_at=self.started_at,
+            source_env=self.source_env,
+            target_env=self.target_env,
+            config_snapshot=self.config_snapshot,
+        )
+
+    @property
     def short_run_id(self) -> str:
         from api.services.run_label import short_run_id
 
