@@ -12,6 +12,8 @@ run DTO, so the UI and the downloadable HTML report cannot drift apart.
 """
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Any
 
 # The specific comparison a run performed lives in config_snapshot, not in
@@ -91,6 +93,66 @@ def run_display_label_for(run: Any) -> str:
     return run_display_label(
         run_id=getattr(run, "run_id", None),
         run_type=getattr(run, "run_type", None),
+        source_env=getattr(run, "source_env", None),
+        target_env=getattr(run, "target_env", None),
+        config_snapshot=getattr(run, "config_snapshot", None),
+    )
+
+
+_SLUG_INVALID = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(text: str) -> str:
+    """Filesystem/URL-safe token: lowercase, non-alphanumeric runs collapsed to a
+    single underscore, no leading/trailing underscore."""
+    lowered = str(text or "").strip().lower()
+    collapsed = _SLUG_INVALID.sub("_", lowered).strip("_")
+    return collapsed or "run"
+
+
+def report_name_base(
+    started_at: Any,
+    source_env: Any = None,
+    target_env: Any = None,
+    config_snapshot: Any = None,
+) -> str:
+    """Build the report/download name stem, e.g. "nightly_recon_2026-08-28_14-30-05".
+
+    Prefers the saved config's name (what the user actually named the job) and
+    falls back to the environment pair when a run has no config (ad-hoc file
+    compares). Always suffixed with the run's start time so repeated downloads
+    of the same run produce the same name. export_filename() in
+    difference_export.py appends a short run id on top of this for on-disk/
+    download uniqueness.
+    """
+    config_name = None
+    if isinstance(config_snapshot, dict):
+        raw = config_snapshot.get("config_name")
+        if raw:
+            config_name = str(raw)
+
+    if config_name:
+        source = config_name
+    else:
+        source_part = str(source_env).strip() if source_env else ""
+        target_part = str(target_env).strip() if target_env else ""
+        if source_part and target_part:
+            source = f"{source_part}_to_{target_part}"
+        else:
+            source = source_part or target_part or "run"
+
+    if isinstance(started_at, datetime):
+        timestamp = started_at.strftime("%Y-%m-%d_%H-%M-%S")
+    else:
+        timestamp = "unscheduled"
+
+    return f"{_slug(source)}_{timestamp}"
+
+
+def report_name_base_for(run: Any) -> str:
+    """Same, read off any object exposing the run's attributes."""
+    return report_name_base(
+        started_at=getattr(run, "started_at", None),
         source_env=getattr(run, "source_env", None),
         target_env=getattr(run, "target_env", None),
         config_snapshot=getattr(run, "config_snapshot", None),

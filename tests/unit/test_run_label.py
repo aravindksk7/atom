@@ -3,6 +3,7 @@
 The label is computed once server-side and shipped on the run DTO, so the live UI
 and the downloadable HTML report show the same string for the same run.
 """
+from datetime import datetime, timezone
 import types
 
 from api.services.run_label import run_display_label, run_display_label_for, short_run_id
@@ -90,3 +91,62 @@ def test_snapshot_exposes_the_label_for_the_report_template():
 
     assert snapshot.run_label == "BO compare · dev → prod · 00a638ef"
     assert snapshot.short_run_id == "00a638ef"
+
+
+class TestReportNameBase:
+    STARTED = datetime(2026, 8, 28, 14, 30, 5, tzinfo=timezone.utc)
+
+    def test_uses_config_name_when_present(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(
+            started_at=self.STARTED,
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"config_name": "Nightly Recon"},
+        )
+        assert name == "nightly_recon_2026-08-28_14-30-05"
+
+    def test_falls_back_to_env_pair_when_no_config_name(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(started_at=self.STARTED, source_env="dev", target_env="prod")
+        assert name == "dev_to_prod_2026-08-28_14-30-05"
+
+    def test_one_sided_environment_still_shows(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(started_at=self.STARTED, source_env="dev")
+        assert name == "dev_2026-08-28_14-30-05"
+
+    def test_falls_back_to_run_when_nothing_identifies_it(self):
+        from api.services.run_label import report_name_base
+
+        assert report_name_base(started_at=self.STARTED) == "run_2026-08-28_14-30-05"
+
+    def test_missing_started_at_still_produces_a_name(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(started_at=None, source_env="dev", target_env="prod")
+        assert name == "dev_to_prod_unscheduled"
+
+    def test_sanitizes_special_characters_in_config_name(self):
+        from api.services.run_label import report_name_base
+
+        name = report_name_base(
+            started_at=self.STARTED,
+            config_snapshot={"config_name": "Q3 Recon / Sales!!"},
+        )
+        assert name == "q3_recon_sales_2026-08-28_14-30-05"
+
+    def test_reads_off_a_run_object(self):
+        import types
+        from api.services.run_label import report_name_base_for
+
+        run = types.SimpleNamespace(
+            started_at=self.STARTED,
+            source_env="dev",
+            target_env="prod",
+            config_snapshot={"config_name": "Nightly Recon"},
+        )
+        assert report_name_base_for(run) == "nightly_recon_2026-08-28_14-30-05"
