@@ -87,12 +87,19 @@ def _extract_sql_source(spec: dict[str, Any], db_session: Any | None = None) -> 
     if not query_or_table:
         raise ValueError("SQL data source requires 'query_or_table' or 'query'")
 
-    session = db_session or spec.get("db_session")
     conn_str = spec.get("connection_string") or spec.get("conn_str") or spec.get("db_url")
 
     query_str = str(query_or_table).strip()
     is_query = query_str.upper().startswith(("SELECT", "WITH", "EXPLAIN", "SHOW", "EXEC")) or " " in query_str
 
+    if conn_str:
+        engine = create_engine(conn_str)
+        with engine.connect() as conn:
+            if is_query:
+                return pd.read_sql_query(text(query_str), conn)
+            return pd.read_sql_table(query_str, conn)
+
+    session = db_session or spec.get("db_session")
     if session is not None:
         bind = getattr(session, "bind", session)
         if hasattr(bind, "connect"):
@@ -104,13 +111,6 @@ def _extract_sql_source(spec: dict[str, Any], db_session: Any | None = None) -> 
             if is_query:
                 return pd.read_sql_query(text(query_str), bind)
             return pd.read_sql_table(query_str, bind)
-
-    if conn_str:
-        engine = create_engine(conn_str)
-        with engine.connect() as conn:
-            if is_query:
-                return pd.read_sql_query(text(query_str), conn)
-            return pd.read_sql_table(query_str, conn)
 
     # SQLite fallback
     engine = create_engine("sqlite:///:memory:")
@@ -152,7 +152,7 @@ def _extract_athena_source(spec: dict[str, Any]) -> pd.DataFrame:
 
 
 def _extract_api_source(spec: dict[str, Any]) -> pd.DataFrame:
-    url = spec.get("url") or spec.get("endpoint")
+    url = spec.get("url") or spec.get("endpoint") or spec.get("endpoint_url")
     if not url:
         raise ValueError("API data source requires 'url'")
 

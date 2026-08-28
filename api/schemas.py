@@ -1229,6 +1229,8 @@ class SQLCompareRequest(BaseModel):
 
 
 class DataSourceSpec(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     source_type: Literal["sql", "file", "aws_athena", "aws_glue", "sap_bo", "api"] | str
     config_id: int | None = None
     connection_name: str | None = None
