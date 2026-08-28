@@ -1228,6 +1228,33 @@ class SQLCompareRequest(BaseModel):
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
 
+class DataSourceSpec(BaseModel):
+    source_type: Literal["sql", "file", "aws_athena", "aws_glue", "sap_bo", "api"] | str
+    config_id: int | None = None
+    connection_name: str | None = None
+    query_or_table: str | None = None
+    file_path: str | None = None
+    file_b64: str | None = None
+    file_name: str | None = None
+    endpoint_url: str | None = None
+    http_method: str | None = "GET"
+    headers: dict[str, str] | None = None
+    bo_doc_id: str | None = None
+    bo_report_id: str | None = None
+
+
+class MatrixCompareRequest(BaseModel):
+    source_a: DataSourceSpec
+    source_b: DataSourceSpec
+    label_a: str = "Source A"
+    label_b: str = "Source B"
+    key_columns: list[str] = Field(default_factory=list)
+    exclude_columns: list[str] = Field(default_factory=list)
+    numeric_tolerance: float = 0.0
+    ignore_case: bool = False
+    trim_whitespace: bool = True
+
+
 class MismatchAcceptRequest(BaseModel):
     note: str = Field(min_length=1)
     accepted_by: str | None = None

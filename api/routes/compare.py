@@ -12,8 +12,10 @@ from api.schemas import (
     BOCompareRequest,
     ColumnStatsOut,
     ColumnStatsRequest,
+    DataSourceSpec,
     DualEnvLaunchOut,
     DualEnvLaunchRequest,
+    MatrixCompareRequest,
     MismatchDiffOut,
     MismatchDiffRequest,
     MultiFileCompareRequest,
@@ -155,6 +157,25 @@ def _run_sql_bg(req: SQLCompareRequest, run_id: str) -> None:
         db.close()
 
 
+def _run_matrix_bg(req: MatrixCompareRequest, run_id: str) -> None:
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.utils.context import set_run_id
+
+    set_run_id(run_id)
+    db = SessionLocal()
+    try:
+        from api.services.compare_service import CompareService
+        from etl_framework.repository.repository import ConfigRepository
+        svc = CompareService(db, ConfigRepository(db))
+        if hasattr(svc, "run_matrix_comparison"):
+            svc.run_matrix_comparison(req, run_id)
+    except Exception:
+        logger.exception("Matrix comparison background task failed for run_id=%s", run_id)
+    finally:
+        set_run_id("")
+        db.close()
+
+
 def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest) -> None:
     from etl_framework.repository.database import SessionLocal
 
@@ -206,6 +227,35 @@ def _launch_dual_env_bg(run_id_a: str, run_id_b: str, req: DualEnvLaunchRequest)
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@router.post("/matrix", response_model=RunStatusOut, status_code=202)
+def compare_matrix(
+    body: MatrixCompareRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RunStatusOut:
+    run_id = str(uuid.uuid4())
+    snapshot = sanitize_compare_request(run_id, "matrix", body.model_dump(mode="json"))
+    compare_body = MatrixCompareRequest(**snapshot["request"])
+    repo = RunRepository(db)
+    repo.create_run(
+        run_id=run_id,
+        source_env=body.label_a,
+        target_env=body.label_b,
+        config_snapshot=snapshot,
+        run_type="matrix_comparison",
+    )
+    AuditService(db).log(
+        request,
+        "run.created",
+        "run",
+        run_id,
+        {"run_type": "matrix_comparison", "label_a": body.label_a, "label_b": body.label_b},
+    )
+    background_tasks.add_task(_run_matrix_bg, compare_body, run_id)
+    run = repo.get_run(run_id)
+    return _status_out(run)
 
 @router.post("/bo-report", response_model=RunStatusOut, status_code=202)
 def compare_bo_report(
