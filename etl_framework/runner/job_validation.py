@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from api.schemas import BOCompareRequest, ReconFileCompareRequest
+from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest
 
 
 class ValidationSeverity(str, Enum):
@@ -234,10 +234,10 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
     elif job_type == "compare":
         compare_type = params.get("compare_type")
         request = params.get("request")
-        if compare_type not in ("bo", "recon_file"):
+        if compare_type not in ("bo", "recon_file", "matrix"):
             issues.append(ValidationIssue(
                 "params.compare_type",
-                "compare jobs require compare_type of 'bo' or 'recon_file'",
+                "compare jobs require compare_type of 'bo', 'recon_file', or 'matrix'",
             ))
         if not isinstance(request, dict):
             issues.append(ValidationIssue(
@@ -288,6 +288,25 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
                             f"compare job {label} uses a "
                             f"{'stored run' if stored else 'file upload'}, "
                             "which cannot be re-run on a schedule - use a file path",
+                        ))
+        elif compare_type == "matrix":
+            try:
+                parsed_matrix = MatrixCompareRequest.model_validate(request)
+            except ValidationError as exc:
+                issues.append(ValidationIssue(
+                    "params.request",
+                    f"compare matrix request is invalid: {_validation_error_message(exc)}",
+                ))
+            else:
+                for field, source, label in (
+                    ("params.request.source_a", parsed_matrix.source_a, "Source A"),
+                    ("params.request.source_b", parsed_matrix.source_b, "Source B"),
+                ):
+                    if source.source_type == "file" and source.file_b64 and not source.file_path:
+                        issues.append(ValidationIssue(
+                            field,
+                            f"compare job {label} is an upload, which cannot be re-run on a "
+                            "schedule - use a file path or another repeatable source",
                         ))
         for field in ("rules", "pass_condition", "depends_on"):
             if params.get(field) or _get(job, field, None):
