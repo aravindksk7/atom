@@ -15,8 +15,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.schemas import (
+    AdvancedCompareOptions,
     BOCompareRequest,
     DifferenceExportStatusOut,
+    MatrixCompareRequest,
     ReconFileCompareRequest,
     RunSettings,
     SQLCompareRequest,
@@ -34,6 +36,7 @@ from etl_framework.reconciliation.compare_utils import (
     resolve_key_columns,
     value_mismatch_mask,
 )
+from etl_framework.reconciliation.data_sources import extract_data_source
 from etl_framework.reconciliation.file_mapping import (
     FileMappingSpec,
     pair_files,
@@ -653,6 +656,7 @@ def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -
         req = BOCompareRequest(**payload)
         df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id, store_responses=False)
         df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id, store_responses=False)
+        options = req.advanced
     elif compare_type == "recon_file":
         req = ReconFileCompareRequest(**payload)
         source_a = svc._load_recon_source(req, "a")
@@ -662,6 +666,20 @@ def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -
             # not row-by-row -- there is no tabular difference set to add here.
             return
         df_a, df_b = source_a, source_b
+        options = req.advanced
+    elif compare_type == "matrix":
+        req = MatrixCompareRequest(**payload)
+        df_a = extract_data_source(req.source_a.model_dump(), db)
+        df_b = extract_data_source(req.source_b.model_dump(), db)
+        # Mirrors CompareService.compare_matrix's own AdvancedCompareOptions
+        # construction (compare_service.py:986) -- Matrix has no .advanced
+        # field of its own, just numeric_tolerance/ignore_case/trim_whitespace.
+        compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
+        options = AdvancedCompareOptions(
+            float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
+            case_insensitive_columns=compare_cols if req.ignore_case else [],
+            whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
+        )
     else:
         return
     _write_tabular_differences(
@@ -669,7 +687,7 @@ def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -
         df_b,
         key_columns=req.key_columns or [],
         exclude_columns=req.exclude_columns or [],
-        options=req.advanced,
+        options=options,
         test_name=saved.name,
         writer=writer,
     )
