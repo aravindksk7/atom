@@ -125,3 +125,45 @@ def test_compare_job_mirroring_clears_stale_top_level_columns():
     )
 
     assert job.key_columns == ["id"]
+
+
+def _matrix_request(**overrides) -> dict:
+    request = {
+        "source_a": {"source_type": "file", "file_path": "/data/a.csv"},
+        "source_b": {"source_type": "sql", "config_id": 1, "query_or_table": "SELECT * FROM t"},
+        "key_columns": ["id"],
+    }
+    return {**request, **overrides}
+
+
+def test_compare_job_accepts_a_matrix_request_with_repeatable_sources():
+    job = JobDefinition(
+        name="nightly_matrix",
+        job_type="compare",
+        params={"compare_type": "matrix", "request": _matrix_request()},
+    )
+
+    assert job.params["compare_type"] == "matrix"
+
+
+def test_compare_job_rejects_a_matrix_upload_source():
+    with pytest.raises(ValidationError, match="Source B"):
+        JobDefinition(
+            name="nightly_matrix",
+            job_type="compare",
+            params={"compare_type": "matrix", "request": _matrix_request(
+                source_b={"source_type": "file", "file_b64": "aWQK", "file_name": "b.csv"},
+            )},
+        )
+
+
+def test_compare_job_mirrors_key_columns_from_a_matrix_request():
+    job = JobDefinition(
+        name="nightly_matrix",
+        job_type="compare",
+        params={"compare_type": "matrix", "request": _matrix_request(
+            key_columns=["region", "product"],
+        )},
+    )
+
+    assert job.key_columns == ["region", "product"]
