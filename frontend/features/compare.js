@@ -631,6 +631,15 @@
         });
         return;
       }
+      if (compareType === 'matrix') {
+        [['A', payload.source_a], ['B', payload.source_b]].forEach(([side, src]) => {
+          if (!src) return;
+          if (src.source_type === 'file' && src.file_b64 && !src.file_path) {
+            throw new Error(`Source ${side} is an upload - a job that re-runs needs a file path or another repeatable source.`);
+          }
+        });
+        return;
+      }
       [
         ['A', payload.stored_run_id, payload.file_a_content_b64],
         ['B', payload.stored_run_id_b, payload.file_b_content_b64],
@@ -655,6 +664,16 @@
           key_columns: payload.key_columns || [],
           exclude_columns: payload.exclude_columns || [],
           params: { source_mode: 'multi_file', file_mapping: payload.file_mapping },
+        };
+      }
+      if (this.saveJobCompareType === 'matrix') {
+        const payload = this._buildMatrixComparePayload();
+        this._assertCompareJobSourcesAreRepeatable('matrix', payload);
+        return {
+          job_type: 'compare',
+          key_columns: payload.key_columns || [],
+          exclude_columns: payload.exclude_columns || [],
+          params: { compare_type: 'matrix', request: payload },
         };
       }
       const payload = this.saveJobCompareType === 'bo'
