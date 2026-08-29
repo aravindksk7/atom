@@ -1924,7 +1924,7 @@ class RunExecutor:
 
     def _build_case_compare(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
-            from api.schemas import BOCompareRequest, ReconFileCompareRequest
+            from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest
             from api.services.compare_service import CompareService
             from etl_framework.repository.repository import ConfigRepository
 
@@ -1946,6 +1946,8 @@ class RunExecutor:
                 result = service.compare_recon_file(
                     ReconFileCompareRequest.model_validate(request), job_name=job.name,
                 )
+            elif compare_type == "matrix":
+                result = service.compare_matrix(MatrixCompareRequest.model_validate(request))
             else:
                 raise ValueError(
                     f"unknown compare_type '{compare_type}' for compare job '{job.name}'"

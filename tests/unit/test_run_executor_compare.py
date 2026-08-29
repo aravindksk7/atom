@@ -83,6 +83,27 @@ def test_compare_job_runs_a_recon_file_compare(tmp_path, monkeypatch):
     assert result.status.value == "PASSED"
 
 
+def test_compare_job_runs_a_matrix_compare_and_names_the_result_after_the_job(tmp_path, monkeypatch):
+    _allow(tmp_path, monkeypatch)
+    (tmp_path / "a.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("id,value\n1,beta\n", encoding="utf-8")
+
+    job = JobDefinition(
+        name="nightly_matrix",
+        job_type="compare",
+        params={"compare_type": "matrix", "request": {
+            "source_a": {"source_type": "file", "file_path": str(tmp_path / "a.csv")},
+            "source_b": {"source_type": "file", "file_path": str(tmp_path / "b.csv")},
+            "key_columns": ["id"],
+        }},
+    )
+
+    result = _executor(_session())._build_case(job)()
+
+    assert result.query_name == "nightly_matrix"
+    assert result.value_mismatch_count == 1
+
+
 def test_compare_job_with_an_unknown_compare_type_raises():
     job = JobDefinition.model_construct(
         name="broken",
