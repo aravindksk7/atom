@@ -473,6 +473,33 @@
       };
     },
 
+    // Reverse of _buildMatrixSourceSpec -- turns a saved compare job's
+    // DataSourceSpec (params.request.source_a/source_b) back into
+    // matrixSourceAType/matrixSourceA shape. Unlike BO, Matrix's UI type
+    // strings ('sql'/'file'/'aws_athena'/'sap_bo'/'api') already equal
+    // DataSourceSpec.source_type values directly (_buildMatrixSourceSpec sets
+    // spec.source_type = type verbatim), so this is a near-identity mapping,
+    // and -- like BO -- only ever needs to handle repeatable sources, since
+    // _assertCompareJobSourcesAreRepeatable rejects an upload at save time.
+    _hydrateMatrixSourceFromConfig(cfg) {
+      const base = { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: '' };
+      if (!cfg) return { type: 'file', src: base };
+      const type = cfg.source_type || 'file';
+      if (type === 'sql') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', connectionName: cfg.connection_name || '', queryOrTable: cfg.query_or_table || '' } };
+      }
+      if (type === 'aws_athena') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', athenaQuery: cfg.query_or_table || '' } };
+      }
+      if (type === 'sap_bo') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', docId: cfg.bo_doc_id || '', reportId: cfg.bo_report_id || '' } };
+      }
+      if (type === 'api') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', endpointUrl: cfg.endpoint_url || '', httpMethod: cfg.http_method || 'GET' } };
+      }
+      return { type: 'file', src: { ...base, filePath: cfg.file_path || '' } };
+    },
+
     // Reverse of _buildAdvanced -- turns an AdvancedCompareOptions object back
     // into the `${prefix}FloatTolerance` etc. raw form fields.
     _applyAdvancedToPrefix(prefix, adv) {
