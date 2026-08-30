@@ -38,6 +38,18 @@
     dsRepository: '',
     dsLoading: false,
     dsResult: null,
+    showDSJobModal: false,
+    dsJobSaving: false,
+    dsJobForm: {
+      name: '',
+      job_name: '',
+      repository: '',
+      description: '',
+      job_params_raw: '',
+      poll_interval_s: 5,
+      timeout_s: 600,
+      tags_raw: 'ds_job',
+    },
 
     // -----------------------------------------------------------
     // Adapters – Automic
@@ -553,12 +565,9 @@
       this.dsTesting = true;
       this.dsTestResult = null;
       try {
-        const res = await fetch('/api/adapters/sap-ds/test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ config_id: parseInt(this.dsConfigId) })
+        this.dsTestResult = await api('POST', '/api/adapters/sap-ds/test', {
+          config_id: parseInt(this.dsConfigId, 10),
         });
-        this.dsTestResult = await res.json();
       } catch (err) {
         this.dsTestResult = { ok: false, message: err.message, latency_ms: 0 };
       } finally {
@@ -571,21 +580,12 @@
       this.dsLoading = true;
       this.dsResult = null;
       try {
-        const res = await fetch('/api/adapters/sap-ds/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            config_id: parseInt(this.dsConfigId),
-            identifier: this.dsIdentifier,
-            id_type: this.dsIdType,
-            repository: this.dsRepository.trim() || null
-          })
+        this.dsResult = await api('POST', '/api/adapters/sap-ds/lookup', {
+          config_id: parseInt(this.dsConfigId, 10),
+          identifier: this.dsIdentifier,
+          id_type: this.dsIdType,
+          repository: this.dsRepository.trim() || null,
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Lookup failed');
-        }
-        this.dsResult = await res.json();
       } catch (err) {
         this.showToast(err.message, 'error');
       } finally {
@@ -593,29 +593,61 @@
       }
     },
 
-    async addSAPDSJob() {
+    openAddDSJobModal() {
       if (!this.dsResult) return;
-      const jobName = `ds_${this.dsResult.identifier.toLowerCase().replace(/[^a-z0-9_]/g, '_')}`;
-      try {
-        const res = await fetch('/api/adapters/jobs/from-sap-ds', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: jobName,
-            job_name: this.dsResult.identifier,
-            repository: this.dsResult.repository || null
-          })
-        });
-        if (res.ok) {
-          this.showToast(`Job '${jobName}' added to catalog`, 'success');
-          await this.loadJobs();
-        } else {
-          const err = await res.json();
-          this.showToast(err.detail || 'Failed to add job', 'error');
+      const rawIdent = this.dsResult.identifier || '';
+      const slug = ('ds_' + rawIdent).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      this.dsJobForm = {
+        name: slug,
+        job_name: rawIdent,
+        repository: this.dsResult.repository || '',
+        description: `SAP DS Job: ${rawIdent}`,
+        job_params_raw: '',
+        poll_interval_s: 5,
+        timeout_s: 600,
+        tags_raw: 'ds_job',
+      };
+      this.showDSJobModal = true;
+    },
+
+    async saveDSJob() {
+      if (!this.dsJobForm.name || !this.dsJobForm.job_name) return;
+      let parsedParams = undefined;
+      if (this.dsJobForm.job_params_raw && this.dsJobForm.job_params_raw.trim()) {
+        try {
+          parsedParams = JSON.parse(this.dsJobForm.job_params_raw.trim());
+        } catch (e) {
+          this.showToast('Invalid Job Parameters JSON: ' + e.message, 'error');
+          return;
         }
+      }
+      this.dsJobSaving = true;
+      try {
+        const payload = {
+          name: this.dsJobForm.name.trim(),
+          job_name: this.dsJobForm.job_name.trim(),
+          repository: this.dsJobForm.repository.trim() || null,
+          description: this.dsJobForm.description.trim() || undefined,
+          tags: this.dsJobForm.tags_raw ? this.dsJobForm.tags_raw.split(',').map(s => s.trim()).filter(Boolean) : ['ds_job'],
+          poll_interval_s: Number(this.dsJobForm.poll_interval_s) || 5,
+          timeout_s: Number(this.dsJobForm.timeout_s) || 600,
+        };
+        if (parsedParams) {
+          payload.job_params = parsedParams;
+        }
+        await api('POST', '/api/adapters/jobs/from-sap-ds', payload);
+        this.showToast(`Job '${payload.name}' added to catalog`, 'success');
+        this.showDSJobModal = false;
+        await this.loadJobs();
       } catch (err) {
         this.showToast(err.message, 'error');
+      } finally {
+        this.dsJobSaving = false;
       }
+    },
+
+    async addSAPDSJob() {
+      this.openAddDSJobModal();
     },
 
     };

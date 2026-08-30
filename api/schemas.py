@@ -992,7 +992,10 @@ class SAPDSJobStatusOut(BaseModel):
 class SAPDSJobCreateRequest(BaseModel):
     name: str
     job_name: str
+    description: str | None = None
+    tags: list[str] = Field(default_factory=lambda: ["ds_job"])
     repository: str | None = None
+    job_params: dict[str, Any] | None = None
     poll_interval_s: float = 5.0
     timeout_s: float = 600.0
 

@@ -474,6 +474,7 @@ function _appRaw() {
         ['showJobModal', 'jobDialog', () => { this.showJobModal = false; }],
         ['showScheduleModal', 'scheduleDialog', () => { this.showScheduleModal = false; }],
         ['showBOJobModal', 'boJobDialog', () => { this.showBOJobModal = false; }],
+        ['showDSJobModal', 'dsJobDialog', () => { this.showDSJobModal = false; }],
         ['showSelectionModal', 'selectionDialog', () => { this.showSelectionModal = false; }],
         ['showLaunchSelectionModal', 'launchSelectionDialog', () => { this.showLaunchSelectionModal = false; }],
         ['showCiIntegrationModal', 'ciIntegrationDialog', () => { this.showCiIntegrationModal = false; }],

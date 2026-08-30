@@ -688,8 +688,44 @@ def test_sapds_schemas():
     )
     assert status.repository == "REPO1"
 
-    create = SAPDSJobCreateRequest(name="my_job", job_name="JOB_1")
+    create = SAPDSJobCreateRequest(
+        name="my_job",
+        job_name="JOB_1",
+        description="Custom DS Job",
+        tags=["ds_job", "nightly"],
+        job_params={"$G_RUN_DATE": "2026-08-30"},
+    )
     assert create.repository is None
+    assert create.description == "Custom DS Job"
+    assert create.tags == ["ds_job", "nightly"]
+    assert create.job_params == {"$G_RUN_DATE": "2026-08-30"}
     assert create.poll_interval_s == 5.0
     assert create.timeout_s == 600.0
+
+
+def test_create_job_from_sap_ds_with_params_and_tags(client):
+    with patch("api.routes.adapters.JobRepository") as MockRepo, \
+         patch("api.routes.adapters.AuditService"):
+        MockRepo.return_value.upsert.return_value = MagicMock()
+        resp = client.post("/api/adapters/jobs/from-sap-ds", json={
+            "name": "my_ds_job_custom",
+            "job_name": "DS_NIGHTLY",
+            "repository": "PROD_REPO",
+            "description": "Custom Nightly Load",
+            "tags": ["ds_job", "nightly", "etl"],
+            "job_params": {"$G_RUN_DATE": "2026-08-30", "$G_BATCH_ID": 100},
+            "poll_interval_s": 15.0,
+            "timeout_s": 900.0,
+        })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["name"] == "my_ds_job_custom"
+    assert data["description"] == "Custom Nightly Load"
+    assert data["job_type"] == "ds_job"
+    assert data["tags"] == ["ds_job", "nightly", "etl"]
+    assert data["params"]["job_name"] == "DS_NIGHTLY"
+    assert data["params"]["repository"] == "PROD_REPO"
+    assert data["params"]["job_params"] == {"$G_RUN_DATE": "2026-08-30", "$G_BATCH_ID": 100}
+    assert data["params"]["poll_interval_s"] == 15.0
+    assert data["params"]["timeout_s"] == 900.0
 

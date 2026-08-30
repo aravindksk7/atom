@@ -79,6 +79,7 @@
           if (this.showCompareTemplatePanel) { this.showCompareTemplatePanel = false; return; }
           if (this.showConfigModal) { this.showConfigModal = false; return; }
           if (this.showBOJobModal) { this.showBOJobModal = false; return; }
+          if (this.showDSJobModal) { this.showDSJobModal = false; return; }
           if (this.showScheduleModal) { this.showScheduleModal = false; return; }
           if (this.showHookModal) { this.showHookModal = false; return; }
           if (this.showContractModal) { this.showContractModal = false; return; }

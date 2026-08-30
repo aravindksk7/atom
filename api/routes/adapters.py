@@ -4,6 +4,7 @@ import base64
 import binascii
 
 from datetime import date
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -438,20 +439,24 @@ def create_job_from_sap_ds(
     request: Request,
     db: Session = Depends(get_session),
 ):
+    params: dict[str, Any] = {
+        "job_name": body.job_name,
+        "repository": body.repository or "",
+        "poll_interval_s": body.poll_interval_s,
+        "timeout_s": body.timeout_s,
+    }
+    if body.job_params:
+        params["job_params"] = body.job_params
+
     job_data = {
         "name": body.name,
-        "description": f"SAP DS Job: {body.job_name}",
-        "tags": ["ds_job"],
+        "description": body.description if body.description is not None else f"SAP DS Job: {body.job_name}",
+        "tags": body.tags if body.tags is not None else ["ds_job"],
         "job_type": "ds_job",
         "query": "",
         "key_columns": [],
         "exclude_columns": [],
-        "params": {
-            "job_name": body.job_name,
-            "repository": body.repository or "",
-            "poll_interval_s": body.poll_interval_s,
-            "timeout_s": body.timeout_s,
-        },
+        "params": params,
         "enabled": True,
     }
     JobRepository(db).upsert(job_data)

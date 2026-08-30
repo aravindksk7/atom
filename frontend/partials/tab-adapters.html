@@ -209,7 +209,7 @@
                 <span class="badge" :class="statusBadgeClass(dsResult.status)" x-text="dsResult.status"></span>
               </div>
               <div class="text-muted mt-1" x-text="'Repo: ' + (dsResult.repository || 'default') + ' · Env: ' + dsResult.environment + ' · Checked: ' + fmtDate(dsResult.checked_at)"></div>
-              <button @click="addSAPDSJob()" class="btn-primary btn-sm mt-2">+ Add to Job Catalog</button>
+              <button @click="openAddDSJobModal()" class="btn-primary btn-sm mt-2">+ Add to Job Catalog</button>
             </div>
           </template>
         </div>
@@ -417,6 +417,56 @@
       <div class="flex justify-end gap-3 mt-4">
         <button @click="showBOJobModal=false" class="btn-secondary">Cancel</button>
         <button @click="saveBOJob()" class="btn-primary" :disabled="!boJobForm.name">Save Job</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add SAP DS Job modal -->
+  <div x-show="showDSJobModal" x-cloak class="modal-backdrop" @click.self="showDSJobModal = false">
+    <div x-ref="dsJobDialog" class="modal-box w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="dsJobDialogTitle">
+      <h2 id="dsJobDialogTitle" class="text-lg font-bold mb-4">Add SAP Data Services Job</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-job-name">Job Name *</label>
+          <input x-model="dsJobForm.name" class="field-input" id="a11y-adapters-ds-job-name" placeholder="ds_job_name" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-target-job">DS Job Name *</label>
+          <input x-model="dsJobForm.job_name" class="field-input font-mono text-sm" id="a11y-adapters-ds-target-job" placeholder="JOB_NAME" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-repository">Repository</label>
+          <input x-model="dsJobForm.repository" class="field-input" id="a11y-adapters-ds-repository" placeholder="DS_REPO (optional)" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-description">Description</label>
+          <input x-model="dsJobForm.description" class="field-input" id="a11y-adapters-ds-description" placeholder="Description" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-job-params">Job Parameters / Global Variables (JSON)</label>
+          <input x-model="dsJobForm.job_params_raw" class="field-input font-mono text-xs" id="a11y-adapters-ds-job-params" placeholder='{"$G_RUN_DATE": "2026-08-30"}' />
+        </div>
+        <div class="grid-2">
+          <div>
+            <label class="field-label" for="a11y-adapters-ds-poll-interval">Poll Interval (s)</label>
+            <input x-model="dsJobForm.poll_interval_s" type="number" min="1" class="field-input" id="a11y-adapters-ds-poll-interval" placeholder="5" />
+          </div>
+          <div>
+            <label class="field-label" for="a11y-adapters-ds-timeout">Timeout (s)</label>
+            <input x-model="dsJobForm.timeout_s" type="number" min="1" class="field-input" id="a11y-adapters-ds-timeout" placeholder="600" />
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="a11y-adapters-ds-tags">Tags (comma-separated)</label>
+          <input x-model="dsJobForm.tags_raw" class="field-input" id="a11y-adapters-ds-tags" placeholder="ds_job, nightly" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-4">
+        <button @click="showDSJobModal=false" class="btn-secondary">Cancel</button>
+        <button @click="saveDSJob()" class="btn-primary" :disabled="!dsJobForm.name || !dsJobForm.job_name || dsJobSaving">
+          <span x-show="!dsJobSaving">Save Job</span>
+          <span x-show="dsJobSaving">Saving…</span>
+        </button>
       </div>
     </div>
   </div>
