@@ -65,6 +65,33 @@ test.describe('08g compare / multi-file', () => {
     await expect(passedPair).toContainText('extract_AB12.json');
   });
 
+  test('sends the Advanced Options backend on the multi-file request', async ({ authedPage }) => {
+    await openMultiFile(authedPage);
+
+    await authedPage.locator('[data-testid="compare-mf-key-columns-input"]').fill('id');
+    await authedPage.locator('[data-testid="compare-mf-match-on-input"]').fill('region');
+    await authedPage.locator('[data-testid="compare-mf-source-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_source'));
+    await authedPage.locator('[data-testid="compare-mf-source-pattern-input"]').fill('sales_{region}.csv');
+    await authedPage.locator('[data-testid="compare-mf-target-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_target'));
+    await authedPage.locator('[data-testid="compare-mf-target-pattern-input"]').fill('financials_{region}.csv');
+
+    await authedPage.locator('[data-testid="compare-mf-advanced-toggle"]').click();
+    await authedPage.locator('[data-testid="compare-mf-backend-select"]').selectOption('polars');
+    await authedPage.locator('[data-testid="compare-mf-float-tolerance-input"]').fill('0.5');
+
+    const request = authedPage.waitForRequest(
+      (r) => r.url().includes('/api/compare/multi-file') && r.method() === 'POST',
+    );
+    await authedPage.locator('[data-testid="compare-mf-run-btn"]').click();
+    const body = JSON.parse((await request).postData() || '{}');
+
+    // The E2E_COMPARE_BACKEND fixture override rewrites comparison_backend when
+    // it is set, so only assert the fields it never touches in that mode.
+    expect(body.advanced).toBeTruthy();
+    expect(body.advanced.float_tolerance).toBe(0.5);
+    if (!process.env.E2E_COMPARE_BACKEND) expect(body.advanced.comparison_backend).toBe('polars');
+  });
+
   test('negative: running with no source root shows an error toast', async ({ authedPage }) => {
     await openMultiFile(authedPage);
     await authedPage.locator('[data-testid="compare-mf-match-on-input"]').fill('region');

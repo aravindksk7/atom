@@ -6677,6 +6677,55 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
     <p class="text-xs text-slate-500">Pattern tokens: {region}, {batch:num}, {code:alpha}, {id:alnum}, {date:%Y%m%d}, {custom:regex([A-Z]{2}\d{4})}. Wildcards: * matches any filename segment and ? matches one character.</p>
     </div>
+    <!-- Advanced Options accordion -- applies to every file pair in the run -->
+    <div class="border rounded">
+      <button data-testid="compare-mf-advanced-toggle" @click="mfAdvancedOpen = !mfAdvancedOpen"
+              class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+        <span>Advanced Options</span>
+        <span x-text="mfAdvancedOpen ? '▲' : '▼'"></span>
+      </button>
+      <div data-testid="compare-mf-advanced-panel" x-show="mfAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+        <div>
+          <label  class="field-label" for="a11y-compare-backend-4">Backend</label>
+          <select data-testid="compare-mf-backend-select" x-model="mfBackend" class="field-input" id="a11y-compare-backend-4">
+            <option value="pandas">pandas</option>
+            <option value="polars">polars</option>
+          </select>
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-float-tolerance-4">Float Tolerance</label>
+          <input data-testid="compare-mf-float-tolerance-input" x-model="mfFloatTolerance" class="field-input" placeholder="1e-9" id="a11y-compare-float-tolerance-4" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-datetime-tolerance-s-4">Datetime Tolerance (s)</label>
+          <input data-testid="compare-mf-datetime-tolerance-input" x-model="mfDatetimeTolerance" type="number" min="0" class="field-input" placeholder="0" id="a11y-compare-datetime-tolerance-s-4" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-mismatch-row-limit-4">Mismatch Row Limit</label>
+          <input data-testid="compare-mf-mismatch-row-limit-input" x-model.number="mfMismatchRowLimit" type="number" min="1" class="field-input" placeholder="5000" id="a11y-compare-mismatch-row-limit-4" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-sample-fraction-0-1-4">Sample Fraction (0–1)</label>
+          <input data-testid="compare-mf-sample-frac-input" x-model="mfSampleFrac" type="number" min="0.01" max="1" step="0.01" class="field-input" placeholder="1.0 (no sampling)" id="a11y-compare-sample-fraction-0-1-4" />
+        </div>
+        <div class="col-span-2">
+          <label  class="field-label" for="a11y-compare-per-column-tolerances-col-val-4">Per-column tolerances (col:val, …)</label>
+          <input data-testid="compare-mf-column-tolerances-input" x-model="mfColumnTolerances" class="field-input" placeholder="price:0.01, amount:0.001" id="a11y-compare-per-column-tolerances-col-val-4" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-case-insensitive-columns-4">Case-insensitive columns</label>
+          <input data-testid="compare-mf-case-insensitive-input" x-model="mfCaseInsensitiveColumns" class="field-input" placeholder="name, status" id="a11y-compare-case-insensitive-columns-4" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-whitespace-normalize-columns-4">Whitespace-normalize columns</label>
+          <input data-testid="compare-mf-whitespace-normalize-input" x-model="mfWhitespaceNormalizeColumns" class="field-input" placeholder="description" id="a11y-compare-whitespace-normalize-columns-4" />
+        </div>
+        <div class="col-span-2 flex items-center gap-2 mt-1">
+          <input data-testid="compare-mf-parallel-columns-checkbox" type="checkbox" x-model="mfParallelColumns" id="mfParallelCols" class="rounded" />
+          <label for="mfParallelCols">Parallel column comparison</label>
+        </div>
+      </div>
+    </div>
     <div class="flex items-center gap-2">
       <button x-show="mfCompareSourceMode === 'files'"
               @click="previewMfCompareMapping()"
@@ -6889,6 +6938,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="flex items-center gap-2 pt-6">
           <input id="matrix-trim-whitespace" data-testid="matrix-trim-whitespace-checkbox" type="checkbox" x-model="matrixTrimWhitespace" class="rounded" />
           <label for="matrix-trim-whitespace" class="text-sm">Trim Whitespace</label>
+        </div>
+        <div>
+          <label class="field-label" for="matrix-backend">Backend</label>
+          <select id="matrix-backend" data-testid="matrix-backend-select" x-model="matrixBackend" class="field-input">
+            <option value="pandas">pandas</option>
+            <option value="polars">polars</option>
+          </select>
         </div>
       </div>
       <div class="flex justify-end gap-2">

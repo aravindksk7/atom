@@ -58,6 +58,53 @@ def test_matrix_compare_request_defaults():
     assert req.numeric_tolerance == 0.0
     assert req.ignore_case is False
     assert req.trim_whitespace is True
+    assert req.comparison_backend == "pandas"
+
+
+def test_matrix_compare_rejects_unknown_backend(client):
+    resp = client.post(
+        "/api/compare/matrix",
+        json={
+            "source_a": {"source_type": "file", "file_path": "a.csv"},
+            "source_b": {"source_type": "file", "file_path": "b.csv"},
+            "comparison_backend": "duckdb",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_matrix_compare_uses_selected_comparison_backend(monkeypatch):
+    """Matrix builds its AdvancedCompareOptions server-side, so without an
+    explicit request field there is no way to steer it off the pandas default."""
+    import pandas as pd
+    import api.services.compare_service as svc_module
+
+    frame = pd.DataFrame({"id": [1], "amount": [1.0]})
+    monkeypatch.setattr(svc_module, "extract_data_source", lambda spec, db: frame.copy())
+
+    captured: dict = {}
+
+    class _Reconciler:
+        def reconcile(self, *args, **kwargs):
+            return "result"
+
+    def fake_build_engine(engine_a, engine_b, **kwargs):
+        captured.update(kwargs)
+        return _Reconciler()
+
+    monkeypatch.setattr(svc_module, "_build_engine", fake_build_engine)
+
+    svc = svc_module.CompareService.__new__(svc_module.CompareService)
+    svc._db = None
+    req = MatrixCompareRequest(
+        source_a=DataSourceSpec(source_type="file", file_path="a.csv"),
+        source_b=DataSourceSpec(source_type="file", file_path="b.csv"),
+        key_columns=["id"],
+        comparison_backend="polars",
+    )
+
+    assert svc.compare_matrix(req) == "result"
+    assert captured["adv"].comparison_backend == "polars"
 
 
 def test_matrix_compare_validation_error(client):

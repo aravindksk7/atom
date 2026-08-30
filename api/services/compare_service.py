@@ -980,12 +980,7 @@ class CompareService:
                 key_columns = ["__row__"]
         self._validate_key_columns(df_a, df_b, key_columns)
 
-        compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
-        adv = AdvancedCompareOptions(
-            float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
-            case_insensitive_columns=compare_cols if req.ignore_case else [],
-            whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
-        )
+        adv = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
 
         engine_a = FrameEngine(df_a, req.label_a)
         engine_b = FrameEngine(df_b, req.label_b)

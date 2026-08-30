@@ -2,6 +2,43 @@
 
 Date: 2026-08-30
 
+## Update 2026-08-30: application-side gaps closed
+
+The audit below found two real product gaps, not test artifacts. Both are now
+fixed in application code, not papered over in the test fixture:
+
+- **Multi-file dropped `advanced` silently.** `_buildMultiFilePayload`
+  (`frontend/features/compare.js:600`) never called `_buildAdvanced`, so the
+  Advanced Options a user set on the Multi-file sub-tab (backend, tolerances,
+  sampling, ...) were built into form state but never reached the server —
+  every multi-file compare silently ran on the `pandas` default regardless of
+  what the UI showed. Fixed by adding the `mf*` advanced-option fields
+  (mirroring `bo`/`file`/`sql`), an Advanced Options accordion in
+  `frontend/partials/tab-compare.html`, and `payload.advanced =
+  this._buildAdvanced('mf')` in `_buildMultiFilePayload`. The fixture's
+  `ADVANCED_CAPABLE_PATHS` injection for `/api/compare/multi-file` is no
+  longer needed now that the frontend sends the object itself, so it was
+  removed from `tests/e2e/fixtures.ts`.
+- **Matrix had no way to select a backend at all.** `MatrixCompareRequest`
+  had no `comparison_backend` field; `CompareService.compare_matrix` built an
+  `AdvancedCompareOptions` internally with the backend hardcoded to the
+  pandas default, so no request, however constructed, could reach
+  `PolarsBackend` through this endpoint. Fixed by adding
+  `comparison_backend: Literal["pandas", "polars"] = "pandas"` to
+  `MatrixCompareRequest` (`api/schemas.py`), a
+  `to_advanced_options(compare_columns)` helper on that model so
+  `CompareService.compare_matrix` and `difference_export.py`'s two matrix
+  paths build their `AdvancedCompareOptions` from one place instead of three
+  copies of the same construction, and a `matrixBackend` select wired through
+  `frontend/features/compare.js` / `tab-compare.html` /
+  `frontend/features/launch.js` (job prefill). The e2e fixture's override now
+  patches a top-level `comparison_backend` key for matrix instead of treating
+  it as an unreachable path.
+
+The rest of this document is the original audit as written; the coverage
+table below is now stale for `multi-file` and `matrix` (see the note after
+the table) but is kept as the record of what the audit found before the fix.
+
 ## Problem
 
 The Playwright suite has 17 spec files that exercise the Compare feature, but only
@@ -116,8 +153,10 @@ breakdown of compare requests:
 | `/api/compare/column-stats` | n/a (4) | Uses `ColumnStatsComparer`, not a comparison backend. |
 | `/api/compare/mismatch-diff` | n/a (5) | Diffs two stored runs' mismatch sets; no backend involved. |
 
-`matrix` is a genuine gap in Polars coverage and is recorded here rather than
-papered over.
+`matrix` was a genuine gap in Polars coverage, recorded here rather than
+papered over -- since fixed, see "Update 2026-08-30" above. `multi-file`'s
+row above is also stale in the same way: the omission was in application
+code (`_buildMultiFilePayload`), not just in the fixture's injection.
 
 ## Unrelated blocker fixed along the way
 

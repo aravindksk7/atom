@@ -15,7 +15,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.schemas import (
-    AdvancedCompareOptions,
     BOCompareRequest,
     DifferenceExportStatusOut,
     MatrixCompareRequest,
@@ -646,12 +645,7 @@ def _write_matrix_compare(db: Session, payload: dict[str, Any], writer: Differen
     req = MatrixCompareRequest(**payload)
     df_a = extract_data_source(req.source_a.model_dump(), db)
     df_b = extract_data_source(req.source_b.model_dump(), db)
-    compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
-    options = AdvancedCompareOptions(
-        float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
-        case_insensitive_columns=compare_cols if req.ignore_case else [],
-        whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
-    )
+    options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     _write_tabular_differences(
         df_a,
         df_b,
@@ -714,15 +708,7 @@ def _write_compare_job(
             )
         df_a = extract_data_source(req.source_a.model_dump(), db)
         df_b = extract_data_source(req.source_b.model_dump(), db)
-        # Mirrors CompareService.compare_matrix's own AdvancedCompareOptions
-        # construction (compare_service.py:986) -- Matrix has no .advanced
-        # field of its own, just numeric_tolerance/ignore_case/trim_whitespace.
-        compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
-        options = AdvancedCompareOptions(
-            float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
-            case_insensitive_columns=compare_cols if req.ignore_case else [],
-            whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
-        )
+        options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     else:
         return
     _write_tabular_differences(

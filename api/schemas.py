@@ -1270,6 +1270,24 @@ class MatrixCompareRequest(BaseModel):
     numeric_tolerance: float = 0.0
     ignore_case: bool = False
     trim_whitespace: bool = True
+    comparison_backend: Literal["pandas", "polars"] = "pandas"
+
+    def to_advanced_options(self, compare_columns: list[str]) -> AdvancedCompareOptions:
+        """Matrix exposes flat scalars rather than a nested ``advanced`` object,
+        so every caller that needs an AdvancedCompareOptions derives one here --
+        keeping CompareService.compare_matrix and the difference-export
+        recomputation from drifting apart.
+
+        ``compare_columns`` is the union of both frames' columns: ignore_case /
+        trim_whitespace are all-column switches, whereas AdvancedCompareOptions
+        takes explicit column lists.
+        """
+        return AdvancedCompareOptions(
+            float_tolerance=self.numeric_tolerance if self.numeric_tolerance > 0 else 1e-9,
+            case_insensitive_columns=compare_columns if self.ignore_case else [],
+            whitespace_normalize_columns=compare_columns if self.trim_whitespace else [],
+            comparison_backend=self.comparison_backend,
+        )
 
 
 class MismatchAcceptRequest(BaseModel):

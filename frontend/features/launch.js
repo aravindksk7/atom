@@ -1387,6 +1387,7 @@
         this.matrixNumericTolerance = req.numeric_tolerance != null ? String(req.numeric_tolerance) : '0.0';
         this.matrixIgnoreCase = Boolean(req.ignore_case);
         this.matrixTrimWhitespace = req.trim_whitespace !== false;
+        this.matrixBackend = req.comparison_backend || 'pandas';
       } else if (subTab === 'bo') {
         this.boSourceAType = opts.runIdA ? 'run' : 'live';
         this.boSourceA = {

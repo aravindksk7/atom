@@ -135,12 +135,13 @@
     matrixNumericTolerance: '0.0',
     matrixIgnoreCase: false,
     matrixTrimWhitespace: true,
+    matrixBackend: 'pandas',
     matrixCompareLoading: false,
     matrixCompareRunId: null,
     matrixCompareResult: null,
     matrixComparePollInterval: null,
 
-    // Advanced compare options (shared shape for BO, File, SQL)
+    // Advanced compare options (shared shape for BO, File, SQL, Multi-file)
     boAdvancedOpen: false,
     boFloatTolerance: '1e-9',
     boColumnTolerances: '',
@@ -173,6 +174,17 @@
     sqlMismatchRowLimit: 5000,
     sqlSampleFrac: '',
     sqlParallelColumns: false,
+
+    mfAdvancedOpen: false,
+    mfFloatTolerance: '1e-9',
+    mfColumnTolerances: '',
+    mfDatetimeTolerance: 0,
+    mfCaseInsensitiveColumns: '',
+    mfWhitespaceNormalizeColumns: '',
+    mfBackend: 'pandas',
+    mfMismatchRowLimit: 5000,
+    mfSampleFrac: '',
+    mfParallelColumns: false,
 
     // Column Stats
     colStatsSourceAType: 'upload',
@@ -614,6 +626,7 @@
       if (this.mfCompareExcludeColumns.trim()) {
         payload.exclude_columns = this.mfCompareExcludeColumns.split(',').map(s => s.trim()).filter(Boolean);
       }
+      payload.advanced = this._buildAdvanced('mf');
       return payload;
     },
 
@@ -1086,6 +1099,7 @@
         numeric_tolerance: parseFloat(this.matrixNumericTolerance) || 0.0,
         ignore_case: !!this.matrixIgnoreCase,
         trim_whitespace: !!this.matrixTrimWhitespace,
+        comparison_backend: this.matrixBackend || 'pandas',
       };
     },
 

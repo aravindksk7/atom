@@ -7,7 +7,8 @@ import { bootstrapAdminToken } from './api-helpers';
 // (e.g. E2E_COMPARE_BACKEND=polars). Only 08a-compare-bo-report.spec.ts ever opens
 // the Advanced Options accordion and picks a backend explicitly; the other compare
 // specs use the frontend default (frontend/features/compare.js's boBackend /
-// fileBackend / sqlBackend = 'pandas') and several run through a *saved job*, where
+// fileBackend / sqlBackend / mfBackend / matrixBackend = 'pandas') and several run
+// through a *saved job*, where
 // the backend travels as run_settings.comparison_backend rather than
 // advanced.comparison_backend and has no per-run select at all. Patching the JSON
 // body on the way out is the single choke point that covers all of those paths
@@ -31,17 +32,7 @@ function recordOverride(url: string, outcome: string) {
   }
 }
 
-// Endpoints whose request schema declares `advanced: AdvancedCompareOptions` but
-// whose frontend payload builder omits it, so the server silently falls back to
-// AdvancedCompareOptions' own `comparison_backend="pandas"` default. /multi-file is
-// the case in this repo: api/schemas.py's MultiFileCompareRequest accepts `advanced`
-// and api/services/compare_service.py's run_multi_file_compare passes it straight to
-// _build_engine, but frontend/features/compare.js's _buildMultiFilePayload never
-// builds one. Injecting the object here is safe *because* the schema defaults it —
-// every other field lands on exactly the value the server would have used anyway.
-const ADVANCED_CAPABLE_PATHS = ['/api/compare/multi-file'];
-
-function patchComparisonBackend(body: unknown, backend: string, url: string): boolean {
+function patchComparisonBackend(body: unknown, backend: string): boolean {
   if (!body || typeof body !== 'object') return false;
   const record = body as Record<string, unknown>;
   let patched = false;
@@ -54,11 +45,11 @@ function patchComparisonBackend(body: unknown, backend: string, url: string): bo
       patched = true;
     }
   }
-  if (!patched && ADVANCED_CAPABLE_PATHS.some((p) => url.includes(p))) {
-    const existing = record.advanced;
-    const advanced = existing && typeof existing === 'object' ? (existing as Record<string, unknown>) : {};
-    advanced.comparison_backend = backend;
-    record.advanced = advanced;
+  // /api/compare/matrix has no nested `advanced` object: MatrixCompareRequest
+  // exposes flat scalars and derives its AdvancedCompareOptions server-side, so
+  // its backend selector rides at the top level of the payload.
+  if ('comparison_backend' in record) {
+    record.comparison_backend = backend;
     patched = true;
   }
   return patched;
@@ -76,7 +67,7 @@ async function installCompareBackendOverride(page: Page, backend: string) {
       // Multipart uploads and form posts aren't compare payloads — pass through.
       return route.continue();
     }
-    if (!patchComparisonBackend(body, backend, request.url())) {
+    if (!patchComparisonBackend(body, backend)) {
       // A compare endpoint that carried no backend key is worth recording too:
       // it means that scenario cannot be steered onto the override at all, which
       // is exactly the blind spot this audit trail exists to surface.
