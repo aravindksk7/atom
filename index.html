@@ -169,9 +169,9 @@ tailwind.config = {
       </div>
 
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-7 gap-y-4 shrink-0">
-        <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L2">17</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">Job types</div></div>
+        <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L2">18</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">Job types</div></div>
         <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L3">26</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">API routers</div></div>
-        <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L4">20</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">DQ rules</div></div>
+        <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L4">36</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">DQ rules</div></div>
         <div><div class="font-display font-extrabold text-[1.9rem] leading-none text-L5">13</div><div class="font-mono text-[10px] uppercase tracking-wider text-muted mt-1.5">Connectors</div></div>
       </div>
     </div>
@@ -196,11 +196,11 @@ tailwind.config = {
         <span class="rail-no">01</span>
         <div>
           <h2 class="font-display font-extrabold text-[1.55rem] leading-tight">What the team touches</h2>
-          <p class="font-mono text-[11px] text-muted mt-0.5">frontend/ · Alpine.js 3 SPA · Chart.js · pre-built Tailwind · zero external calls</p>
+          <p class="font-mono text-[11px] text-muted mt-0.5">frontend/ · Alpine.js 3 SPA · Chart.js · pre-built Tailwind · 15 tabs · zero external calls</p>
         </div>
       </div>
 
-      <div class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 mt-5">
+      <div class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-5">
 
         <div class="group relative">
           <div class="node">
@@ -245,8 +245,8 @@ tailwind.config = {
             <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">Compare tab · features/compare.js</p>
           </div>
           <div class="tip">
-            <p class="text-[12.5px] leading-relaxed">Ad-hoc comparison of <span class="tip-k">SQL ↔ SQL</span>, <span class="tip-k">BO report ↔ file</span>, <span class="tip-k">REST ↔ REST</span>, stored run ↔ production HTML report, or a whole folder of files.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Backed by <span class="font-mono">compare_service.py</span> (~48 KB) and <span class="font-mono">difference_export.py</span>; the Multi-File sub-tab reuses the same pairing logic without a saved job.</p>
+            <p class="text-[12.5px] leading-relaxed">Ad-hoc comparison of <span class="tip-k">SQL ↔ SQL</span>, <span class="tip-k">BO report ↔ file</span>, <span class="tip-k">REST ↔ REST</span>, stored run ↔ production HTML report, a whole folder of files, or the <span class="tip-k">Matrix</span> any-to-any mode that pairs two different technologies.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Backed by <span class="font-mono">compare_service.py</span> (~51 KB) and <span class="font-mono">difference_export.py</span>. Multi-File reuses the pairing logic without a saved job; Matrix can be persisted with <span class="tip-k">Save as Job</span> (<span class="font-mono">compare_type: "matrix"</span>) so it schedules like any other job.</p>
           </div>
         </div>
 
@@ -270,7 +270,31 @@ tailwind.config = {
           </div>
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">Named data contracts with an owner, consumers, <span class="tip-k">SLA hours</span> and a semantic version; live OK / BREACHED / OVERDUE badges and inline version bump.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Scheduler Reports gives telemetry-backed schedule summaries, failure filters, timelines and exports.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">One click runs the <span class="tip-k">ODCS test suite</span> for a contract; Scheduler Reports gives telemetry-backed schedule summaries, failure filters, timelines and exports.</p>
+          </div>
+        </div>
+
+        <div class="group relative">
+          <div class="node">
+            <div class="chip mb-3"><i data-lucide="unplug"></i></div>
+            <h3 class="font-display font-bold text-[15px] leading-snug">Browse the source systems</h3>
+            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">Adapters · AWS tabs · features/adapters.js</p>
+          </div>
+          <div class="tip">
+            <p class="text-[12.5px] leading-relaxed">Log on to BO and browse documents, prompts and instances; look up Automic and SAP DS jobs; test and preview a REST endpoint — then <span class="tip-k">turn any of them into a saved job</span> in one modal.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">The AWS tab runs ad-hoc S3 metadata, row-count, partition and format checks, and promotes them to tracked jobs. The Config tab's <span class="tip-k">API exchange inspector</span> shows the redacted request/response pair.</p>
+          </div>
+        </div>
+
+        <div class="group relative">
+          <div class="node">
+            <div class="chip mb-3"><i data-lucide="life-buoy"></i></div>
+            <h3 class="font-display font-bold text-[15px] leading-snug">Answers without leaving the app</h3>
+            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">Help tab · help-content.js · Home tab</p>
+          </div>
+          <div class="tip">
+            <p class="text-[12.5px] leading-relaxed">A searchable in-app help center documents every tab, option and compare mode — including the Matrix source types and comparison settings — so the docs ship with the air-gapped build.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">The sidebar groups the 15 tabs into <span class="tip-k">Setup · Execution · Analysis · System</span>, and Home summarises recent activity.</p>
           </div>
         </div>
 
@@ -319,7 +343,7 @@ tailwind.config = {
           </div>
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">configs · jobs · runs · compare · contracts · schedules · notifications · tokens · audit · coverage · gates · expectations · profiles · schema-snapshots · lineage · selections · sequences · adapters · logs · settings · health · scheduler-reports · aws/s3 · aws/glue · aws/athena · auth.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="font-mono">runs.py</span> alone is ~67 KB — runs, trends, badges, baselines, drill-down, cancel and the test-suite trigger.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="font-mono">runs.py</span> alone is ~68 KB — runs, trends, badges, baselines, drill-down, cancel and the test-suite trigger.</p>
           </div>
         </div>
 
@@ -366,7 +390,7 @@ tailwind.config = {
         <span class="rail-no">03</span>
         <div>
           <h2 class="font-display font-extrabold text-[1.55rem] leading-tight">The work gets decided here</h2>
-          <p class="font-mono text-[11px] text-muted mt-0.5">api/services/ · 47 service modules · business rules, not plumbing</p>
+          <p class="font-mono text-[11px] text-muted mt-0.5">api/services/ · 48 service modules · business rules, not plumbing</p>
         </div>
       </div>
 
@@ -379,7 +403,7 @@ tailwind.config = {
             <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">run_executor.py · the ~105 KB core</p>
           </div>
           <div class="tip">
-            <p class="text-[12.5px] leading-relaxed">Dispatches all <span class="tip-k">17 job types</span>: reconciliation (query / multi-file / BO-live / file), api_reconciliation, freshness, profile, schema_snapshot, cross_job_assertion, dbt_artifact, compare, bo_report, bo_job, ds_job, automic_job, and the S3 / Glue / Athena checks.</p>
+            <p class="text-[12.5px] leading-relaxed">Dispatches all <span class="tip-k">18 job types</span>: reconciliation (query / multi-file / BO-live / file), api_reconciliation, health_check, freshness, profile, schema_snapshot, cross_job_assertion, dbt_artifact, compare (incl. matrix), bo_report, bo_job, ds_job, automic_job, and the S3 / Glue / Athena checks.</p>
             <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Owns retry with exponential backoff, <span class="font-mono">depends_on</span> topological ordering (upstream failure ⇒ skip), DQ evaluation, and a cancel check after every step.</p>
           </div>
         </div>
@@ -404,7 +428,8 @@ tailwind.config = {
           </div>
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">Normalises two heterogeneous sides into a common frame, aligns them on key columns, then renders the delta as browsable HTML plus CSV/Excel exports.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Handles BO report exports, uploaded files, live SQL and REST payloads identically once loaded into the frame engine.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Handles BO report exports, uploaded files, live SQL, Athena and REST payloads identically once loaded into the frame engine — which is what makes the <span class="tip-k">Matrix</span> any-to-any mode (<span class="font-mono">POST /api/compare/matrix</span>, 202 + background run) possible.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Per-column tolerances, datetime tolerance, case-insensitive and whitespace-normalised columns, and optional column-parallel diffing are shared by every compare endpoint.</p>
           </div>
         </div>
 
@@ -424,10 +449,11 @@ tailwind.config = {
           <div class="node">
             <div class="chip mb-3"><i data-lucide="file-badge"></i></div>
             <h3 class="font-display font-bold text-[15px] leading-snug">Holds owners to their SLA</h3>
-            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">contract_breach_checker.py · gate_service.py</p>
+            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">contract_breach_checker · contract_tester · gate_service</p>
           </div>
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">Post-run hook: a failed source job <span class="tip-k">opens a breach</span>; a passing one <span class="tip-k">auto-resolves</span> it with duration computed; past <span class="font-mono">sla_hours</span> it escalates.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="tip-k">ODCS contract testing:</span> <span class="font-mono">POST /api/contracts/{name}/test</span> evaluates four pillars — schema conformance, quality rules, SLA freshness and consumer compatibility — into a PASSED / WARNING / FAILED report of per-check verdicts.</p>
             <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Write-Audit-Publish gate: <span class="font-mono">POST /api/gates/{job}/evaluate</span> returns PROMOTE or HOLD so an orchestrator can block a staging→production swap.</p>
           </div>
         </div>
@@ -467,7 +493,7 @@ tailwind.config = {
         </div>
       </div>
 
-      <div class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 mt-5">
+      <div class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 mt-5">
 
         <div class="group relative">
           <div class="node">
@@ -477,7 +503,7 @@ tailwind.config = {
           </div>
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">Key columns, excluded columns, float tolerance, null handling, hash precheck to short-circuit identical sets, and a schema-mismatch policy.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Pluggable backends (<span class="tip-k">polars / pandas</span>), a <span class="font-mono">chunker</span> for datasets bigger than memory, and a <span class="font-mono">SamplingBackend</span> for cheap shadow runs (2 % default).</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Pluggable backends (<span class="tip-k">pandas / polars</span>), a <span class="font-mono">chunker</span> for datasets bigger than memory, and a <span class="font-mono">SamplingBackend</span> for cheap shadow runs (2 % default).</p>
           </div>
         </div>
 
@@ -485,11 +511,12 @@ tailwind.config = {
           <div class="node">
             <div class="chip mb-3"><i data-lucide="badge-check"></i></div>
             <h3 class="font-display font-bold text-[15px] leading-snug">Data quality rules</h3>
-            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">reconciliation/dq_engine.py · 20 types</p>
+            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">reconciliation/dq_engine.py · 36 types</p>
           </div>
           <div class="tip">
-            <p class="text-[12.5px] leading-relaxed"><span class="tip-k">Basic:</span> not_null, unique, row_count_min/max/between, column_mean_between, match_regex, custom_sql.</p>
-            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="tip-k">Advanced:</span> completeness_ratio, distinct_count_between, column_sum/std_dev/percentile, column_type_check, column_value_between, cross_column_consistency, pii_mask_check, no_whitespace, referential_check, custom_sql_assert — each with error/warn severity.</p>
+            <p class="text-[12.5px] leading-relaxed"><span class="tip-k">Basic:</span> not_null, unique, row_count_min/max/between, column_mean_between, match_regex, custom_sql, column_min/max_length, value_in/not_in_set, column_contains, date_range, positive/negative_values.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="tip-k">Advanced:</span> completeness_ratio, distinct_count_between, column_sum/std_dev/percentile, column_type_check, column_value_between, cross_column_consistency, pii_mask_check, no_whitespace, referential_check, custom_sql_assert.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70"><span class="tip-k">Statistical:</span> outlier_zscore / iqr / grubbs, distribution_ks_test, distribution_chi_square, distribution_anderson_darling, hypothesis_test_proportion, anomaly_detection_sigma — each with error/warn severity.</p>
           </div>
         </div>
 
@@ -526,6 +553,18 @@ tailwind.config = {
           <div class="tip">
             <p class="text-[12.5px] leading-relaxed">SQLAlchemy models and repositories (runs, results, mismatches, audit, contracts, sequences) with self-applying startup migrations — new columns and tables are added in place.</p>
             <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Reporting emits themed HTML, metric sidecars, JUnit XML for CI, and per-run / per-job <span class="tip-k">badge SVGs</span>.</p>
+          </div>
+        </div>
+
+        <div class="group relative">
+          <div class="node">
+            <div class="chip mb-3"><i data-lucide="flask-conical"></i></div>
+            <h3 class="font-display font-bold text-[15px] leading-snug">Transform logic in isolation</h3>
+            <p class="font-mono text-[10.5px] text-muted mt-1.5 leading-relaxed">transform_testing/harness.py · TransformCase</p>
+          </div>
+          <div class="tip">
+            <p class="text-[12.5px] leading-relaxed">Runs a transform SQL statement against <span class="tip-k">in-memory DuckDB fixture tables</span> and reconciles the output against an expected DataFrame — no live database, no network.</p>
+            <p class="text-[12px] leading-relaxed mt-2 text-paper/70">Reconciles with the same <span class="font-mono">ComparisonBackend</span> protocol and mismatch semantics production runs use, so a green unit test and a green production job mean the same thing. Examples live in <span class="font-mono">tests/transforms/</span>.</p>
           </div>
         </div>
 
