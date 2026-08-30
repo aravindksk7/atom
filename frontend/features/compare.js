@@ -473,6 +473,33 @@
       };
     },
 
+    // Reverse of _buildMatrixSourceSpec -- turns a saved compare job's
+    // DataSourceSpec (params.request.source_a/source_b) back into
+    // matrixSourceAType/matrixSourceA shape. Unlike BO, Matrix's UI type
+    // strings ('sql'/'file'/'aws_athena'/'sap_bo'/'api') already equal
+    // DataSourceSpec.source_type values directly (_buildMatrixSourceSpec sets
+    // spec.source_type = type verbatim), so this is a near-identity mapping,
+    // and -- like BO -- only ever needs to handle repeatable sources, since
+    // _assertCompareJobSourcesAreRepeatable rejects an upload at save time.
+    _hydrateMatrixSourceFromConfig(cfg) {
+      const base = { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: '' };
+      if (!cfg) return { type: 'file', src: base };
+      const type = cfg.source_type || 'file';
+      if (type === 'sql') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', connectionName: cfg.connection_name || '', queryOrTable: cfg.query_or_table || '' } };
+      }
+      if (type === 'aws_athena') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', athenaQuery: cfg.query_or_table || '' } };
+      }
+      if (type === 'sap_bo') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', docId: cfg.bo_doc_id || '', reportId: cfg.bo_report_id || '' } };
+      }
+      if (type === 'api') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', endpointUrl: cfg.endpoint_url || '', httpMethod: cfg.http_method || 'GET' } };
+      }
+      return { type: 'file', src: { ...base, filePath: cfg.file_path || '' } };
+    },
+
     // Reverse of _buildAdvanced -- turns an AdvancedCompareOptions object back
     // into the `${prefix}FloatTolerance` etc. raw form fields.
     _applyAdvancedToPrefix(prefix, adv) {
@@ -631,6 +658,15 @@
         });
         return;
       }
+      if (compareType === 'matrix') {
+        [['A', payload.source_a], ['B', payload.source_b]].forEach(([side, src]) => {
+          if (!src) return;
+          if (src.source_type === 'file' && src.file_b64 && !src.file_path) {
+            throw new Error(`Source ${side} is an upload - a job that re-runs needs a file path or another repeatable source.`);
+          }
+        });
+        return;
+      }
       [
         ['A', payload.stored_run_id, payload.file_a_content_b64],
         ['B', payload.stored_run_id_b, payload.file_b_content_b64],
@@ -655,6 +691,16 @@
           key_columns: payload.key_columns || [],
           exclude_columns: payload.exclude_columns || [],
           params: { source_mode: 'multi_file', file_mapping: payload.file_mapping },
+        };
+      }
+      if (this.saveJobCompareType === 'matrix') {
+        const payload = this._buildMatrixComparePayload();
+        this._assertCompareJobSourcesAreRepeatable('matrix', payload);
+        return {
+          job_type: 'compare',
+          key_columns: payload.key_columns || [],
+          exclude_columns: payload.exclude_columns || [],
+          params: { compare_type: 'matrix', request: payload },
         };
       }
       const payload = this.saveJobCompareType === 'bo'

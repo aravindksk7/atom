@@ -1713,11 +1713,13 @@
           <label for="matrix-trim-whitespace" class="text-sm">Trim Whitespace</label>
         </div>
       </div>
-      <div class="flex justify-end">
+      <div class="flex justify-end gap-2">
         <button id="btn-run-matrix-compare" data-testid="btn-run-matrix-compare" @click="runMatrixCompare()" :disabled="matrixCompareLoading" class="btn-primary">
           <span x-show="!matrixCompareLoading">Run Matrix Compare</span>
           <span x-show="matrixCompareLoading">Comparing...</span>
         </button>
+        <button data-testid="compare-matrix-save-job-btn" @click="openSaveCompareAsJob('matrix')"
+                class="btn-secondary btn-sm text-xs">Save as Job</button>
       </div>
     </div>
 

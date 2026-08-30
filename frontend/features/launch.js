@@ -1327,6 +1327,7 @@
       if (job.job_type === 'compare') {
         if (job.params?.compare_type === 'bo') return 'bo';
         if (job.params?.compare_type === 'recon_file') return 'recon';
+        if (job.params?.compare_type === 'matrix') return 'matrix';
         return null;
       }
       return null;
@@ -1373,6 +1374,19 @@
         this.fileCompareKeyColumns = (req.key_columns || []).join(', ');
         this.fileCompareExcludeColumns = (req.exclude_columns || []).join(', ');
         this._applyAdvancedToPrefix('file', req.advanced);
+      } else if (job.job_type === 'compare' && subTab === 'matrix') {
+        const req = job.params?.request || {};
+        const a = this._hydrateMatrixSourceFromConfig(req.source_a);
+        const b = this._hydrateMatrixSourceFromConfig(req.source_b);
+        this.matrixSourceAType = a.type;
+        this.matrixSourceA = { ...a.src, label: req.label_a || 'Source A' };
+        this.matrixSourceBType = b.type;
+        this.matrixSourceB = { ...b.src, label: req.label_b || 'Source B' };
+        this.matrixKeyColumns = (req.key_columns || []).join(', ');
+        this.matrixExcludeColumns = (req.exclude_columns || []).join(', ');
+        this.matrixNumericTolerance = req.numeric_tolerance != null ? String(req.numeric_tolerance) : '0.0';
+        this.matrixIgnoreCase = Boolean(req.ignore_case);
+        this.matrixTrimWhitespace = req.trim_whitespace !== false;
       } else if (subTab === 'bo') {
         this.boSourceAType = opts.runIdA ? 'run' : 'live';
         this.boSourceA = {

@@ -722,9 +722,9 @@ class JobDefinition(BaseModel):
                     raise ValueError("reconciliation jobs require key_columns")
         elif self.job_type == "compare":
             compare_type = self.params.get("compare_type")
-            if compare_type not in ("bo", "recon_file"):
+            if compare_type not in ("bo", "recon_file", "matrix"):
                 raise ValueError(
-                    "compare jobs require params.compare_type of 'bo' or 'recon_file'"
+                    "compare jobs require params.compare_type of 'bo', 'recon_file', or 'matrix'"
                 )
             request = self.params.get("request")
             if not isinstance(request, dict):
@@ -744,7 +744,7 @@ class JobDefinition(BaseModel):
                         raise ValueError(
                             f"compare job Source {side} live source requires doc_id"
                         )
-            else:
+            elif compare_type == "recon_file":
                 parsed_file = ReconFileCompareRequest.model_validate(request)
                 for side, stored, content in (
                     ("A", parsed_file.stored_run_id, parsed_file.file_a_content_b64),
@@ -755,6 +755,14 @@ class JobDefinition(BaseModel):
                             f"compare job Source {side} uses a "
                             f"{'stored run' if stored else 'file upload'}, "
                             "which cannot be re-run on a schedule - use a file path"
+                        )
+            else:
+                parsed_matrix = MatrixCompareRequest.model_validate(request)
+                for side, src in (("A", parsed_matrix.source_a), ("B", parsed_matrix.source_b)):
+                    if src.source_type == "file" and src.file_b64 and not src.file_path:
+                        raise ValueError(
+                            f"compare job Source {side} is an upload, "
+                            "which cannot be re-run on a schedule - use a file path or another repeatable source"
                         )
         elif self.job_type == "freshness":
             if not self.params.get("timestamp_column"):

@@ -384,3 +384,40 @@ def test_compare_recon_file_job_with_stored_run_source_reports_an_error():
 
     errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
     assert any(i.field == "params.request.source_a" and "stored run" in i.message for i in errors)
+
+
+def test_compare_matrix_job_reports_no_errors_for_repeatable_sources():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_matrix",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "matrix",
+            "request": {
+                "source_a": {"source_type": "file", "file_path": "/data/a.csv"},
+                "source_b": {"source_type": "sql", "config_id": 1, "query_or_table": "SELECT * FROM t"},
+            },
+        },
+    })
+
+    assert [i for i in issues if i.severity == ValidationSeverity.ERROR] == []
+
+
+def test_compare_matrix_job_with_upload_source_reports_an_error():
+    from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
+
+    issues = validate_job_definition({
+        "name": "nightly_matrix",
+        "job_type": "compare",
+        "params": {
+            "compare_type": "matrix",
+            "request": {
+                "source_a": {"source_type": "file", "file_path": "/data/a.csv"},
+                "source_b": {"source_type": "file", "file_b64": "aWQK", "file_name": "b.csv"},
+            },
+        },
+    })
+
+    errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+    assert any(i.field == "params.request.source_b" and "upload" in i.message for i in errors)

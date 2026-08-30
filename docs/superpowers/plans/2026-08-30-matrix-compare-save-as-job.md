@@ -1248,3 +1248,80 @@ Run: `rtk proxy npx playwright test tests/e2e/26-compare-save-as-job.spec.ts tes
 Expected: all PASS — confirms the bo/recon_file save-as-job flow, the pre-existing ad-hoc Matrix flow, and the new matrix save-as-job flow all still work together.
 
 - [ ] **Step 3: No commit for this task** — it is verification only; if either run fails, return to the relevant earlier task and fix forward with a new commit there.
+
+---
+
+### Task 11: `RunExecutor` gates matrix live/remote sources behind `use_live_connections`
+
+Added after the final holistic review (post-Task-10) found that the `matrix` arm of `_build_case_compare` (Task 3) has no equivalent to the `bo` arm's live-connections gate three lines above it. `bo` explicitly blocks a scheduled job with a `live`/`api` source when `RunSettings.use_live_connections` is `False` (the default); `matrix` calls `service.compare_matrix(...)` unconditionally regardless of source type. Before this feature, Matrix had no path into scheduled/unattended execution at all — `compare_type: "matrix"` is what first makes that reachable — so a saved matrix job with a `sql`/`aws_athena`/`sap_bo`/`api` source would fire live outbound calls on every scheduled run with no opt-out, unlike its `bo` sibling.
+
+**Files:**
+- Modify: `api/services/run_executor.py:1949-1950`
+- Test: `tests/unit/test_run_executor_compare.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/unit/test_run_executor_compare.py`:
+
+```python
+def test_compare_job_with_matrix_live_source_respects_live_connections_setting():
+    job = JobDefinition(
+        name="nightly_matrix",
+        job_type="compare",
+        params={"compare_type": "matrix", "request": {
+            "source_a": {"source_type": "sql", "config_id": 1, "query_or_table": "SELECT * FROM t"},
+            "source_b": {"source_type": "file", "file_path": "/data/b.csv"},
+            "key_columns": ["id"],
+        }},
+    )
+
+    with pytest.raises(ValueError, match="live connections"):
+        _executor(_session())._build_case(job)()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `python -m pytest tests/unit/test_run_executor_compare.py -v -k matrix_live_source`
+Expected: FAIL — no `ValueError` is raised; `_build_case(job)()` instead attempts a real SQL connection (or errors on a missing/invalid `config_id`), since nothing currently gates the `matrix` arm.
+
+- [ ] **Step 3: Implement**
+
+In `api/services/run_executor.py`, replace:
+
+```python
+            elif compare_type == "matrix":
+                result = service.compare_matrix(MatrixCompareRequest.model_validate(request))
+```
+
+with:
+
+```python
+            elif compare_type == "matrix":
+                parsed_matrix = MatrixCompareRequest.model_validate(request)
+                if not self._settings.use_live_connections and any(
+                    source.source_type != "file"
+                    for source in (parsed_matrix.source_a, parsed_matrix.source_b)
+                ):
+                    raise ValueError(
+                        "compare jobs with live or API sources require live connections to be enabled"
+                    )
+                result = service.compare_matrix(parsed_matrix)
+```
+
+Matrix's `DataSourceSpec.source_type` has no `"live"` value the way BO's `SourceConfig` does — `"file"` is the only inherently local/offline source type (`sql`, `aws_athena`, `sap_bo`, `api` all reach out over a network or database connection), so the condition is `!= "file"` rather than BO's `in ("live", "api")` allowlist-of-risky-types. Reuses the exact same error message as the `bo` arm for consistency.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `python -m pytest tests/unit/test_run_executor_compare.py -v`
+Expected: PASS (all tests in the file, including the pre-existing bo/recon_file/matrix/unknown-type ones — this must not regress `test_compare_job_runs_a_matrix_compare_and_names_the_result_after_the_job`, which uses two `file`-type sources and must still succeed since neither source is non-file)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add api/services/run_executor.py tests/unit/test_run_executor_compare.py
+git commit -m "fix: gate matrix compare jobs with live/remote sources behind use_live_connections"
+```
+
+## Out of scope (still, after Task 11)
+
+- The ad-hoc `/api/compare/matrix` endpoint and `write_recomputed_differences`'s missing `matrix` dispatch branch (Full HTML Report is empty for ad-hoc, never-saved Matrix runs) — a separate, pre-existing bug unrelated to save-as-job, confirmed by the final review but deliberately not fixed here to keep this plan's scope to job-execution/scheduling, not ad-hoc single-run reporting.
