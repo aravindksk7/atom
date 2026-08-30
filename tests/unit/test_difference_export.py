@@ -901,3 +901,201 @@ def test_write_reconciliation_run_recomputes_a_matrix_compare_job_instead_of_ski
     row = json.loads(lines[0])
     assert row["test_name"] == "matrix_compare_job"
     assert row["column_name"] == "amount"
+
+
+def test_write_recomputed_differences_handles_adhoc_matrix_compare_run(tmp_path, monkeypatch):
+    """Ad-hoc (never-saved) Matrix runs must recompute differences instead of
+    falling through to _write_reconciliation_run and producing empty output."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.services import difference_export as de
+    from api.services import file_source
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import RunRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    src = tmp_path / "adhoc_src.csv"
+    tgt = tmp_path / "adhoc_tgt.csv"
+    src.write_text("id,val\n1,alpha\n2,beta\n", encoding="utf-8")
+    tgt.write_text("id,val\n1,alpha\n2,gamma\n", encoding="utf-8")
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+
+    with _db_module.SessionLocal() as db:
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-adhoc-matrix-diffs",
+            source_env="Source A",
+            target_env="Source B",
+            config_snapshot={
+                "compare_request_type": "matrix",
+                "request": {
+                    "source_a": {"source_type": "file", "file_path": str(src)},
+                    "source_b": {"source_type": "file", "file_path": str(tgt)},
+                    "label_a": "Adhoc Matrix Test",
+                    "label_b": "Source B",
+                    "key_columns": ["id"],
+                    "exclude_columns": [],
+                },
+            },
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "adhoc_matrix_diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        row_count = de.write_recomputed_differences(db, run, "json", out_path)
+
+    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+    assert row_count == len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["test_name"] == "Adhoc Matrix Test"
+    assert row["column_name"] == "val"
+    assert row["source_value"] == "beta"
+    assert row["target_value"] == "gamma"
+
+
+def test_write_reconciliation_run_saved_matrix_job_respects_use_live_connections_gate(tmp_path, monkeypatch):
+    """When a saved Matrix compare job uses non-file sources and use_live_connections is False,
+    recompute must fail-fast with ValueError rather than hitting external connections."""
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.services import difference_export as de
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "matrix_sql_job",
+            "description": "",
+            "tags": [],
+            "job_type": "compare",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None, "target_env": None,
+            "params": {
+                "compare_type": "matrix",
+                "request": {
+                    "source_a": {"source_type": "sql", "query_or_table": "SELECT 1"},
+                    "source_b": {"source_type": "sql", "query_or_table": "SELECT 2"},
+                    "label_a": "Source A",
+                    "label_b": "Source B",
+                    "key_columns": ["id"],
+                    "exclude_columns": [],
+                },
+            },
+            "enabled": True,
+        })
+
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-matrix-gated-recompute",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={
+                "job_sequence": ["matrix_sql_job"],
+                "run_settings": {"use_live_connections": False},
+            },
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "matrix_gated_diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        with pytest.raises(ValueError, match="require live connections"):
+            de.write_recomputed_differences(db, run, "json", out_path)
+
+
+def test_write_reconciliation_run_saved_bo_job_respects_use_live_connections_gate(tmp_path, monkeypatch):
+    """When a saved BO compare job uses live/api sources and use_live_connections is False,
+    recompute must fail-fast with ValueError rather than making live API calls."""
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.services import difference_export as de
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    from etl_framework.repository.models import TestRun
+    from etl_framework.repository.repository import JobRepository, RunRepository
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "bo_live_job",
+            "description": "",
+            "tags": [],
+            "job_type": "compare",
+            "query": "",
+            "key_columns": ["id"],
+            "exclude_columns": [],
+            "source_env": None, "target_env": None,
+            "params": {
+                "compare_type": "bo",
+                "request": {
+                    "source_a": {"source_type": "live", "config_id": 1},
+                    "source_b": {"source_type": "live", "config_id": 1},
+                    "label_a": "Source A",
+                    "label_b": "Source B",
+                    "doc_id": "doc123",
+                    "report_id": "1",
+                    "key_columns": ["id"],
+                    "exclude_columns": [],
+                },
+            },
+            "enabled": True,
+        })
+
+        repo = RunRepository(db)
+        run = repo.create_run(
+            run_id="run-bo-gated-recompute",
+            source_env="qa",
+            target_env="prod",
+            config_snapshot={
+                "job_sequence": ["bo_live_job"],
+                "run_settings": {"use_live_connections": False},
+            },
+        )
+        run_id = run.run_id
+
+    out_path = tmp_path / "bo_gated_diffs.jsonl"
+    with _db_module.SessionLocal() as db:
+        run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
+        with pytest.raises(ValueError, match="require live connections"):
+            de.write_recomputed_differences(db, run, "json", out_path)
+

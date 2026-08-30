@@ -401,6 +401,8 @@ def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path
             _write_recon_file_compare(db, payload or {}, writer)
         elif request_type == "multi_file":
             _write_multi_file_compare(db, payload or {}, writer)
+        elif request_type == "matrix":
+            _write_matrix_compare(db, payload or {}, writer)
         else:
             _write_reconciliation_run(db, run, writer)
         return writer.row_count
@@ -640,7 +642,33 @@ def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: Diff
             )
 
 
-def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -> None:
+def _write_matrix_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
+    req = MatrixCompareRequest(**payload)
+    df_a = extract_data_source(req.source_a.model_dump(), db)
+    df_b = extract_data_source(req.source_b.model_dump(), db)
+    compare_cols = list(set(df_a.columns).union(set(df_b.columns)))
+    options = AdvancedCompareOptions(
+        float_tolerance=req.numeric_tolerance if req.numeric_tolerance > 0 else 1e-9,
+        case_insensitive_columns=compare_cols if req.ignore_case else [],
+        whitespace_normalize_columns=compare_cols if req.trim_whitespace else [],
+    )
+    _write_tabular_differences(
+        df_a,
+        df_b,
+        key_columns=req.key_columns or [],
+        exclude_columns=req.exclude_columns or [],
+        options=options,
+        test_name=req.label_a or "matrix_comparison",
+        writer=writer,
+    )
+
+
+def _write_compare_job(
+    db: Session,
+    saved: SavedJob,
+    writer: DifferenceWriter,
+    settings: RunSettings | None = None,
+) -> None:
     """Recompute a job saved via the Compare tab's "Save as Job" button
     (job_type == 'compare') from its own params, the same way a
     'compare_request_type'-tagged ad-hoc run does. Job-executed compare runs
@@ -652,8 +680,16 @@ def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -
     compare_type = params.get("compare_type")
     payload = dict(params.get("request") or {})
     svc = CompareService(db, ConfigRepository(db))
+    use_live = settings.use_live_connections if settings is not None else True
     if compare_type == "bo":
         req = BOCompareRequest(**payload)
+        if not use_live and any(
+            source.source_type in ("live", "api")
+            for source in (req.source_a, req.source_b)
+        ):
+            raise ValueError(
+                "compare jobs with live or API sources require live connections to be enabled"
+            )
         df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id, store_responses=False)
         df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id, store_responses=False)
         options = req.advanced
@@ -669,6 +705,13 @@ def _write_compare_job(db: Session, saved: SavedJob, writer: DifferenceWriter) -
         options = req.advanced
     elif compare_type == "matrix":
         req = MatrixCompareRequest(**payload)
+        if not use_live and any(
+            source.source_type != "file"
+            for source in (req.source_a, req.source_b)
+        ):
+            raise ValueError(
+                "compare jobs with live or API sources require live connections to be enabled"
+            )
         df_a = extract_data_source(req.source_a.model_dump(), db)
         df_b = extract_data_source(req.source_b.model_dump(), db)
         # Mirrors CompareService.compare_matrix's own AdvancedCompareOptions
@@ -713,7 +756,7 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         if saved is None:
             continue
         if saved.job_type == "compare":
-            _write_compare_job(db, saved, writer)
+            _write_compare_job(db, saved, writer, settings=settings)
             continue
         if saved.job_type != "reconciliation":
             continue
