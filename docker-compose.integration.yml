@@ -90,7 +90,12 @@ services:
     # check on for this service.
 
   localstack:
-    image: localstack/localstack:latest
+    # Pinned to the last community line: from the 2026.x images onward,
+    # localstack/localstack:latest exits at boot with "License activation failed"
+    # unless LOCALSTACK_AUTH_TOKEN holds a valid pro key, which broke
+    # `docker compose up --wait` (and therefore tests/e2e/global-setup.ts) for
+    # everyone without a licence. 3.8.1 starts s3/glue/athena as before.
+    image: localstack/localstack:3
     container_name: atom-localstack-integration
     ports:
       - "4566:4566"

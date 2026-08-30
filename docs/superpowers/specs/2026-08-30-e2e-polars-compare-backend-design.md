@@ -101,6 +101,36 @@ tracks how many requests it patched. A run where the count is zero is reported a
 a failure to exercise Polars rather than as a pass, preventing a silent no-op
 (for example a wrong key path) from masquerading as green.
 
+## Coverage found by the audit
+
+Running all 17 compare specs (74 tests) with the override produced this
+breakdown of compare requests:
+
+| Endpoint | Forced to Polars | Notes |
+|---|---|---|
+| `/api/compare/bo-report` | yes (5) | `advanced` sent by the UI. |
+| `/api/compare/sql` | yes (3) | `advanced` sent by the UI. |
+| `/api/compare/recon-file` | yes (3) | `advanced` sent by the UI. |
+| `/api/compare/multi-file` | yes (3) | Schema accepts `advanced` and `compare_service.run_multi_file_compare` forwards it, but `_buildMultiFilePayload` omits it, so the server was defaulting to pandas. The fixture injects the object for this path. |
+| `/api/compare/matrix` | no (11) | `MatrixCompareRequest` has no `advanced` field; `compare_service.compare_matrix` constructs `AdvancedCompareOptions` internally, so matrix comparisons always use the default backend. Steering them would require a product change, not a test change. |
+| `/api/compare/column-stats` | n/a (4) | Uses `ColumnStatsComparer`, not a comparison backend. |
+| `/api/compare/mismatch-diff` | n/a (5) | Diffs two stored runs' mismatch sets; no backend involved. |
+
+`matrix` is a genuine gap in Polars coverage and is recorded here rather than
+papered over.
+
+## Unrelated blocker fixed along the way
+
+`docker compose up --wait` failed because `localstack/localstack:latest`
+(2026.8.0) now exits at boot with "License activation failed" unless a pro
+`LOCALSTACK_AUTH_TOKEN` is supplied, which made `global-setup` abort before any
+spec ran. The compose service is pinned to `localstack/localstack:3` (3.8.1,
+community), which starts s3/glue/athena as before.
+
+On machines with only ODBC Driver 18 installed, the SQL Server seed needs
+`LIVE_SQLSERVER_ODBC_DRIVER="ODBC Driver 18 for SQL Server"`; this env var
+already existed for exactly that purpose.
+
 ## Out of scope
 
 - Making Polars the default backend for the application.

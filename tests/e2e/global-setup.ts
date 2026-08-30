@@ -1,10 +1,17 @@
 import { execSync, spawnSync } from 'node:child_process';
+import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { FullConfig } from '@playwright/test';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
 export default async function globalSetup(_config: FullConfig) {
+  // Truncate the previous run's comparison-backend audit trail (written by
+  // tests/e2e/fixtures.ts when E2E_COMPARE_BACKEND is set) so a stale file from
+  // an earlier run can't be mistaken for evidence that this run used the override.
+  mkdirSync(path.join(REPO_ROOT, 'test-results'), { recursive: true });
+  rmSync(path.join(REPO_ROOT, 'test-results', 'compare-backend-override.log'), { force: true });
+
   // Live backends (SQL Server + SAP BO mock), gated — mirrors the existing
   // RUN_LIVE_SQLSERVER_TESTS / RUN_LIVE_SAPBO_TESTS pytest convention.
   // (The throwaway sqlite DB path itself is created in playwright.config.ts,
