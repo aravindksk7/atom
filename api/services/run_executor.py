@@ -1947,7 +1947,15 @@ class RunExecutor:
                     ReconFileCompareRequest.model_validate(request), job_name=job.name,
                 )
             elif compare_type == "matrix":
-                result = service.compare_matrix(MatrixCompareRequest.model_validate(request))
+                parsed_matrix = MatrixCompareRequest.model_validate(request)
+                if not self._settings.use_live_connections and any(
+                    source.source_type != "file"
+                    for source in (parsed_matrix.source_a, parsed_matrix.source_b)
+                ):
+                    raise ValueError(
+                        "compare jobs with live or API sources require live connections to be enabled"
+                    )
+                result = service.compare_matrix(parsed_matrix)
             else:
                 raise ValueError(
                     f"unknown compare_type '{compare_type}' for compare job '{job.name}'"

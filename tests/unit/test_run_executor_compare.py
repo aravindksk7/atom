@@ -139,3 +139,18 @@ def test_compare_job_with_live_source_respects_live_connections_setting():
 
     with pytest.raises(ValueError, match="live connections"):
         _executor(_session())._build_case(job)()
+
+
+def test_compare_job_with_matrix_live_source_respects_live_connections_setting():
+    job = JobDefinition(
+        name="nightly_matrix",
+        job_type="compare",
+        params={"compare_type": "matrix", "request": {
+            "source_a": {"source_type": "sql", "config_id": 1, "query_or_table": "SELECT * FROM t"},
+            "source_b": {"source_type": "file", "file_path": "/data/b.csv"},
+            "key_columns": ["id"],
+        }},
+    )
+
+    with pytest.raises(ValueError, match="live connections"):
+        _executor(_session())._build_case(job)()
