@@ -235,3 +235,21 @@ def get_schema(name: str, environment: str = "both", db: Session = Depends(get_s
         "columns": columns,
         "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Contract Testing
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/test", response_model=dict)
+def test_contract(name: str, db: Session = Depends(get_session)):
+    """Execute contract testing and return ODCS-compliant test report."""
+    try:
+        from api.services.contract_tester import ContractTestingEngine
+        engine = ContractTestingEngine(db)
+        report = engine.test_contract(name)
+        return report.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Contract testing failed: {str(exc)}")
