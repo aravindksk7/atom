@@ -110,7 +110,7 @@ A baseline is a known run saved as a reference point. Pin a trusted run after va
 
 ### Data Contracts
 
-A data contract names the producer, owner, consumers, SLA, and expected quality of a job. When its source job fails or becomes overdue, the framework opens a breach and can notify subscribers. Version bumps make changed expectations visible instead of silently redefining success.
+A data contract names the producer, owner, consumers, SLA, and expected quality of a job. When its source job fails or becomes overdue, the framework opens a breach and can notify subscribers. Version bumps make changed expectations visible instead of silently redefining success. Contracts can also be actively tested on demand against the Open Data Contract Standard, checking schema conformance, quality invariants, SLA freshness, and consumer compatibility in one pass.
 
 ### Write-Audit-Publish (WAP) Gates
 
@@ -239,6 +239,7 @@ Use this tab for an immediate comparison that may not need a saved launch workfl
 | SQL Direct | Executes source and target SQL immediately without first saving a catalog job. |
 | Column Stats | Compares counts, nulls, distinct values, and numeric summaries by column. |
 | Mismatch Diff | Compares mismatches from two runs to show introduced, resolved, and unchanged issues. |
+| Matrix | Compares any source type against any other (SQL, File, Athena, SAP BO, API) with per-side type selection. |
 | Config / Environment / Connection | Chooses credentials and source/target locations. |
 | Report / Document / Prompt values | Selects BO content and supplies refresh prompts. |
 | Query / File / Sheet / Delimiter / Header | Defines the data extracted from each side. |
@@ -432,6 +433,7 @@ Build reusable ordered workflows with dependencies and conditions.
 | SQL Direct | You want the shortest path from two SQL statements to a diff | You need reusable catalog metadata and dependencies. |
 | Column Stats | Aggregate profile differences are more useful than every row | Exact row-level evidence is required. |
 | Mismatch Diff | You need to know which failures are new or resolved between runs | You have not yet produced two comparable run results. |
+| Matrix | The two sides live in different technologies (BO vs SQL, file vs Athena, API vs DB) | Both sides are the same kind; a dedicated subtab gives you more type-specific options. |
 
 ### Schema Mismatch Policies
 
@@ -2420,6 +2422,70 @@ The **Compare** tab provides ad-hoc comparison workflows that do not need to sta
 | **Column Stats** | You need fast distribution/aggregate drift checks for large tables where full row diffs are too expensive. | Per-column metric diffs. |
 | **Mismatch Diff** | You need to compare mismatch sets between two historical runs. | New, resolved, and persistent mismatch groups. |
 | **Multi-File** | You need a one-off local folder-to-folder file reconciliation without saving a job first. | Persisted multi-file run with per-pair breakdown. |
+| **Matrix** | You need to compare two datasets that live in *different* technologies, such as a SAP BO report against a SQL table. | Row-level compare run with mismatch details. |
+
+---
+
+### Matrix Compare
+
+Matrix comparison is the any-to-any compare mode. Every other compare subtab pairs two sources of the *same* kind; Matrix lets you choose the source type for each side independently and reconcile across the boundary. Both sides are normalized into a common tabular frame before the row-level diff runs, which is what makes cross-technology comparison possible.
+
+**Supported source types (per side)**
+
+| `source_type` | Required inputs | Notes |
+|---|---|---|
+| `sql` | `config_id`, `query_or_table`, optional `connection_name` | Any supported relational backend; accepts a query or a bare table name. |
+| `file` | `file_path`, **or** `file_b64` + `file_name` | Server-side path or direct browser upload. Supports `.csv`, `.xlsx`, `.xls`, `.json`, `.xml`, `.tsv`, `.txt`, `.parquet`. |
+| `aws_athena` | `config_id`, `query_or_table` | Runs the query through the config's Athena settings. |
+| `sap_bo` | `config_id`, `bo_doc_id`, `bo_report_id` | Fetches the report from a live SAP BO server. |
+| `api` | `config_id`, `endpoint_url`, `http_method` (`GET` or `POST`) | REST endpoint returning tabular JSON. |
+
+Any combination of the two sides is valid. Common pairings include SAP BO vs SQL (does the BI report agree with the warehouse?), file vs Athena (does the vendor drop match what landed in the lake?), and API vs SQL (does the service expose what the database holds?).
+
+**Comparison options**
+
+| Option | Default | Description |
+|---|---|---|
+| `key_columns` | `[]` | Columns used to match rows one-to-one across the two sides. |
+| `exclude_columns` | `[]` | Columns dropped before comparison, for volatile fields such as `created_at` or `etl_ts`. |
+| `numeric_tolerance` | `0.0` | Absolute delta within which two numeric values count as equal. Essential when systems round differently. |
+| `ignore_case` | `false` | Compare strings case-insensitively. |
+| `trim_whitespace` | `true` | Strip leading/trailing whitespace before comparing. |
+| `label_a` / `label_b` | `"Source A"` / `"Source B"` | Display names carried into the run record, mismatch drawer, and reports. |
+
+> **Note:** browser-uploaded files (`file_b64`) are embedded in the request rather than referenced by path, so they cannot be replayed by a schedule. Use a server-side `file_path` if you intend to **Save as Job**.
+
+**Execution model**
+
+`POST /api/compare/matrix` returns `202 Accepted` with a `run_id` and executes in the background as a `matrix_comparison` run. The UI polls run status every 3 seconds until it reaches a terminal state, then loads the full result. The run appears in History like any other execution, and its mismatches feed the standard Differences tooling: mismatch search, column stats, bulk accept/reject, and HTML report download.
+
+Click **Save as Job** to persist the configuration as a reusable, schedulable compare job (`params.compare_type = "matrix"`).
+
+**API:**
+
+```powershell
+$body = @{
+  source_a = @{
+    source_type    = "sap_bo"
+    config_id      = 1
+    bo_doc_id      = "12345"
+    bo_report_id   = "Sales Summary"
+  }
+  source_b = @{
+    source_type    = "sql"
+    config_id      = 2
+    query_or_table = "SELECT order_id, amount, status FROM dbo.orders"
+  }
+  label_a           = "BO Sales Report"
+  label_b           = "Warehouse Orders"
+  key_columns       = @("order_id")
+  exclude_columns   = @("etl_ts")
+  numeric_tolerance = 0.01
+  ignore_case       = $false
+  trim_whitespace   = $true
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/matrix" -Body $body -ContentType "application/json" -Headers $h
+```
 
 ---
 
@@ -2984,6 +3050,49 @@ breach remains open ≥ sla_hours
 
 Contracts reuse the existing webhook notification hooks. Add `contract.breached` (and/or the other two events) to any hook's event filter in **Notifications** to receive alerts.
 
+### Contract Testing & Verification (ODCS)
+
+Beyond passive breach tracking, a contract can be actively tested on demand. **Contracts → select a contract → Run Contract Test** executes a validation suite modeled on the Open Data Contract Standard (ODCS / Bitol) and returns a structured report. The same suite is available programmatically at `POST /api/contracts/{name}/test`.
+
+**The four pillars**
+
+| Pillar | Category | What it validates | Evidence source |
+|---|---|---|---|
+| Schema Conformance | `schema` | Every column the source job declares (`null_check_columns` + `key_columns`) is present in the captured schema. | Latest `SchemaSnapshot` for `source_job`. |
+| Data Quality Invariants | `quality` | Row count is non-zero; not-null completeness; unique-key constraints. | Latest `TestResult` for `source_job`. |
+| SLA & Freshness | `sla` | Hours elapsed since the last **successful** run against `sla_hours`; count of open and escalated breaches. | `TestResult` timestamps and `ContractBreach` records. |
+| Consumer Compatibility | `consumers` | At least one downstream consumer is declared; version follows `major.minor` semantics. | Contract `consumers` and `version` fields. |
+
+**Check outcomes**
+
+Each individual check reports one of three statuses:
+
+- **`PASS`** — the assertion held.
+- **`FAIL`** — the assertion was definitively violated (missing column, zero rows, SLA exceeded, open breach).
+- **`WARN`** — the assertion could not be verified rather than definitively failing, for example uniqueness that cannot be confirmed because the underlying run itself failed.
+
+**Overall verdict**
+
+| `overall_status` | Condition |
+|---|---|
+| `PASSED` | No failures and no warnings. |
+| `WARNING` | At least one warning, no failures. |
+| `FAILED` | At least one failing check. |
+
+Every check carries `category`, `name`, `target`, `expected`, `actual`, and a diagnostic `message`, so a failure identifies the exact column, job, or hour count responsible. The report also includes `summary` counts (`total`, `passed`, `failed`, `warnings`, `pass_rate`) and `duration_ms`.
+
+In the UI, the status banner shows the verdict, pass rate, and counts; category tabs (All, Schema, Data Quality, SLA & Freshness, Consumers) filter the checks table; and **Export ODCS Report (JSON)** downloads the full machine-readable payload for audit archives or external governance tooling.
+
+```powershell
+# Run the contract test suite
+$report = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/contracts/orders_v1/test" -Headers $h
+$report.overall_status          # PASSED | WARNING | FAILED
+$report.summary.pass_rate       # e.g. 83.3
+$report.checks | Where-Object { $_.status -eq 'FAIL' } | Format-Table category, name, target, expected, actual
+```
+
+Because the endpoint returns a machine-readable verdict, it can gate a deployment in CI the same way the [Write-Audit-Publish gate](#write-audit-publish-gate) does — fail the build when `overall_status` is `FAILED`.
+
 ### Contracts API quick reference
 
 ```powershell
@@ -3028,6 +3137,9 @@ Invoke-RestMethod -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/rule
 
 # Derived: latest schema snapshot from source job
 Invoke-RestMethod -Headers $h "http://127.0.0.1:8000/api/contracts/orders_v1/schema?environment=source"
+
+# Run the ODCS contract test suite (schema + quality + SLA + consumers)
+Invoke-RestMethod -Method Post -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1/test
 
 # Delete (soft)
 Invoke-RestMethod -Method Delete -Headers $h http://127.0.0.1:8000/api/contracts/orders_v1
