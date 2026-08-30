@@ -27,6 +27,9 @@
     expandedExampleId: null,
     contractBumpNote: '',
     contractBumpLoading: false,
+    contractTestingLoading: false,
+    contractTestResult: null,
+    contractTestCategoryFilter: 'all',
 
       // ===== METHODS (extracted from app.js) =====
     async loadContracts() {
@@ -47,6 +50,8 @@
       this.contractBreachHistory = [];
       this.contractVersionHistory = [];
       this.contractBreachLoading = true;
+      this.contractTestResult = null;
+      this.contractTestCategoryFilter = 'all';
       try { this.contractBreachHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/breaches`); } catch {}
       this.contractBreachLoading = false;
       try { this.contractVersionHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/versions`); } catch {}
@@ -142,6 +147,36 @@
         }
       } catch (e) { alert('Bump failed: ' + (e.message || e)); }
       this.contractBumpLoading = false;
+    },
+
+    async runContractTest(contractName) {
+      this.contractTestingLoading = true;
+      try {
+        this.contractTestResult = await api('POST', `/api/contracts/${encodeURIComponent(contractName)}/test`);
+      } catch (e) {
+        alert('Contract test failed: ' + (e.message || e));
+        this.contractTestResult = null;
+      }
+      this.contractTestingLoading = false;
+    },
+
+    filteredContractChecks() {
+      if (!this.contractTestResult || !this.contractTestResult.checks) return [];
+      if (this.contractTestCategoryFilter === 'all') return this.contractTestResult.checks;
+      return this.contractTestResult.checks.filter(c => c.category === this.contractTestCategoryFilter);
+    },
+
+    exportContractTestReport() {
+      if (!this.contractTestResult) return;
+      const blob = new Blob([JSON.stringify(this.contractTestResult, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `contract-test-${this.contractTestResult.contract}-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     },
 
     // NOTE: dead code — not called from index.html markup (contract status

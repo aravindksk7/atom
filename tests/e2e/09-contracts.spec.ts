@@ -38,6 +38,67 @@ test.describe('09 contracts', () => {
     await authedPage.locator('[data-testid="contract-delete-btn"]').click();
   });
 
+  test('run contract test and view ODCS results', async ({ authedPage }) => {
+    const name = `e2e_test_contract_${Date.now()}`;
+    await openContracts(authedPage);
+    await createContract(authedPage, name);
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+
+    await authedPage.locator('[data-testid="contract-run-test-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-test-status-badge"]')).toBeVisible({ timeout: 15000 });
+
+    const statusText = (await authedPage.locator('[data-testid="contract-test-status-badge"]').textContent())?.trim();
+    expect(['PASSED', 'FAILED', 'WARNING']).toContain(statusText);
+
+    await expect(authedPage.locator('table[aria-label="contract test checks table"]')).toBeVisible();
+    const rowCount = await authedPage.locator('table[aria-label="contract test checks table"] tbody tr').count();
+    expect(rowCount).toBeGreaterThanOrEqual(1);
+
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
+
+  test('filter contract test checks by category', async ({ authedPage }) => {
+    const name = `e2e_filter_contract_${Date.now()}`;
+    await openContracts(authedPage);
+    await createContract(authedPage, name);
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+
+    await authedPage.locator('[data-testid="contract-run-test-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-test-status-badge"]')).toBeVisible({ timeout: 15000 });
+
+    const allCount = await authedPage.locator('table[aria-label="contract test checks table"] tbody tr').count();
+
+    await authedPage.locator('[data-testid="contract-test-filter-sla"]').click();
+    const slaCount = await authedPage.locator('table[aria-label="contract test checks table"] tbody tr').count();
+    expect(slaCount).toBeLessThanOrEqual(allCount);
+
+    await authedPage.locator('[data-testid="contract-test-filter-all"]').click();
+    const backToAll = await authedPage.locator('table[aria-label="contract test checks table"] tbody tr').count();
+    expect(backToAll).toBe(allCount);
+
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
+
+  test('export contract test report', async ({ authedPage }) => {
+    const name = `e2e_export_contract_${Date.now()}`;
+    await openContracts(authedPage);
+    await createContract(authedPage, name);
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+
+    await authedPage.locator('[data-testid="contract-run-test-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-test-status-badge"]')).toBeVisible({ timeout: 15000 });
+
+    const downloadPromise = authedPage.waitForEvent('download');
+    await authedPage.locator('[data-testid="contract-export-report-btn"]').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toContain('contract-test-');
+
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
+
   test('negative: saving a duplicate contract name surfaces a native alert', async ({ authedPage }) => {
     const name = `e2e_dup_contract_${Date.now()}`;
     await openContracts(authedPage);
