@@ -392,6 +392,19 @@ def test_load_api_source_404_when_config_missing():
     assert exc.value.status_code == 404
 
 
+def test_advanced_options_reject_duckdb_backend():
+    """duckdb is no longer a user-selectable compare backend. DuckDBBackend
+    remains internal to the TransformCase harness; exposing it here shipped a
+    path with weaker type dispatch and near-zero test coverage."""
+    with pytest.raises(ValueError):
+        AdvancedCompareOptions(comparison_backend="duckdb")
+
+
+def test_advanced_options_accept_supported_backends():
+    for name in ("pandas", "polars"):
+        assert AdvancedCompareOptions(comparison_backend=name).comparison_backend == name
+
+
 def test_load_api_source_404_when_endpoint_missing():
     from fastapi import HTTPException
     from api.schemas import SourceConfig

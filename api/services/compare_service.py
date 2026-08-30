@@ -193,7 +193,7 @@ def _build_engine(
     adv: "AdvancedCompareOptions | None" = None,
 ) -> "ReconciliationEngine":
     """Construct a ReconciliationEngine, optionally with advanced options."""
-    from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, DuckDBBackend, SamplingBackend
+    from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, SamplingBackend
 
     if adv is None:
         return ReconciliationEngine(
@@ -212,9 +212,7 @@ def _build_engine(
         datetime_tolerance_seconds=adv.datetime_tolerance_seconds,
     )
 
-    if backend_name == "duckdb":
-        backend = DuckDBBackend(**common_kwargs)
-    elif backend_name == "polars":
+    if backend_name == "polars":
         backend = PolarsBackend(**common_kwargs)
     else:
         backend = PandasBackend(

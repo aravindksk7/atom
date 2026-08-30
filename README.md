@@ -2793,7 +2793,7 @@ Tabular compare modes that run row-level diffs, including BO Report, Recon File,
 
 | Option | Default | Description |
 |---|---|---|
-| `comparison_backend` | `"pandas"` | Which backend computes the row diff. `"pandas"` — vectorised Pandas merge (default, works everywhere). `"polars"` — Polars FULL OUTER JOIN; faster on large datasets (`pip install polars`). `"duckdb"` — in-process DuckDB SQL; fastest for very wide tables (`pip install duckdb`). |
+| `comparison_backend` | `"pandas"` | Which backend computes the row diff. `"pandas"` — vectorised Pandas merge (default, supports every normalization option). `"polars"` — Polars FULL OUTER JOIN; faster on large datasets. Both packages are installed by `requirements.txt`. |
 | `float_tolerance` | `1e-9` | Global floating-point tolerance. Two numeric values are considered equal when `abs(a - b) <= float_tolerance`. |
 | `column_tolerances` | `{}` | Per-column tolerance overrides. Supersedes `float_tolerance` for the named column. Example: `{"price": 0.01, "weight_kg": 0.001}`. |
 | `datetime_tolerance_seconds` | `0.0` | Maximum allowed difference (in seconds) between two datetime values before they are flagged as mismatched. Useful when comparing timestamps that may differ by sub-second rounding. |
@@ -2808,9 +2808,8 @@ Tabular compare modes that run row-level diffs, including BO Report, Recon File,
 
 | Situation | Option(s) to use | Guidance |
 |---|---|---|
-| You want the safest default compare. | `comparison_backend: "pandas"` | Use Pandas unless you have installed and validated another backend. It supports all normalization options and works in the default environment. |
-| Large row counts make Pandas slow. | `comparison_backend: "polars"` | Use Polars when `polars` is installed and the workload is mostly straightforward typed columns. Re-run a known sample before making it the default for a workflow. |
-| Very wide tables or SQL-friendly local analysis are slow. | `comparison_backend: "duckdb"` | Use DuckDB when `duckdb` is installed and the data is wide enough that an in-process SQL engine is faster. Keep Pandas for small ad-hoc checks. |
+| You want the safest default compare. | `comparison_backend: "pandas"` | Use Pandas unless you have validated another backend. It is the only backend that applies `case_insensitive_columns` and `whitespace_normalize_columns` itself, and it has the broadest test coverage. |
+| Large row counts make Pandas slow. | `comparison_backend: "polars"` | Use Polars when the workload is mostly straightforward typed columns. Re-run a known sample before making it the default for a workflow. |
 | Numeric values differ by harmless rounding. | `float_tolerance` | Set a global tolerance such as `1e-6` for general floating-point noise. Keep it as small as the business rule allows. |
 | Different numeric columns have different precision rules. | `column_tolerances` | Use per-column overrides for currency, percentages, weights, rates, or tax fields. Example: `price:0.01, tax:0.005`. |
 | Timestamps differ by rounding or extract timing. | `datetime_tolerance_seconds` | Set the allowed seconds of drift, such as `1` for sub-second rounding or `60` for minute-bucketed exports. |
@@ -2956,23 +2955,25 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/mismatch-
 
 ### Comparison Backends
 
-The framework supports three interchangeable comparison backends. All backends implement the same `ComparisonBackend` protocol: `compare(df_source, df_target) -> list[MismatchRecord]`.
+All backends implement the same `ComparisonBackend` protocol: `compare(df_source, df_target) -> list[MismatchRecord]`. Two are selectable from jobs and the compare UI; the other two are internal.
 
-| Backend | Class | When to use | Requirement |
+| Backend | Class | When to use | Selectable |
 |---|---|---|---|
-| **Pandas** | `PandasBackend` | Default — works everywhere, full feature set (case-insensitive, whitespace-normalize, per-column tolerance, datetime tolerance) | Always available |
-| **Polars** | `PolarsBackend` | Large datasets with many rows; FULL OUTER JOIN via Polars | `pip install polars` |
-| **DuckDB** | `DuckDBBackend` | Very wide tables (100+ columns); SQL-level FULL OUTER JOIN via DuckDB's C++ engine | `pip install duckdb` |
-| **Sampling** | `SamplingBackend` | Wraps any backend and samples N% of rows before comparison (quick smoke-tests) | Always available |
+| **Pandas** | `PandasBackend` | Default — full feature set (case-insensitive, whitespace-normalize, per-column tolerance, datetime tolerance) | Yes |
+| **Polars** | `PolarsBackend` | Large datasets with many rows; FULL OUTER JOIN via Polars | Yes |
+| **DuckDB** | `DuckDBBackend` | Internal — the comparison engine behind `TransformCase` (see *Transform Testing*). Not exposed via `comparison_backend`. | No |
+| **Sampling** | `SamplingBackend` | Wraps any backend and samples N% of rows before comparison (quick smoke-tests). Applied automatically by `sample_frac` / shadow runs. | Indirect |
+
+All required packages (`pandas`, `polars`, `pyarrow`, `duckdb`) are installed by `requirements.txt` and `pyproject.toml`.
 
 **Using backends programmatically:**
 
 ```python
-from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, DuckDBBackend, SamplingBackend
+from etl_framework.reconciliation.backends import PandasBackend, PolarsBackend, SamplingBackend
 from etl_framework.reconciliation.engine import ReconciliationEngine
 
-# DuckDB backend with per-column tolerances
-backend = DuckDBBackend(
+# Polars backend with per-column tolerances
+backend = PolarsBackend(
     key_columns=["order_id"],
     column_tolerances={"price": 0.01, "tax": 0.005},
     datetime_tolerance_seconds=1.0,
@@ -3675,7 +3676,7 @@ def test_cancelled_orders_excluded_from_revenue():
     assert mismatches == []
 ```
 
-`inputs` accepts one or more named tables (each a `DataFrame`) — pass multiple to test transforms that join across tables. `TransformCase` reuses the same `DuckDBBackend` comparison engine production reconciliation runs use, so a passing `TransformCase` test and a passing production job mean the same thing. See `tests/transforms/test_example_daily_revenue.py` for a complete example, and add new transform tests under `tests/transforms/`.
+`inputs` accepts one or more named tables (each a `DataFrame`) — pass multiple to test transforms that join across tables. `TransformCase` runs its diff through `DuckDBBackend`, which implements the same `ComparisonBackend` protocol and mismatch semantics as the production reconciliation backends, so a passing `TransformCase` test and a passing production job mean the same thing. See `tests/transforms/test_example_daily_revenue.py` for a complete example, and add new transform tests under `tests/transforms/`.
 
 Run just the transform tests:
 

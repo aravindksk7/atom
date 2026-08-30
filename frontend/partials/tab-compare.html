@@ -245,7 +245,6 @@
             <select data-testid="compare-bo-backend-select" x-model="boBackend" class="field-input" id="a11y-compare-backend">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
-              <option value="duckdb">duckdb</option>
             </select>
           </div>
           <div>
@@ -585,10 +584,9 @@
           <div data-testid="compare-file-advanced-panel" x-show="fileAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
             <div>
               <label  class="field-label" for="a11y-compare-backend-2">Backend</label>
-              <select x-model="fileBackend" class="field-input" id="a11y-compare-backend-2">
+              <select data-testid="compare-file-backend-select" x-model="fileBackend" class="field-input" id="a11y-compare-backend-2">
                 <option value="pandas">pandas</option>
                 <option value="polars">polars</option>
-                <option value="duckdb">duckdb</option>
               </select>
             </div>
             <div>
@@ -892,10 +890,9 @@
         <div data-testid="compare-sql-advanced-panel" x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
           <div>
             <label  class="field-label" for="a11y-compare-backend-3">Backend</label>
-            <select x-model="sqlBackend" class="field-input" id="a11y-compare-backend-3">
+            <select data-testid="compare-sql-backend-select" x-model="sqlBackend" class="field-input" id="a11y-compare-backend-3">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
-              <option value="duckdb">duckdb</option>
             </select>
           </div>
           <div>

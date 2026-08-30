@@ -1,7 +1,7 @@
 import { Page } from '@playwright/test';
 
 export interface AdvancedOptions {
-  backend?: 'pandas' | 'polars' | 'duckdb';
+  backend?: 'pandas' | 'polars';
   floatTolerance?: string;
   datetimeTolerance?: string;
   mismatchRowLimit?: string;

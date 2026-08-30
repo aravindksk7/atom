@@ -1108,7 +1108,7 @@ class AdvancedCompareOptions(BaseModel):
     datetime_tolerance_seconds: float = Field(default=0.0, ge=0)
     case_insensitive_columns: list[str] = Field(default_factory=list)
     whitespace_normalize_columns: list[str] = Field(default_factory=list)
-    comparison_backend: Literal["pandas", "polars", "duckdb"] = "pandas"
+    comparison_backend: Literal["pandas", "polars"] = "pandas"
     mismatch_row_limit: int = Field(default=5000, ge=1)
     sample_frac: float | None = Field(default=None, ge=0.01, le=1.0)
     parallel_columns: bool = False
