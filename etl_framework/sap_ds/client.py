@@ -19,9 +19,13 @@ class DSRestClient:
     same way etl_framework/sap_bo/client.py's on-premises biprws quirks
     (_unwrap_collection, _paginate_biprws_collection) were discovered and
     documented over time rather than assumed correct up front.
+
+    Live-server quirk found so far: login endpoint is lowercase "/logon"
+    (not "/Login"), and it 400s on a plain "Accept: application/json" --
+    needs a browser-style Accept header instead.
     """
 
-    LOGIN_ENDPOINT = "/Login"
+    LOGIN_ENDPOINT = "/logon"
     TRIGGER_ENDPOINT = "/BatchJob/{repository}/{job_name}/Execute"
     STATUS_ENDPOINT = "/BatchJob/{repository}/status/{run_id}"
     SESSION_TOKEN_HEADER = "X-DS-SessionToken"
@@ -65,7 +69,10 @@ class DSRestClient:
         response = self._session.post(
             url,
             json=payload,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Content-Type": "application/json",
+            },
             timeout=self._timeout,
             verify=self._verify_ssl,
         )
