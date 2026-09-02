@@ -83,7 +83,7 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path == "/Login":
+        if path == "/logon":
             length = int(self.headers.get("Content-Length", "0") or "0")
             body = self.rfile.read(length) if length else b"{}"
             try:

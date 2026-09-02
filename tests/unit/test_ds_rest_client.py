@@ -75,7 +75,7 @@ def test_login_posts_credentials_and_stores_token(env_config):
     assert token == "tok"
     assert client._token == "tok"
     called_url = mock_post.call_args[0][0]
-    assert called_url == "http://ds.example.com/Login"
+    assert called_url == "http://ds.example.com/logon"
     sent_payload = mock_post.call_args[1]["json"]
     assert sent_payload == {"userName": "admin", "password": "dspass", "authType": "secEnterprise"}
 
