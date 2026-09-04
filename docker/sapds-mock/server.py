@@ -6,7 +6,7 @@ import re
 import ssl
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 
 HOST = os.getenv("SAPDS_MOCK_HOST", "0.0.0.0")
@@ -17,19 +17,26 @@ CERT_FILE = os.getenv("SAPDS_MOCK_CERT_FILE", "/certs/sapds-mock.crt")
 KEY_FILE = os.getenv("SAPDS_MOCK_KEY_FILE", "/certs/sapds-mock.key")
 TOKEN = "mock-sapds-token"
 
-# Batch jobs that can be triggered via POST /BatchJob/{repository}/{job_name}/Execute.
+# Batch jobs that can be triggered via the legacy servlet form POST
+# /DataServices/servlet/AwBatchJobExecute (application/x-www-form-urlencoded,
+# matching the live 2026-09-03 DevTools capture -- see
+# DSRestClient.trigger_job's docstring). The client's submitted GUID form
+# field is used as the run id key, since the client no longer reads a
+# server-generated id out of the (HTML, not JSON) response body.
 # Each entry's outcome is reached after JOB_POLLS_TO_TERMINAL polls of
 # GET /BatchJob/{repository}/status/{run_id} -- first poll(s) return "Running"
 # to exercise the client's poll loop, not just its terminal-status parsing.
+# STATUS_ENDPOINT itself is still the original unverified REST-style guess,
+# unchanged here pending a live capture of how the console actually reports
+# job status.
 SCHEDULABLE_JOBS = {
     "DS_NIGHTLY_LOAD": "Completed",
     "DS_BAD_LOAD": "Error",
 }
 JOB_POLLS_TO_TERMINAL = 2
 
-# run_id -> {"job_name": str, "polls_seen": int}
+# run_id (client-submitted GUID) -> {"job_name": str, "polls_seen": int}
 _JOB_RUNS: dict[str, dict] = {}
-_next_run_id = [0]
 
 
 class SAPDSMockHandler(BaseHTTPRequestHandler):
@@ -45,6 +52,14 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         for key, value in (headers or {}).items():
             self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, status: HTTPStatus, html: str) -> None:
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
@@ -101,18 +116,19 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"success": True})
             return
 
-        trigger_match = re.fullmatch(r"/BatchJob/([^/]+)/([^/]+)/Execute", path)
-        if trigger_match:
+        if path == "/DataServices/servlet/AwBatchJobExecute":
             if not self._require_token():
                 return
-            _repository, job_name = trigger_match.groups()
-            if job_name not in SCHEDULABLE_JOBS:
-                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"job {job_name} not found"})
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(length) if length else b""
+            form = {k: v[0] for k, v in parse_qs(body.decode("utf-8")).items()}
+            job_name = form.get("JobName", "")
+            run_id = form.get("GUID", "")
+            if job_name not in SCHEDULABLE_JOBS or not run_id:
+                self._send_html(HTTPStatus.NOT_FOUND, f"<html>job {job_name} not found</html>")
                 return
-            _next_run_id[0] += 1
-            run_id = f"run-{_next_run_id[0]}"
             _JOB_RUNS[run_id] = {"job_name": job_name, "polls_seen": 0}
-            self._send_json(HTTPStatus.OK, {"id": run_id})
+            self._send_html(HTTPStatus.OK, "<html>submitted</html>")
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
