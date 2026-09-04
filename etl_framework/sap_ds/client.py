@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 import requests
 from urllib.parse import urlparse
 from etl_framework.config.models import EnvironmentConfig
@@ -20,13 +21,25 @@ class DSRestClient:
     (_unwrap_collection, _paginate_biprws_collection) were discovered and
     documented over time rather than assumed correct up front.
 
-    Live-server quirk found so far: login endpoint is lowercase "/logon"
-    (not "/Login"), and it 400s on a plain "Accept: application/json" --
-    needs a browser-style Accept header instead.
+    Live-server quirks found so far:
+    - login endpoint is lowercase "/logon" (not "/Login"), and it 400s on a
+      plain "Accept: application/json" -- needs a browser-style Accept
+      header instead.
+    - job triggering does NOT go through this REST-style login/token API at
+      all. DevTools capture (2026-09-03) against the real Data Services
+      Management Console shows it's a legacy servlet form POST:
+      "POST /DataServices/servlet/AwBatchJobExecute" with
+      "Content-Type: application/x-www-form-urlencoded", not JSON. See
+      trigger_job's docstring for the still-unverified parts (CSRF/session
+      handling, response shape) carried over from that capture.
+
+    STATUS_ENDPOINT below is still the original unverified REST-style
+    guess -- expect it to need the same servlet-based rework once
+    trigger_job's remaining unknowns are ironed out.
     """
 
     LOGIN_ENDPOINT = "/logon"
-    TRIGGER_ENDPOINT = "/BatchJob/{repository}/{job_name}/Execute"
+    TRIGGER_ENDPOINT = "/DataServices/servlet/AwBatchJobExecute"
     STATUS_ENDPOINT = "/BatchJob/{repository}/status/{run_id}"
     SESSION_TOKEN_HEADER = "X-DS-SessionToken"
 
@@ -101,14 +114,28 @@ class DSRestClient:
     def trigger_job(
         self, job_name: str, repository: str | None = None, job_params: dict | None = None,
     ) -> str:
-        """POST {repository}/{job_name}/Execute -- trigger a SAP DS batch job
-        run in the given repository (falling back to the EnvironmentConfig's
-        ds_repository if none is given). job_params is passed through as the
-        JSON body for job substitution/global variables. Returns the new run
-        id.
+        """POST form-encoded to the Management Console's AwBatchJobExecute
+        servlet -- trigger a SAP DS batch job run in the given repository
+        (falling back to the EnvironmentConfig's ds_repository if none is
+        given). job_params is flattened directly into the form body as
+        global-variable fields (e.g. {"$G_RUN_DATE": "2026-07-24"}),
+        matching what the browser sends.
 
-        Response shape is best-effort, assumes {"id": "<run_id>"}, matching
-        the convention BORestClient.schedule_object already uses.
+        Modeled directly on a live DevTools capture (2026-09-03) of a real
+        "Execute Batch Job" submission, but still has unverified pieces:
+        - X-CSRF-TOKEN: the captured request carried one, scraped by the
+          browser from a page it had loaded first. We don't yet know how to
+          obtain it headlessly, so this first cut omits it and expects a
+          403/redirect-to-login response to confirm it's actually required.
+        - JOB_SERVER: derived as "{host}:3500" from ds_url's host (3500 is
+          SAP DS's default Job Server port, and matches the captured
+          "QETL111:3500" for host "qetl111") -- not read from config.
+        - Response is HTML, not JSON, and its success/run-id shape is
+          unknown. The GUID this method generates and submits (the real
+          request submits one as a correlation id) is returned as a
+          working-hypothesis run id for get_job_status/wait_for_completion
+          to poll with -- also still unverified, since STATUS_ENDPOINT
+          hasn't been checked against a live response yet.
         """
         if not self._token:
             self.login()
@@ -118,11 +145,34 @@ class DSRestClient:
                 "ds_job requires a repository: set 'ds_repository' in the environment config "
                 "or 'repository' in the job's params",
             )
-        url = f"{self._base_url}{self.TRIGGER_ENDPOINT.format(repository=repo, job_name=job_name)}"
+        guid = str(uuid.uuid4())
+        host = urlparse(self._base_url).hostname or ""
+        form = {
+            "SAMPLE_RATE": "5",
+            "AUDIT_CONTROL": "",
+            "USE_STAT": "",
+            "JOB_SERVER": f"{host.upper()}:3500",
+            "TRACE": "TRACE_SELECTED",
+            "job_trace_session": "yes",
+            "job_trace_workflow": "yes",
+            "job_trace_dataflow": "yes",
+            "default_ACTION_REQUEST": "none",
+            "ACTION_REQUEST": "Execute",
+            "REPOSITORY_NAME": repo,
+            "JobName": job_name,
+            "GUID": guid,
+            "__MOVE_DIRECTION": "FORWARD",
+            "ACTIVE_VIEW": "Execute Batch Job",
+        }
+        for key, value in (job_params or {}).items():
+            form[key] = "" if value is None else str(value)
+        url = f"{self._base_url}{self.TRIGGER_ENDPOINT}"
         response = self._session.post(
             url,
-            json=job_params or {},
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            data=form,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
             timeout=self._timeout,
             verify=self._verify_ssl,
         )
@@ -130,13 +180,11 @@ class DSRestClient:
             raise DSAPIError(
                 job_name=job_name, http_status=response.status_code, response_body=response.text,
             )
-        run_id = str(response.json().get("id", ""))
-        if not run_id:
-            raise DSAPIError(
-                job_name=job_name, http_status=response.status_code,
-                response_body="trigger response missing 'id'",
-            )
-        return run_id
+        logger.debug(
+            "AwBatchJobExecute response for job %r (guid=%s): %s",
+            job_name, guid, response.text[:2000],
+        )
+        return guid
 
     def _normalise_job_status(self, raw_status: str) -> TestStatus:
         mapped = self.STATUS_MAP.get(raw_status.upper())

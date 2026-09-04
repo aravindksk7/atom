@@ -1,10 +1,11 @@
 """Tests for DSRestClient SAP Data Services Administrator API methods.
 
-Endpoint paths, header names, and payload shapes here are best-effort,
-modeled after commonly documented SAP DS Administrator conventions -- not
-verified against a live SAP DS instance. Verify and adjust when a real
-server is available, the same way etl_framework/sap_bo/client.py's biprws
-quirks were discovered and documented over time.
+login/logout and trigger_job are modeled on live DevTools captures against
+a real on-prem instance (2026-09-03) -- see each test section's comment for
+what's confirmed vs. still-unverified. get_job_status/wait_for_completion
+below are still the original best-effort guess, not verified against a live
+server yet -- same situation etl_framework/sap_bo/client.py's biprws quirks
+were in before they were discovered and documented over time.
 """
 from __future__ import annotations
 
@@ -132,39 +133,54 @@ def test_logout_is_noop_when_not_authenticated(env_config):
 
 # ---------------------------------------------------------------------------
 # trigger_job
+#
+# Modeled on a live DevTools capture (2026-09-03) of the real "Execute Batch
+# Job" form submission: a legacy servlet form POST
+# (application/x-www-form-urlencoded to /DataServices/servlet/
+# AwBatchJobExecute), not the JSON REST call originally assumed. See
+# DSRestClient.trigger_job's docstring for what's still unverified
+# (X-CSRF-TOKEN, JOB_SERVER sourcing, response shape).
 # ---------------------------------------------------------------------------
 
-def test_trigger_job_posts_to_execute_endpoint_using_default_repository(authenticated_client):
+def test_trigger_job_posts_to_execute_servlet_using_default_repository(authenticated_client):
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-42"}
-    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
+    mock_response.text = "<html>submitted</html>"
+    with patch("uuid.uuid4", return_value="fixed-guid"), \
+         patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
         run_id = authenticated_client.trigger_job("DS_NIGHTLY_LOAD")
 
-    assert run_id == "run-42"
+    assert run_id == "fixed-guid"
     called_url = mock_post.call_args[0][0]
-    assert called_url == "http://ds.example.com/BatchJob/DS_REPO/DS_NIGHTLY_LOAD/Execute"
+    assert called_url == "http://ds.example.com/DataServices/servlet/AwBatchJobExecute"
+    sent_form = mock_post.call_args[1]["data"]
+    assert sent_form["JobName"] == "DS_NIGHTLY_LOAD"
+    assert sent_form["REPOSITORY_NAME"] == "DS_REPO"
+    assert sent_form["ACTION_REQUEST"] == "Execute"
+    assert sent_form["GUID"] == "fixed-guid"
+    assert sent_form["JOB_SERVER"] == "DS.EXAMPLE.COM:3500"
 
 
 def test_trigger_job_uses_explicit_repository_override(authenticated_client):
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-43"}
+    mock_response.text = "<html>submitted</html>"
     with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
         authenticated_client.trigger_job("DS_NIGHTLY_LOAD", repository="OTHER_REPO")
 
-    called_url = mock_post.call_args[0][0]
-    assert called_url == "http://ds.example.com/BatchJob/OTHER_REPO/DS_NIGHTLY_LOAD/Execute"
+    sent_form = mock_post.call_args[1]["data"]
+    assert sent_form["REPOSITORY_NAME"] == "OTHER_REPO"
 
 
-def test_trigger_job_sends_job_params_as_json_body(authenticated_client):
+def test_trigger_job_flattens_job_params_into_form_body(authenticated_client):
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-44"}
+    mock_response.text = "<html>submitted</html>"
     with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
         authenticated_client.trigger_job("DS_NIGHTLY_LOAD", job_params={"$G_RUN_DATE": "2026-07-24"})
 
-    assert mock_post.call_args[1]["json"] == {"$G_RUN_DATE": "2026-07-24"}
+    sent_form = mock_post.call_args[1]["data"]
+    assert sent_form["$G_RUN_DATE"] == "2026-07-24"
 
 
 def test_trigger_job_authenticates_first_if_no_token(env_config):
@@ -176,11 +192,11 @@ def test_trigger_job_authenticates_first_if_no_token(env_config):
     login_response.headers = {"X-DS-SessionToken": "tok"}
     trigger_response = MagicMock()
     trigger_response.status_code = 200
-    trigger_response.json.return_value = {"id": "run-1"}
+    trigger_response.text = "<html>submitted</html>"
     with patch.object(client._session, "post", side_effect=[login_response, trigger_response]):
         run_id = client.trigger_job("DS_NIGHTLY_LOAD")
 
-    assert run_id == "run-1"
+    assert run_id
     assert client._token == "tok"
 
 
@@ -193,17 +209,6 @@ def test_trigger_job_raises_ds_api_error_on_http_failure(authenticated_client):
     with patch.object(authenticated_client._session, "post", return_value=mock_response):
         with pytest.raises(DSAPIError):
             authenticated_client.trigger_job("does-not-exist")
-
-
-def test_trigger_job_raises_ds_api_error_when_response_has_no_id(authenticated_client):
-    from etl_framework.exceptions import DSAPIError
-
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {}
-    with patch.object(authenticated_client._session, "post", return_value=mock_response):
-        with pytest.raises(DSAPIError):
-            authenticated_client.trigger_job("DS_NIGHTLY_LOAD")
 
 
 def test_trigger_job_raises_value_error_when_no_repository_available(env_config):
