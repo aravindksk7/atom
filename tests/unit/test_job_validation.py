@@ -226,6 +226,55 @@ def test_aws_athena_query_requires_positive_max_attempts():
     assert any(issue.field == "params.max_attempts" for issue in issues)
 
 
+def test_aws_athena_query_rejects_invalid_operator_assertions():
+    issues = validate_job_definition({
+        "name": "athena_orders",
+        "job_type": "aws_athena_query",
+        "params": {
+            "config_id": 1,
+            "query": "select 1",
+            "output_location": "s3://out/",
+            "metric_assertions": {"row_count": {"operator": "invalid"}},
+        },
+    })
+    invalid_issues = [i for i in issues if i.field == "params.metric_assertions.row_count"]
+    assert len(invalid_issues) == 1
+    assert "unsupported operator" in invalid_issues[0].message
+
+
+def test_aws_athena_query_accepts_valid_operator_assertions():
+    issues = validate_job_definition({
+        "name": "athena_orders",
+        "job_type": "aws_athena_query",
+        "params": {
+            "config_id": 1,
+            "query": "select 1",
+            "output_location": "s3://out/",
+            "metric_assertions": {
+                "row_count": {"operator": "between", "min": 2, "max": 5},
+                "null_counts.id": {"operator": "<=", "value": 0},
+            },
+        },
+    })
+    metric_issues = [i for i in issues if i.field.startswith("params.metric_assertions")]
+    assert metric_issues == []
+
+
+def test_aws_athena_query_legacy_scalar_assertions_accepted():
+    issues = validate_job_definition({
+        "name": "athena_orders",
+        "job_type": "aws_athena_query",
+        "params": {
+            "config_id": 1,
+            "query": "select 1",
+            "output_location": "s3://out/",
+            "metric_assertions": {"row_count": 10},
+        },
+    })
+    metric_issues = [i for i in issues if i.field.startswith("params.metric_assertions")]
+    assert metric_issues == []
+
+
 def test_compare_job_without_compare_type_reports_an_error():
     from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
 

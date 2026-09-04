@@ -57,10 +57,26 @@
       awsAthenaMaxRows: '100',
       awsAthenaMinRows: '',
       awsAthenaMaxRowsAssert: '',
+      awsAthenaMetricAssertions: [],
       awsAthenaJobName: '',
       awsAthenaResult: null,
       awsAthenaError: null,
       awsAthenaLoading: false,
+
+      awsAthenaAddAssertion() {
+        this.awsAthenaMetricAssertions.push({
+          path: '',
+          operator: '==',
+          value: '',
+          min: '',
+          max: '',
+          tolerance: '',
+        });
+      },
+
+      awsAthenaRemoveAssertion(index) {
+        this.awsAthenaMetricAssertions.splice(index, 1);
+      },
 
       _awsReset() {
         this.awsResult = null;
@@ -277,6 +293,41 @@
         const maxRowsAssert = String(this.awsAthenaMaxRowsAssert || '').trim();
         if (minRows !== '') params.min_rows = Number(minRows);
         if (maxRowsAssert !== '') params.max_rows_assert = Number(maxRowsAssert);
+
+        const metric_assertions = {};
+        for (const ast of (this.awsAthenaMetricAssertions || [])) {
+          const p = (ast.path || '').trim();
+          if (!p) continue;
+          const op = ast.operator || '==';
+          const rawVal = (ast.value !== undefined && ast.value !== null) ? String(ast.value) : '';
+          const parsedVal = (isNaN(Number(rawVal)) || rawVal.trim() === '') ? (ast.value ?? '') : Number(rawVal);
+
+          if (op === 'between') {
+            metric_assertions[p] = {
+              operator: 'between',
+              min: Number(ast.min),
+              max: Number(ast.max),
+            };
+          } else if (op === '==' || op === '!=') {
+            const tol = (ast.tolerance || '').trim();
+            if (!tol) {
+              if (op === '==') {
+                metric_assertions[p] = parsedVal;
+              } else {
+                metric_assertions[p] = { operator: '!=', value: parsedVal };
+              }
+            } else {
+              const tolVal = (tol.endsWith('%') || isNaN(Number(tol))) ? tol : Number(tol);
+              metric_assertions[p] = { operator: op, value: parsedVal, tolerance: tolVal };
+            }
+          } else {
+            metric_assertions[p] = { operator: op, value: Number(ast.value) };
+          }
+        }
+        if (Object.keys(metric_assertions).length > 0) {
+          params.metric_assertions = metric_assertions;
+        }
+
         return params;
       },
 

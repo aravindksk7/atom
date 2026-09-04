@@ -84,6 +84,14 @@ def test_aws_tab_contains_athena_query_controls():
     assert "data-testid=\"aws-athena-job-name-input\"" in html
     assert "data-testid=\"aws-athena-min-rows-input\"" in html
     assert "data-testid=\"aws-athena-max-rows-assert-input\"" in html
+    assert "data-testid=\"aws-athena-assertion-path\"" in html
+    assert "data-testid=\"aws-athena-assertion-operator\"" in html
+    assert "data-testid=\"aws-athena-assertion-min\"" in html
+    assert "data-testid=\"aws-athena-assertion-max\"" in html
+    assert "data-testid=\"aws-athena-assertion-value\"" in html
+    assert "data-testid=\"aws-athena-assertion-tolerance\"" in html
+    assert "data-testid=\"aws-athena-remove-assertion-btn\"" in html
+    assert "data-testid=\"aws-athena-add-assertion-btn\"" in html
     assert "data-testid=\"aws-athena-run-query-btn\"" in html
     assert "data-testid=\"aws-athena-create-job-btn\"" in html
     assert "data-testid=\"aws-athena-loading\"" in html

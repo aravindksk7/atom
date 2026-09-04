@@ -127,3 +127,31 @@ def test_execute_athena_query_missing_metric_assertion_fails_when_expected_none(
     assert result.status == TestStatus.FAILED
     assert result.mismatches[0].mismatch_type == "athena_metric_mismatch"
     assert result.mismatches[0].target_value == "<missing>"
+
+
+def test_execute_athena_query_fails_complex_assertions(monkeypatch, db_session):
+    monkeypatch.setattr("api.services.run_executor.AwsAthenaService", lambda repo: SimpleNamespace(run_query=lambda *a, **k: run_response(row_count=5)))
+    result = executor(db_session)._execute_aws_athena_query(
+        job({
+            "metric_assertions": {
+                "null_counts.id": {"operator": "<", "value": 0},
+                "distinct_counts.id": {"operator": "between", "min": 2, "max": 4},
+            }
+        })
+    )
+    assert result.status == TestStatus.FAILED
+    assert {m.source_value for m in result.mismatches} == {"< 0", "between 2 and 4"}
+
+
+def test_execute_athena_query_passes_complex_assertions(monkeypatch, db_session):
+    monkeypatch.setattr("api.services.run_executor.AwsAthenaService", lambda repo: SimpleNamespace(run_query=lambda *a, **k: run_response(row_count=2)))
+    result = executor(db_session)._execute_aws_athena_query(
+        job({
+            "metric_assertions": {
+                "null_counts.id": {"operator": "<=", "value": 0},
+                "distinct_counts.id": {"operator": "between", "min": 1, "max": 5},
+            }
+        })
+    )
+    assert result.status == TestStatus.PASSED
+    assert result.mismatches == []

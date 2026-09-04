@@ -76,6 +76,33 @@ test.describe('20 AWS Athena tab', () => {
     await expect(authedPage.locator('[data-testid="aws-athena-result"]')).toContainText('amount');
 
     await authedPage.locator('[data-testid="aws-athena-job-name-input"]').fill('e2e-athena-orders');
+
+    await authedPage.locator('[data-testid="aws-athena-add-assertion-btn"]').click();
+    await authedPage.locator('[data-testid="aws-athena-assertion-path"]').nth(0).fill('row_count');
+    await authedPage.locator('[data-testid="aws-athena-assertion-operator"]').nth(0).selectOption('==');
+    await authedPage.locator('[data-testid="aws-athena-assertion-value"]').nth(0).fill('1');
+
+    await authedPage.locator('[data-testid="aws-athena-add-assertion-btn"]').click();
+    await authedPage.locator('[data-testid="aws-athena-assertion-path"]').nth(1).fill('null_counts.amount');
+    await authedPage.locator('[data-testid="aws-athena-assertion-operator"]').nth(1).selectOption('<=');
+    await authedPage.locator('[data-testid="aws-athena-assertion-value"]').nth(1).fill('0');
+
+    await authedPage.locator('[data-testid="aws-athena-add-assertion-btn"]').click();
+    await authedPage.locator('[data-testid="aws-athena-assertion-path"]').nth(2).fill('numeric.amount.avg');
+    await authedPage.locator('[data-testid="aws-athena-assertion-operator"]').nth(2).selectOption('between');
+    await authedPage.locator('[data-testid="aws-athena-assertion-min"]').nth(0).fill('10');
+    await authedPage.locator('[data-testid="aws-athena-assertion-max"]').nth(0).fill('20');
+
+    await authedPage.locator('[data-testid="aws-athena-add-assertion-btn"]').click();
+    await authedPage.locator('[data-testid="aws-athena-assertion-path"]').nth(3).fill('numeric.amount.max');
+    await authedPage.locator('[data-testid="aws-athena-assertion-operator"]').nth(3).selectOption('==');
+    await authedPage.locator('[data-testid="aws-athena-assertion-value"]').nth(2).fill('10.5');
+    await authedPage.locator('[data-testid="aws-athena-assertion-tolerance"]').nth(1).fill('5%');
+
+    await authedPage.locator('[data-testid="aws-athena-add-assertion-btn"]').click();
+    await authedPage.locator('[data-testid="aws-athena-assertion-path"]').nth(4).fill('temp_to_remove');
+    await authedPage.locator('[data-testid="aws-athena-remove-assertion-btn"]').nth(4).click();
+
     await authedPage.locator('[data-testid="aws-athena-create-job-btn"]').click();
     await expect.poll(() => jobBody).not.toBeNull();
     expect(jobBody.job_type).toBe('aws_athena_query');
@@ -85,6 +112,24 @@ test.describe('20 AWS Athena tab', () => {
       query: 'select id, amount from orders',
       output_location: 's3://athena-out/',
       min_rows: 1,
+      metric_assertions: {
+        row_count: 1,
+        'null_counts.amount': {
+          operator: '<=',
+          value: 0,
+        },
+        'numeric.amount.avg': {
+          operator: 'between',
+          min: 10,
+          max: 20,
+        },
+        'numeric.amount.max': {
+          operator: '==',
+          value: 10.5,
+          tolerance: '5%',
+        },
+      },
     });
+    expect(jobBody.params.metric_assertions).not.toHaveProperty('temp_to_remove');
   });
 });

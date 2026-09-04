@@ -4707,6 +4707,38 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
       </div>
 
+      <div class="mt-4 mb-3">
+        <label class="block text-sm font-medium text-slate-700 mb-2">Metric Assertions</label>
+        <template x-for="(ast, index) in awsAthenaMetricAssertions" :key="index">
+          <div class="flex items-center gap-2 mb-2">
+            <input x-model="ast.path" class="field-input w-48" placeholder="metric path e.g. null_counts.id" data-testid="aws-athena-assertion-path" />
+            <select x-model="ast.operator" class="field-input w-28" data-testid="aws-athena-assertion-operator">
+              <option value="==">==</option>
+              <option value="!=">!=</option>
+              <option value=">">&gt;</option>
+              <option value=">=">&gt;=</option>
+              <option value="<">&lt;</option>
+              <option value="<=">&lt;=</option>
+              <option value="between">between</option>
+            </select>
+            <template x-if="ast.operator === 'between'">
+              <div class="flex items-center gap-2">
+                <input x-model="ast.min" type="number" class="field-input w-24" placeholder="min" data-testid="aws-athena-assertion-min" />
+                <input x-model="ast.max" type="number" class="field-input w-24" placeholder="max" data-testid="aws-athena-assertion-max" />
+              </div>
+            </template>
+            <template x-if="ast.operator !== 'between'">
+              <input x-model="ast.value" class="field-input w-32" placeholder="value" data-testid="aws-athena-assertion-value" />
+            </template>
+            <template x-if="ast.operator === '==' || ast.operator === '!='">
+              <input x-model="ast.tolerance" class="field-input w-24" placeholder="tol / %" data-testid="aws-athena-assertion-tolerance" />
+            </template>
+            <button type="button" @click="awsAthenaRemoveAssertion(index)" class="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded" data-testid="aws-athena-remove-assertion-btn">&times;</button>
+          </div>
+        </template>
+        <button type="button" @click="awsAthenaAddAssertion()" class="text-sm text-blue-600 hover:underline" data-testid="aws-athena-add-assertion-btn">+ Add Metric Assertion</button>
+      </div>
+
       <div class="flex gap-2 flex-wrap mb-3">
         <button @click="awsAthenaRunQuery()" :disabled="awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation" class="btn-primary" data-testid="aws-athena-run-query-btn">Run Athena Query</button>
         <button @click="awsCreateAthenaQueryJob()" :disabled="awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation" class="btn-secondary" data-testid="aws-athena-create-job-btn">Create Athena Query Job</button>

@@ -23,6 +23,7 @@ from api.services.aws_athena_service import AthenaQueryFailedError, AwsAthenaSer
 from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
 from api.services.frame_engine import FrameEngine
+from etl_framework.assertions.comparators import evaluate_assertion, normalise_assertion
 from etl_framework.aws_s3.formats import validate_format
 from etl_framework.aws_s3.metadata import read_object_metadata
 from etl_framework.aws_s3.partitions import discover_partitions
@@ -1279,9 +1280,11 @@ class RunExecutor:
             mismatches.append(MismatchRecord({"job": job.name}, "row_count", int(params["max_rows_assert"]), row_count, "athena_row_count_above_max"))
         for path, expected in (params.get("metric_assertions") or {}).items():
             actual = self._metric_path(metrics, str(path))
-            if actual != expected:
+            assertion = normalise_assertion(expected)
+            outcome = evaluate_assertion(assertion, actual)
+            if not outcome.passed:
                 mismatch_actual = "<missing>" if actual is _MISSING_METRIC else actual
-                mismatches.append(MismatchRecord({"job": job.name}, str(path), expected, mismatch_actual, "athena_metric_mismatch"))
+                mismatches.append(MismatchRecord({"job": job.name}, str(path), outcome.expected_display, mismatch_actual, "athena_metric_mismatch"))
         return mismatches
 
     def _athena_result(

@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest
+from etl_framework.assertions.comparators import validate_assertion
 
 
 class ValidationSeverity(str, Enum):
@@ -148,8 +149,14 @@ def _validate_aws_athena_query(params: dict[str, Any], issues: list[ValidationIs
         issues.append(ValidationIssue("params.min_rows", "min_rows must be less than or equal to max_rows_assert"))
     if params.get("expected_status") not in (None, "SUCCEEDED", "FAILED", "CANCELLED"):
         issues.append(ValidationIssue("params.expected_status", "expected_status must be SUCCEEDED, FAILED, or CANCELLED"))
-    if "metric_assertions" in params and not isinstance(params.get("metric_assertions"), dict):
-        issues.append(ValidationIssue("params.metric_assertions", "metric_assertions must be an object"))
+    if "metric_assertions" in params:
+        metric_assertions = params.get("metric_assertions")
+        if not isinstance(metric_assertions, dict):
+            issues.append(ValidationIssue("params.metric_assertions", "metric_assertions must be an object"))
+        else:
+            for path, raw_assertion in metric_assertions.items():
+                for error in validate_assertion(path, raw_assertion):
+                    issues.append(ValidationIssue(f"params.metric_assertions.{path}", error))
 
 
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
