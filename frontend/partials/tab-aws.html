@@ -10,7 +10,7 @@
     <button type="button" data-testid="aws-service-s3" @click="awsService='s3'" :class="awsService === 's3' ? 'sub-tab active' : 'sub-tab'">S3</button>
     <button type="button" data-testid="aws-service-glue" @click="awsService='glue'" :class="awsService === 'glue' ? 'sub-tab active' : 'sub-tab'">Glue</button>
     <button type="button" data-testid="aws-service-athena" @click="awsService='athena'" :class="awsService === 'athena' ? 'sub-tab active' : 'sub-tab'">Athena</button>
-    <button type="button" data-testid="aws-service-airflow" disabled title="Coming soon" class="sub-tab">Airflow</button>
+    <button type="button" data-testid="aws-service-airflow" @click="awsService='airflow'" :class="awsService === 'airflow' ? 'sub-tab active' : 'sub-tab'">Airflow</button>
   </div>
 
   <div class="card mb-4">
@@ -324,6 +324,120 @@
         </template>
         <template x-if="awsAthenaResult && awsAthenaResult.results && awsAthenaResult.results.rows && awsAthenaResult.results.rows.length">
           <pre class="bg-slate-50 rounded-lg p-2 overflow-x-auto" x-text="JSON.stringify(awsAthenaResult.results.rows.slice(0, 10), null, 2)"></pre>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="awsService === 'airflow'">
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">Apache Airflow</div>
+        <span class="badge badge-purple">DAG Run</span>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label  class="field-label" for="a11y-aws-dag-id">DAG ID</label>
+          <input x-model="awsAirflowDagId" class="field-input" placeholder="etl_orders_daily" data-testid="aws-airflow-dag-input" id="a11y-aws-dag-id" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-aws-job-name-optional-4">Job Name (optional)</label>
+          <input x-model="awsAirflowJobName" class="field-input" placeholder="auto-generated from DAG ID" data-testid="aws-airflow-job-name-input" id="a11y-aws-job-name-optional-4" />
+        </div>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label  class="field-label" for="a11y-aws-poll-interval">Poll Interval (seconds)</label>
+          <input x-model="awsAirflowPollInterval" type="number" min="0" step="0.5" class="field-input" placeholder="1" data-testid="aws-airflow-poll-interval-input" id="a11y-aws-poll-interval" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-aws-max-attempts">Max Attempts</label>
+          <input x-model="awsAirflowMaxAttempts" type="number" min="1" class="field-input" placeholder="60" data-testid="aws-airflow-max-attempts-input" id="a11y-aws-max-attempts" />
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label  class="field-label" for="a11y-aws-conf-json">Config JSON</label>
+        <textarea x-model="awsAirflowConf" rows="3" class="field-input" placeholder="{}" data-testid="aws-airflow-conf-input" id="a11y-aws-conf-json"></textarea>
+      </div>
+
+      <div class="mb-3">
+        <label  class="field-label" for="a11y-aws-dag-select">Loaded DAGs</label>
+        <select x-model="awsAirflowDagId" class="field-input field-select" data-testid="aws-airflow-dag-select" id="a11y-aws-dag-select">
+          <option value="">— Select a DAG —</option>
+          <template x-for="dag in awsAirflowDags" :key="dag.dag_id">
+            <option :value="dag.dag_id" x-text="dag.dag_id"></option>
+          </template>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label  class="field-label" for="a11y-aws-expected-status">Expected Run Status</label>
+        <select x-model="awsAirflowExpectedStatus" class="field-input field-select" data-testid="aws-airflow-expected-status-select" id="a11y-aws-expected-status">
+          <option value="success">success</option>
+          <option value="failed">failed</option>
+        </select>
+      </div>
+
+      <div class="mt-4 mb-3">
+        <label class="block text-sm font-medium text-slate-700 mb-2">Task Assertions (optional)</label>
+        <template x-for="(ta, index) in awsAirflowTaskAssertions" :key="index">
+          <div class="flex items-center gap-2 mb-2">
+            <input x-model="ta.task_id" class="field-input w-48" placeholder="task_id e.g. extract" data-testid="aws-airflow-task-assertion-id" />
+            <select x-model="ta.state" class="field-input w-36" data-testid="aws-airflow-task-assertion-state">
+              <option value="success">success</option>
+              <option value="failed">failed</option>
+              <option value="skipped">skipped</option>
+              <option value="upstream_failed">upstream_failed</option>
+            </select>
+            <button type="button" @click="awsAirflowRemoveTaskAssertion(index)" class="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded" data-testid="aws-airflow-remove-task-assertion-btn">&times;</button>
+          </div>
+        </template>
+        <button type="button" @click="awsAirflowAddTaskAssertion()" class="text-sm text-blue-600 hover:underline" data-testid="aws-airflow-add-task-assertion-btn">+ Add Task Assertion</button>
+      </div>
+
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button @click="awsAirflowLoadDags()" :disabled="awsAirflowLoading || !awsConfigId" class="btn-secondary" data-testid="aws-airflow-load-dags-btn">Load DAGs</button>
+        <button @click="awsAirflowTriggerDag()" :disabled="awsAirflowLoading || !awsConfigId || !awsAirflowDagId" class="btn-secondary" data-testid="aws-airflow-trigger-btn">Trigger DAG Run</button>
+        <button @click="awsAirflowRunDag()" :disabled="awsAirflowLoading || !awsConfigId || !awsAirflowDagId" class="btn-primary" data-testid="aws-airflow-run-btn">Run DAG to Completion</button>
+        <button @click="awsCreateAirflowRunJob()" :disabled="awsAirflowLoading || !awsConfigId || !awsAirflowDagId" class="btn-secondary" data-testid="aws-airflow-create-job-btn">Create Airflow Run Job</button>
+      </div>
+
+      <div x-show="awsAirflowLoading" class="text-muted mb-3" data-testid="aws-airflow-loading">Running...</div>
+      <div x-show="awsAirflowError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" data-testid="aws-airflow-error" x-text="awsAirflowError"></div>
+
+      <div x-show="awsAirflowResult" data-testid="aws-airflow-result" class="text-sm">
+        <div class="flex gap-2 flex-wrap mb-2">
+          <span>State: <strong x-text="awsAirflowResult && awsAirflowResult.state"></strong></span>
+          <span>DAG: <strong x-text="awsAirflowResult && awsAirflowResult.dag_id"></strong></span>
+          <span>DAG Run ID: <strong x-text="awsAirflowResult && awsAirflowResult.dag_run_id"></strong></span>
+        </div>
+        <template x-if="awsAirflowResult && awsAirflowResult.task_instances && awsAirflowResult.task_instances.length">
+          <div class="overflow-x-auto">
+            <table class="results-table text-sm" aria-label="aws table airflow">
+              <thead>
+                <tr>
+                  <th scope="col">Task</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="ti in awsAirflowResult.task_instances" :key="ti.task_id">
+                  <tr>
+                    <td x-text="ti.task_id"></td>
+                    <td x-text="ti.state"></td>
+                    <td x-text="ti.duration != null ? ti.duration : ''"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+        <template x-if="awsAirflowResult && awsAirflowResult.task_instances && !awsAirflowResult.task_instances.length">
+          <div class="text-muted">No task instances.</div>
         </template>
       </div>
     </div>

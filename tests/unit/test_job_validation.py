@@ -275,6 +275,69 @@ def test_aws_athena_query_legacy_scalar_assertions_accepted():
     assert metric_issues == []
 
 
+def test_airflow_dag_run_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {
+            "config_id": 1,
+            "dag_id": "nightly_etl",
+            "expected_status": "success",
+            "conf": {"region": "eu-west-1"},
+            "poll_interval_seconds": 1.0,
+            "max_attempts": 60,
+            "task_assertions": {"extract": "success", "load": "skipped"},
+        },
+    })
+    assert issues == []
+
+
+def test_airflow_dag_run_requires_dag_id():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {"config_id": 1},
+    })
+    assert any(issue.field == "params.dag_id" for issue in issues)
+
+
+def test_airflow_dag_run_rejects_bad_expected_status():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {"config_id": 1, "dag_id": "nightly_etl", "expected_status": "SUCCESS"},
+    })
+    assert any(issue.field == "params.expected_status" for issue in issues)
+
+
+def test_airflow_dag_run_rejects_bad_conf():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {"config_id": 1, "dag_id": "nightly_etl", "conf": ["not", "a", "dict"]},
+    })
+    assert any(issue.field == "params.conf" for issue in issues)
+
+
+def test_airflow_dag_run_requires_positive_poll_and_attempts():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {"config_id": 1, "dag_id": "nightly_etl", "poll_interval_seconds": 0, "max_attempts": 0},
+    })
+    fields = {issue.field for issue in issues}
+    assert fields == {"params.poll_interval_seconds", "params.max_attempts"}
+
+
+def test_airflow_dag_run_rejects_invalid_task_assertions():
+    issues = validate_job_definition({
+        "name": "airflow_etl",
+        "job_type": "airflow_dag_run",
+        "params": {"config_id": 1, "dag_id": "nightly_etl", "task_assertions": {"extract": "SUCCESS", "load": "queued"}},
+    })
+    assert any(issue.field == "params.task_assertions.extract" for issue in issues)
+
+
 def test_compare_job_without_compare_type_reports_an_error():
     from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
 

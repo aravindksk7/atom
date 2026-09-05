@@ -159,6 +159,38 @@ def _validate_aws_athena_query(params: dict[str, Any], issues: list[ValidationIs
                     issues.append(ValidationIssue(f"params.metric_assertions.{path}", error))
 
 
+AIRFLOW_TASK_STATES = {"success", "failed", "skipped", "upstream_failed", "running", "queued"}
+
+
+def _validate_airflow_dag_run(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    if not _has_config_ref(params):
+        issues.append(ValidationIssue("params.config_id", "airflow_dag_run jobs require 'config_id' or 'config' in params"))
+    if not params.get("dag_id"):
+        issues.append(ValidationIssue("params.dag_id", "airflow_dag_run jobs require 'dag_id' in params"))
+    if params.get("expected_status") not in (None, "success", "failed"):
+        issues.append(ValidationIssue("params.expected_status", "expected_status must be None, 'success', or 'failed'"))
+    if "conf" in params and not isinstance(params.get("conf"), dict):
+        issues.append(ValidationIssue("params.conf", "conf must be an object"))
+    _positive_int(params, "max_attempts", issues)
+    if "poll_interval_seconds" in params:
+        try:
+            if float(params["poll_interval_seconds"]) <= 0:
+                issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+        except (TypeError, ValueError):
+            issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+    if "task_assertions" in params:
+        task_assertions = params.get("task_assertions")
+        if not isinstance(task_assertions, dict):
+            issues.append(ValidationIssue("params.task_assertions", "task_assertions must map task ids to expected states"))
+        else:
+            for task_id, expected in task_assertions.items():
+                if not isinstance(expected, str) or expected not in AIRFLOW_TASK_STATES:
+                    issues.append(ValidationIssue(
+                        f"params.task_assertions.{task_id}",
+                        "task_assertions values must be one of success, failed, skipped, upstream_failed, running, queued",
+                    ))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     job_type = _job_type(job)
@@ -173,6 +205,8 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_glue_catalog_compare(params, issues)
     elif job_type == "aws_athena_query":
         _validate_aws_athena_query(params, issues)
+    elif job_type == "airflow_dag_run":
+        _validate_airflow_dag_run(params, issues)
     query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 

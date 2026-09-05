@@ -63,6 +63,26 @@
       awsAthenaError: null,
       awsAthenaLoading: false,
 
+      awsAirflowDags: [],
+      awsAirflowDagId: '',
+      awsAirflowConf: '{}',
+      awsAirflowExpectedStatus: 'success',
+      awsAirflowTaskAssertions: [],
+      awsAirflowPollInterval: '1',
+      awsAirflowMaxAttempts: '60',
+      awsAirflowJobName: '',
+      awsAirflowResult: null,
+      awsAirflowError: null,
+      awsAirflowLoading: false,
+
+      awsAirflowAddTaskAssertion() {
+        this.awsAirflowTaskAssertions.push({ task_id: '', state: 'success' });
+      },
+
+      awsAirflowRemoveTaskAssertion(index) {
+        this.awsAirflowTaskAssertions.splice(index, 1);
+      },
+
       awsAthenaAddAssertion() {
         this.awsAthenaMetricAssertions.push({
           path: '',
@@ -365,6 +385,126 @@
           this.toast('error', 'Athena job creation failed', e.message);
         } finally {
           this.awsAthenaLoading = false;
+        }
+      },
+
+      _awsAirflowRequiredFieldError() {
+        if (!this.awsConfigId) return 'Config is required';
+        if (!(this.awsAirflowDagId || '').trim()) return 'DAG ID is required';
+        const raw = (this.awsAirflowConf || '').trim();
+        if (raw) {
+          try {
+            JSON.parse(raw);
+          } catch (e) {
+            return 'Config JSON must be valid JSON';
+          }
+        }
+        return null;
+      },
+
+      _awsAirflowRunParams() {
+        let conf = {};
+        const raw = (this.awsAirflowConf || '').trim();
+        if (raw) conf = JSON.parse(raw);
+        const pollInterval = String(this.awsAirflowPollInterval || '').trim();
+        const maxAttempts = String(this.awsAirflowMaxAttempts || '').trim();
+        return {
+          config_id: Number(this.awsConfigId),
+          conf,
+          poll_interval_seconds: Number(pollInterval || 1),
+          max_attempts: Number(maxAttempts || 60),
+        };
+      },
+
+      _awsAirflowJobParams() {
+        const params = this._awsAirflowRunParams();
+        params.dag_id = (this.awsAirflowDagId || '').trim();
+        if (this.awsAirflowExpectedStatus) {
+          params.expected_status = this.awsAirflowExpectedStatus;
+        }
+        const task_assertions = {};
+        for (const ta of (this.awsAirflowTaskAssertions || [])) {
+          const tid = (ta.task_id || '').trim();
+          if (tid) {
+            task_assertions[tid] = ta.state || 'success';
+          }
+        }
+        if (Object.keys(task_assertions).length > 0) {
+          params.task_assertions = task_assertions;
+        }
+        return params;
+      },
+
+      async awsAirflowTriggerDag() {
+        if (this.awsAirflowLoading) return;
+        this.awsAirflowError = null;
+        this.awsAirflowResult = null;
+        const missing = this._awsAirflowRequiredFieldError();
+        if (missing) { this.awsAirflowError = missing; return; }
+        this.awsAirflowLoading = true;
+        try {
+          const dagId = encodeURIComponent((this.awsAirflowDagId || '').trim());
+          this.awsAirflowResult = await api('POST', '/api/aws/airflow/dags/' + dagId + '/trigger', this._awsAirflowRunParams());
+          this.toast('success', 'Airflow DAG triggered', this.awsAirflowResult && this.awsAirflowResult.dag_run_id);
+        } catch (e) {
+          this.awsAirflowError = e.message;
+          this.toast('error', 'Triggering Airflow DAG failed', e.message);
+        } finally {
+          this.awsAirflowLoading = false;
+        }
+      },
+
+      async awsAirflowLoadDags() {
+        if (this.awsAirflowLoading) return;
+        this.awsAirflowError = null;
+        if (!this.awsConfigId) { this.awsAirflowError = 'Config is required'; return; }
+        this.awsAirflowLoading = true;
+        try {
+          const data = await api('GET', '/api/aws/airflow/dags?config_id=' + encodeURIComponent(this.awsConfigId));
+          this.awsAirflowDags = (data && data.dags) || [];
+        } catch (e) {
+          this.awsAirflowError = e.message;
+          this.toast('error', 'Loading Airflow DAGs failed', e.message);
+        } finally {
+          this.awsAirflowLoading = false;
+        }
+      },
+
+      async awsAirflowRunDag() {
+        if (this.awsAirflowLoading) return;
+        this.awsAirflowError = null;
+        this.awsAirflowResult = null;
+        const missing = this._awsAirflowRequiredFieldError();
+        if (missing) { this.awsAirflowError = missing; return; }
+        this.awsAirflowLoading = true;
+        try {
+          const dagId = encodeURIComponent((this.awsAirflowDagId || '').trim());
+          this.awsAirflowResult = await api('POST', '/api/aws/airflow/dags/' + dagId + '/run', this._awsAirflowRunParams());
+        } catch (e) {
+          this.awsAirflowError = e.message;
+          this.toast('error', 'Airflow DAG run failed', e.message);
+        } finally {
+          this.awsAirflowLoading = false;
+        }
+      },
+
+      async awsCreateAirflowRunJob() {
+        if (this.awsAirflowLoading) return;
+        this.awsAirflowError = null;
+        const missing = this._awsAirflowRequiredFieldError();
+        if (missing) { this.awsAirflowError = missing; return; }
+        const name = ((this.awsAirflowJobName || '').trim() || ['airflow', (this.awsAirflowDagId || '').trim() || 'dag'].filter(Boolean).join('_')).replace(/[^a-z0-9_]+/gi, '_').toLowerCase();
+        this.awsAirflowLoading = true;
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'airflow_dag_run', params: this._awsAirflowJobParams(), key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Airflow job created', name);
+          this.awsAirflowJobName = '';
+        } catch (e) {
+          this.awsAirflowError = e.message;
+          this.toast('error', 'Airflow job creation failed', e.message);
+        } finally {
+          this.awsAirflowLoading = false;
         }
       },
     };

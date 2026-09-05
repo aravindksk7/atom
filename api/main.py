@@ -12,6 +12,7 @@ from api.routes import configs, runs, jobs, health as health_routes, adapters, c
 from api.routes import aws_s3 as aws_s3_routes
 from api.routes import aws_glue as aws_glue_routes
 from api.routes import aws_athena as aws_athena_routes
+from api.routes import aws_airflow as aws_airflow_routes
 from api.routes import selections as selections_routes
 from api.routes import sequences as sequences_routes
 from api.routes import auth as auth_routes
@@ -59,6 +60,7 @@ app.include_router(adapters.router, prefix="/api/adapters")
 app.include_router(aws_s3_routes.router, prefix="/api/aws/s3")
 app.include_router(aws_glue_routes.router, prefix="/api/aws/glue")
 app.include_router(aws_athena_routes.router, prefix="/api/aws/athena")
+app.include_router(aws_airflow_routes.router, prefix="/api/aws/airflow")
 app.include_router(compare_routes.router, prefix="/api/compare")
 app.include_router(auth_routes.router)
 app.include_router(audit_routes.router, prefix="/api/audit")

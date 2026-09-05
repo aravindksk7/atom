@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from api.schemas import JobDefinition, RunSettings, SequenceStep, StepCondition
 from api.services.api_artifact import build_api_response_sink, run_artifact_dir
+from api.services.aws_airflow_service import AwsAirflowService
 from api.services.aws_athena_service import AthenaQueryFailedError, AwsAthenaService
 from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
@@ -514,6 +515,8 @@ class RunExecutor:
             return self._build_case_aws_glue_catalog_compare(job)
         if job.job_type == "aws_athena_query":
             return self._build_case_aws_athena_query(job)
+        if job.job_type == "airflow_dag_run":
+            return self._build_case_aws_airflow_dag_run(job)
         if job.job_type == "freshness":
             return self._build_case_freshness(job)
         if job.job_type == "schema_snapshot":
@@ -1361,6 +1364,87 @@ class RunExecutor:
         metrics["row_count"] = row_count
         mismatches = self._athena_mismatches(job, p, metrics, row_count)
         return self._athena_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+
+    # -- AWS Airflow -----------------------------------------------------------
+
+    def _build_case_aws_airflow_dag_run(self, job: JobDefinition):
+        def run_airflow_dag_run() -> ReconciliationResult:
+            return self._execute_airflow_dag_run(job)
+        return run_airflow_dag_run
+
+    def _airflow_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        metrics: dict[str, Any],
+        mismatches: list[MismatchRecord],
+        executed_at: datetime,
+        duration_seconds: float,
+    ) -> ReconciliationResult:
+        by_type: dict[str, int] = {}
+        for mismatch in mismatches:
+            by_type[mismatch.mismatch_type] = by_type.get(mismatch.mismatch_type, 0) + 1
+        task_instances = metrics.get("task_instances") or []
+        row_count = len(task_instances) if isinstance(task_instances, list) else 0
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=row_count,
+            target_row_count=row_count,
+            matched_count=0 if mismatches else row_count,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration_seconds,
+            mismatch_summary={"airflow": metrics, "metrics": metrics, "by_type": by_type},
+        )
+
+    def _execute_airflow_dag_run(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        max_attempts = int(p["max_attempts"]) if p.get("max_attempts") not in (None, "") else 60
+        try:
+            result = AwsAirflowService(ConfigRepository(self._db)).run_dag_to_completion(
+                config_id=self._s3_config_id(job),
+                dag_id=str(p.get("dag_id", "")),
+                conf=p.get("conf"),
+                poll_interval_seconds=float(p.get("poll_interval_seconds", 1.0)),
+                max_attempts=max_attempts,
+            )
+        except TimeoutError as exc:
+            error_payload = str(exc)
+            metrics = {"error": error_payload}
+            mismatch = MismatchRecord({"job": job.name}, "airflow", "ok", error_payload, "airflow_timeout")
+            return self._airflow_result(job, TestStatus.ERROR, metrics, [mismatch], executed_at, time.monotonic() - t0)
+        except Exception as exc:
+            error_payload = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            metrics = {"error": error_payload}
+            mismatch = MismatchRecord({"job": job.name}, "airflow", "ok", error_payload, "airflow_error")
+            return self._airflow_result(job, TestStatus.ERROR, metrics, [mismatch], executed_at, time.monotonic() - t0)
+
+        metrics = dict(result or {})
+        mismatches: list[MismatchRecord] = []
+        expected_status = p.get("expected_status") or "success"
+        actual_state = result.get("state")
+        if actual_state != expected_status:
+            mismatches.append(MismatchRecord({"job": job.name}, "dag_run_state", expected_status, actual_state, "airflow_dag_run_status_mismatch"))
+        task_instances = {task.get("task_id"): task for task in (result.get("task_instances") or [])}
+        for task_id, expected_state in (p.get("task_assertions") or {}).items():
+            task = task_instances.get(task_id)
+            if task is None or task.get("state") != expected_state:
+                mismatches.append(MismatchRecord(
+                    {"job": job.name},
+                    f"task.{task_id}",
+                    expected_state,
+                    task.get("state") if task is not None else "missing",
+                    "airflow_task_status_mismatch",
+                ))
+        return self._airflow_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
 
     # -- Freshness -----------------------------------------------------------
 

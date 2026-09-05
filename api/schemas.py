@@ -629,7 +629,7 @@ class JobDefinition(BaseModel):
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
-        "aws_glue_catalog_compare", "aws_athena_query", "compare",
+        "aws_glue_catalog_compare", "aws_athena_query", "airflow_dag_run", "compare",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -685,6 +685,11 @@ class JobDefinition(BaseModel):
             for field in ("query", "output_location"):
                 if not self.params.get(field):
                     raise ValueError(f"aws_athena_query jobs require '{field}' in params")
+        elif self.job_type == "airflow_dag_run":
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError("airflow_dag_run jobs require 'config_id' or 'config' in params")
+            if not self.params.get("dag_id"):
+                raise ValueError("airflow_dag_run jobs require 'dag_id' in params")
         elif self.job_type == "dbt_artifact":
             if not self.params.get("run_results_path"):
                 raise ValueError("dbt_artifact jobs require 'run_results_path' in params")

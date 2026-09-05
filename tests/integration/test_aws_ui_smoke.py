@@ -56,7 +56,7 @@ def test_aws_tab_contains_glue_catalog_controls():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     assert "data-testid=\"aws-service-glue\"" in html
     assert "data-testid=\"aws-service-athena\"" in html
-    assert "data-testid=\"aws-service-airflow\" disabled title=\"Coming soon\" class=\"sub-tab\">Airflow" in html
+    assert "data-testid=\"aws-service-airflow\" @click=\"awsService='airflow'\"" in html
     assert "data-testid=\"aws-glue-source-database-input\"" in html
     assert "data-testid=\"aws-glue-source-table-input\"" in html
     assert "data-testid=\"aws-glue-target-database-input\"" in html
@@ -75,7 +75,7 @@ def test_aws_tab_contains_glue_catalog_controls():
 def test_aws_tab_contains_athena_query_controls():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     assert "data-testid=\"aws-service-athena\"" in html
-    assert "data-testid=\"aws-service-airflow\" disabled title=\"Coming soon\" class=\"sub-tab\">Airflow" in html
+    assert "data-testid=\"aws-service-airflow\" @click=\"awsService='airflow'\"" in html
     assert "data-testid=\"aws-athena-database-input\"" in html
     assert "data-testid=\"aws-athena-workgroup-input\"" in html
     assert "data-testid=\"aws-athena-query-input\"" in html
@@ -106,3 +106,22 @@ def test_aws_tab_contains_athena_query_controls():
     assert "JSON.stringify(awsAthenaResult.dq_metrics, null, 2)" in html
     assert "JSON.stringify(awsAthenaResult.results.rows.slice(0, 10), null, 2)" in html
     assert ":disabled=\"awsAthenaLoading || !awsConfigId || !awsAthenaQuery || !awsAthenaOutputLocation\"" in html
+
+
+def test_aws_tab_contains_airflow_controls():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert "data-testid=\"aws-service-airflow\" @click=\"awsService='airflow'\"" in html
+    assert "data-testid=\"aws-airflow-run-btn\"" in html
+    assert "data-testid=\"aws-airflow-create-job-btn\"" in html
+    assert "data-testid=\"aws-airflow-load-dags-btn\"" in html
+    assert "data-testid=\"aws-airflow-dag-input\"" in html
+    assert "data-testid=\"aws-airflow-dag-select\"" in html
+    assert "data-testid=\"aws-airflow-conf-input\"" in html
+    assert "data-testid=\"aws-airflow-job-name-input\"" in html
+    assert "data-testid=\"aws-airflow-poll-interval-input\"" in html
+    assert "data-testid=\"aws-airflow-max-attempts-input\"" in html
+    assert "data-testid=\"aws-airflow-loading\"" in html
+    assert "data-testid=\"aws-airflow-error\"" in html
+    assert "data-testid=\"aws-airflow-result\"" in html
+    assert "awsAirflowResult.task_instances" in html
+    assert "Run DAG to Completion" in html
