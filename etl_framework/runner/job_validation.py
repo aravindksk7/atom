@@ -129,6 +129,27 @@ def _validate_glue_catalog_compare(params: dict[str, Any], issues: list[Validati
             issues.append(ValidationIssue(f"params.{field}", f"{field} must be a boolean"))
 
 
+GLUE_JOB_EXPECTED_STATUSES = {None, "SUCCEEDED", "FAILED", "STOPPED", "TIMEOUT", "ERROR"}
+
+
+def _validate_aws_glue_job_run(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    if not _has_config_ref(params):
+        issues.append(ValidationIssue("params.config_id", "aws_glue_job_run jobs require 'config_id' or 'config' in params"))
+    if not params.get("job_name"):
+        issues.append(ValidationIssue("params.job_name", "aws_glue_job_run jobs require 'job_name' in params"))
+    if params.get("expected_status") not in GLUE_JOB_EXPECTED_STATUSES:
+        issues.append(ValidationIssue("params.expected_status", "expected_status must be SUCCEEDED, FAILED, STOPPED, TIMEOUT, or ERROR"))
+    if "arguments" in params and not isinstance(params.get("arguments"), dict):
+        issues.append(ValidationIssue("params.arguments", "arguments must be a dict"))
+    _positive_int(params, "max_attempts", issues)
+    if "poll_interval_seconds" in params:
+        try:
+            if float(params["poll_interval_seconds"]) <= 0:
+                issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+        except (TypeError, ValueError):
+            issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+
+
 def _validate_aws_athena_query(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
     if not _has_config_ref(params):
         issues.append(ValidationIssue("params.config_id", "Athena jobs require 'config_id' or 'config' in params"))
@@ -203,6 +224,8 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_s3_partition_check(params, issues)
     elif job_type == "aws_glue_catalog_compare":
         _validate_glue_catalog_compare(params, issues)
+    elif job_type == "aws_glue_job_run":
+        _validate_aws_glue_job_run(params, issues)
     elif job_type == "aws_athena_query":
         _validate_aws_athena_query(params, issues)
     elif job_type == "airflow_dag_run":

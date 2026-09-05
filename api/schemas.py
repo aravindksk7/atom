@@ -629,7 +629,7 @@ class JobDefinition(BaseModel):
         "reconciliation", "health_check", "bo_report", "automic_job", "dbt_artifact",
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
-        "aws_glue_catalog_compare", "aws_athena_query", "airflow_dag_run", "compare",
+        "aws_glue_catalog_compare", "aws_glue_job_run", "aws_athena_query", "airflow_dag_run", "compare",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -679,6 +679,11 @@ class JobDefinition(BaseModel):
             for field in ("source_database", "source_table", "target_database", "target_table"):
                 if not self.params.get(field):
                     raise ValueError(f"aws_glue_catalog_compare jobs require '{field}' in params")
+        elif self.job_type == "aws_glue_job_run":
+            if not (self.params.get("config_id") or self.params.get("config")):
+                raise ValueError("aws_glue_job_run jobs require 'config_id' or 'config' in params")
+            if not self.params.get("job_name"):
+                raise ValueError("aws_glue_job_run jobs require 'job_name' in params")
         elif self.job_type == "aws_athena_query":
             if not (self.params.get("config_id") or self.params.get("config")):
                 raise ValueError("aws_athena_query jobs require 'config_id' or 'config' in params")

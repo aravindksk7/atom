@@ -50,6 +50,16 @@
       awsGlueError: null,
       awsGlueLoading: false,
       awsGlueJobName: '',
+      awsGlueJobs: [],
+      awsGlueJobNameInput: '',
+      awsGlueJobArgs: '{}',
+      awsGlueJobExpectedStatus: 'SUCCEEDED',
+      awsGlueJobPollInterval: '2',
+      awsGlueJobMaxAttempts: '120',
+      awsGlueJobRunName: '',
+      awsGlueJobRunResult: null,
+      awsGlueJobRunError: null,
+      awsGlueJobRunLoading: false,
       awsAthenaDatabase: '',
       awsAthenaQuery: '',
       awsAthenaOutputLocation: '',
@@ -284,6 +294,112 @@
           this.toast('error', 'Glue job creation failed', e.message);
         } finally {
           this.awsGlueLoading = false;
+        }
+      },
+
+      _awsGlueJobRunRequiredFieldError() {
+        if (!this.awsConfigId) return 'Config is required';
+        if (!(this.awsGlueJobNameInput || '').trim()) return 'Job name is required';
+        return null;
+      },
+
+      _awsGlueJobArgsParsed() {
+        const raw = (this.awsGlueJobArgs || '').trim();
+        if (!raw || raw === '{}') return {};
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            return null;
+          }
+          return parsed;
+        } catch (e) {
+          return null;
+        }
+      },
+
+      _awsGlueJobRunParams() {
+        const args = this._awsGlueJobArgsParsed();
+        if (args === null) {
+          this.awsGlueJobRunError = 'Arguments JSON must be valid JSON';
+          return null;
+        }
+        const pollInterval = String(this.awsGlueJobPollInterval || '').trim();
+        const maxAttempts = String(this.awsGlueJobMaxAttempts || '').trim();
+        return {
+          config_id: Number(this.awsConfigId),
+          arguments: args,
+          poll_interval_seconds: pollInterval !== '' ? Number(pollInterval) : 2.0,
+          max_attempts: maxAttempts !== '' ? Number(maxAttempts) : 120,
+        };
+      },
+
+      async awsGlueLoadJobs() {
+        if (this.awsGlueJobRunLoading) return;
+        this.awsGlueJobRunError = null;
+        if (!this.awsConfigId) {
+          this.awsGlueJobRunError = 'Config is required';
+          return;
+        }
+        this.awsGlueJobRunLoading = true;
+        try {
+          const data = await api('GET', '/api/aws/glue/jobs?config_id=' + encodeURIComponent(this.awsConfigId));
+          this.awsGlueJobs = (data && data.jobs) || [];
+        } catch (e) {
+          this.awsGlueJobRunError = e.message;
+          this.toast('error', 'Loading Glue jobs failed', e.message);
+        } finally {
+          this.awsGlueJobRunLoading = false;
+        }
+      },
+
+      async awsGlueRunJob() {
+        if (this.awsGlueJobRunLoading) return;
+        this.awsGlueJobRunError = null;
+        this.awsGlueJobRunResult = null;
+        const missing = this._awsGlueJobRunRequiredFieldError();
+        if (missing) { this.awsGlueJobRunError = missing; return; }
+        const runParams = this._awsGlueJobRunParams();
+        if (!runParams) return;
+        this.awsGlueJobRunLoading = true;
+        try {
+          const jobName = encodeURIComponent((this.awsGlueJobNameInput || '').trim());
+          this.awsGlueJobRunResult = await api('POST', '/api/aws/glue/jobs/' + jobName + '/run', runParams);
+          this.toast('success', 'Glue job finished', (this.awsGlueJobRunResult && this.awsGlueJobRunResult.job_run_state) || 'Done');
+        } catch (e) {
+          this.awsGlueJobRunError = e.message;
+          this.toast('error', 'Glue job run failed', e.message);
+        } finally {
+          this.awsGlueJobRunLoading = false;
+        }
+      },
+
+      async awsCreateGlueJobRun() {
+        if (this.awsGlueJobRunLoading) return;
+        this.awsGlueJobRunError = null;
+        const missing = this._awsGlueJobRunRequiredFieldError();
+        if (missing) { this.awsGlueJobRunError = missing; return; }
+        const runParams = this._awsGlueJobRunParams();
+        if (!runParams) return;
+        const name = ((this.awsGlueJobRunName || '').trim() || ['glue', (this.awsGlueJobNameInput || '').trim()].filter(Boolean).join('_')).replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
+        const params = {
+          config_id: Number(this.awsConfigId),
+          job_name: (this.awsGlueJobNameInput || '').trim(),
+          arguments: runParams.arguments,
+          expected_status: this.awsGlueJobExpectedStatus || 'SUCCEEDED',
+          poll_interval_seconds: runParams.poll_interval_seconds,
+          max_attempts: runParams.max_attempts,
+        };
+        this.awsGlueJobRunLoading = true;
+        try {
+          await api('POST', '/api/jobs', { name, job_type: 'aws_glue_job_run', params, key_columns: [] });
+          if (this.loadJobs) await this.loadJobs();
+          this.toast('success', 'Glue job created', name);
+          this.awsGlueJobRunName = '';
+        } catch (e) {
+          this.awsGlueJobRunError = e.message;
+          this.toast('error', 'Glue job creation failed', e.message);
+        } finally {
+          this.awsGlueJobRunLoading = false;
         }
       },
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -7,7 +9,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from api.services.aws_glue_runtime import AwsGlueRuntime
-from api.services.aws_glue_service import AwsGlueService, compare_glue_tables, normalize_glue_table, normalize_glue_type
+from api.services.aws_glue_service import (
+    GLUE_JOB_TERMINAL_STATES,
+    AwsGlueService,
+    compare_glue_tables,
+    normalize_glue_table,
+    normalize_glue_type,
+)
 from etl_framework.repository.database import Base
 from etl_framework.repository.repository import ConfigRepository
 
@@ -146,3 +154,186 @@ def test_glue_runtime_resolves_named_config(config_repo):
     runtime = AwsGlueRuntime(config_repo)
     assert runtime.config_id("aws-dev") == cfg.id
     assert runtime.env("aws-dev").name == "dev"
+
+
+def test_glue_job_terminal_states_constant():
+    assert GLUE_JOB_TERMINAL_STATES == {"SUCCEEDED", "FAILED", "STOPPED", "TIMEOUT", "ERROR"}
+
+
+def test_glue_service_list_jobs(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.get_jobs.return_value = {
+        "Jobs": [
+            {
+                "Name": "etl_orders",
+                "Description": "Orders ETL job",
+                "Role": "arn:aws:iam::123456789012:role/GlueRole",
+                "Command": {
+                    "Name": "glueetl",
+                    "ScriptLocation": "s3://bucket/scripts/orders.py",
+                },
+                "WorkerType": "G.1X",
+            },
+            {
+                "Name": "etl_customers",
+                "Description": None,
+                "Role": "arn:aws:iam::123456789012:role/GlueRole",
+                "Command": None,
+                "WorkerType": None,
+            },
+        ]
+    }
+    service._glue_client_override = mock_client
+    jobs = service.list_jobs(cfg.id)
+    assert jobs == [
+        {
+            "name": "etl_orders",
+            "description": "Orders ETL job",
+            "role": "arn:aws:iam::123456789012:role/GlueRole",
+            "script_location": "s3://bucket/scripts/orders.py",
+            "worker_type": "G.1X",
+        },
+        {
+            "name": "etl_customers",
+            "description": None,
+            "role": "arn:aws:iam::123456789012:role/GlueRole",
+            "script_location": None,
+            "worker_type": None,
+        },
+    ]
+    mock_client.get_jobs.assert_called_once_with()
+
+
+def test_glue_service_get_job(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.get_job.return_value = {
+        "Job": {
+            "Name": "etl_orders",
+            "Description": "Orders ETL job",
+            "Role": "arn:aws:iam::123456789012:role/GlueRole",
+            "Command": {
+                "ScriptLocation": "s3://bucket/scripts/orders.py",
+            },
+            "WorkerType": "G.1X",
+            "MaxCapacity": 2.0,
+        }
+    }
+    service._glue_client_override = mock_client
+    job = service.get_job(cfg.id, "etl_orders")
+    assert job == {
+        "name": "etl_orders",
+        "description": "Orders ETL job",
+        "role": "arn:aws:iam::123456789012:role/GlueRole",
+        "script_location": "s3://bucket/scripts/orders.py",
+        "worker_type": "G.1X",
+        "max_capacity": 2.0,
+    }
+    mock_client.get_job.assert_called_once_with(JobName="etl_orders")
+
+
+def test_glue_service_start_job_run(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.start_job_run.return_value = {"JobRunId": "jr_abc123"}
+    service._glue_client_override = mock_client
+
+    result = service.start_job_run(cfg.id, "etl_orders", {"--env": "dev"})
+    assert result == {"job_run_id": "jr_abc123", "job_name": "etl_orders"}
+    mock_client.start_job_run.assert_called_once_with(JobName="etl_orders", Arguments={"--env": "dev"})
+
+    mock_client.reset_mock()
+    mock_client.start_job_run.return_value = {"JobRunId": "jr_def456"}
+    result_none_args = service.start_job_run(cfg.id, "etl_orders")
+    assert result_none_args == {"job_run_id": "jr_def456", "job_name": "etl_orders"}
+    mock_client.start_job_run.assert_called_once_with(JobName="etl_orders", Arguments={})
+
+
+def test_glue_service_get_job_run_status(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.get_job_run.return_value = {
+        "JobRun": {
+            "JobRunState": "RUNNING",
+            "ExecutionTime": 60,
+            "ErrorMessage": None,
+        }
+    }
+    service._glue_client_override = mock_client
+
+    status = service.get_job_run_status(cfg.id, "etl_orders", "jr_abc123")
+    assert status == {
+        "job_run_id": "jr_abc123",
+        "job_name": "etl_orders",
+        "job_run_state": "RUNNING",
+        "execution_time": 60,
+        "error_message": None,
+    }
+    mock_client.get_job_run.assert_called_once_with(JobName="etl_orders", RunId="jr_abc123")
+
+
+def test_glue_service_run_job_to_completion_success(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.start_job_run.return_value = {"JobRunId": "jr_abc123"}
+    mock_client.get_job_run.side_effect = [
+        {"JobRun": {"JobRunState": "RUNNING", "ExecutionTime": 10, "ErrorMessage": None}},
+        {"JobRun": {"JobRunState": "SUCCEEDED", "ExecutionTime": 25, "ErrorMessage": None}},
+    ]
+    service._glue_client_override = mock_client
+
+    with patch("time.sleep") as mock_sleep:
+        status = service.run_job_to_completion(cfg.id, "etl_orders", poll_interval_seconds=1.0, max_attempts=5)
+    assert status == {
+        "job_run_id": "jr_abc123",
+        "job_name": "etl_orders",
+        "job_run_state": "SUCCEEDED",
+        "execution_time": 25,
+        "error_message": None,
+    }
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_called_with(1.0)
+
+
+def test_glue_service_run_job_to_completion_terminal_failed(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.start_job_run.return_value = {"JobRunId": "jr_failed1"}
+    mock_client.get_job_run.return_value = {
+        "JobRun": {"JobRunState": "FAILED", "ExecutionTime": 5, "ErrorMessage": "OutOfMemory"}
+    }
+    service._glue_client_override = mock_client
+
+    with patch("time.sleep"):
+        status = service.run_job_to_completion(cfg.id, "etl_orders", poll_interval_seconds=0.5, max_attempts=3)
+    assert status == {
+        "job_run_id": "jr_failed1",
+        "job_name": "etl_orders",
+        "job_run_state": "FAILED",
+        "execution_time": 5,
+        "error_message": "OutOfMemory",
+    }
+
+
+def test_glue_service_run_job_to_completion_timeout(config_repo):
+    cfg = config_repo.create("aws", "dev", {"aws_region": "us-east-1"})
+    service = AwsGlueService(config_repo)
+    mock_client = MagicMock()
+    mock_client.start_job_run.return_value = {"JobRunId": "jr_timeout1"}
+    mock_client.get_job_run.return_value = {
+        "JobRun": {"JobRunState": "RUNNING", "ExecutionTime": 10, "ErrorMessage": None}
+    }
+    service._glue_client_override = mock_client
+
+    with patch("time.sleep"):
+        with pytest.raises(TimeoutError) as exc_info:
+            service.run_job_to_completion(cfg.id, "etl_orders", poll_interval_seconds=2.0, max_attempts=3)
+    assert "Glue job 'etl_orders' run 'jr_timeout1' timed out after 6.0s" in str(exc_info.value)
+

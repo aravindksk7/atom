@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -102,3 +102,106 @@ def test_glue_route_maps_generic_exception_to_structured_400(client, mock_servic
 
     assert r.status_code == 400
     assert r.json() == {"detail": {"error_type": "RuntimeError", "message": "AWS boom"}}
+
+
+def test_list_jobs_route(client, mock_service):
+    mock_service.list_jobs.return_value = [
+        {"name": "etl-job", "description": "ETL", "role": "r", "script_location": "s3://b/s", "worker_type": "G.1X"},
+    ]
+    r = client.get("/api/aws/glue/jobs?config_id=1")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["jobs"] == [{"name": "etl-job", "description": "ETL", "role": "r", "script_location": "s3://b/s", "worker_type": "G.1X"}]
+    mock_service.list_jobs.assert_called_once_with("1")
+
+
+def test_list_jobs_audit_log(client, mock_service):
+    mock_service.list_jobs.return_value = [{"name": "j1"}, {"name": "j2"}]
+    with patch("api.routes.aws_glue.AuditService") as MockAudit:
+        r = client.get("/api/aws/glue/jobs?config_id=1")
+    assert r.status_code == 200
+    MockAudit.return_value.log.assert_called_once()
+    call_args = MockAudit.return_value.log.call_args
+    assert call_args.args[1] == "aws_glue.check"
+    assert call_args.args[2] == "aws_glue_jobs"
+    assert call_args.args[3] == "1"
+    assert call_args.args[4] == {"count": 2}
+
+
+def test_get_job_route(client, mock_service):
+    mock_service.get_job.return_value = {"name": "etl-job", "description": "ETL", "role": "r", "script_location": "s3://b/s", "worker_type": "G.1X", "max_capacity": 10.0}
+    r = client.get("/api/aws/glue/jobs/etl-job?config_id=1")
+    assert r.status_code == 200
+    assert r.json()["name"] == "etl-job"
+    mock_service.get_job.assert_called_once_with("1", "etl-job")
+
+
+def test_start_job_route(client, mock_service):
+    mock_service.start_job_run.return_value = {"job_run_id": "jr_123", "job_name": "etl-job"}
+    r = client.post("/api/aws/glue/jobs/etl-job/start", json={"config_id": 1, "arguments": {"--foo": "bar"}})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["job_run_id"] == "jr_123"
+    assert data["job_name"] == "etl-job"
+    mock_service.start_job_run.assert_called_once_with(1, "etl-job", {"--foo": "bar"})
+
+
+def test_start_job_route_without_arguments(client, mock_service):
+    mock_service.start_job_run.return_value = {"job_run_id": "jr_123", "job_name": "etl-job"}
+    r = client.post("/api/aws/glue/jobs/etl-job/start", json={"config_id": 1})
+    assert r.status_code == 200
+    mock_service.start_job_run.assert_called_once_with(1, "etl-job", None)
+
+
+def test_get_job_run_status_route(client, mock_service):
+    mock_service.get_job_run_status.return_value = {
+        "job_run_id": "jr_123", "job_name": "etl-job", "job_run_state": "SUCCEEDED", "execution_time": 42, "error_message": None,
+    }
+    r = client.get("/api/aws/glue/jobs/etl-job/runs/jr_123?config_id=1")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["job_run_id"] == "jr_123"
+    assert data["job_run_state"] == "SUCCEEDED"
+    mock_service.get_job_run_status.assert_called_once_with("1", "etl-job", "jr_123")
+
+
+def test_run_job_to_completion_route(client, mock_service):
+    mock_service.run_job_to_completion.return_value = {
+        "job_run_id": "jr_123", "job_name": "etl-job", "job_run_state": "SUCCEEDED", "execution_time": 42, "error_message": None,
+    }
+    r = client.post("/api/aws/glue/jobs/etl-job/run", json={"config_id": 1, "arguments": {"--foo": "bar"}})
+    assert r.status_code == 200
+    assert r.json()["job_run_state"] == "SUCCEEDED"
+    mock_service.run_job_to_completion.assert_called_once_with(1, "etl-job", {"--foo": "bar"}, 2.0, 120)
+
+
+def test_run_job_to_completion_custom_poll(client, mock_service):
+    mock_service.run_job_to_completion.return_value = {
+        "job_run_id": "jr_123", "job_name": "etl-job", "job_run_state": "SUCCEEDED", "execution_time": 42, "error_message": None,
+    }
+    r = client.post("/api/aws/glue/jobs/etl-job/run", json={"config_id": 1, "poll_interval_seconds": 0.5, "max_attempts": 10})
+    assert r.status_code == 200
+    mock_service.run_job_to_completion.assert_called_once_with(1, "etl-job", None, 0.5, 10)
+
+
+def test_jobs_route_maps_generic_exception_to_structured_400(client, mock_service):
+    mock_service.list_jobs.side_effect = RuntimeError("AWS boom")
+    r = client.get("/api/aws/glue/jobs?config_id=1")
+    assert r.status_code == 400
+    assert r.json()["detail"] == {"error_type": "RuntimeError", "message": "AWS boom"}
+
+
+def test_jobs_route_preserves_http_exception(client, mock_service):
+    mock_service.list_jobs.side_effect = HTTPException(status_code=404, detail="Config not found")
+    r = client.get("/api/aws/glue/jobs?config_id=999")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Config not found"
+
+
+def test_run_job_timeout_maps_to_400(client, mock_service):
+    mock_service.run_job_to_completion.side_effect = TimeoutError("timed out")
+    r = client.post("/api/aws/glue/jobs/etl-job/run", json={"config_id": 1})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert detail["error_type"] == "TimeoutError"
+    assert "timed out" in detail["message"]

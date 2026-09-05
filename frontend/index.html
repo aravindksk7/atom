@@ -4655,6 +4655,82 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </template>
       </div>
     </div>
+
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-slate-700">AWS Glue Job Execution</div>
+        <span class="badge badge-purple">ETL / Spark Run</span>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label" for="a11y-aws-glue-job">Job Name</label>
+          <input x-model="awsGlueJobNameInput" class="field-input" placeholder="spark_orders_etl" data-testid="aws-glue-job-input" id="a11y-aws-glue-job" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-aws-glue-job-run-name">Job Run Name (optional)</label>
+          <input x-model="awsGlueJobRunName" class="field-input" placeholder="auto-generated from Job Name" data-testid="aws-glue-job-run-name-input" id="a11y-aws-glue-job-run-name" />
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="field-label" for="a11y-aws-glue-job-select">Loaded Jobs</label>
+        <select x-model="awsGlueJobNameInput" class="field-input field-select" data-testid="aws-glue-job-select" id="a11y-aws-glue-job-select">
+          <option value="">— Select a Job —</option>
+          <template x-for="job in awsGlueJobs" :key="job.name">
+            <option :value="job.name" x-text="job.name"></option>
+          </template>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label class="field-label" for="a11y-aws-glue-job-args">Arguments JSON</label>
+        <textarea x-model="awsGlueJobArgs" rows="3" class="field-input" placeholder="{}" data-testid="aws-glue-job-args-input" id="a11y-aws-glue-job-args"></textarea>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label" for="a11y-aws-glue-job-expected-status">Expected Status</label>
+          <select x-model="awsGlueJobExpectedStatus" class="field-input field-select" data-testid="aws-glue-job-expected-status-select" id="a11y-aws-glue-job-expected-status">
+            <option value="SUCCEEDED">SUCCEEDED</option>
+            <option value="FAILED">FAILED</option>
+            <option value="STOPPED">STOPPED</option>
+          </select>
+        </div>
+        <div></div>
+      </div>
+
+      <div class="grid-2 mb-3">
+        <div>
+          <label class="field-label" for="a11y-aws-glue-job-poll-interval">Poll Interval (seconds)</label>
+          <input x-model="awsGlueJobPollInterval" type="number" min="0" step="0.5" class="field-input" placeholder="2" data-testid="aws-glue-job-poll-interval-input" id="a11y-aws-glue-job-poll-interval" />
+        </div>
+        <div>
+          <label class="field-label" for="a11y-aws-glue-job-max-attempts">Max Attempts</label>
+          <input x-model="awsGlueJobMaxAttempts" type="number" min="1" class="field-input" placeholder="120" data-testid="aws-glue-job-max-attempts-input" id="a11y-aws-glue-job-max-attempts" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button @click="awsGlueLoadJobs()" :disabled="awsGlueJobRunLoading || !awsConfigId" class="btn-secondary" data-testid="aws-glue-load-jobs-btn">Load Jobs</button>
+        <button @click="awsGlueRunJob()" :disabled="awsGlueJobRunLoading || !awsConfigId || !awsGlueJobNameInput" class="btn-primary" data-testid="aws-glue-job-run-btn">Run Glue Job</button>
+        <button @click="awsCreateGlueJobRun()" :disabled="awsGlueJobRunLoading || !awsConfigId || !awsGlueJobNameInput" class="btn-secondary" data-testid="aws-glue-create-job-run-btn">Create Glue Job Run</button>
+      </div>
+
+      <div x-show="awsGlueJobRunLoading" class="text-muted mb-3" data-testid="aws-glue-job-loading">Running...</div>
+      <div x-show="awsGlueJobRunError" class="bg-rose-50 border-rose-200 text-rose-700 border rounded-lg p-2 text-sm mb-3" data-testid="aws-glue-job-error" x-text="awsGlueJobRunError"></div>
+
+      <div x-show="awsGlueJobRunResult" data-testid="aws-glue-job-run-result" class="text-sm">
+        <div class="flex gap-2 flex-wrap mb-2 items-center">
+          <span>Job: <strong x-text="awsGlueJobRunResult && awsGlueJobRunResult.job_name"></strong></span>
+          <span>Run ID: <strong x-text="awsGlueJobRunResult && awsGlueJobRunResult.job_run_id"></strong></span>
+          <span class="badge" :class="awsGlueJobRunResult && (awsGlueJobRunResult.job_run_state === 'SUCCEEDED' ? 'badge-green' : (awsGlueJobRunResult.job_run_state === 'FAILED' ? 'badge-rose' : 'badge-purple'))" x-text="awsGlueJobRunResult && awsGlueJobRunResult.job_run_state"></span>
+          <span x-show="awsGlueJobRunResult && awsGlueJobRunResult.execution_time != null">Execution time: <strong x-text="awsGlueJobRunResult && (awsGlueJobRunResult.execution_time != null ? awsGlueJobRunResult.execution_time + 's' : '')"></strong></span>
+        </div>
+        <div x-show="awsGlueJobRunResult && awsGlueJobRunResult.error_message" class="text-rose-600 mt-1" x-text="awsGlueJobRunResult && awsGlueJobRunResult.error_message"></div>
+      </div>
+    </div>
+    </div>
   </div>
 
   <div x-show="awsService === 'athena'">

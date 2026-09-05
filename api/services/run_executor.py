@@ -513,6 +513,8 @@ class RunExecutor:
             return self._build_case_s3_partition_check(job)
         if job.job_type == "aws_glue_catalog_compare":
             return self._build_case_aws_glue_catalog_compare(job)
+        if job.job_type == "aws_glue_job_run":
+            return self._build_case_aws_glue_job_run(job)
         if job.job_type == "aws_athena_query":
             return self._build_case_aws_athena_query(job)
         if job.job_type == "airflow_dag_run":
@@ -1240,6 +1242,91 @@ class RunExecutor:
             mismatches.append(MismatchRecord({"job": job.name}, "formats", diff["format_mismatch"], None, "format_mismatch"))
         by_type = {m.mismatch_type: sum(1 for x in mismatches if x.mismatch_type == m.mismatch_type) for m in mismatches}
         return ReconciliationResult(query_name=job.name, source_env=self._source_env, target_env=self._target_env, source_row_count=len(source_cols), target_row_count=len(target_cols), matched_count=0 if mismatches else 1, missing_in_target_count=len(diff.get("missing_columns") or []), missing_in_source_count=len(diff.get("extra_columns") or []), value_mismatch_count=len(mismatches), mismatches=mismatches, status=TestStatus.FAILED if mismatches else TestStatus.PASSED, executed_at=executed_at, duration_seconds=time.monotonic() - t0, mismatch_summary={"metrics": metrics, "by_type": by_type, "catalog_diff": diff})
+
+    def _build_case_aws_glue_job_run(self, job: JobDefinition):
+        def run_glue_job_run() -> ReconciliationResult:
+            return self._execute_aws_glue_job_run(job)
+        return run_glue_job_run
+
+    def _glue_job_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        metrics: dict[str, Any],
+        mismatches: list[MismatchRecord],
+        executed_at: datetime,
+        duration_seconds: float,
+        row_count: int = 1,
+    ) -> ReconciliationResult:
+        by_type: dict[str, int] = {}
+        for mismatch in mismatches:
+            by_type[mismatch.mismatch_type] = by_type.get(mismatch.mismatch_type, 0) + 1
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=row_count,
+            target_row_count=row_count,
+            matched_count=0 if mismatches else row_count,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration_seconds,
+            mismatch_summary={"glue": metrics, "metrics": metrics, "by_type": by_type},
+        )
+
+    def _execute_aws_glue_job_run(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        p = job.params
+        config_id = self._s3_config_id(job)
+        job_name = str(p.get("job_name", ""))
+        arguments = p.get("arguments")
+        poll_interval_seconds = float(p.get("poll_interval_seconds", 2.0))
+        max_attempts = int(p["max_attempts"]) if p.get("max_attempts") not in (None, "") else 120
+        try:
+            result = AwsGlueService(ConfigRepository(self._db)).run_job_to_completion(
+                config_id=config_id,
+                job_name=job_name,
+                arguments=arguments,
+                poll_interval_seconds=poll_interval_seconds,
+                max_attempts=max_attempts,
+            )
+        except TimeoutError as exc:
+            error_payload = str(exc)
+            metrics = {"error": error_payload}
+            mismatch = MismatchRecord({"job": job.name}, "glue", "ok", error_payload, "glue_job_timeout")
+            return self._glue_job_result(job, TestStatus.ERROR, metrics, [mismatch], executed_at, time.monotonic() - t0, row_count=0)
+        except Exception as exc:
+            error_payload = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            metrics = {"error": error_payload}
+            mismatch = MismatchRecord({"job": job.name}, "glue", "ok", error_payload, "glue_job_error")
+            return self._glue_job_result(job, TestStatus.ERROR, metrics, [mismatch], executed_at, time.monotonic() - t0, row_count=0)
+
+        metrics = dict(result or {})
+        mismatches: list[MismatchRecord] = []
+        expected_status = p.get("expected_status") or "SUCCEEDED"
+        actual_state = result.get("job_run_state")
+        if actual_state != expected_status:
+            mismatches.append(MismatchRecord(
+                {"job": job.name},
+                "job_run_state",
+                expected_status,
+                actual_state,
+                "glue_job_status_mismatch",
+            ))
+        return self._glue_job_result(
+            job,
+            TestStatus.FAILED if mismatches else TestStatus.PASSED,
+            metrics,
+            mismatches,
+            executed_at,
+            time.monotonic() - t0,
+            row_count=1,
+        )
 
     def _build_case_aws_athena_query(self, job: JobDefinition):
         def run_athena_query() -> ReconciliationResult:

@@ -72,6 +72,23 @@ def test_aws_tab_contains_glue_catalog_controls():
     assert ":disabled=\"awsGlueLoading || !awsConfigId || !awsGlueSourceDatabase || !awsGlueSourceTable || !awsGlueTargetDatabase || !awsGlueTargetTable\"" in html
 
 
+def test_aws_tab_contains_glue_job_controls():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert 'data-testid="aws-glue-job-input"' in html
+    assert 'data-testid="aws-glue-load-jobs-btn"' in html
+    assert 'data-testid="aws-glue-job-select"' in html
+    assert 'data-testid="aws-glue-job-run-name-input"' in html
+    assert 'data-testid="aws-glue-job-args-input"' in html
+    assert 'data-testid="aws-glue-job-expected-status-select"' in html
+    assert 'data-testid="aws-glue-job-poll-interval-input"' in html
+    assert 'data-testid="aws-glue-job-max-attempts-input"' in html
+    assert 'data-testid="aws-glue-job-run-btn"' in html
+    assert 'data-testid="aws-glue-create-job-run-btn"' in html
+    assert 'data-testid="aws-glue-job-run-result"' in html
+    assert 'data-testid="aws-glue-job-loading"' in html
+    assert 'data-testid="aws-glue-job-error"' in html
+
+
 def test_aws_tab_contains_athena_query_controls():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     assert "data-testid=\"aws-service-athena\"" in html

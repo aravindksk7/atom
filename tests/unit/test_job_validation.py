@@ -533,3 +533,82 @@ def test_compare_matrix_job_with_upload_source_reports_an_error():
 
     errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
     assert any(i.field == "params.request.source_b" and "upload" in i.message for i in errors)
+
+
+def test_aws_glue_job_run_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "spark_etl",
+        "job_type": "aws_glue_job_run",
+        "params": {
+            "config_id": 1,
+            "job_name": "daily_spark_job",
+            "expected_status": "SUCCEEDED",
+            "arguments": {"--env": "qa"},
+            "poll_interval_seconds": 1.0,
+            "max_attempts": 60,
+        },
+    })
+    assert issues == []
+
+
+def test_aws_glue_job_run_requires_config_and_job_name():
+    issues = validate_job_definition({
+        "name": "spark_etl",
+        "job_type": "aws_glue_job_run",
+        "params": {},
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.config_id" in fields
+    assert "params.job_name" in fields
+
+
+def test_aws_glue_job_run_rejects_invalid_expected_status():
+    issues = validate_job_definition({
+        "name": "spark_etl",
+        "job_type": "aws_glue_job_run",
+        "params": {"config_id": 1, "job_name": "daily_job", "expected_status": "COMPLETED"},
+    })
+    assert any(issue.field == "params.expected_status" for issue in issues)
+
+
+def test_aws_glue_job_run_rejects_non_dict_arguments():
+    issues = validate_job_definition({
+        "name": "spark_etl",
+        "job_type": "aws_glue_job_run",
+        "params": {"config_id": 1, "job_name": "daily_job", "arguments": ["--env", "qa"]},
+    })
+    assert any(issue.field == "params.arguments" for issue in issues)
+
+
+def test_aws_glue_job_run_requires_positive_poll_and_attempts():
+    issues = validate_job_definition({
+        "name": "spark_etl",
+        "job_type": "aws_glue_job_run",
+        "params": {"config_id": 1, "job_name": "daily_job", "poll_interval_seconds": 0, "max_attempts": 0},
+    })
+    fields = {issue.field for issue in issues}
+    assert fields == {"params.poll_interval_seconds", "params.max_attempts"}
+
+
+def test_job_definition_schema_validates_aws_glue_job_run():
+    job = JobDefinition(
+        name="spark_etl",
+        job_type="aws_glue_job_run",
+        params={"config_id": 1, "job_name": "daily_spark_job"},
+    )
+    assert job.job_type == "aws_glue_job_run"
+
+    with pytest.raises(ValueError, match="aws_glue_job_run jobs require 'config_id' or 'config'"):
+        JobDefinition(
+            name="spark_etl",
+            job_type="aws_glue_job_run",
+            params={"job_name": "daily_spark_job"},
+        )
+
+    with pytest.raises(ValueError, match="aws_glue_job_run jobs require 'job_name'"):
+        JobDefinition(
+            name="spark_etl",
+            job_type="aws_glue_job_run",
+            params={"config_id": 1},
+        )
+
