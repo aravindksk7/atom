@@ -21,9 +21,13 @@ export default async function globalSetup(_config: FullConfig) {
     execSync('docker compose -f docker-compose.integration.yml up -d --wait', {
       cwd: REPO_ROOT,
       stdio: 'inherit',
-      timeout: 180_000,
+      // Raised from 180_000: Oracle's first boot (gvenzl/oracle-free's initial
+      // datafile/catalog creation) commonly takes 1-3 minutes on top of the other
+      // services, longer than the previous budget allowed for.
+      timeout: 420_000,
     });
     seedSqlServer();
+    seedOracle();
     seedMinio();
   }
 }
@@ -131,4 +135,54 @@ print("seeded")
     throw new Error(`SQL Server seed failed:\n${result.stdout}\n${result.stderr}`);
   }
   console.log('[global-setup] SQL Server seeded:', result.stdout.trim());
+}
+
+function seedOracle() {
+  // Oracle has no direct equivalent of SQL Server's "two databases on one login" --
+  // schema-per-user is the analog, so the src/tgt split here is two Oracle users
+  // rather than two databases (see seedSqlServer() above for the SQL Server shape
+  // this mirrors). e2e_src is auto-created by the gvenzl/oracle-free image itself
+  // via the APP_USER/APP_USER_PASSWORD env vars in docker-compose.integration.yml;
+  // e2e_tgt is created here, the same way seedSqlServer() creates both of its
+  // databases itself rather than relying on compose.
+  const script = `
+import oracledb
+
+sys_conn = oracledb.connect(user="system", password="Oracle_Test_12345", dsn="127.0.0.1:1521/FREEPDB1")
+sys_conn.autocommit = True
+cur = sys_conn.cursor()
+cur.execute("""
+DECLARE
+  user_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO user_count FROM all_users WHERE username = 'E2E_TGT';
+  IF user_count = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE USER e2e_tgt IDENTIFIED BY "Oracle_Test_12345"';
+    EXECUTE IMMEDIATE 'GRANT CONNECT, RESOURCE, UNLIMITED TABLESPACE TO e2e_tgt';
+  END IF;
+END;
+""")
+sys_conn.close()
+
+def seed(user, password, rows):
+    conn = oracledb.connect(user=user, password=password, dsn="127.0.0.1:1521/FREEPDB1")
+    conn.autocommit = True
+    c = conn.cursor()
+    try:
+        c.execute("DROP TABLE orders")
+    except oracledb.DatabaseError:
+        pass
+    c.execute("CREATE TABLE orders (id NUMBER PRIMARY KEY, sku VARCHAR2(50) NOT NULL, amount NUMBER(10,2) NOT NULL)")
+    c.executemany("INSERT INTO orders (id, sku, amount) VALUES (:1, :2, :3)", rows)
+    conn.close()
+
+seed("e2e_src", "Oracle_Test_12345", [(1, "A100", 25.50), (2, "B200", 50.00), (3, "C300", 75.00)])
+seed("e2e_tgt", "Oracle_Test_12345", [(1, "A100", 25.50), (2, "B200", 55.00), (4, "D400", 99.00)])
+print("seeded")
+`;
+  const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
+  if (result.status !== 0) {
+    throw new Error(`Oracle seed failed:\n${result.stdout}\n${result.stderr}`);
+  }
+  console.log('[global-setup] Oracle seeded:', result.stdout.trim());
 }
