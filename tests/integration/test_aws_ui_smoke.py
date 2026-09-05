@@ -191,3 +191,65 @@ def test_all_aws_service_panels_render_inside_the_aws_tab():
             f"{service} panel at line {panel_depths[service] + 1} renders outside the AWS tab "
             f"container, which closes at line {closed_at + 1}"
         )
+
+
+def _panel_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
+    """Map each AWS service to the [start, end) line range of its x-show panel."""
+    starts: list[tuple[str, int]] = []
+    for i, line in enumerate(lines):
+        for service in ("s3", "glue", "athena", "airflow"):
+            if f"x-show=\"awsService === '{service}'\"" in line:
+                starts.append((service, i))
+    starts.sort(key=lambda pair: pair[1])
+
+    spans: dict[str, tuple[int, int]] = {}
+    for idx, (service, start) in enumerate(starts):
+        end = starts[idx + 1][1] if idx + 1 < len(starts) else len(lines)
+        spans[service] = (start, end)
+    return spans
+
+
+# Each control must live in the panel it belongs to. Substring-only assertions pass
+# even when markup is nested in the wrong panel or falls outside the AWS tab entirely,
+# which is exactly how the Athena and Airflow panels once shipped unreachable.
+AWS_PANEL_CONTROLS = {
+    "athena": [
+        "aws-athena-run-query-btn",
+        "aws-athena-create-job-btn",
+        "aws-athena-add-assertion-btn",
+        "aws-athena-assertion-operator",
+        "aws-athena-result",
+    ],
+    "airflow": [
+        "aws-airflow-load-dags-btn",
+        "aws-airflow-trigger-btn",
+        "aws-airflow-run-btn",
+        "aws-airflow-create-job-btn",
+        "aws-airflow-result",
+    ],
+    "glue": [
+        "aws-glue-compare-btn",
+        "aws-glue-load-jobs-btn",
+        "aws-glue-job-run-btn",
+        "aws-glue-create-job-run-btn",
+        "aws-glue-job-run-result",
+    ],
+}
+
+
+@pytest.mark.parametrize("service", sorted(AWS_PANEL_CONTROLS))
+def test_aws_controls_live_in_their_own_panel(service):
+    lines = Path("frontend/index.html").read_text(encoding="utf-8").splitlines()
+    spans = _panel_spans(lines)
+    assert service in spans, f"{service} panel missing from index.html"
+    start, end = spans[service]
+
+    for testid in AWS_PANEL_CONTROLS[service]:
+        needle = f'data-testid="{testid}"'
+        hits = [i for i, line in enumerate(lines) if needle in line]
+        assert hits, f"{testid} not present in index.html at all"
+        assert any(start <= hit < end for hit in hits), (
+            f"{testid} exists but renders outside the '{service}' panel "
+            f"(panel spans lines {start + 1}-{end}); found at line(s) "
+            f"{[h + 1 for h in hits]}"
+        )

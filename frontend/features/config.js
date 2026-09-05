@@ -571,8 +571,12 @@
         const schemas = [...new Set(this.schemaExplorerData.map(t => t.schema))];
         this.schemaExpandedSchemas = Object.fromEntries(schemas.map(s => [s, true]));
       } catch (e) {
+        // Keep the panel open on failure. It already renders a "No tables found or
+        // connection failed." message for an empty result, and closing it here threw
+        // the user back to the config list -- losing the connection they picked and
+        // hiding that message, so a bad connection looked like the button did nothing.
         this.toast('error', 'Schema load failed', e.message);
-        this.schemaExplorerId = null;
+        this.schemaExplorerData = [];
       } finally {
         this.schemaExplorerLoading = false;
       }

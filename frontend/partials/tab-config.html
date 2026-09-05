@@ -53,13 +53,24 @@
           <template x-if="getSchemaConnections(schemaExplorerId).length > 1">
             <div class="flex items-center gap-1.5 text-xs text-slate-600">
               <label for="schema-explorer-conn-select" class="font-medium">Data Source:</label>
+              <!-- @change passes $event.target.value, not schemaExplorerConnection: on
+                   change the x-model write has not landed yet, so the old value was
+                   handed to openSchemaExplorer(). For the first switch that old value
+                   is "", which matches the same-config/same-connection guard and closed
+                   the panel instead of loading the newly picked connection. -->
               <select id="schema-explorer-conn-select"
                       x-model="schemaExplorerConnection"
-                      @change="openSchemaExplorer(configs.find(c => c.id === schemaExplorerId), schemaExplorerConnection)"
+                      @change="openSchemaExplorer(configs.find(c => c.id === schemaExplorerId), $event.target.value)"
                       class="field-input field-select text-xs py-1 px-2"
                       data-testid="schema-explorer-connection-select">
                 <template x-for="conn in getSchemaConnections(schemaExplorerId)" :key="conn.name">
-                  <option :value="conn.name" x-text="conn.label"></option>
+                  <!-- value="" is set explicitly as well as bound: Alpine skips the
+                       :value binding for an empty string, and a bare <option> with no
+                       value attribute falls back to its own text as the value. That
+                       made the "Main DB" entry report a value of its whole label,
+                       so selecting it by value (or round-tripping x-model back to the
+                       main connection) did not work. -->
+                  <option value="" :value="conn.name" x-text="conn.label"></option>
                 </template>
               </select>
             </div>

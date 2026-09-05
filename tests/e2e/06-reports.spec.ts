@@ -93,10 +93,12 @@ test.describe('06 reports', () => {
 
     // loadReport() catches the GET /api/runs/{id}/report 404 and toasts
     // ('error', 'Failed to load report', e.message) -- e.message is apiBlob()'s
-    // apiErrorMessage(err.detail, ...), and ArtifactService.generate_html_report()
-    // (api/services/artifact_service.py) raises HTTPException(404, detail=f"Run
-    // {run_id} not found.") verbatim, including the trailing period.
+    // apiErrorMessage(err.detail, ...). The route itself guards the run first
+    // (api/routes/runs.py get_run_report) and raises HTTPException(404,
+    // detail="Run not found"), so that terse detail is what reaches the toast --
+    // ArtifactService's more verbose f"Run {run_id} not found." is unreachable
+    // through this endpoint because the route never calls it for a missing run.
     await expect(authedPage.locator('.toast-error .toast-title')).toContainText('Failed to load report');
-    await expect(authedPage.locator('.toast-error .toast-msg')).toContainText(`Run ${bogusRunId} not found.`);
+    await expect(authedPage.locator('.toast-error .toast-msg')).toContainText('Run not found');
   });
 });

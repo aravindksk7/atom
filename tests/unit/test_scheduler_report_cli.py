@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -14,6 +14,18 @@ import etl_framework.repository.models  # noqa: F401
 from etl_framework.repository.models import ScheduledRun
 from etl_framework.repository.repository import SchedulerTelemetryRepository
 from etl_framework.runner import cli as cli_module
+
+
+def FAILED_EVENT_START() -> datetime:
+    """Start of the seeded FAILED event: yesterday, safely inside any lookback."""
+    return (datetime.now(timezone.utc) - timedelta(days=1)).replace(
+        hour=5, minute=0, second=0, microsecond=0
+    )
+
+
+def PASSED_EVENT_START() -> datetime:
+    """Start of the seeded PASSED event: the day before the FAILED one."""
+    return FAILED_EVENT_START() - timedelta(days=1)
 
 
 def _session_factory():
@@ -37,6 +49,10 @@ def _session_factory():
         db.commit()
         db.refresh(sched)
         repo = SchedulerTelemetryRepository(db)
+        # Anchored to "now" rather than fixed calendar dates: the report CLI filters on
+        # a rolling lookback window, so hardcoded dates age out and fail with time.
+        failed_started = FAILED_EVENT_START()
+        passed_started = PASSED_EVENT_START()
         repo.record_event(
             schedule_id=sched.id,
             schedule_name="nightly",
@@ -44,12 +60,12 @@ def _session_factory():
             event_state="failed",
             status="FAILED",
             exit_code=1,
-            started_at=datetime(2026, 7, 18, 5, 0, tzinfo=timezone.utc),
-            finished_at=datetime(2026, 7, 18, 5, 4, tzinfo=timezone.utc),
+            started_at=failed_started,
+            finished_at=failed_started + timedelta(minutes=4),
             duration_ms=240000,
             run_id="run-1",
             error_summary="source timeout",
-            created_at=datetime(2026, 7, 18, 5, 4, tzinfo=timezone.utc),
+            created_at=failed_started + timedelta(minutes=4),
         )
         repo.record_event(
             schedule_id=sched.id,
@@ -58,11 +74,11 @@ def _session_factory():
             event_state="completed",
             status="PASSED",
             exit_code=0,
-            started_at=datetime(2026, 7, 17, 5, 0, tzinfo=timezone.utc),
-            finished_at=datetime(2026, 7, 17, 5, 3, tzinfo=timezone.utc),
+            started_at=passed_started,
+            finished_at=passed_started + timedelta(minutes=3),
             duration_ms=180000,
             run_id="run-0",
-            created_at=datetime(2026, 7, 17, 5, 3, tzinfo=timezone.utc),
+            created_at=passed_started + timedelta(minutes=3),
         )
     return SessionLocal
 
@@ -76,8 +92,9 @@ def test_scheduler_report_text_summary_filters(monkeypatch, capsys):
         "--status", "failed",
         "--job", "nightly",
         "--exit-code", "1",
-        "--from", "2026-07-18T00:00:00+00:00",
-        "--to", "2026-07-19T00:00:00+00:00",
+        # Bracket the seeded FAILED event without naming fixed calendar dates.
+        "--from", (FAILED_EVENT_START() - timedelta(hours=5)).isoformat(),
+        "--to", (FAILED_EVENT_START() + timedelta(hours=19)).isoformat(),
     ])
 
     out = capsys.readouterr().out

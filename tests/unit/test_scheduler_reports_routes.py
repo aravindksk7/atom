@@ -47,6 +47,12 @@ def client(monkeypatch):
         db.add(sched)
         db.commit()
         db.refresh(sched)
+        # Anchor the seeded event to "now" rather than a fixed calendar date. The
+        # endpoints under test filter on a rolling lookback window (default 30 days),
+        # so a hardcoded date silently ages out of range and turns these tests red
+        # purely with the passage of time.
+        event_started = datetime.now(timezone.utc) - timedelta(days=1)
+        event_finished = event_started + timedelta(minutes=2)
         SchedulerTelemetryRepository(db).record_event(
             schedule_id=sched.id,
             schedule_name="nightly",
@@ -54,10 +60,10 @@ def client(monkeypatch):
             event_state="completed",
             status="PASSED",
             exit_code=0,
-            started_at=datetime(2026, 7, 18, 5, 0, tzinfo=timezone.utc),
-            finished_at=datetime(2026, 7, 18, 5, 2, tzinfo=timezone.utc),
+            started_at=event_started,
+            finished_at=event_finished,
             duration_ms=120000,
-            created_at=datetime(2026, 7, 18, 5, 2, tzinfo=timezone.utc),
+            created_at=event_finished,
         )
     with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
         yield c
@@ -119,11 +125,14 @@ def test_prune_endpoint_removes_old_telemetry(client):
 
 
 def test_query_aliases_from_and_to_filter_reports(client):
+    # Bracket the seeded event (yesterday) rather than naming fixed calendar dates,
+    # which would drift out of range as soon as the fixture stopped using them.
+    seeded = datetime.now(timezone.utc) - timedelta(days=1)
     resp = client.get(
         "/api/scheduler-reports/summary",
         params={
-            "from": "2026-07-18T04:00:00+00:00",
-            "to": "2026-07-18T06:00:00+00:00",
+            "from": (seeded - timedelta(hours=1)).isoformat(),
+            "to": (seeded + timedelta(hours=1)).isoformat(),
             "job": "night",
         },
     )

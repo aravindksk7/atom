@@ -10,7 +10,12 @@ test.describe('41 Live Docker Config Schema Browse per Data Source', () => {
       // Create a config pointing to live Docker SQL Server with a named Oracle/Netezza connection entry
       const cfg = await createConfig(ctx, `e2e-live-docker-schema-${Date.now()}`, 'dev', {
         db_type: 'mssql',
-        db_driver: 'ODBC Driver 17 for SQL Server',
+        // Honour the same override global-setup.ts uses to seed SQL Server. Hardcoding
+        // "ODBC Driver 17" made GET /api/configs/{id}/schema fail with IM002 on hosts
+        // that only ship Driver 18; openSchemaExplorer() resets schemaExplorerId to
+        // null on a schema-load error, so the panel silently closed and every
+        // subsequent locator in this spec resolved to nothing.
+        db_driver: process.env.LIVE_SQLSERVER_ODBC_DRIVER || 'ODBC Driver 17 for SQL Server',
         db_host: '127.0.0.1',
         db_port: 14333,
         db_name: 'master',
