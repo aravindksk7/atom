@@ -7064,7 +7064,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option value="">Select Athena config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <textarea data-testid="compare-matrix-source-a-athena-query-textarea" x-model="matrixSourceA.athenaQuery" class="field-input" rows="3" placeholder="SELECT * FROM athena_db.table_a" aria-label="athena query a"></textarea>
+            <input data-testid="compare-matrix-source-a-athena-database-input" x-model="matrixSourceA.athenaDatabase" class="field-input mb-2" placeholder="database (optional)" aria-label="athena database a" />
+            <textarea data-testid="compare-matrix-source-a-athena-query-textarea" x-model="matrixSourceA.athenaQuery" class="field-input mb-2" rows="3" placeholder="SELECT * FROM athena_db.table_a" aria-label="athena query a"></textarea>
+            <input data-testid="compare-matrix-source-a-athena-output-location-input" x-model="matrixSourceA.athenaOutputLocation" class="field-input mb-2" placeholder="s3://bucket/athena-output/" aria-label="athena output location a" />
+            <input data-testid="compare-matrix-source-a-athena-workgroup-input" x-model="matrixSourceA.athenaWorkgroup" class="field-input" placeholder="primary" aria-label="athena workgroup a" />
           </div>
         </template>
 
@@ -7128,7 +7131,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option value="">Select Athena config</option>
               <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
             </select>
-            <textarea data-testid="compare-matrix-source-b-athena-query-textarea" x-model="matrixSourceB.athenaQuery" class="field-input" rows="3" placeholder="SELECT * FROM athena_db.table_b" aria-label="athena query b"></textarea>
+            <input data-testid="compare-matrix-source-b-athena-database-input" x-model="matrixSourceB.athenaDatabase" class="field-input mb-2" placeholder="database (optional)" aria-label="athena database b" />
+            <textarea data-testid="compare-matrix-source-b-athena-query-textarea" x-model="matrixSourceB.athenaQuery" class="field-input mb-2" rows="3" placeholder="SELECT * FROM athena_db.table_b" aria-label="athena query b"></textarea>
+            <input data-testid="compare-matrix-source-b-athena-output-location-input" x-model="matrixSourceB.athenaOutputLocation" class="field-input mb-2" placeholder="s3://bucket/athena-output/" aria-label="athena output location b" />
+            <input data-testid="compare-matrix-source-b-athena-workgroup-input" x-model="matrixSourceB.athenaWorkgroup" class="field-input" placeholder="primary" aria-label="athena workgroup b" />
           </div>
         </template>
 

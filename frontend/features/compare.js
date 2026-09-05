@@ -128,8 +128,8 @@
 
     matrixSourceAType: 'file',
     matrixSourceBType: 'sql',
-    matrixSourceA: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source A' },
-    matrixSourceB: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source B' },
+    matrixSourceA: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', athenaDatabase: '', athenaOutputLocation: '', athenaWorkgroup: '', glueDatabase: '', glueTable: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source A' },
+    matrixSourceB: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', athenaDatabase: '', athenaOutputLocation: '', athenaWorkgroup: '', glueDatabase: '', glueTable: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source B' },
     matrixKeyColumns: '',
     matrixExcludeColumns: '',
     matrixNumericTolerance: '0.0',
@@ -1076,6 +1076,9 @@
       } else if (type === 'aws_athena') {
         if (src.configId) spec.config_id = parseInt(src.configId, 10);
         if (src.athenaQuery || src.queryOrTable) spec.query_or_table = src.athenaQuery || src.queryOrTable;
+        if (src.athenaDatabase) spec.athena_database = src.athenaDatabase;
+        if (src.athenaOutputLocation) spec.athena_output_location = src.athenaOutputLocation;
+        if (src.athenaWorkgroup) spec.athena_workgroup = src.athenaWorkgroup;
       } else if (type === 'sap_bo') {
         if (src.configId) spec.config_id = parseInt(src.configId, 10);
         if (src.docId) spec.bo_doc_id = src.docId;
