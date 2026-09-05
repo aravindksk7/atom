@@ -1,6 +1,9 @@
 from __future__ import annotations
-import httpx
+
+import asyncio
 from typing import Any
+import requests
+
 from .models import AirflowDag, AirflowDagRun, AirflowTaskInstance
 
 
@@ -12,12 +15,14 @@ class AirflowRestClient:
         password: str | None = None,
         token: str | None = None,
         timeout: float = 30.0,
+        session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.token = token
         self.timeout = timeout
+        self._session = session or requests.Session()
 
     def _get_headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -25,9 +30,9 @@ class AirflowRestClient:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def _get_auth(self) -> httpx.Auth | None:
+    def _get_auth(self) -> tuple[str, str] | None:
         if self.username and self.password:
-            return httpx.BasicAuth(self.username, self.password)
+            return (self.username, self.password)
         return None
 
     @staticmethod
@@ -64,64 +69,63 @@ class AirflowRestClient:
             duration=float(t["duration"]) if t.get("duration") is not None else None,
         )
 
-    async def list_dags(self, limit: int = 100, offset: int = 0) -> list[AirflowDag]:
-        url = f"{self.base_url}/api/v1/dags"
-        async with httpx.AsyncClient(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = await client.get(url, headers=self._get_headers(), params={"limit": limit, "offset": offset})
-            resp.raise_for_status()
-            data = resp.json()
-            return [self._parse_dag(d) for d in data.get("dags", [])]
-
-    async def trigger_dag_run(self, dag_id: str, conf: dict[str, Any] | None = None) -> AirflowDagRun:
-        url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns"
-        payload: dict[str, Any] = {"conf": conf or {}}
-        async with httpx.AsyncClient(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = await client.post(url, headers=self._get_headers(), json=payload)
-            resp.raise_for_status()
-            return self._parse_dag_run(resp.json())
-
-    async def get_dag_run(self, dag_id: str, dag_run_id: str) -> AirflowDagRun:
-        url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns/{dag_run_id}"
-        async with httpx.AsyncClient(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = await client.get(url, headers=self._get_headers())
-            resp.raise_for_status()
-            return self._parse_dag_run(resp.json())
-
-    async def list_task_instances(self, dag_id: str, dag_run_id: str) -> list[AirflowTaskInstance]:
-        url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances"
-        async with httpx.AsyncClient(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = await client.get(url, headers=self._get_headers())
-            resp.raise_for_status()
-            data = resp.json()
-            return [self._parse_task_instance(t) for t in data.get("task_instances", [])]
-
     def list_dags_sync(self, limit: int = 100, offset: int = 0) -> list[AirflowDag]:
         url = f"{self.base_url}/api/v1/dags"
-        with httpx.Client(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = client.get(url, headers=self._get_headers(), params={"limit": limit, "offset": offset})
-            resp.raise_for_status()
-            data = resp.json()
-            return [self._parse_dag(d) for d in data.get("dags", [])]
+        resp = self._session.get(
+            url,
+            headers=self._get_headers(),
+            auth=self._get_auth(),
+            params={"limit": limit, "offset": offset},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [self._parse_dag(d) for d in data.get("dags", [])]
 
     def trigger_dag_run_sync(self, dag_id: str, conf: dict[str, Any] | None = None) -> AirflowDagRun:
         url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns"
         payload: dict[str, Any] = {"conf": conf or {}}
-        with httpx.Client(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = client.post(url, headers=self._get_headers(), json=payload)
-            resp.raise_for_status()
-            return self._parse_dag_run(resp.json())
+        resp = self._session.post(
+            url,
+            headers=self._get_headers(),
+            auth=self._get_auth(),
+            json=payload,
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        return self._parse_dag_run(resp.json())
 
     def get_dag_run_sync(self, dag_id: str, dag_run_id: str) -> AirflowDagRun:
         url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns/{dag_run_id}"
-        with httpx.Client(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = client.get(url, headers=self._get_headers())
-            resp.raise_for_status()
-            return self._parse_dag_run(resp.json())
+        resp = self._session.get(
+            url,
+            headers=self._get_headers(),
+            auth=self._get_auth(),
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        return self._parse_dag_run(resp.json())
 
     def list_task_instances_sync(self, dag_id: str, dag_run_id: str) -> list[AirflowTaskInstance]:
         url = f"{self.base_url}/api/v1/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances"
-        with httpx.Client(timeout=self.timeout, auth=self._get_auth()) as client:
-            resp = client.get(url, headers=self._get_headers())
-            resp.raise_for_status()
-            data = resp.json()
-            return [self._parse_task_instance(t) for t in data.get("task_instances", [])]
+        resp = self._session.get(
+            url,
+            headers=self._get_headers(),
+            auth=self._get_auth(),
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [self._parse_task_instance(t) for t in data.get("task_instances", [])]
+
+    async def list_dags(self, limit: int = 100, offset: int = 0) -> list[AirflowDag]:
+        return await asyncio.to_thread(self.list_dags_sync, limit, offset)
+
+    async def trigger_dag_run(self, dag_id: str, conf: dict[str, Any] | None = None) -> AirflowDagRun:
+        return await asyncio.to_thread(self.trigger_dag_run_sync, dag_id, conf)
+
+    async def get_dag_run(self, dag_id: str, dag_run_id: str) -> AirflowDagRun:
+        return await asyncio.to_thread(self.get_dag_run_sync, dag_id, dag_run_id)
+
+    async def list_task_instances(self, dag_id: str, dag_run_id: str) -> list[AirflowTaskInstance]:
+        return await asyncio.to_thread(self.list_task_instances_sync, dag_id, dag_run_id)
