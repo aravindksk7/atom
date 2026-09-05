@@ -53,11 +53,20 @@
           <template x-if="getSchemaConnections(schemaExplorerId).length > 1">
             <div class="flex items-center gap-1.5 text-xs text-slate-600">
               <label for="schema-explorer-conn-select" class="font-medium">Data Source:</label>
-              <!-- @change passes $event.target.value, not schemaExplorerConnection: on
-                   change the x-model write has not landed yet, so the old value was
-                   handed to openSchemaExplorer(). For the first switch that old value
-                   is "", which matches the same-config/same-connection guard and closed
-                   the panel instead of loading the newly picked connection. -->
+              <!-- @change passes $event.target.value rather than relying on
+                   schemaExplorerConnection directly, because x-model's own
+                   "change" listener runs first and already commits the new
+                   value into schemaExplorerConnection before this handler
+                   fires. openSchemaExplorer()'s toggle-close guard used to
+                   compare its connectionName argument against
+                   schemaExplorerConnection -- which, precisely because of that
+                   ordering, is now ALWAYS equal to the new value for every
+                   dropdown switch (a native "change" event only fires when the
+                   value actually differs from before). That made every
+                   connection switch match the guard and close the panel
+                   instead of loading the newly picked connection. The guard in
+                   frontend/features/config.js now only toggles-close when
+                   connectionName is the button's null sentinel. -->
               <select id="schema-explorer-conn-select"
                       x-model="schemaExplorerConnection"
                       @change="openSchemaExplorer(configs.find(c => c.id === schemaExplorerId), $event.target.value)"

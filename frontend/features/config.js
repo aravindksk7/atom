@@ -554,7 +554,19 @@
     },
 
     async openSchemaExplorer(cfg, connectionName = null) {
-      if (this.schemaExplorerId === cfg.id && (connectionName === null || connectionName === this.schemaExplorerConnection)) {
+      // Only the "Browse Schema" button calls this with connectionName omitted
+      // (null), to toggle the panel closed on a re-click of the same row. The
+      // connection dropdown's @change always passes a real string ("" for Main
+      // DB, or a named connection) -- and by the time this handler runs,
+      // x-model has *already* written that same string into
+      // schemaExplorerConnection. Comparing connectionName against
+      // schemaExplorerConnection here was therefore always true for a
+      // dropdown-driven call (native "change" events only fire when the value
+      // actually differs from before), so every connection switch matched this
+      // guard and closed the panel instead of loading the newly picked
+      // connection. Only treat this as a toggle-close when it's the
+      // button's null-connectionName call.
+      if (this.schemaExplorerId === cfg.id && connectionName === null) {
         this.closeSchemaExplorer();
         return;
       }
