@@ -142,3 +142,52 @@ def test_aws_tab_contains_airflow_controls():
     assert "data-testid=\"aws-airflow-result\"" in html
     assert "awsAirflowResult.task_instances" in html
     assert "Run DAG to Completion" in html
+
+
+def _div_depths(lines: list[str]) -> tuple[int, dict[str, int]]:
+    """Return (final depth, {service: depth after its panel opening tag})."""
+    depth = 0
+    panel_depths: dict[str, int] = {}
+    for line in lines:
+        depth += line.count("<div") - line.count("</div>")
+        for service in ("s3", "glue", "athena", "airflow"):
+            if f"x-show=\"awsService === '{service}'\"" in line:
+                panel_depths[service] = depth
+    return depth, panel_depths
+
+
+def test_aws_tab_partial_has_balanced_divs():
+    """A stray </div> silently closes the AWS tab container and hides later panels."""
+    lines = Path("frontend/partials/tab-aws.html").read_text(encoding="utf-8").splitlines()
+    final_depth, panel_depths = _div_depths(lines)
+    assert final_depth == 0, f"tab-aws.html has unbalanced <div> tags (final depth {final_depth})"
+    assert set(panel_depths) == {"s3", "glue", "athena", "airflow"}
+    assert len(set(panel_depths.values())) == 1, (
+        f"AWS service panels must be siblings at the same nesting depth, got {panel_depths}"
+    )
+
+
+def test_all_aws_service_panels_render_inside_the_aws_tab():
+    """Athena/Airflow panels must live inside the currentView === 'aws' container."""
+    lines = Path("frontend/index.html").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if "currentView === 'aws'" in line)
+
+    depth = 0
+    panel_depths: dict[str, int] = {}
+    closed_at: int | None = None
+    for offset, line in enumerate(lines[start:]):
+        depth += line.count("<div") - line.count("</div>")
+        for service in ("s3", "glue", "athena", "airflow"):
+            if f"x-show=\"awsService === '{service}'\"" in line:
+                panel_depths[service] = start + offset
+        if depth == 0 and offset > 0:
+            closed_at = start + offset
+            break
+
+    assert closed_at is not None, "AWS tab container is never closed"
+    for service in ("s3", "glue", "athena", "airflow"):
+        assert service in panel_depths, f"{service} panel missing from index.html"
+        assert panel_depths[service] < closed_at, (
+            f"{service} panel at line {panel_depths[service] + 1} renders outside the AWS tab "
+            f"container, which closes at line {closed_at + 1}"
+        )
