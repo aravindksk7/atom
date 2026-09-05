@@ -155,11 +155,10 @@ def _extract_athena_source(spec: dict[str, Any]) -> pd.DataFrame:
 
 
 def _extract_glue_source(spec: dict[str, Any]) -> pd.DataFrame:
-    """AWS Glue is a catalog, not a query engine: real config_id -> S3-object
-    resolution happens upstream in api/services/compare_service.py (which knows
-    how to talk to AwsGlueService/S3), exactly like _extract_sap_bo_source's
-    bo_client resolution happens upstream of this module. This function only
-    ever sees the already-resolved rows.
+    """Unlike _extract_athena_source/_extract_sap_bo_source (which accept an inline
+    client and can call it directly), this intentionally has NO live-client dispatch
+    branch — real Glue/S3 resolution is deferred to a later task in
+    api/services/compare_service.py. This function only ever sees pre-resolved rows.
     """
     if "df" in spec or "data" in spec or "rows" in spec:
         raw_data = spec.get("df") or spec.get("data") or spec.get("rows")
