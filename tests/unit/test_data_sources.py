@@ -101,6 +101,22 @@ def test_extract_aws_athena_mock_runner():
     mock_runner.run_query.assert_called_once_with("SELECT * FROM athena_db.athena_table")
 
 
+def test_extract_aws_glue_with_resolved_rows():
+    spec = {
+        "source_type": "aws_glue",
+        "rows": [{"id": 1, "amount": 10.0}, {"id": 2, "amount": 20.0}],
+    }
+    df = extract_data_source(spec)
+    assert isinstance(df, pd.DataFrame)
+    assert list(df.columns) == ["id", "amount"]
+    assert df.iloc[0]["id"] == 1
+
+
+def test_extract_aws_glue_without_resolved_rows_raises():
+    with pytest.raises(ValueError, match="AWS Glue data source requires"):
+        extract_data_source({"source_type": "aws_glue", "config_id": 1})
+
+
 def test_extract_api_source():
     mock_response = MagicMock()
     mock_response.json.return_value = [
