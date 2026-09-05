@@ -962,6 +962,7 @@ class CompareService:
         "parquet": "parquet",
         "orc": "orc",
         "json": "json",
+        "text": "csv",  # Hive's TextInputFormat + LazySimpleSerDe is the CSV-shaped default
     }
 
     def _glue_object_format(self, input_format: str | None) -> str:
@@ -969,7 +970,7 @@ class CompareService:
         for needle, fmt in self._GLUE_INPUT_FORMAT_TO_FMT.items():
             if needle in name:
                 return fmt
-        return "csv"
+        raise HTTPException(status_code=422, detail=f"Unsupported Glue input format: {input_format!r}")
 
     @staticmethod
     def _parse_s3_uri(uri: str) -> tuple[str, str]:
@@ -984,13 +985,13 @@ class CompareService:
         from api.services.aws_s3_runtime import AwsS3Runtime
 
         described = AwsGlueService(self._config_repo).describe_table(config_id, database, table)
+        fmt = self._glue_object_format(described.input_format)
         bucket, prefix = self._parse_s3_uri(described.location or "")
         client = AwsS3Runtime(self._config_repo).client(config_id)
         data_key = next((obj["Key"] for obj in client.list_objects(bucket, prefix) if not obj["Key"].endswith("/")), None)
         if data_key is None:
             raise HTTPException(status_code=404, detail=f"No objects found under s3://{bucket}/{prefix}")
         raw = client.get_object(bucket, data_key)
-        fmt = self._glue_object_format(described.input_format)
         buf = io.BytesIO(raw)
         if fmt == "parquet":
             df = pd.read_parquet(buf)

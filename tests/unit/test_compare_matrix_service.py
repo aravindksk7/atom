@@ -308,3 +308,57 @@ def test_resolve_source_spec_builds_rows_from_glue_table(tmp_path) -> None:
             s3_runtime_module.AwsS3Runtime.client = original_s3_client
     finally:
         db.close()
+
+
+def test_resolve_source_spec_glue_unrecognized_input_format_raises_422() -> None:
+    """An input_format outside the known parquet/orc/json/text set (e.g. Avro)
+    must raise a clear 422 rather than silently falling back to a CSV parse
+    that would either error opaquely on binary bytes or, worse, "succeed" with
+    garbage data.
+    """
+    from api.services.compare_service import CompareService
+
+    db = _make_db()
+    try:
+        config_repo = ConfigRepository(db)
+        cfg = config_repo.create("aws-glue-e2e-avro", "dev", {"aws_region": "us-east-1"})
+        svc = CompareService(db, config_repo)
+
+        fake_glue_client = MagicMock()
+        fake_glue_client.get_table.return_value = {
+            "Table": {
+                "Name": "orders",
+                "StorageDescriptor": {
+                    "Location": "s3://bucket/raw/orders/",
+                    "InputFormat": "org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat",
+                    "Columns": [{"Name": "id", "Type": "int"}, {"Name": "amount", "Type": "double"}],
+                },
+                "PartitionKeys": [],
+            }
+        }
+
+        fake_s3_client = MagicMock()
+
+        import api.services.aws_glue_service as glue_service_module
+        import api.services.aws_s3_runtime as s3_runtime_module
+        original_glue_client = glue_service_module.AwsGlueService._client
+        original_s3_client = s3_runtime_module.AwsS3Runtime.client
+        glue_service_module.AwsGlueService._client = lambda self, config_id: fake_glue_client
+        s3_runtime_module.AwsS3Runtime.client = lambda self, config_id, override=None: fake_s3_client
+        try:
+            spec = {
+                "source_type": "aws_glue",
+                "config_id": cfg.id,
+                "glue_database": "raw",
+                "glue_table": "orders",
+            }
+            with pytest.raises(HTTPException) as err:
+                svc._resolve_source_spec(spec)
+            assert err.value.status_code == 422
+            assert "Avro" in err.value.detail
+            fake_s3_client.get_object.assert_not_called()
+        finally:
+            glue_service_module.AwsGlueService._client = original_glue_client
+            s3_runtime_module.AwsS3Runtime.client = original_s3_client
+    finally:
+        db.close()
