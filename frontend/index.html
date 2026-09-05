@@ -7035,6 +7035,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <button data-testid="compare-matrix-source-a-mode-sql" @click="matrixSourceAType = 'sql'" :class="matrixSourceAType === 'sql' ? 'pill active' : 'pill'">SQL</button>
           <button data-testid="compare-matrix-source-a-mode-file" @click="matrixSourceAType = 'file'" :class="matrixSourceAType === 'file' ? 'pill active' : 'pill'">File</button>
           <button data-testid="compare-matrix-source-a-mode-athena" @click="matrixSourceAType = 'aws_athena'" :class="matrixSourceAType === 'aws_athena' ? 'pill active' : 'pill'">Athena</button>
+          <button data-testid="compare-matrix-source-a-mode-glue" @click="matrixSourceAType = 'aws_glue'" :class="matrixSourceAType === 'aws_glue' ? 'pill active' : 'pill'">Glue</button>
           <button data-testid="compare-matrix-source-a-mode-bo" @click="matrixSourceAType = 'sap_bo'" :class="matrixSourceAType === 'sap_bo' ? 'pill active' : 'pill'">SAP BO</button>
           <button data-testid="compare-matrix-source-a-mode-api" @click="matrixSourceAType = 'api'" :class="matrixSourceAType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
@@ -7071,6 +7072,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </template>
 
+        <template x-if="matrixSourceAType === 'aws_glue'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-a-glue-config" x-model="matrixSourceA.configId" class="field-input field-select mb-2" aria-label="glue config a">
+              <option value="">Select Glue config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <input data-testid="compare-matrix-source-a-glue-database-input" x-model="matrixSourceA.glueDatabase" class="field-input mb-2" placeholder="database" aria-label="glue database a" />
+            <input data-testid="compare-matrix-source-a-glue-table-input" x-model="matrixSourceA.glueTable" class="field-input" placeholder="table" aria-label="glue table a" />
+          </div>
+        </template>
+
         <template x-if="matrixSourceAType === 'sap_bo'">
           <div class="space-y-2">
             <select data-testid="compare-matrix-source-a-bo-config" x-model="matrixSourceA.configId" class="field-input field-select mb-2" aria-label="bo config a">
@@ -7102,6 +7114,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <button data-testid="compare-matrix-source-b-mode-sql" @click="matrixSourceBType = 'sql'" :class="matrixSourceBType === 'sql' ? 'pill active' : 'pill'">SQL</button>
           <button data-testid="compare-matrix-source-b-mode-file" @click="matrixSourceBType = 'file'" :class="matrixSourceBType === 'file' ? 'pill active' : 'pill'">File</button>
           <button data-testid="compare-matrix-source-b-mode-athena" @click="matrixSourceBType = 'aws_athena'" :class="matrixSourceBType === 'aws_athena' ? 'pill active' : 'pill'">Athena</button>
+          <button data-testid="compare-matrix-source-b-mode-glue" @click="matrixSourceBType = 'aws_glue'" :class="matrixSourceBType === 'aws_glue' ? 'pill active' : 'pill'">Glue</button>
           <button data-testid="compare-matrix-source-b-mode-bo" @click="matrixSourceBType = 'sap_bo'" :class="matrixSourceBType === 'sap_bo' ? 'pill active' : 'pill'">SAP BO</button>
           <button data-testid="compare-matrix-source-b-mode-api" @click="matrixSourceBType = 'api'" :class="matrixSourceBType === 'api' ? 'pill active' : 'pill'">API</button>
         </div>
@@ -7135,6 +7148,17 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <textarea data-testid="compare-matrix-source-b-athena-query-textarea" x-model="matrixSourceB.athenaQuery" class="field-input mb-2" rows="3" placeholder="SELECT * FROM athena_db.table_b" aria-label="athena query b"></textarea>
             <input data-testid="compare-matrix-source-b-athena-output-location-input" x-model="matrixSourceB.athenaOutputLocation" class="field-input mb-2" placeholder="s3://bucket/athena-output/" aria-label="athena output location b" />
             <input data-testid="compare-matrix-source-b-athena-workgroup-input" x-model="matrixSourceB.athenaWorkgroup" class="field-input" placeholder="primary" aria-label="athena workgroup b" />
+          </div>
+        </template>
+
+        <template x-if="matrixSourceBType === 'aws_glue'">
+          <div class="space-y-2">
+            <select data-testid="compare-matrix-source-b-glue-config" x-model="matrixSourceB.configId" class="field-input field-select mb-2" aria-label="glue config b">
+              <option value="">Select Glue config</option>
+              <template x-for="cfg in configs" :key="cfg.id"><option :value="cfg.id" x-text="cfg.name"></option></template>
+            </select>
+            <input data-testid="compare-matrix-source-b-glue-database-input" x-model="matrixSourceB.glueDatabase" class="field-input mb-2" placeholder="database" aria-label="glue database b" />
+            <input data-testid="compare-matrix-source-b-glue-table-input" x-model="matrixSourceB.glueTable" class="field-input" placeholder="table" aria-label="glue table b" />
           </div>
         </template>
 
