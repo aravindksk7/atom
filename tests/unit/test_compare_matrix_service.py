@@ -135,3 +135,26 @@ def test_run_matrix_comparison_invalid_source_persists_error(tmp_path) -> None:
         assert run.error == 1
     finally:
         db.close()
+
+
+def test_data_source_spec_accepts_athena_and_glue_resolution_fields() -> None:
+    spec = DataSourceSpec(
+        source_type="aws_athena",
+        config_id=1,
+        query_or_table="SELECT * FROM db.tbl",
+        athena_database="db",
+        athena_output_location="s3://bucket/athena-output/",
+        athena_workgroup="primary",
+    )
+    assert spec.athena_database == "db"
+    assert spec.athena_output_location == "s3://bucket/athena-output/"
+    assert spec.athena_workgroup == "primary"
+
+    glue_spec = DataSourceSpec(
+        source_type="aws_glue",
+        config_id=1,
+        glue_database="raw",
+        glue_table="orders",
+    )
+    assert glue_spec.glue_database == "raw"
+    assert glue_spec.glue_table == "orders"
