@@ -25,6 +25,20 @@ Read these first if anything below is unclear — this plan assumes you have NOT
 
 ---
 
+## SCOPE CHANGE (decided during Task 8, applies to everything below)
+
+Task 8's real-environment verification found the risk above was worse than anticipated: `localstack/localstack:3` Community edition does not implement the Glue or Athena APIs **at all** — confirmed via `GET http://127.0.0.1:4566/_localstack/health`, whose `services` map doesn't list `glue`/`athena` even as `"disabled"`; both are gated behind a paid `LOCALSTACK_AUTH_TOKEN` (LocalStack Pro), which this environment does not have. `seedGlueAthena()`'s `create_database`/`create_table` calls and a direct `start_query_execution` call against Athena both fail identically with `"API for service '<x>' not yet implemented or pro feature"`.
+
+Escalated to the user; decision was to **descope** rather than pause for a Pro token or switch to a real AWS account:
+- Tasks 1-3 (backend Matrix fix), 4-5 (frontend Matrix Athena/Glue UI), 6-7 (live Airflow container + readiness wait) are unaffected — they don't depend on LocalStack's Glue/Athena support and are already done, verified, and merged as-is.
+- Task 8 keeps `seedGlueAthena()` in the file (documents exactly what's missing and what a Pro token would unlock) but changed it to **warn and return instead of throwing** on failure, so it can never take down the rest of `global-setup.ts` (SQL Server/Oracle/MinIO/Airflow seeding must keep working regardless of this unrelated, unfixable gap).
+- **Task 9 (live Glue tab spec) and Task 10 (live Athena tab spec) are DROPPED.** There is no live backend to test against. The existing mocked specs (`tests/e2e/19-aws-glue-tab.spec.ts`, `tests/e2e/20-aws-athena-tab.spec.ts`) remain the only Glue/Athena AWS-tab coverage — unchanged, still valid, not touched by this plan.
+- **Task 11 (live Airflow tab spec) proceeds as originally planned** — Airflow has no LocalStack dependency; the container built in Tasks 6-7 is fully real and working.
+- **Task 12 (live Matrix AWS-combinations spec) is DROPPED** in its original form (it depended entirely on live Athena/Glue query execution against LocalStack, which doesn't exist). The Matrix backend fix itself (Tasks 1-3) already has thorough unit coverage (real `AwsAthenaService`/`AwsGlueService`/`AwsS3Runtime` code paths exercised against fakes at the boto3-client boundary, not mocks of the fix's own logic), and the frontend UI (Tasks 4-5) already has non-live Playwright coverage via the existing `tests/e2e/42-live-docker-matrix-reconciliation.spec.ts` (which doesn't require `E2E_LIVE_BACKENDS` — it hits the app's real `/api/compare/matrix` endpoint against file/SQL sources, and exercises the new Athena/Glue UI fields' visibility/isolation). No further live spec is achievable or necessary for this gap.
+- Task 13 (final full-suite verification) is scoped down accordingly: verify SQL Server/Oracle/MinIO/S3/Airflow live specs + Matrix UI specs (42, 26) pass; there is no live Glue/Athena run to include.
+
+---
+
 ## Part A — Backend: fix the Matrix `aws_athena` / `aws_glue` gaps
 
 ### Task 1: `DataSourceSpec` — add Athena/Glue resolution fields
@@ -1078,7 +1092,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 Each spec below follows `tests/e2e/18-aws-s3-tab-live.spec.ts`'s shape: `test.skip(!liveBackends, ...)`, a `beforeAll` that creates a real `Config` via `createConfig`, an `afterAll` that cleans it (and any created jobs) up via `deleteConfig`/`deleteJob`, and assertions against the real backend rather than route mocks.
 
-### Task 9: `tests/e2e/46-aws-glue-tab-live.spec.ts` — live Glue catalog operations
+### Task 9 [DROPPED — see "SCOPE CHANGE" above]: `tests/e2e/46-aws-glue-tab-live.spec.ts` — live Glue catalog operations
 
 **Files:**
 - Create: `tests/e2e/46-aws-glue-tab-live.spec.ts`
@@ -1184,7 +1198,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: `tests/e2e/47-aws-athena-tab-live.spec.ts` — live Athena query execution
+### Task 10 [DROPPED — see "SCOPE CHANGE" above]: `tests/e2e/47-aws-athena-tab-live.spec.ts` — live Athena query execution
 
 **Files:**
 - Create: `tests/e2e/47-aws-athena-tab-live.spec.ts`
@@ -1396,7 +1410,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: `tests/e2e/49-live-docker-matrix-aws-combinations.spec.ts` — Matrix combos across all 4 services
+### Task 12 [DROPPED — see "SCOPE CHANGE" above]: `tests/e2e/49-live-docker-matrix-aws-combinations.spec.ts` — Matrix combos across all 4 services
 
 **Files:**
 - Create: `tests/e2e/49-live-docker-matrix-aws-combinations.spec.ts`
@@ -1573,11 +1587,10 @@ Run: `docker compose -f docker-compose.integration.yml down -v`
 
 - [ ] **Step 2: Run the entire live e2e suite**
 
-Run: `$env:E2E_LIVE_BACKENDS = "1"; npx playwright test` (PowerShell) — this triggers `global-setup.ts` (all seeders + Airflow wait) once, then runs every spec serially (`workers: 1`), including the pre-existing Oracle/SQL Server/S3/SFTP specs alongside the 4 new ones from this plan.
+Run: `$env:E2E_LIVE_BACKENDS = "1"; $env:LIVE_SQLSERVER_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"; npx playwright test` (PowerShell, this host's installed driver — omit/adjust the ODBC var on a machine with Driver 17) — this triggers `global-setup.ts` (SQL Server/Oracle/MinIO seeding, the now-warn-only Glue/Athena seed attempt, Airflow readiness wait) once, then runs every spec serially (`workers: 1`), including the pre-existing Oracle/SQL Server/S3/SFTP specs alongside the ones this plan actually added (Task 11's live Airflow spec; Tasks 9/10/12 were dropped per the SCOPE CHANGE above — do not expect or add specs numbered 46/47/49).
 
-Expected: full PASS. Investigate any failure by category:
-- A `data-testid` mismatch in a new spec -> re-check the actual `frontend/partials/tab-aws.html` markup for that panel and fix the spec's locator.
-- An Athena-related failure -> revisit the Task 8 Step 2 checkpoint note.
+Expected: full PASS, with a `[global-setup] Glue/Athena seed skipped (expected -- ...)` warning line present but not causing any failure. Investigate any real failure by category:
+- A `data-testid` mismatch in the Airflow spec -> re-check the actual `frontend/partials/tab-aws.html` markup for that panel and fix the spec's locator.
 - A timeout on Airflow -> check `docker compose -f docker-compose.integration.yml logs airflow` for scheduler/webserver startup time; raise the relevant test's timeout if the container is simply slow on this machine, don't change the product code to compensate for CI/local Docker speed.
 
 - [ ] **Step 3: Full teardown**
@@ -1599,6 +1612,6 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ## Self-review notes (for whoever executes this plan)
 
-- **Spec coverage:** S3 already had live AWS-tab + job coverage (`18-...spec.ts`, untouched by this plan) — Glue (Task 9), Athena (Task 10), Airflow (Task 11) each get the same shape. Matrix gets both services wired end-to-end (Tasks 1-3 backend, 4-5 frontend) and exercised (Task 12), including the Athena/Glue combinations the original request asked for. Reconcile-as-tracked-job coverage is folded into each per-service live spec (mirroring `18-...spec.ts`'s own "creates tracked jobs and runs them" test) rather than a separate task, since that's exactly how the existing S3 precedent structures it.
-- **Placeholders:** none — every task either has runnable code (backend/frontend/infra) or a fully written spec file. The one deliberately-flagged uncertainty (LocalStack Athena's real query support) is called out as a checkpoint with an explicit, concrete fallback instruction, not a TBD.
-- **Type/name consistency:** `athena_database`/`athena_output_location`/`athena_workgroup`/`glue_database`/`glue_table` are used identically across `api/schemas.py` (Task 1), `compare_service.py`'s `_resolve_source_spec` (Task 3), and `frontend/features/compare.js`'s `_buildMatrixSourceSpec` (Task 4-5) — cross-checked field-by-field while writing this plan.
+- **Spec coverage:** S3 already had live AWS-tab + job coverage (`18-...spec.ts`, untouched by this plan). Airflow (Task 11) gets the same live shape, backed by the real container from Tasks 6-7. Matrix gets both Athena and Glue wired end-to-end at the backend (Tasks 1-3, real `AwsAthenaService`/`AwsGlueService`/`AwsS3Runtime` code paths, unit-tested against fakes at the boto3-client boundary) and frontend (Tasks 4-5, real UI fields + non-live Playwright coverage via the pre-existing `42-live-docker-matrix-reconciliation.spec.ts`). Live Glue/Athena AWS-tab specs and a live Matrix-AWS-combinations spec (originally Tasks 9/10/12) were dropped mid-plan — see "SCOPE CHANGE" above — because LocalStack Community cannot back them at all (not a partial-support gap; the Glue/Athena APIs are entirely absent from the community build), and the user chose to descope rather than pay for LocalStack Pro or wire up real AWS credentials. This is a real, deliberate reduction in what "all relevant combinations" ended up meaning, not an oversight.
+- **Placeholders:** none — every executed task has runnable code (backend/frontend/infra) verified against a real, live container. The dropped tasks are marked `[DROPPED — see "SCOPE CHANGE" above]` in their own headers rather than silently deleted, so their original intent and the reason they didn't ship stays visible.
+- **Type/name consistency:** `athena_database`/`athena_output_location`/`athena_workgroup`/`glue_database`/`glue_table` are used identically across `api/schemas.py` (Task 1), `compare_service.py`'s `_resolve_source_spec` (Task 3), and `frontend/features/compare.js`'s `_buildMatrixSourceSpec` (Task 4-5) — cross-checked field-by-field while writing this plan, and confirmed again during Task 4/5's code review.
