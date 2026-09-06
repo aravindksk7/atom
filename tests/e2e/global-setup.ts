@@ -88,6 +88,16 @@ function seedGlueAthena() {
   // location directly via create_table, matching how a real data lake table
   // looks once already cataloged (which is all _read_glue_table_rows in
   // compare_service.py or a direct AWS-tab Glue call ever needs to see).
+  //
+  // KNOWN GAP: localstack/localstack:3 Community edition does not implement
+  // the Glue or Athena APIs at all (confirmed via GET /_localstack/health --
+  // neither service appears in the response, not even as "disabled"; both
+  // require a paid LOCALSTACK_AUTH_TOKEN / LocalStack Pro). This seed step
+  // will therefore always fail in this environment. It's kept here (rather
+  // than deleted) as the one place that documents exactly what's missing and
+  // exactly what a Pro token would unlock, but it must never take down the
+  // rest of global-setup (SQL Server/Oracle/MinIO/Airflow seeding all still
+  // need to succeed) -- so failure here is caught and logged, not thrown.
   const script = `
 import time
 import boto3
@@ -148,7 +158,11 @@ print("seeded")
 `;
   const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
   if (result.status !== 0) {
-    throw new Error(`Glue/Athena seed failed:\n${result.stdout}\n${result.stderr}`);
+    console.warn(
+      '[global-setup] Glue/Athena seed skipped (expected -- LocalStack Community does not implement Glue/Athena):',
+      result.stderr.trim() || result.stdout.trim(),
+    );
+    return;
   }
   console.log('[global-setup] Glue/Athena seeded:', result.stdout.trim());
 }
