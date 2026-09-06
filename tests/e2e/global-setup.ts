@@ -29,6 +29,7 @@ export default async function globalSetup(_config: FullConfig) {
     seedSqlServer();
     seedOracle();
     seedMinio();
+    waitForAirflow();
   }
 }
 
@@ -77,6 +78,34 @@ print("seeded")
     throw new Error(`MinIO seed failed:\n${result.stdout}\n${result.stderr}`);
   }
   console.log('[global-setup] MinIO seeded:', result.stdout.trim());
+}
+
+function waitForAirflow() {
+  // `docker compose up -d --wait` already blocks on the airflow service's own
+  // Docker healthcheck (docker-compose.integration.yml), so this is a belt-and-
+  // suspenders check that the seeded DAG is actually visible through the REST
+  // API (not just that the process is listening) before any spec tries to use it.
+  const script = `
+import time
+import requests
+
+for attempt in range(30):
+    try:
+        resp = requests.get("http://127.0.0.1:18085/api/v1/dags", auth=("admin", "admin"), timeout=3)
+        if resp.status_code == 200 and any(d["dag_id"] == "etl_orders_daily" for d in resp.json().get("dags", [])):
+            break
+    except Exception:
+        pass
+    time.sleep(2)
+else:
+    raise RuntimeError("Airflow did not report the seeded etl_orders_daily DAG within 60s")
+print("airflow ready")
+`;
+  const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
+  if (result.status !== 0) {
+    throw new Error(`Airflow readiness check failed:\n${result.stdout}\n${result.stderr}`);
+  }
+  console.log('[global-setup] Airflow ready:', result.stdout.trim());
 }
 
 function seedSqlServer() {
