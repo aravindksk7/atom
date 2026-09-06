@@ -163,12 +163,21 @@ services:
         (airflow scheduler &) &&
         exec airflow webserver --port 8080
     healthcheck:
+      # /health always returns HTTP 200 with a per-component JSON body -- it
+      # does NOT turn non-200 when a component is down, so a plain "did the
+      # request succeed" check (this file's usual sapbo/sapds pattern) would
+      # report this container healthy even if the backgrounded `airflow
+      # scheduler &` process (started fire-and-forget by `command:` above,
+      # never itself supervised) died right after launch. Parse the body and
+      # require the scheduler component specifically to be healthy.
       test:
         - CMD
         - python
         - -c
         - >-
-          import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3).read()
+          import json, urllib.request;
+          body = json.loads(urllib.request.urlopen('http://localhost:8080/health', timeout=3).read());
+          exit(0 if body.get('scheduler', {}).get('status') == 'healthy' and body.get('metadatabase', {}).get('status') == 'healthy' else 1)
       interval: 10s
       timeout: 5s
       retries: 40
