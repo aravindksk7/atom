@@ -63,7 +63,11 @@ class DSAPIError(ETLFrameworkError):
         self.job_name = job_name
         self.http_status = http_status
         self.response_body = response_body
-        super().__init__(f"SAP DS API error {http_status} for job '{job_name}'")
+        snippet = response_body.strip()[:500] if response_body else ""
+        message = f"SAP DS API error {http_status} for job '{job_name}'"
+        if snippet:
+            message = f"{message}: {snippet}"
+        super().__init__(message)
 
 
 class ReportOutputError(ETLFrameworkError):

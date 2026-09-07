@@ -128,8 +128,8 @@
 
     matrixSourceAType: 'file',
     matrixSourceBType: 'sql',
-    matrixSourceA: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source A' },
-    matrixSourceB: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source B' },
+    matrixSourceA: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', athenaDatabase: '', athenaOutputLocation: '', athenaWorkgroup: '', glueDatabase: '', glueTable: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source A' },
+    matrixSourceB: { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', athenaDatabase: '', athenaOutputLocation: '', athenaWorkgroup: '', glueDatabase: '', glueTable: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: 'Source B' },
     matrixKeyColumns: '',
     matrixExcludeColumns: '',
     matrixNumericTolerance: '0.0',
@@ -494,14 +494,17 @@
     // and -- like BO -- only ever needs to handle repeatable sources, since
     // _assertCompareJobSourcesAreRepeatable rejects an upload at save time.
     _hydrateMatrixSourceFromConfig(cfg) {
-      const base = { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: '' };
+      const base = { configId: '', connectionName: '', queryOrTable: '', filePath: '', fileB64: '', fileName: '', athenaQuery: '', athenaDatabase: '', athenaOutputLocation: '', athenaWorkgroup: '', glueDatabase: '', glueTable: '', docId: '', reportId: '', endpointUrl: '', httpMethod: 'GET', label: '' };
       if (!cfg) return { type: 'file', src: base };
       const type = cfg.source_type || 'file';
       if (type === 'sql') {
         return { type, src: { ...base, configId: cfg.config_id ?? '', connectionName: cfg.connection_name || '', queryOrTable: cfg.query_or_table || '' } };
       }
       if (type === 'aws_athena') {
-        return { type, src: { ...base, configId: cfg.config_id ?? '', athenaQuery: cfg.query_or_table || '' } };
+        return { type, src: { ...base, configId: cfg.config_id ?? '', athenaQuery: cfg.query_or_table || '', athenaDatabase: cfg.athena_database || '', athenaOutputLocation: cfg.athena_output_location || '', athenaWorkgroup: cfg.athena_workgroup || '' } };
+      }
+      if (type === 'aws_glue') {
+        return { type, src: { ...base, configId: cfg.config_id ?? '', glueDatabase: cfg.glue_database || '', glueTable: cfg.glue_table || '' } };
       }
       if (type === 'sap_bo') {
         return { type, src: { ...base, configId: cfg.config_id ?? '', docId: cfg.bo_doc_id || '', reportId: cfg.bo_report_id || '' } };
@@ -1076,6 +1079,13 @@
       } else if (type === 'aws_athena') {
         if (src.configId) spec.config_id = parseInt(src.configId, 10);
         if (src.athenaQuery || src.queryOrTable) spec.query_or_table = src.athenaQuery || src.queryOrTable;
+        if (src.athenaDatabase) spec.athena_database = src.athenaDatabase;
+        if (src.athenaOutputLocation) spec.athena_output_location = src.athenaOutputLocation;
+        if (src.athenaWorkgroup) spec.athena_workgroup = src.athenaWorkgroup;
+      } else if (type === 'aws_glue') {
+        if (src.configId) spec.config_id = parseInt(src.configId, 10);
+        if (src.glueDatabase) spec.glue_database = src.glueDatabase;
+        if (src.glueTable) spec.glue_table = src.glueTable;
       } else if (type === 'sap_bo') {
         if (src.configId) spec.config_id = parseInt(src.configId, 10);
         if (src.docId) spec.bo_doc_id = src.docId;

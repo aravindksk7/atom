@@ -20,6 +20,7 @@ def extract_data_source(spec: dict[str, Any], db_session: Any | None = None) -> 
     - "file": local filesystem path or base64 encoded data
     - "sql": database query or table execution
     - "aws_athena": S3/Athena query execution or runner
+    - "aws_glue": pre-resolved rows from a Glue-catalog S3 object (resolved upstream)
     - "api": HTTP REST endpoint payload
     - "sap_bo": SAP BO report snapshot or client fetch
     """
@@ -35,6 +36,8 @@ def extract_data_source(spec: dict[str, Any], db_session: Any | None = None) -> 
         return _extract_sql_source(spec, db_session=db_session)
     elif source_type == "aws_athena":
         return _extract_athena_source(spec)
+    elif source_type == "aws_glue":
+        return _extract_glue_source(spec)
     elif source_type == "api":
         return _extract_api_source(spec)
     elif source_type == "sap_bo":
@@ -149,6 +152,22 @@ def _extract_athena_source(spec: dict[str, Any]) -> pd.DataFrame:
         return pd.DataFrame(raw_data)
 
     raise ValueError("AWS Athena data source requires 'query_runner', 'query', or mock data in spec")
+
+
+def _extract_glue_source(spec: dict[str, Any]) -> pd.DataFrame:
+    """Unlike _extract_athena_source/_extract_sap_bo_source (which accept an inline
+    client and can call it directly), this intentionally has NO live-client dispatch
+    branch — real Glue/S3 resolution is deferred to a later task in
+    api/services/compare_service.py. This function only ever sees pre-resolved rows.
+    """
+    if "df" in spec or "data" in spec or "rows" in spec:
+        raw_data = spec.get("df") or spec.get("data") or spec.get("rows")
+        return pd.DataFrame(raw_data)
+
+    raise ValueError(
+        "AWS Glue data source requires pre-resolved 'rows'/'data' "
+        "(resolve config_id -> S3 object via CompareService before calling extract_data_source)"
+    )
 
 
 def _extract_api_source(spec: dict[str, Any]) -> pd.DataFrame:

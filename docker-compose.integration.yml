@@ -120,6 +120,69 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
 
+  airflow:
+    # Single-container "standalone-ish" Airflow: SequentialExecutor + its default
+    # sqlite metadata DB (no Postgres/MySQL sidecar needed for a throwaway e2e
+    # container). `airflow users create` gives us the deterministic admin/admin
+    # credentials AwsAirflowRuntime._standalone_client's basic auth expects --
+    # the built-in `airflow standalone` CLI command instead generates a random
+    # password per boot, which would defeat a fixed e2e Config.
+    image: apache/airflow:2.9.3-python3.11
+    container_name: atom-airflow-integration
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # A newly-parsed DAG defaults to paused, and Airflow's scheduler will
+      # NOT queue tasks for a run on a paused DAG even when that run was
+      # created by an explicit manual trigger (confirmed empirically: a
+      # triggered run on a paused DAG sits at state=queued with
+      # last_scheduling_decision=null forever; unpausing immediately lets
+      # the same run proceed to running/success). Since this container's
+      # only DAG exists purely to be triggered by e2e tests, default it
+      # (and any future DAG dropped into the seed folder) to unpaused.
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      # Scan the dags folder every 5s (default 30s) so the seeded DAG is
+      # visible via the REST API well within a healthcheck-based wait.
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "5"
+      # Default REST API auth backend is airflow.api.auth.backend.session,
+      # which only accepts a browser session cookie -- any request with plain
+      # HTTP Basic Auth (which is all AirflowRestClient/_standalone_client
+      # ever sends) gets a 403 regardless of whether the credentials are
+      # correct. basic_auth is the backend that actually checks username/password.
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+    volumes:
+      - ./docker/airflow-seed/dags:/opt/airflow/dags
+    ports:
+      - "18085:8080"
+    command:
+      - bash
+      - -c
+      - >-
+        airflow db migrate &&
+        (airflow users create --username admin --password admin --firstname E2E --lastname Admin --role Admin --email admin@example.com || true) &&
+        (airflow scheduler &) &&
+        exec airflow webserver --port 8080
+    healthcheck:
+      # /health always returns HTTP 200 with a per-component JSON body -- it
+      # does NOT turn non-200 when a component is down, so a plain "did the
+      # request succeed" check (this file's usual sapbo/sapds pattern) would
+      # report this container healthy even if the backgrounded `airflow
+      # scheduler &` process (started fire-and-forget by `command:` above,
+      # never itself supervised) died right after launch. Parse the body and
+      # require the scheduler component specifically to be healthy.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          body = json.loads(urllib.request.urlopen('http://localhost:8080/health', timeout=3).read());
+          exit(0 if body.get('scheduler', {}).get('status') == 'healthy' and body.get('metadatabase', {}).get('status') == 'healthy' else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 40s
+
   gitlab:
     build:
       context: ./docker/gitlab-mock

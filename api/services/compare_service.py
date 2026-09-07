@@ -1,8 +1,10 @@
 from __future__ import annotations
+import io
 import logging
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from fastapi import HTTPException
@@ -956,10 +958,110 @@ class CompareService:
     # Matrix comparison
     # ------------------------------------------------------------------
 
+    _GLUE_INPUT_FORMAT_TO_FMT = {
+        "parquet": "parquet",
+        "orc": "orc",
+        "json": "json",
+        "text": "csv",  # Hive's TextInputFormat + LazySimpleSerDe is the CSV-shaped default
+    }
+
+    def _glue_object_format(self, input_format: str | None) -> str:
+        name = (input_format or "").lower()
+        for needle, fmt in self._GLUE_INPUT_FORMAT_TO_FMT.items():
+            if needle in name:
+                return fmt
+        raise HTTPException(status_code=422, detail=f"Unsupported Glue input format: {input_format!r}")
+
+    @staticmethod
+    def _parse_s3_uri(uri: str) -> tuple[str, str]:
+        if not uri or not uri.startswith("s3://"):
+            raise HTTPException(status_code=422, detail=f"Unsupported Glue table location: {uri!r}")
+        rest = uri[len("s3://"):]
+        bucket, _, prefix = rest.partition("/")
+        return bucket, prefix
+
+    def _read_glue_table_rows(self, config_id: int, database: str, table: str) -> list[dict[str, Any]]:
+        from api.services.aws_glue_service import AwsGlueService
+        from api.services.aws_s3_runtime import AwsS3Runtime
+
+        described = AwsGlueService(self._config_repo).describe_table(config_id, database, table)
+        fmt = self._glue_object_format(described.input_format)
+        bucket, prefix = self._parse_s3_uri(described.location or "")
+        client = AwsS3Runtime(self._config_repo).client(config_id)
+        data_key = next((obj["Key"] for obj in client.list_objects(bucket, prefix) if not obj["Key"].endswith("/")), None)
+        if data_key is None:
+            raise HTTPException(status_code=404, detail=f"No objects found under s3://{bucket}/{prefix}")
+        raw = client.get_object(bucket, data_key)
+        buf = io.BytesIO(raw)
+        if fmt == "parquet":
+            df = pd.read_parquet(buf)
+        elif fmt == "orc":
+            import pyarrow.orc as orc
+            df = orc.ORCFile(buf).read().to_pandas()
+        elif fmt == "json":
+            df = pd.read_json(buf, lines=True)
+        else:
+            df = pd.read_csv(buf)
+        return df.to_dict(orient="records")
+
+    def _resolve_source_spec(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Turn a config_id-bearing aws_athena/aws_glue DataSourceSpec dict into
+        the query_runner/rows shape etl_framework.reconciliation.data_sources
+        already knows how to consume. A spec that already carries a query_runner
+        (or df/data/rows) is left untouched -- this only fills the gap for the
+        real, config_id-driven path the Matrix UI actually sends.
+        """
+        source_type = str(spec.get("source_type") or "").lower()
+        config_id = spec.get("config_id")
+        if config_id is None:
+            return spec
+
+        if source_type == "aws_athena" and not any(
+            k in spec for k in ("query_runner", "athena_service", "athena_runtime", "runner", "df", "data", "rows")
+        ):
+            from api.services.aws_athena_service import AwsAthenaService
+
+            output_location = spec.get("athena_output_location")
+            if not output_location:
+                raise HTTPException(
+                    status_code=422,
+                    detail="athena_output_location is required on an aws_athena Matrix source using config_id",
+                )
+            query = spec.get("query_or_table") or spec.get("query")
+            if not query:
+                raise HTTPException(
+                    status_code=422,
+                    detail="query_or_table is required on an aws_athena Matrix source using config_id",
+                )
+            service = AwsAthenaService(self._config_repo)
+            database = spec.get("athena_database")
+            workgroup = spec.get("athena_workgroup")
+
+            class _Runner:
+                def run_query(_self, q: str) -> list[dict[str, Any]]:
+                    return service.run_query(config_id, database, q, output_location, workgroup).results.rows
+
+            return {**spec, "query_runner": _Runner()}
+
+        if source_type == "aws_glue" and not any(k in spec for k in ("df", "data", "rows")):
+            database = spec.get("glue_database")
+            table = spec.get("glue_table")
+            if not database or not table:
+                raise HTTPException(
+                    status_code=422,
+                    detail="glue_database and glue_table are required on an aws_glue Matrix source",
+                )
+            rows = self._read_glue_table_rows(config_id, database, table)
+            return {**spec, "rows": rows}
+
+        return spec
+
     def compare_matrix(self, req: MatrixCompareRequest) -> "ReconciliationResult":
         """Execute matrix comparison between source_a and source_b and return result."""
         spec_a = req.source_a.model_dump() if hasattr(req.source_a, "model_dump") else req.source_a
         spec_b = req.source_b.model_dump() if hasattr(req.source_b, "model_dump") else req.source_b
+        spec_a = self._resolve_source_spec(spec_a)
+        spec_b = self._resolve_source_spec(spec_b)
         df_a = extract_data_source(spec_a, self._db)
         df_b = extract_data_source(spec_b, self._db)
 

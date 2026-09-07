@@ -10,6 +10,7 @@ const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
 const JOB_NAME = 'e2e_saved_bo_compare';
 const RECON_JOB_NAME = 'e2e_saved_recon_file_compare';
 const REPORT_JOB_NAME = 'e2e_saved_recon_file_compare_report';
+const MATRIX_ATHENA_JOB_NAME = 'e2e_saved_matrix_athena_compare';
 
 async function openBOCompare(page: import('@playwright/test').Page) {
   await page.goto('/');
@@ -24,12 +25,19 @@ async function openFileCompare(page: import('@playwright/test').Page) {
   await page.locator('[data-testid="compare-recon-mode-file"]').click();
 }
 
+async function openMatrixCompare(page: import('@playwright/test').Page) {
+  await page.goto('/');
+  await page.locator('[data-testid="nav-tab-compare"]').click();
+  await page.locator('[data-testid="compare-subtab-matrix"]').click();
+}
+
 test.describe('26 compare / save as job', () => {
   test.afterEach(async ({ adminToken }) => {
     const ctx = await authedContext(adminToken);
     await deleteJob(ctx, JOB_NAME);
     await deleteJob(ctx, RECON_JOB_NAME);
     await deleteJob(ctx, REPORT_JOB_NAME);
+    await deleteJob(ctx, MATRIX_ATHENA_JOB_NAME);
     await ctx.dispose();
   });
 
@@ -217,5 +225,44 @@ test.describe('26 compare / save as job', () => {
     } finally {
       await ctx.dispose();
     }
+  });
+
+  test('editing a saved Matrix Athena compare job reflects the saved database/output-location/workgroup', async ({ authedPage }) => {
+    // Regression coverage for _hydrateMatrixSourceFromConfig (frontend/features/compare.js)
+    // dropping athena_database/athena_output_location/athena_workgroup on reload: those
+    // three fields were added to _buildMatrixSourceSpec's aws_athena branch (so a saved
+    // job's request.source_a carries them) but the reverse mapping used when re-opening a
+    // saved Matrix job for edit did not read them back off cfg, so the fields silently
+    // reset to blank in the UI even though the job itself still held the saved values.
+    await openMatrixCompare(authedPage);
+
+    await authedPage.locator('[data-testid="compare-matrix-source-a-mode-athena"]').click();
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-query-textarea"]').fill('SELECT * FROM athena_db.table_a');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-database-input"]').fill('raw');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-output-location-input"]').fill('s3://bucket/athena-output/');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-workgroup-input"]').fill('primary');
+
+    await authedPage.locator('[data-testid="compare-matrix-source-b-mode-file"]').click();
+    await authedPage.locator('[data-testid="compare-matrix-source-b-path-input"]').fill(path.join(FIXTURE_DIR, 'target.csv'));
+    await authedPage.locator('[data-testid="matrix-key-columns-input"]').fill('id');
+
+    await authedPage.locator('[data-testid="compare-matrix-save-job-btn"]').click();
+    await expect(authedPage.locator('[data-testid="compare-save-job-modal"]')).toBeVisible();
+    await authedPage.locator('[data-testid="compare-save-job-name"]').fill(MATRIX_ATHENA_JOB_NAME);
+    await authedPage.locator('[data-testid="compare-save-job-confirm"]').click();
+    await expect(authedPage.locator('[data-testid="compare-save-job-modal"]')).toBeHidden();
+
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await expect(authedPage.locator(`[data-testid="job-row-${MATRIX_ATHENA_JOB_NAME}"]`)).toBeVisible();
+
+    // Edit must reopen the Matrix subtab with the Athena fields faithfully reflected,
+    // not reset to blank -- this is exactly the reload path _hydrateMatrixSourceFromConfig
+    // drives (frontend/features/launch.js's openCompareForJob).
+    await authedPage.locator(`[data-testid="job-row-${MATRIX_ATHENA_JOB_NAME}-edit-btn"]`).click();
+    await expect(authedPage.locator('[data-testid="compare-subtab-matrix"]')).toHaveClass(/active/);
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-query-textarea"]')).toHaveValue('SELECT * FROM athena_db.table_a');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-database-input"]')).toHaveValue('raw');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-output-location-input"]')).toHaveValue('s3://bucket/athena-output/');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-workgroup-input"]')).toHaveValue('primary');
   });
 });

@@ -14,7 +14,8 @@ async function openMatrix(page: import('@playwright/test').Page) {
 const MODE_FIELDS: Record<string, string[]> = {
   sql: ['config-select', 'query-textarea'],
   file: ['path-input', 'upload-input'],
-  athena: ['athena-config', 'athena-query-textarea'],
+  athena: ['athena-config', 'athena-query-textarea', 'athena-database-input', 'athena-output-location-input', 'athena-workgroup-input'],
+  glue: ['glue-config', 'glue-database-input', 'glue-table-input'],
   bo: ['bo-config', 'bo-doc', 'bo-report'],
   api: ['api-url-input'],
 };
@@ -81,6 +82,26 @@ test.describe('Live Docker Cross-Source Matrix Reconciliation Web UI', () => {
     await authedPage.locator('[data-testid="btn-run-matrix-compare"]').click();
 
     await expect(authedPage.locator('[data-testid="matrix-compare-results"]')).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('Athena mode collects database, output location, and workgroup', async ({ authedPage }) => {
+    await openMatrix(authedPage);
+    await authedPage.locator('[data-testid="compare-matrix-source-a-mode-athena"]').click();
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-database-input"]').fill('raw');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-output-location-input"]').fill('s3://bucket/athena-output/');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-athena-workgroup-input"]').fill('primary');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-database-input"]')).toHaveValue('raw');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-output-location-input"]')).toHaveValue('s3://bucket/athena-output/');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-athena-workgroup-input"]')).toHaveValue('primary');
+  });
+
+  test('Glue mode is selectable and collects database/table', async ({ authedPage }) => {
+    await openMatrix(authedPage);
+    await authedPage.locator('[data-testid="compare-matrix-source-a-mode-glue"]').click();
+    await authedPage.locator('[data-testid="compare-matrix-source-a-glue-database-input"]').fill('raw');
+    await authedPage.locator('[data-testid="compare-matrix-source-a-glue-table-input"]').fill('orders');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-glue-database-input"]')).toHaveValue('raw');
+    await expect(authedPage.locator('[data-testid="compare-matrix-source-a-glue-table-input"]')).toHaveValue('orders');
   });
 
   test('every Source A mode reveals only its own fields', async ({ authedPage }) => {

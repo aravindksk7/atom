@@ -1268,6 +1268,11 @@ class DataSourceSpec(BaseModel):
     headers: dict[str, str] | None = None
     bo_doc_id: str | None = None
     bo_report_id: str | None = None
+    athena_database: str | None = None
+    athena_output_location: str | None = None
+    athena_workgroup: str | None = None
+    glue_database: str | None = None
+    glue_table: str | None = None
 
 
 class MatrixCompareRequest(BaseModel):
