@@ -161,6 +161,28 @@ def test_trigger_job_posts_to_execute_servlet_using_default_repository(authentic
     assert sent_form["JOB_SERVER"] == "DS.EXAMPLE.COM:3500"
 
 
+def test_trigger_job_ignores_ds_url_path_and_uses_server_origin(env_config):
+    """Regression test for the 2026-09-08 live 404: this on-prem instance's
+    ds_url is "https://qetl111/DataServices/launch/" -- login is genuinely
+    nested under "/launch", but AwBatchJobExecute is a sibling servlet at
+    the origin. trigger_job must resolve against scheme+host only, not
+    ds_url's configured path, or it doubles "/DataServices" and pulls in
+    the extra "/launch" segment."""
+    from etl_framework.sap_ds.client import DSRestClient
+
+    cfg = env_config.model_copy(update={"ds_url": "https://qetl111/DataServices/launch/"})
+    client = DSRestClient(cfg)
+    client._token = "fake-ds-token-123"
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "<html>submitted</html>"
+    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+        client.trigger_job("DS_NIGHTLY_LOAD")
+
+    called_url = mock_post.call_args[0][0]
+    assert called_url == "https://qetl111/DataServices/servlet/AwBatchJobExecute"
+
+
 def test_trigger_job_uses_explicit_repository_override(authenticated_client):
     mock_response = MagicMock()
     mock_response.status_code = 200

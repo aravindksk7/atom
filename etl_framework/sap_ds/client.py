@@ -32,6 +32,17 @@ class DSRestClient:
       "Content-Type: application/x-www-form-urlencoded", not JSON. See
       trigger_job's docstring for the still-unverified parts (CSRF/session
       handling, response shape) carried over from that capture.
+    - TRIGGER_ENDPOINT is resolved against the server origin
+      (scheme+host+port from ds_url), NOT ds_url's configured path.
+      Confirmed live 2026-09-08: this on-prem instance's ds_url is
+      "https://qetl111/DataServices/launch/" -- login is genuinely nested
+      under that "/launch" path, but AwBatchJobExecute is not, it's a
+      sibling servlet directly under "/DataServices/" at the origin.
+      Concatenating ds_url + TRIGGER_ENDPOINT the way login does doubled
+      "/DataServices" and pulled in the extra "/launch" segment, producing
+      a 404 (SAP's generic "Missing Page" template, not an app-level
+      "job not found" -- that distinction is what pointed at a routing
+      bug rather than an auth/job-name one).
 
     STATUS_ENDPOINT below is still the original unverified REST-style
     guess -- expect it to need the same servlet-based rework once
@@ -137,6 +148,15 @@ class DSRestClient:
           working-hypothesis run id for get_job_status/wait_for_completion
           to poll with -- also still unverified, since STATUS_ENDPOINT
           hasn't been checked against a live response yet.
+
+        Confirmed live 2026-09-08: unlike login (which is genuinely nested
+        under ds_url's configured path, e.g. ".../DataServices/launch/"),
+        this servlet lives at the server origin + TRIGGER_ENDPOINT
+        regardless of whatever path ds_url carries -- concatenating onto
+        self._base_url the way login does doubled "/DataServices" and
+        pulled in an extra "/launch" segment that doesn't belong here,
+        producing a 404. Built from urlparse(self._base_url)'s scheme+host
+        instead, matching the captured browser request exactly.
         """
         if not self._token:
             self.login()
@@ -147,7 +167,9 @@ class DSRestClient:
                 "or 'repository' in the job's params",
             )
         guid = str(uuid.uuid4())
-        host = urlparse(self._base_url).hostname or ""
+        parsed_base = urlparse(self._base_url)
+        host = parsed_base.hostname or ""
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
         form = {
             "SAMPLE_RATE": "5",
             "AUDIT_CONTROL": "",
@@ -167,7 +189,7 @@ class DSRestClient:
         }
         for key, value in (job_params or {}).items():
             form[key] = "" if value is None else str(value)
-        url = f"{self._base_url}{self.TRIGGER_ENDPOINT}"
+        url = f"{origin}{self.TRIGGER_ENDPOINT}"
         response = self._session.post(
             url,
             data=form,
