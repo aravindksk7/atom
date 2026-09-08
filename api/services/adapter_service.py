@@ -472,6 +472,13 @@ class AdapterService:
 
     def lookup_ds_job(self, config_id: int, identifier: str, id_type: str, repository: str | None = None) -> SAPDSJobStatusOut:
         from datetime import datetime, timezone
+        if id_type == "run_id":
+            raise HTTPException(
+                status_code=400,
+                detail="SAP DS job lookup by run_id is not supported by this on-prem instance's "
+                       "API -- there is no run-id-keyed status endpoint, only a job-name-keyed "
+                       "history lookup. Use id_type='job_name' instead.",
+            )
         env = self._get_env_config(config_id)
         repo = repository or env.ds_repository
         try:

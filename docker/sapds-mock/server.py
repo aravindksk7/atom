@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import ssl
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,20 +22,37 @@ TOKEN = "mock-sapds-token"
 # DSRestClient.trigger_job's docstring). The client's submitted GUID form
 # field is used as the run id key, since the client no longer reads a
 # server-generated id out of the (HTML, not JSON) response body.
-# Each entry's outcome is reached after JOB_POLLS_TO_TERMINAL polls of
-# GET /BatchJob/{repository}/status/{run_id} -- first poll(s) return "Running"
-# to exercise the client's poll loop, not just its terminal-status parsing.
-# STATUS_ENDPOINT itself is still the original unverified REST-style guess,
-# unchanged here pending a live capture of how the console actually reports
-# job status.
+#
+# Status is checked via GET /DataServices/servlet/AwBatchJobHistory
+# (matching the live 2026-09-08 capture -- see
+# DSRestClient.get_job_status's docstring), keyed by JobName since there's
+# no run-id-keyed status endpoint on the real app. Each entry's outcome is
+# reached after JOB_POLLS_TO_TERMINAL polls -- earlier polls return an
+# empty listing (simulating the run not yet appearing in history) to
+# exercise the client's "no matching row -> keep polling" path, not just
+# its terminal-icon parsing.
 SCHEDULABLE_JOBS = {
-    "DS_NIGHTLY_LOAD": "Completed",
-    "DS_BAD_LOAD": "Error",
+    "DS_NIGHTLY_LOAD": "green",
+    "DS_BAD_LOAD": "red",
 }
 JOB_POLLS_TO_TERMINAL = 2
 
 # run_id (client-submitted GUID) -> {"job_name": str, "polls_seen": int}
 _JOB_RUNS: dict[str, dict] = {}
+
+
+def _history_html(rows: list[tuple[str, str]]) -> str:
+    """rows: list of (job_name, icon_color). Matches the real
+    AwBatchJobHistory row structure closely enough for DSRestClient's
+    regex-based scraping (class=tablerow lowercase, a bare
+    class="cell" nowrap job-name cell, a circ{color}.gif status icon)."""
+    row_html = "".join(
+        f"""<TR  class=tablerow ><TD ><input type="checkbox" Name="CBG1" Value="1"></TD>
+        <TD  class="cell" nowrap align=CENTER><IMG alt='' src='../images/circ{icon}.gif'></TD>
+        <TD  class="cell" nowrap>{job_name}</TD></TR>"""
+        for job_name, icon in rows
+    )
+    return f"<html><body><TABLE><TBODY>{row_html}</TBODY></TABLE></body></html>"
 
 
 class SAPDSMockHandler(BaseHTTPRequestHandler):
@@ -79,19 +95,23 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
         if not self._require_token():
             return
 
-        status_match = re.fullmatch(r"/BatchJob/([^/]+)/status/([^/]+)", path)
-        if status_match:
-            _repository, run_id = status_match.groups()
-            run = _JOB_RUNS.get(run_id)
+        if path == "/DataServices/servlet/AwBatchJobHistory":
+            query = parse_qs(parsed.query)
+            job_name = query.get("JobName", [""])[0]
+            run = None
+            for candidate in reversed(list(_JOB_RUNS.values())):
+                if candidate["job_name"] == job_name:
+                    run = candidate
+                    break
             if run is None:
-                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"run {run_id} not found"})
+                self._send_html(HTTPStatus.OK, _history_html([]))
                 return
             run["polls_seen"] += 1
             if run["polls_seen"] < JOB_POLLS_TO_TERMINAL:
-                self._send_json(HTTPStatus.OK, {"id": run_id, "status": "Running"})
+                self._send_html(HTTPStatus.OK, _history_html([]))
             else:
-                terminal_status = SCHEDULABLE_JOBS[run["job_name"]]
-                self._send_json(HTTPStatus.OK, {"id": run_id, "status": terminal_status})
+                icon = SCHEDULABLE_JOBS[job_name]
+                self._send_html(HTTPStatus.OK, _history_html([(job_name, icon)]))
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})

@@ -776,7 +776,9 @@ def test_ds_job_returns_passed_on_success():
     run = RunRepository(db).get_run("r-dsj")
     assert run.results[0].status == TestStatus.PASSED.value
     inst.trigger_job.assert_called_once_with("DS_NIGHTLY_LOAD", None, None)
-    inst.wait_for_completion.assert_called_once_with("run-1", repository=None, timeout_s=600, poll_interval_s=5)
+    inst.wait_for_completion.assert_called_once_with(
+        "DS_NIGHTLY_LOAD", run_id="run-1", repository=None, timeout_s=600, poll_interval_s=5,
+    )
     inst.logout.assert_called_once()
 
 
@@ -840,7 +842,9 @@ def test_ds_job_returns_error_on_timeout():
 
     run = RunRepository(db).get_run("r-dsj-timeout")
     assert run.results[0].status == TestStatus.ERROR.value
-    inst.wait_for_completion.assert_called_once_with("run-3", repository=None, timeout_s=1, poll_interval_s=1)
+    inst.wait_for_completion.assert_called_once_with(
+        "DS_NIGHTLY_LOAD", run_id="run-3", repository=None, timeout_s=1, poll_interval_s=1,
+    )
 
 
 def test_ds_job_passes_repository_and_job_params_through():
@@ -878,7 +882,7 @@ def test_ds_job_passes_repository_and_job_params_through():
         "DS_NIGHTLY_LOAD", "OTHER_REPO", {"$G_RUN_DATE": "2026-07-24"},
     )
     inst.wait_for_completion.assert_called_once_with(
-        "run-4", repository="OTHER_REPO", timeout_s=600, poll_interval_s=5,
+        "DS_NIGHTLY_LOAD", run_id="run-4", repository="OTHER_REPO", timeout_s=600, poll_interval_s=5,
     )
 
 
