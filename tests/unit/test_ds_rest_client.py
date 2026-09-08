@@ -284,6 +284,25 @@ def test_get_job_status_uses_repository_override(authenticated_client):
     assert called_url == "http://ds.example.com/BatchJob/OTHER_REPO/status/run-42"
 
 
+def test_get_job_status_ignores_ds_url_path_and_uses_server_origin(env_config):
+    """Regression test for the 2026-09-08 live 404: same bug class as
+    trigger_job's -- ds_url "https://qetl111/DataServices/launch/" must not
+    have its "/launch" path carried into the status check URL."""
+    from etl_framework.sap_ds.client import DSRestClient
+
+    cfg = env_config.model_copy(update={"ds_url": "https://qetl111/DataServices/launch/"})
+    client = DSRestClient(cfg)
+    client._token = "fake-ds-token-123"
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "run-42", "status": "Completed"}
+    with patch.object(client._session, "get", return_value=mock_response) as mock_get:
+        client.get_job_status("run-42")
+
+    called_url = mock_get.call_args[0][0]
+    assert called_url == "https://qetl111/BatchJob/DS_REPO/status/run-42"
+
+
 def test_get_job_status_treats_unrecognized_status_as_running(authenticated_client, caplog):
     mock_response = MagicMock()
     mock_response.status_code = 200

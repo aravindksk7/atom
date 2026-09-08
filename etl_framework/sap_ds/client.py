@@ -44,9 +44,12 @@ class DSRestClient:
       "job not found" -- that distinction is what pointed at a routing
       bug rather than an auth/job-name one).
 
-    STATUS_ENDPOINT below is still the original unverified REST-style
-    guess -- expect it to need the same servlet-based rework once
-    trigger_job's remaining unknowns are ironed out.
+    STATUS_ENDPOINT's path is still the original unverified REST-style
+    guess -- expect it to need the same servlet-based rework
+    (AwBatchJobExecute worked live as of 2026-09-08) once a live capture
+    of an actual status/history check is available. It's at least
+    resolved against the server origin now too, same as TRIGGER_ENDPOINT,
+    since that part of the bug is confirmed to apply here as well.
     """
 
     LOGIN_ENDPOINT = "/logon"
@@ -224,7 +227,22 @@ class DSRestClient:
         triggered batch job run and map it to TestStatus. Non-terminal DS
         states (Running/Pending/Queued) and any unrecognized status string
         both map to TestStatus.RUNNING, so callers keep polling instead of
-        mis-reading an unknown state as done."""
+        mis-reading an unknown state as done.
+
+        STATUS_ENDPOINT is still the ORIGINAL never-verified REST-style
+        guess -- unlike trigger_job, we don't have a live capture of a real
+        status/history check to model this on yet. Confirmed live
+        2026-09-08 that at minimum it has the same origin-vs-ds_url-path
+        bug trigger_job had (this on-prem ds_url is
+        "https://qetl111/DataServices/launch/", and status was 404ing at
+        ".../launch/BatchJob/.../status/..."), so resolving against the
+        server origin like trigger_job now does -- but the "/BatchJob/
+        {repository}/status/{run_id}" path itself is still unconfirmed and
+        will very likely also need the same servlet-based rework (probably
+        something in the AwBatchJobHistory family, per the "HISTORY" field
+        seen in the AwBatchJobExecute capture) once a live capture of an
+        actual status check is available.
+        """
         if not self._token:
             self.login()
         repo = repository or self._default_repository
@@ -233,7 +251,9 @@ class DSRestClient:
                 "ds_job requires a repository: set 'ds_repository' in the environment config "
                 "or 'repository' in the job's params",
             )
-        url = f"{self._base_url}{self.STATUS_ENDPOINT.format(repository=repo, run_id=run_id)}"
+        parsed_base = urlparse(self._base_url)
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+        url = f"{origin}{self.STATUS_ENDPOINT.format(repository=repo, run_id=run_id)}"
         response = self._session.get(
             url,
             headers={"Accept": "application/json"},
