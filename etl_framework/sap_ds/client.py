@@ -272,6 +272,19 @@ class DSRestClient:
           in-progress icon exists yet either -- any icon other than
           green/red, and the case of no matching history row yet, both
           fall back to RUNNING (keep polling) rather than guessing.
+
+        OPEN QUESTION as of 2026-09-08: a live run of a job known to finish
+        in ~4s (per its own trace log) instead timed out after the full
+        600s here, meaning get_job_status never found a matching row the
+        entire time. Suspect this GET-with-query-params approach may not
+        actually apply the JobName/GROUP_TIME_RADIO filter the way the
+        app's own "tab" link navigation does -- classic legacy-JSP-app
+        behavior is for a bare GET to render a default/unfiltered view and
+        only a real form POST to execute the search. Every call now logs a
+        compact INFO line (row counts, matched-or-not, resolved status) and
+        the full response body at DEBUG when nothing matches, specifically
+        to get real evidence on this before guessing further (e.g. before
+        switching this to a POST).
         """
         if not self._token:
             self.login()
@@ -307,15 +320,23 @@ class DSRestClient:
                 job_name=job_name, http_status=response.status_code, response_body=response.text,
                 url=response.url,
             )
-        for row_html in self._HISTORY_ROW_RE.findall(response.text):
+        all_rows = self._HISTORY_ROW_RE.findall(response.text)
+        matched_row = None
+        for row_html in all_rows:
             name_match = self._HISTORY_ROW_JOB_NAME_RE.search(row_html)
             if name_match and name_match.group(1).strip() == job_name:
-                return self._parse_history_row_status(row_html)
-        logger.debug(
-            "No AwBatchJobHistory row yet for job %r (run_id=%s) -- treating as still running",
-            job_name, run_id,
+                matched_row = row_html
+                break
+        result = self._parse_history_row_status(matched_row) if matched_row is not None else TestStatus.RUNNING
+        logger.info(
+            "AwBatchJobHistory check for job %r (run_id=%s): url=%s status_code=%s "
+            "total_rows=%d matched_row=%s -> %s",
+            job_name, run_id, response.url, response.status_code,
+            len(all_rows), matched_row is not None, result,
         )
-        return TestStatus.RUNNING
+        if matched_row is None:
+            logger.debug("AwBatchJobHistory full response body for job %r: %s", job_name, response.text[:5000])
+        return result
 
     def wait_for_completion(
         self, job_name: str, run_id: str | None = None, repository: str | None = None,
