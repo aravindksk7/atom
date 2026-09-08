@@ -273,18 +273,23 @@ class DSRestClient:
           green/red, and the case of no matching history row yet, both
           fall back to RUNNING (keep polling) rather than guessing.
 
-        OPEN QUESTION as of 2026-09-08: a live run of a job known to finish
-        in ~4s (per its own trace log) instead timed out after the full
-        600s here, meaning get_job_status never found a matching row the
-        entire time. Suspect this GET-with-query-params approach may not
-        actually apply the JobName/GROUP_TIME_RADIO filter the way the
-        app's own "tab" link navigation does -- classic legacy-JSP-app
-        behavior is for a bare GET to render a default/unfiltered view and
-        only a real form POST to execute the search. Every call now logs a
-        compact INFO line (row counts, matched-or-not, resolved status) and
-        the full response body at DEBUG when nothing matches, specifically
-        to get real evidence on this before guessing further (e.g. before
-        switching this to a POST).
+        OPEN QUESTION as of 2026-09-08, narrowed down: a live run of a job
+        known to finish in ~4s (per its own trace log) instead timed out
+        after the full 600s here. The INFO log added to investigate showed
+        why: response.url was "https://qetl111/DataServices/timeout.jsp"
+        -- every single poll got redirected to DS's generic session/
+        navigation-state error page, seconds after a successful login and
+        trigger (too fast to be a real idle-session timeout). Leading
+        theory, untested: this app may validate the Referer header as a
+        lightweight session-binding/CSRF-like check (common in older
+        enterprise apps) -- our client never sends one, unlike a real
+        browser navigating from a previous page in this app. Also still
+        possible: the GET-doesn't-apply-filters theory from before, or
+        this view genuinely needing a prior page load to establish
+        wizard-style state. Not yet tried since we didn't have the
+        timeout.jsp response body to judge from -- now logged at INFO
+        (capped at 1500 chars) whenever no row matches, to read its actual
+        message before picking a fix.
         """
         if not self._token:
             self.login()
@@ -335,7 +340,10 @@ class DSRestClient:
             len(all_rows), matched_row is not None, result,
         )
         if matched_row is None:
-            logger.debug("AwBatchJobHistory full response body for job %r: %s", job_name, response.text[:5000])
+            logger.info(
+                "AwBatchJobHistory response body (no match) for job %r: %s",
+                job_name, response.text[:1500],
+            )
         return result
 
     def wait_for_completion(
