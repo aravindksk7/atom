@@ -59,12 +59,15 @@ class BOAPIError(ETLFrameworkError):
 
 
 class DSAPIError(ETLFrameworkError):
-    def __init__(self, job_name: str, http_status: int, response_body: str) -> None:
+    def __init__(self, job_name: str, http_status: int, response_body: str, url: str = "") -> None:
         self.job_name = job_name
         self.http_status = http_status
         self.response_body = response_body
+        self.url = url
         snippet = response_body.strip()[:500] if response_body else ""
         message = f"SAP DS API error {http_status} for job '{job_name}'"
+        if url:
+            message = f"{message} at {url}"
         if snippet:
             message = f"{message}: {snippet}"
         super().__init__(message)
