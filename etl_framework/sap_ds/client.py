@@ -92,6 +92,7 @@ class DSRestClient:
         if response.status_code >= 400:
             raise DSAPIError(
                 job_name="<login>", http_status=response.status_code, response_body=response.text,
+                url=response.url,
             )
         self._token = response.headers.get(self.SESSION_TOKEN_HEADER)
         if self._token:
@@ -179,6 +180,7 @@ class DSRestClient:
         if response.status_code >= 400:
             raise DSAPIError(
                 job_name=job_name, http_status=response.status_code, response_body=response.text,
+                url=response.url,
             )
         logger.debug(
             "AwBatchJobExecute response for job %r (guid=%s): %s",
@@ -219,6 +221,7 @@ class DSRestClient:
         if response.status_code >= 400:
             raise DSAPIError(
                 job_name=run_id, http_status=response.status_code, response_body=response.text,
+                url=response.url,
             )
         return self._normalise_job_status(str(response.json().get("status", "")))
 
