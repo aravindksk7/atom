@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone, date
+from fastapi import HTTPException
 
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.repository.models import SavedConfig
@@ -588,4 +589,13 @@ def test_lookup_ds_job_success(service):
         assert res.identifier == "JOB_DEMO"
         assert res.status == "PASSED"
         assert res.repository == "REPO_TEST"
+
+
+def test_lookup_ds_job_rejects_run_id_lookup(service):
+    """This on-prem API has no run-id-keyed status endpoint (see
+    DSRestClient.get_job_status) -- id_type='run_id' must be rejected
+    clearly rather than silently misused as a job_name."""
+    with pytest.raises(HTTPException) as exc_info:
+        service.lookup_ds_job(1, "some-guid", "run_id", repository="REPO_TEST")
+    assert exc_info.value.status_code == 400
 

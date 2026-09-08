@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import uuid
 import requests
@@ -44,28 +45,30 @@ class DSRestClient:
       "job not found" -- that distinction is what pointed at a routing
       bug rather than an auth/job-name one).
 
-    STATUS_ENDPOINT's path is still the original unverified REST-style
-    guess -- expect it to need the same servlet-based rework
-    (AwBatchJobExecute worked live as of 2026-09-08) once a live capture
-    of an actual status/history check is available. It's at least
-    resolved against the server origin now too, same as TRIGGER_ENDPOINT,
-    since that part of the bug is confirmed to apply here as well.
+    Status checking (get_job_status/wait_for_completion) went through a
+    complete rework on 2026-09-08 once real captures became available for
+    it, replacing an original REST-style guess ({repository}/status/
+    {run_id}) that turned out to have no basis in how this app actually
+    works. See get_job_status's docstring for what's confirmed vs. still
+    inferred in the new design.
     """
 
     LOGIN_ENDPOINT = "/logon"
     TRIGGER_ENDPOINT = "/DataServices/servlet/AwBatchJobExecute"
-    STATUS_ENDPOINT = "/BatchJob/{repository}/status/{run_id}"
+    HISTORY_ENDPOINT = "/DataServices/servlet/AwBatchJobHistory"
     SESSION_TOKEN_HEADER = "X-DS-SessionToken"
 
-    STATUS_MAP: dict[str, TestStatus] = {
-        "COMPLETED": TestStatus.PASSED,
-        "SUCCESS": TestStatus.PASSED,
-        "ERROR": TestStatus.FAILED,
-        "FAILED": TestStatus.FAILED,
-        "CANCELLED": TestStatus.FAILED,
-        "RUNNING": TestStatus.RUNNING,
-        "PENDING": TestStatus.RUNNING,
-        "QUEUED": TestStatus.RUNNING,
+    # AwBatchJobHistory's status column is a colored icon
+    # (../images/circ{color}.gif), not a text field. circgreen.gif ->
+    # PASSED is directly confirmed by a live capture (2026-09-08).
+    # circred.gif -> FAILED is a traffic-light-convention inference, not
+    # yet directly observed. Any other/unknown icon (e.g. a presumed
+    # in-progress one we haven't seen) falls back to RUNNING via
+    # _parse_history_row_status's default, same "unrecognized -> keep
+    # polling" philosophy as the rest of this client.
+    ICON_STATUS_MAP: dict[str, TestStatus] = {
+        "green": TestStatus.PASSED,
+        "red": TestStatus.FAILED,
     }
 
     def __init__(self, env_config: EnvironmentConfig):
@@ -213,35 +216,62 @@ class DSRestClient:
         )
         return guid
 
-    def _normalise_job_status(self, raw_status: str) -> TestStatus:
-        mapped = self.STATUS_MAP.get(raw_status.upper())
+    _HISTORY_ROW_RE = re.compile(r"<TR\s+class=tablerow\s*>(.*?)</TR>", re.IGNORECASE | re.DOTALL)
+    _HISTORY_ROW_JOB_NAME_RE = re.compile(r'<TD\s+class="cell"\s+nowrap>([^<]+)</TD>')
+    _HISTORY_ROW_ICON_RE = re.compile(r"circ(\w+?)\.gif", re.IGNORECASE)
+
+    def _parse_history_row_status(self, row_html: str) -> TestStatus:
+        icon_match = self._HISTORY_ROW_ICON_RE.search(row_html)
+        icon = icon_match.group(1).lower() if icon_match else ""
+        mapped = self.ICON_STATUS_MAP.get(icon)
         if mapped is None:
             logger.warning(
-                "Unrecognized SAP DS job status %r, treating as still running", raw_status,
+                "Unrecognized SAP DS history status icon %r, treating as still running", icon,
             )
             return TestStatus.RUNNING
         return mapped
 
-    def get_job_status(self, run_id: str, repository: str | None = None) -> TestStatus:
-        """GET {repository}/status/{run_id} -- fetch the current status of a
-        triggered batch job run and map it to TestStatus. Non-terminal DS
-        states (Running/Pending/Queued) and any unrecognized status string
-        both map to TestStatus.RUNNING, so callers keep polling instead of
-        mis-reading an unknown state as done.
+    def get_job_status(
+        self, job_name: str, run_id: str | None = None, repository: str | None = None,
+    ) -> TestStatus:
+        """Fetch the status of job_name's most recent execution and map it
+        to TestStatus.
 
-        STATUS_ENDPOINT is still the ORIGINAL never-verified REST-style
-        guess -- unlike trigger_job, we don't have a live capture of a real
-        status/history check to model this on yet. Confirmed live
-        2026-09-08 that at minimum it has the same origin-vs-ds_url-path
-        bug trigger_job had (this on-prem ds_url is
-        "https://qetl111/DataServices/launch/", and status was 404ing at
-        ".../launch/BatchJob/.../status/..."), so resolving against the
-        server origin like trigger_job now does -- but the "/BatchJob/
-        {repository}/status/{run_id}" path itself is still unconfirmed and
-        will very likely also need the same servlet-based rework (probably
-        something in the AwBatchJobHistory family, per the "HISTORY" field
-        seen in the AwBatchJobExecute capture) once a live capture of an
-        actual status check is available.
+        Complete rework (2026-09-08) of an original REST-style guess that
+        had no basis in how this app actually works. Modeled on live
+        captures of the Management Console's own "Batch Job Status" /
+        "Job Trace Log" pages:
+
+        - GET /DataServices/servlet/AwBatchJobHistory (resolved against the
+          server origin, like trigger_job) with GROUP_TIME_RADIO=
+          LAST_EXECUTION_RADIO returns a listing filtered to just the LAST
+          execution of the matching job(s) -- exactly what we want right
+          after triggering a run. Confirmed live: the app's own "tab" links
+          use plain GET with these exact query params (no CSRF, no session
+          form fields needed), the same pattern already confirmed working
+          for AwBatchJobLogs.
+        - There is NO run-id-keyed status lookup in this app at all. Status
+          is read off a colored icon (../images/circ{color}.gif) in the
+          matching row of that listing -- see ICON_STATUS_MAP. run_id (the
+          GUID trigger_job returns) is accepted here only for logging/
+          correlation -- confirmed live that this GUID does get used
+          server-side (it appears, dashes->underscores, in the triggered
+          run's trace log filename), but the history listing itself is
+          looked up by job_name, not run_id, since there's no endpoint that
+          takes a run id directly.
+        - Known race condition, unverified severity: if called immediately
+          after trigger_job, before DS has registered the new run in
+          history, this could return the PREVIOUS execution's status
+          instead of the new one. Live evidence (a trace log timestamped
+          the same second as the trigger) suggests DS registers the run at
+          start, not completion, so the window should be small, but this
+          hasn't been stress-tested.
+        - Icon color mapping: circgreen.gif -> PASSED is directly confirmed
+          live. circred.gif -> FAILED is inferred from traffic-light
+          convention, not yet observed directly. No live example of an
+          in-progress icon exists yet either -- any icon other than
+          green/red, and the case of no matching history row yet, both
+          fall back to RUNNING (keep polling) rather than guessing.
         """
         if not self._token:
             self.login()
@@ -253,22 +283,42 @@ class DSRestClient:
             )
         parsed_base = urlparse(self._base_url)
         origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
-        url = f"{origin}{self.STATUS_ENDPOINT.format(repository=repo, run_id=run_id)}"
+        params = {
+            "REPOSITORY_NAME": repo,
+            "JobName": job_name,
+            "JOB": "All batch jobs",
+            "GROUP_TIME_RADIO": "LAST_EXECUTION_RADIO",
+            "DAYS_INTERVAL": "1",
+            "FROM_DATE": "",
+            "TO_DATE": "",
+            "ACTIVE_VIEW": "Batch Job Status",
+        }
         response = self._session.get(
-            url,
-            headers={"Accept": "application/json"},
+            f"{origin}{self.HISTORY_ENDPOINT}",
+            params=params,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
             timeout=self._timeout,
             verify=self._verify_ssl,
         )
         if response.status_code >= 400:
             raise DSAPIError(
-                job_name=run_id, http_status=response.status_code, response_body=response.text,
+                job_name=job_name, http_status=response.status_code, response_body=response.text,
                 url=response.url,
             )
-        return self._normalise_job_status(str(response.json().get("status", "")))
+        for row_html in self._HISTORY_ROW_RE.findall(response.text):
+            name_match = self._HISTORY_ROW_JOB_NAME_RE.search(row_html)
+            if name_match and name_match.group(1).strip() == job_name:
+                return self._parse_history_row_status(row_html)
+        logger.debug(
+            "No AwBatchJobHistory row yet for job %r (run_id=%s) -- treating as still running",
+            job_name, run_id,
+        )
+        return TestStatus.RUNNING
 
     def wait_for_completion(
-        self, run_id: str, repository: str | None = None,
+        self, job_name: str, run_id: str | None = None, repository: str | None = None,
         timeout_s: float = 600, poll_interval_s: float = 5,
     ) -> TestStatus:
         """Poll get_job_status until it returns a terminal status
@@ -277,11 +327,11 @@ class DSRestClient:
         run error, not a job failure."""
         deadline = time.monotonic() + timeout_s
         while True:
-            status = self.get_job_status(run_id, repository=repository)
+            status = self.get_job_status(job_name, run_id=run_id, repository=repository)
             if status != TestStatus.RUNNING:
                 return status
             if time.monotonic() >= deadline:
                 raise TimeoutError(
-                    f"SAP DS job run '{run_id}' did not complete within {timeout_s}s",
+                    f"SAP DS job '{job_name}' (run_id={run_id}) did not complete within {timeout_s}s",
                 )
             time.sleep(poll_interval_s)

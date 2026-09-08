@@ -245,74 +245,109 @@ def test_trigger_job_raises_value_error_when_no_repository_available(env_config)
 
 # ---------------------------------------------------------------------------
 # get_job_status / wait_for_completion
+#
+# Complete rework (2026-09-08) modeled on live captures of the Management
+# Console's own "Batch Job Status" (AwBatchJobHistory) and "Job Trace Log"
+# (AwBatchJobLogs) pages -- see DSRestClient.get_job_status's docstring for
+# what's confirmed live vs. still inferred (only circgreen.gif -> PASSED is
+# directly observed; circred.gif -> FAILED is a traffic-light inference).
 # ---------------------------------------------------------------------------
 
 from etl_framework.runner.state import TestStatus
 
 
-@pytest.mark.parametrize("raw_status,expected", [
-    ("Completed", TestStatus.PASSED),
-    ("completed", TestStatus.PASSED),
-    ("Success", TestStatus.PASSED),
-    ("Error", TestStatus.FAILED),
-    ("Failed", TestStatus.FAILED),
-    ("Cancelled", TestStatus.FAILED),
-    ("Running", TestStatus.RUNNING),
-    ("Pending", TestStatus.RUNNING),
-    ("Queued", TestStatus.RUNNING),
-])
-def test_get_job_status_maps_known_statuses(authenticated_client, raw_status, expected):
+def _history_row(job_name: str, icon: str, object_key: str = "306") -> str:
+    """A minimal single-row AwBatchJobHistory table body, matching the real
+    structure captured live: a class=tablerow (lowercase) <TR>, a status
+    icon cell, and a bare job-name cell with no other attributes."""
+    return f"""
+    <TABLE CLASS="JCActaHTMLTableSortable">
+    <TBODY>
+    <TR  class=tablerow ><TD ><input type="checkbox" Name="CBG1" Value= "{object_key}" ></TD>
+    <TD  class="cell" nowrap align=CENTER><IMG alt='' id=IMG1 align=absmiddle src='../images/circ{icon}.gif'></TD>
+    <TD  class="cell" nowrap>{job_name}</TD>
+    <TD  class="cell" nowrap><a HREF=AwBatchJobLogs?ObjectKey={object_key}&JobName={job_name}>Trace</a></TD>
+    </TR>
+    </TBODY>
+    </TABLE>
+    """
+
+
+def _history_response(job_name: str, icon: str, object_key: str = "306") -> MagicMock:
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-42", "status": raw_status}
-    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
-        status = authenticated_client.get_job_status("run-42")
+    mock_response.text = _history_row(job_name, icon, object_key)
+    return mock_response
 
-    assert status == expected
+
+def test_get_job_status_maps_green_icon_to_passed(authenticated_client):
+    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
+    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
+        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD", run_id="some-guid")
+
+    assert status == TestStatus.PASSED
     called_url = mock_get.call_args[0][0]
-    assert called_url == "http://ds.example.com/BatchJob/DS_REPO/status/run-42"
+    assert called_url == "http://ds.example.com/DataServices/servlet/AwBatchJobHistory"
+    called_params = mock_get.call_args[1]["params"]
+    assert called_params["JobName"] == "DS_NIGHTLY_LOAD"
+    assert called_params["REPOSITORY_NAME"] == "DS_REPO"
+    assert called_params["GROUP_TIME_RADIO"] == "LAST_EXECUTION_RADIO"
+
+
+def test_get_job_status_maps_red_icon_to_failed(authenticated_client):
+    mock_response = _history_response("DS_NIGHTLY_LOAD", "red")
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
+
+    assert status == TestStatus.FAILED
 
 
 def test_get_job_status_uses_repository_override(authenticated_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-42", "status": "Completed"}
+    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
     with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
-        authenticated_client.get_job_status("run-42", repository="OTHER_REPO")
+        authenticated_client.get_job_status("DS_NIGHTLY_LOAD", repository="OTHER_REPO")
 
-    called_url = mock_get.call_args[0][0]
-    assert called_url == "http://ds.example.com/BatchJob/OTHER_REPO/status/run-42"
+    called_params = mock_get.call_args[1]["params"]
+    assert called_params["REPOSITORY_NAME"] == "OTHER_REPO"
 
 
 def test_get_job_status_ignores_ds_url_path_and_uses_server_origin(env_config):
     """Regression test for the 2026-09-08 live 404: same bug class as
     trigger_job's -- ds_url "https://qetl111/DataServices/launch/" must not
-    have its "/launch" path carried into the status check URL."""
+    have its "/launch" path carried into the history check URL."""
     from etl_framework.sap_ds.client import DSRestClient
 
     cfg = env_config.model_copy(update={"ds_url": "https://qetl111/DataServices/launch/"})
     client = DSRestClient(cfg)
     client._token = "fake-ds-token-123"
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-42", "status": "Completed"}
+    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
     with patch.object(client._session, "get", return_value=mock_response) as mock_get:
-        client.get_job_status("run-42")
+        client.get_job_status("DS_NIGHTLY_LOAD")
 
     called_url = mock_get.call_args[0][0]
-    assert called_url == "https://qetl111/BatchJob/DS_REPO/status/run-42"
+    assert called_url == "https://qetl111/DataServices/servlet/AwBatchJobHistory"
 
 
-def test_get_job_status_treats_unrecognized_status_as_running(authenticated_client, caplog):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "run-42", "status": "SomeNewDSStatus"}
+def test_get_job_status_treats_unrecognized_icon_as_running(authenticated_client, caplog):
+    mock_response = _history_response("DS_NIGHTLY_LOAD", "yellow")
     with patch.object(authenticated_client._session, "get", return_value=mock_response):
         with caplog.at_level("WARNING"):
-            status = authenticated_client.get_job_status("run-42")
+            status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
 
     assert status == TestStatus.RUNNING
-    assert "SomeNewDSStatus" in caplog.text
+    assert "yellow" in caplog.text
+
+
+def test_get_job_status_treats_no_matching_row_as_running(authenticated_client):
+    """Job not in the history listing yet (e.g. just triggered, DS hasn't
+    registered the run) -- keep polling rather than erroring."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = _history_row("SOME_OTHER_JOB", "green")
+    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
+
+    assert status == TestStatus.RUNNING
 
 
 def test_get_job_status_raises_ds_api_error_on_http_failure(authenticated_client):
@@ -323,15 +358,17 @@ def test_get_job_status_raises_ds_api_error_on_http_failure(authenticated_client
     mock_response.text = "server error"
     with patch.object(authenticated_client._session, "get", return_value=mock_response):
         with pytest.raises(DSAPIError):
-            authenticated_client.get_job_status("run-42")
+            authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
 
 
 def test_wait_for_completion_returns_immediately_on_success(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
-        status = authenticated_client.wait_for_completion("run-42", timeout_s=5, poll_interval_s=0.01)
+        status = authenticated_client.wait_for_completion(
+            "DS_NIGHTLY_LOAD", run_id="some-guid", timeout_s=5, poll_interval_s=0.01,
+        )
 
     assert status == TestStatus.PASSED
-    mock_get.assert_called_once_with("run-42", repository=None)
+    mock_get.assert_called_once_with("DS_NIGHTLY_LOAD", run_id="some-guid", repository=None)
 
 
 def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
@@ -339,7 +376,7 @@ def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
         authenticated_client, "get_job_status",
         side_effect=[TestStatus.RUNNING, TestStatus.RUNNING, TestStatus.PASSED],
     ) as mock_get:
-        status = authenticated_client.wait_for_completion("run-42", timeout_s=5, poll_interval_s=0.01)
+        status = authenticated_client.wait_for_completion("DS_NIGHTLY_LOAD", timeout_s=5, poll_interval_s=0.01)
 
     assert status == TestStatus.PASSED
     assert mock_get.call_count == 3
@@ -347,12 +384,14 @@ def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
 
 def test_wait_for_completion_raises_timeout_error_when_never_terminal(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.RUNNING):
-        with pytest.raises(TimeoutError, match="run-42"):
-            authenticated_client.wait_for_completion("run-42", timeout_s=0.05, poll_interval_s=0.01)
+        with pytest.raises(TimeoutError, match="DS_NIGHTLY_LOAD"):
+            authenticated_client.wait_for_completion("DS_NIGHTLY_LOAD", timeout_s=0.05, poll_interval_s=0.01)
 
 
 def test_wait_for_completion_passes_repository_override_through(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
-        authenticated_client.wait_for_completion("run-42", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01)
+        authenticated_client.wait_for_completion(
+            "DS_NIGHTLY_LOAD", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01,
+        )
 
-    mock_get.assert_called_once_with("run-42", repository="OTHER_REPO")
+    mock_get.assert_called_once_with("DS_NIGHTLY_LOAD", run_id=None, repository="OTHER_REPO")

@@ -63,7 +63,7 @@ def test_trigger_and_wait_for_completion_success():
     client.login()
 
     run_id = client.trigger_job("DS_NIGHTLY_LOAD")
-    status = client.wait_for_completion(run_id, timeout_s=5, poll_interval_s=0.1)
+    status = client.wait_for_completion("DS_NIGHTLY_LOAD", run_id=run_id, timeout_s=5, poll_interval_s=0.1)
     assert status == TestStatus.PASSED
 
 
@@ -73,7 +73,7 @@ def test_trigger_and_wait_for_completion_failure():
     client.login()
 
     run_id = client.trigger_job("DS_BAD_LOAD")
-    status = client.wait_for_completion(run_id, timeout_s=5, poll_interval_s=0.1)
+    status = client.wait_for_completion("DS_BAD_LOAD", run_id=run_id, timeout_s=5, poll_interval_s=0.1)
     assert status == TestStatus.FAILED
 
 
