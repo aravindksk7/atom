@@ -207,9 +207,9 @@ class DSRestClient:
                 job_name=job_name, http_status=response.status_code, response_body=response.text,
                 url=response.url,
             )
-        logger.debug(
-            "AwBatchJobExecute response for job %r (guid=%s): %s",
-            job_name, guid, response.text[:2000],
+        logger.info(
+            "AwBatchJobExecute response for job %r (guid=%s), status=%s, url=%s: %s",
+            job_name, guid, response.status_code, response.url, response.text[:2000],
         )
         return guid
 
