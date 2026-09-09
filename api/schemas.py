@@ -46,6 +46,8 @@ class CustomVariableCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_default_value(self) -> "CustomVariableCreate":
+        if self.default_value == "":
+            self.default_value = None
         if self.default_value:
             from api.services.variable_types import validate_variable_value
             validate_variable_value(self.default_value, self.var_type)
@@ -59,6 +61,8 @@ class CustomVariableUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_default_value(self) -> "CustomVariableUpdate":
+        if self.default_value == "":
+            self.default_value = None
         if self.default_value and self.var_type:
             from api.services.variable_types import validate_variable_value
             validate_variable_value(self.default_value, self.var_type)

@@ -24,6 +24,11 @@ def test_create_allows_blank_default_value():
     assert v.default_value is None
 
 
+def test_create_normalizes_empty_string_default_value_to_none():
+    v = CustomVariableCreate(name="batch_id", var_type="number", default_value="")
+    assert v.default_value is None
+
+
 def test_update_rejects_default_value_not_matching_declared_type():
     with pytest.raises(ValidationError):
         CustomVariableUpdate(var_type="number", default_value="abc")
