@@ -31,6 +31,50 @@ class ConfigOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CustomVariableCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    var_type: Literal["text", "number", "date", "alphanumeric"]
+    default_value: str | None = None
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        from api.services.variable_types import validate_variable_name
+        validate_variable_name(v)
+        return v
+
+    @model_validator(mode="after")
+    def _validate_default_value(self) -> "CustomVariableCreate":
+        if self.default_value:
+            from api.services.variable_types import validate_variable_value
+            validate_variable_value(self.default_value, self.var_type)
+        return self
+
+
+class CustomVariableUpdate(BaseModel):
+    var_type: Literal["text", "number", "date", "alphanumeric"] | None = None
+    default_value: str | None = None
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_default_value(self) -> "CustomVariableUpdate":
+        if self.default_value and self.var_type:
+            from api.services.variable_types import validate_variable_value
+            validate_variable_value(self.default_value, self.var_type)
+        return self
+
+
+class CustomVariableOut(BaseModel):
+    id: int
+    name: str
+    var_type: str
+    default_value: str | None
+    description: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class FrameworkErrorOut(BaseModel):
     error_type: str
     message: str
