@@ -326,8 +326,16 @@ class RunExecutor:
         ]
 
     def _build_jobs_index(self) -> dict[str, JobDefinition]:
-        index: dict[str, JobDefinition] = {job.name: job for job in _SEED_JOBS}
-        index.update({job.name: self._job_to_definition(job) for job in self._job_repo.list()})
+        from api.services.variable_resolution import substitute_in_job
+
+        variables = self._config_snapshot.get("variables") or {}
+        index: dict[str, JobDefinition] = {
+            job.name: substitute_in_job(job, variables) for job in _SEED_JOBS
+        }
+        index.update({
+            job.name: substitute_in_job(self._job_to_definition(job), variables)
+            for job in self._job_repo.list()
+        })
         return index
 
     def _check_condition(self, condition: StepCondition, prev_result: ReconciliationResult) -> bool:
