@@ -1202,13 +1202,19 @@
     },
 
     openLaunchSelectionModal(sel) {
-      this.launchSelectionModal = { selection_id: sel.id, source_env: 'dev', target_env: 'prod' };
+      this.launchSelectionModal = { selection_id: sel.id, source_env: 'dev', target_env: 'prod', variableOverridesRaw: '' };
       this.showLaunchSelectionModal = true;
     },
 
     async launchSelection() {
       const m = this.launchSelectionModal;
       const body = { source_env: m.source_env, target_env: m.target_env || '' };
+      const variable_overrides = {};
+      (m.variableOverridesRaw || '').split('\n').forEach(line => {
+        const idx = line.indexOf('=');
+        if (idx > 0) variable_overrides[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+      });
+      if (Object.keys(variable_overrides).length > 0) body.variable_overrides = variable_overrides;
       try {
         const run = await api('POST', `/api/selections/${m.selection_id}/launch`, body);
         this.showLaunchSelectionModal = false;

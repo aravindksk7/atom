@@ -1340,6 +1340,11 @@
             <option value="staging">Staging</option><option value="prod">Prod</option>
           </select>
         </div>
+        <div>
+          <label class="field-label">Variable overrides (optional, one per line "name=value")</label>
+          <textarea x-model="launchSelectionModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-selection-variable-overrides-textarea"></textarea>
+          <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
+        </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
