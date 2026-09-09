@@ -29,16 +29,23 @@ def resolve_variables(
         v.name: v.default_value for v in global_vars if v.default_value is not None
     }
 
+    # A blank/empty-string override (config-level or launch-level) is treated
+    # as "no override for this run" and falls through to the next-lower-
+    # priority value rather than being stored as "" -- this is intentional,
+    # mirroring how a blank `default_value` is normalized to None elsewhere
+    # in this feature (see CustomVariableCreate/Update in api/schemas.py).
+    # Do not change `and value` to a presence check (`name in cfg_overrides`)
+    # without re-reading the design spec's blank-means-inherit policy.
     if config_id is not None:
         cfg = ConfigRepository(db).get(config_id)
         cfg_overrides = (cfg.config_json or {}).get("variables", {}) if cfg is not None else {}
         for name, value in cfg_overrides.items():
             if name in global_names and value:
-                resolved[name] = value
+                resolved[name] = str(value)
 
     for name, value in (overrides or {}).items():
         if name in global_names and value:
-            resolved[name] = value
+            resolved[name] = str(value)
 
     for name in list(resolved):
         if var_types.get(name) == "date":
