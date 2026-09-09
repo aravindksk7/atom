@@ -135,6 +135,7 @@
         connections: [],
         apiEndpoints: [],
         apiBaseHost: '',
+        variables: {},
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -213,6 +214,7 @@
           exchangePretty: true,
           exchangeOpen: false,
         })),
+        variables: { ...(d.variables || {}) },
       };
       this.configValidation = null;
       this.showConfigModal = true;
@@ -263,6 +265,12 @@
               ...(c.db_password ? { db_password: c.db_password } : {}),
             }])
         );
+      }
+      const nonBlankVariables = Object.fromEntries(
+        Object.entries(m.variables || {}).filter(([, v]) => (v || '').toString().trim())
+      );
+      if (Object.keys(nonBlankVariables).length > 0) {
+        data.variables = nonBlankVariables;
       }
       if (m.apiBaseHost && m.apiBaseHost.trim()) {
         data.api_base_host = m.apiBaseHost.trim();

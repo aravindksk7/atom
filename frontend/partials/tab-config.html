@@ -1000,6 +1000,21 @@
           <div><label  class="field-label" for="a11y-config-automic-user">Automic User</label><input x-model="configModal.automic_user" class="field-input" id="a11y-config-automic-user" /></div>
           <div><label  class="field-label" for="a11y-config-automic-password">Automic Password</label><input x-model="configModal.automic_password" type="password" class="field-input" id="a11y-config-automic-password" /></div>
         </div>
+        <template x-if="customVariables.length > 0">
+          <div>
+            <div class="divider"></div>
+            <span class="field-label">VARIABLE OVERRIDES</span>
+            <span class="text-xs text-slate-400 ml-2">Blank = use the global default for this variable.</span>
+            <div class="grid-2 mt-2">
+              <template x-for="v in customVariables" :key="v.id">
+                <div>
+                  <label class="field-label font-mono" x-text="v.name"></label>
+                  <input x-model="configModal.variables[v.name]" class="field-input" :placeholder="'default: ' + (v.default_value || '(none)')" :data-testid="'config-modal-variable-' + v.name + '-input'" />
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
         <template x-if="configValidation">
           <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
                class="border rounded-lg p-3 text-sm" data-testid="config-validation-result">
