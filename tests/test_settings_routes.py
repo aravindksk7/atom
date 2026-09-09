@@ -68,7 +68,7 @@ def test_2_create_regular_token(settings_client):
 def test_3_get_settings_defaults_to_utc(settings_client):
     resp = settings_client.get("/api/settings", headers={"Authorization": f"Bearer {_regular_token}"})
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "UTC", "upload_retention_days": 30}
+    assert resp.json() == {"timezone": "UTC", "upload_retention_days": 30, "bo_download_dir": ""}
 
 
 def test_4_put_settings_requires_admin(settings_client):
@@ -96,10 +96,10 @@ def test_6_put_settings_persists_as_admin(settings_client):
         headers={"Authorization": f"Bearer {_admin_token}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30}
+    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": ""}
 
     get_resp = settings_client.get("/api/settings", headers={"Authorization": f"Bearer {_regular_token}"})
-    assert get_resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30}
+    assert get_resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": ""}
 
 
 def test_7_put_settings_updates_upload_retention(settings_client):
@@ -109,4 +109,4 @@ def test_7_put_settings_updates_upload_retention(settings_client):
         headers={"Authorization": f"Bearer {_admin_token}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 14}
+    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 14, "bo_download_dir": ""}

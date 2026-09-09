@@ -36,6 +36,7 @@ prometheus_client>=0.17
 # Dev / test
 pytest>=7.0
 pytest-cov
+pytest-asyncio>=0.24
 hypothesis>=6.0
 httpx>=0.28
 moto>=5.0
