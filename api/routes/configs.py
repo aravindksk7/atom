@@ -20,6 +20,7 @@ from etl_framework.config.loader import ConfigLoader
 from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, SECRET_FIELDS, resolve_connection
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
+from etl_framework.repository.repository import CustomVariableRepository
 from api.services.audit_service import AuditService
 
 router = APIRouter(tags=["configs"])
@@ -99,6 +100,32 @@ def _preserve_masked_secrets(incoming: dict, existing: dict | None) -> dict:
     return result
 
 
+def _validate_variable_overrides(db: Session, variables) -> list[FrameworkErrorOut]:
+    """Check each entry in a config's `variables` override dict against the
+    matching global CustomVariable's type. A key with no matching global
+    variable (deleted or never created) is inert, not an error -- see the
+    design spec's rename/delete-is-inert decision. A blank value means
+    "inherit the global default", also not an error."""
+    if not isinstance(variables, dict) or not variables:
+        return []
+    from api.services.variable_types import validate_variable_value
+
+    var_types = {v.name: v.var_type for v in CustomVariableRepository(db).list()}
+    errors: list[FrameworkErrorOut] = []
+    for name, value in variables.items():
+        var_type = var_types.get(name)
+        if var_type is None or value in (None, ""):
+            continue
+        try:
+            validate_variable_value(str(value), var_type)
+        except ValueError as exc:
+            errors.append(FrameworkErrorOut(
+                error_type="validation_error", message=str(exc),
+                field_name=f"variables.{name}", details={},
+            ))
+    return errors
+
+
 @router.get("", response_model=list[ConfigOut])
 def list_configs(db: Session = Depends(get_session)):
     repo = ConfigRepository(db)
@@ -114,6 +141,9 @@ def list_configs(db: Session = Depends(get_session)):
 
 @router.post("", response_model=ConfigOut, status_code=201)
 def create_config(body: ConfigCreate, request: Request, db: Session = Depends(get_session)):
+    errors = _validate_variable_overrides(db, body.config_data.get("variables"))
+    if errors:
+        raise HTTPException(status_code=422, detail=[e.model_dump() for e in errors])
     repo = ConfigRepository(db)
     cfg = repo.create(name=body.name, env_name=body.env_name, config_data=body.config_data)
     AuditService(db).log(
@@ -261,6 +291,10 @@ def get_config(config_id: int, db: Session = Depends(get_session)):
 
 @router.put("/{config_id}", response_model=ConfigOut)
 def update_config(config_id: int, body: ConfigUpdate, request: Request, db: Session = Depends(get_session)):
+    if body.config_data is not None:
+        errors = _validate_variable_overrides(db, body.config_data.get("variables"))
+        if errors:
+            raise HTTPException(status_code=422, detail=[e.model_dump() for e in errors])
     repo = ConfigRepository(db)
     before = repo.get(config_id)
     before_data = None
