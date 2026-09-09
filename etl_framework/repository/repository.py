@@ -925,10 +925,12 @@ class NotificationRepository:
         self._db = db
 
     def create(self, name: str, url: str, events: list[str],
-               secret: str | None = None, channel: str = "generic") -> NotificationHook:
+               secret: str | None = None, channel: str = "generic",
+               subject_template: str | None = None, body_template: str | None = None) -> NotificationHook:
         from api.services.secret_store import encrypt_secret
         stored_secret = encrypt_secret(secret) if secret else secret
-        hook = NotificationHook(name=name, url=url, events=events, secret=stored_secret, channel=channel)
+        hook = NotificationHook(name=name, url=url, events=events, secret=stored_secret, channel=channel,
+                                 subject_template=subject_template or None, body_template=body_template or None)
         self._db.add(hook)
         self._db.commit()
         self._db.refresh(hook)
@@ -949,7 +951,8 @@ class NotificationRepository:
         return True
 
     def update(self, hook_id: int, enabled: bool | None = None,
-               events: list[str] | None = None) -> NotificationHook | None:
+               events: list[str] | None = None, subject_template: str | None = None,
+               body_template: str | None = None) -> NotificationHook | None:
         hook = self._db.get(NotificationHook, hook_id)
         if hook is None:
             return None
@@ -957,6 +960,10 @@ class NotificationRepository:
             hook.enabled = enabled
         if events is not None:
             hook.events = events
+        if subject_template is not None:
+            hook.subject_template = subject_template or None
+        if body_template is not None:
+            hook.body_template = body_template or None
         self._db.commit()
         self._db.refresh(hook)
         return hook

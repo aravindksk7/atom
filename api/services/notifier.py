@@ -7,6 +7,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import smtplib
 import socket
 import threading
@@ -118,6 +119,17 @@ def parse_mailto(url: str) -> list[str]:
     if not url.startswith("mailto:"):
         return []
     return [a.strip() for a in url[len("mailto:"):].split(",") if a.strip()]
+
+
+_TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+def render_template(template: str, data: dict) -> str:
+    """Replace {{var}} placeholders with values from data. Missing/None vars -> ''."""
+    def _sub(match: "re.Match") -> str:
+        value = data.get(match.group(1))
+        return "" if value is None else str(value)
+    return _TEMPLATE_VAR_RE.sub(_sub, template)
 
 
 def _resolve_smtp_config() -> dict:
@@ -245,8 +257,12 @@ def notify(
                     if not recipients:
                         logger.warning("Email hook %s has no valid mailto: recipients", hook.id)
                         break
-                    subject = f"ETL run {p.get('status', '')}: {run_id}"
-                    body = json.dumps(p, indent=2, default=str)
+                    subject_template = getattr(hook, "subject_template", None)
+                    body_template = getattr(hook, "body_template", None)
+                    subject = render_template(subject_template, p) if subject_template \
+                        else f"ETL run {p.get('status', '')}: {run_id}"
+                    body = render_template(body_template, p) if body_template \
+                        else json.dumps(p, indent=2, default=str)
                     smtp_config = _resolve_smtp_config()
                     target = _send_email_and_track if delivery_id is not None else _send_email
                     args = ((recipients, subject, body, smtp_config, delivery_id)

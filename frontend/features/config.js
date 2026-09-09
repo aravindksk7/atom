@@ -53,7 +53,7 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showHookModal: false,
-    hookModal: { name: '', channel: 'generic', url: '', events: [], secret: '' },
+    hookModal: { name: '', channel: 'generic', url: '', events: [], secret: '', subjectTemplate: '', bodyTemplate: '' },
     hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed', 'run.held', 'run.cancelled'],
       // ===== METHODS (extracted from app.js) =====
     // ===========================================================
@@ -488,7 +488,7 @@
     },
 
     openNewHookModal() {
-      this.hookModal = { name: '', channel: 'generic', url: '', events: ['run.failed', 'run.error'], secret: '' };
+      this.hookModal = { name: '', channel: 'generic', url: '', events: ['run.failed', 'run.error'], secret: '', subjectTemplate: '', bodyTemplate: '' };
       this.showHookModal = true;
     },
 
@@ -506,6 +506,8 @@
           name: m.name, channel: m.channel, url: m.url,
           events: m.events,
           secret: m.channel === 'generic' ? (m.secret || null) : null,
+          subject_template: m.channel === 'email' ? (m.subjectTemplate || null) : null,
+          body_template: m.channel === 'email' ? (m.bodyTemplate || null) : null,
         });
         await this.loadHooks();
         this.showHookModal = false;

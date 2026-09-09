@@ -25,6 +25,11 @@ class HookCreate(BaseModel):
     url: str
     events: list[str] = list(_ALL_EVENTS)
     secret: str | None = None
+    # Email channel only: {{var}}-substitution overrides for the default subject/body.
+    # Available vars: run_id, status, event, completed_at, plus whatever the firing
+    # event includes (e.g. passed/failed/error counts for run.*, contract name for contract.*).
+    subject_template: str | None = None
+    body_template: str | None = None
 
     @field_validator("channel")
     @classmethod
@@ -50,6 +55,8 @@ class HookCreate(BaseModel):
 class HookUpdate(BaseModel):
     enabled: bool | None = None
     events: list[str] | None = None
+    subject_template: str | None = None
+    body_template: str | None = None
 
 
 class HookOut(BaseModel):
@@ -59,6 +66,8 @@ class HookOut(BaseModel):
     events: list[str]
     enabled: bool
     channel: str
+    subject_template: str | None = None
+    body_template: str | None = None
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -88,7 +97,8 @@ def create_hook(body: HookCreate, request: Request, db: Session = Depends(get_se
     invalid = [e for e in body.events if e not in EVENTS]
     if invalid:
         raise HTTPException(status_code=400, detail=f"Unknown events: {invalid}")
-    hook = NotificationRepository(db).create(body.name, body.url, body.events, body.secret, body.channel)
+    hook = NotificationRepository(db).create(body.name, body.url, body.events, body.secret, body.channel,
+                                              body.subject_template, body.body_template)
     AuditService(db).log(
         request, "notification_hook.created", "notification_hook", hook.id,
         {"name": hook.name, "events": hook.events},
@@ -102,7 +112,8 @@ def update_hook(hook_id: int, body: HookUpdate, request: Request, db: Session = 
         invalid = [e for e in body.events if e not in EVENTS]
         if invalid:
             raise HTTPException(status_code=400, detail=f"Unknown events: {invalid}")
-    hook = NotificationRepository(db).update(hook_id, enabled=body.enabled, events=body.events)
+    hook = NotificationRepository(db).update(hook_id, enabled=body.enabled, events=body.events,
+                                              subject_template=body.subject_template, body_template=body.body_template)
     if hook is None:
         raise HTTPException(status_code=404, detail="Hook not found")
     AuditService(db).log(
@@ -142,12 +153,18 @@ def test_hook(hook_id: int, request: Request, db: Session = Depends(get_session)
         raise HTTPException(status_code=404, detail="Hook not found")
     import threading
     if hook.channel == "email":
-        from api.services.notifier import _resolve_smtp_config, _send_email, parse_mailto
+        from api.services.notifier import _resolve_smtp_config, _send_email, parse_mailto, render_template
         recipients = parse_mailto(hook.url)
         smtp_config = _resolve_smtp_config()
+        sample = {"run_id": "test", "status": "TEST", "event": "test.ping",
+                  "completed_at": datetime.utcnow().isoformat()}
+        subject = render_template(hook.subject_template, sample) if hook.subject_template \
+            else "ETL Framework webhook test"
+        body = render_template(hook.body_template, sample) if hook.body_template \
+            else "This is a test notification from ETL Framework."
         threading.Thread(
             target=_send_email,
-            args=(recipients, "ETL Framework webhook test", "This is a test notification from ETL Framework.", smtp_config),
+            args=(recipients, subject, body, smtp_config),
             daemon=True,
         ).start()
     else:
