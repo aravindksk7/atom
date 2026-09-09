@@ -28,6 +28,7 @@ services:
     environment:
       SAPDS_MOCK_USER: "administrator"
       SAPDS_MOCK_PASSWORD: "Password1"
+      SAPDS_MOCK_CMS_SYSTEM: "mock-cms"
     ports:
       - "18444:8444"
     healthcheck:

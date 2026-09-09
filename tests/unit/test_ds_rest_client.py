@@ -1,11 +1,14 @@
-"""Tests for DSRestClient SAP Data Services Administrator API methods.
+"""Tests for DSRestClient — SAP Data Services SOAP web service client.
 
-login/logout and trigger_job are modeled on live DevTools captures against
-a real on-prem instance (2026-09-03) -- see each test section's comment for
-what's confirmed vs. still-unverified. get_job_status/wait_for_completion
-below are still the original best-effort guess, not verified against a live
-server yet -- same situation etl_framework/sap_bo/client.py's biprws quirks
-were in before they were discovered and documented over time.
+Verified against the live WSDL at
+https://qetl111/DataServices/servlet/webservices?ver=2.0
+(service DataServices_Server, targetNamespace http://www.businessobjects.com).
+
+Operation contract used here (from that WSDL):
+  Logon                (SOAPAction "function=Logon")   LogonRequest{username,password,cms_system,cms_authentication} -> session{SessionID}
+  Ping                 (SOAPAction "function=Ping")     Ping_Input{} -> pingVersion
+  Run_Batch_Job        (SOAPAction "jobAdmin=Run_Batch_Job")   RunBatchJobRequest{jobName,repoName,...} -> BatchJobResponse{pid,cid,rid,repoName,returnCode?,errorMessage?}
+  Get_BatchJob_Status  (SOAPAction "jobAdmin=Get_BatchJob_Status") batchJobStatusRequest{runID,repoName} -> batchJobStatusResponse{returnCode,status}
 """
 from __future__ import annotations
 
@@ -13,6 +16,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from etl_framework.config.models import EnvironmentConfig
+from etl_framework.runner.state import TestStatus
+
+DS_NS = "http://www.businessobjects.com"
 
 
 @pytest.fixture
@@ -21,22 +27,43 @@ def env_config():
         name="test",
         db_host="localhost",
         db_password="secret",
-        ds_url="http://ds.example.com",
+        ds_url="https://ds.example.com/DataServices/servlet/webservices",
         ds_user="admin",
         ds_password="dspass",
         ds_repository="DS_REPO",
+        ds_cms_system="cms-host",
         ds_timeout=30,
     )
+
+
+def _soap(body_inner: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+        f"<soapenv:Body>{body_inner}</soapenv:Body></soapenv:Envelope>"
+    )
+
+
+def _mock_soap_response(body_inner: str, status_code: int = 200):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.text = _soap(body_inner)
+    resp.content = resp.text.encode()
+    return resp
 
 
 @pytest.fixture
 def authenticated_client(env_config):
     from etl_framework.sap_ds.client import DSRestClient
     client = DSRestClient(env_config)
-    client._token = "fake-ds-token-123"
-    client._session.headers.update({"X-DS-SessionToken": "fake-ds-token-123"})
+    client._token = "SESS-123"
+    client._owns_token = True
     return client
 
+
+# ---------------------------------------------------------------------------
+# construction / proxy / ssl
+# ---------------------------------------------------------------------------
 
 def test_client_requires_url_scheme(env_config):
     from etl_framework.sap_ds.client import DSRestClient
@@ -46,80 +73,132 @@ def test_client_requires_url_scheme(env_config):
         DSRestClient(cfg)
 
 
-def test_client_applies_proxy_and_ssl_verification_config(env_config):
+def test_client_ignores_env_proxy_when_no_proxy_configured(env_config, monkeypatch):
     from etl_framework.sap_ds.client import DSRestClient
 
-    cfg = env_config.model_copy(
-        update={"ds_proxy_url": "http://proxy.example.com:8080", "ds_verify_ssl": False}
-    )
-    client = DSRestClient(cfg)
+    monkeypatch.setenv("HTTPS_PROXY", "http://zproxy.example.com:8080")
+    monkeypatch.setenv("HTTP_PROXY", "http://zproxy.example.com:8080")
+    client = DSRestClient(env_config.model_copy(update={"ds_proxy_url": ""}))
+    assert client._session.trust_env is False
 
+
+def test_client_explicit_proxy_still_wins(env_config, monkeypatch):
+    from etl_framework.sap_ds.client import DSRestClient
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://zproxy.example.com:8080")
+    client = DSRestClient(
+        env_config.model_copy(update={"ds_proxy_url": "http://proxy.example.com:8080"})
+    )
     assert client._session.proxies["https"] == "http://proxy.example.com:8080"
     assert client._session.proxies["http"] == "http://proxy.example.com:8080"
+
+
+def test_client_applies_ssl_verification_config(env_config):
+    from etl_framework.sap_ds.client import DSRestClient
+
+    client = DSRestClient(env_config.model_copy(update={"ds_verify_ssl": False}))
     assert client._verify_ssl is False
 
 
 # ---------------------------------------------------------------------------
-# login
+# login (Logon SOAP op)
 # ---------------------------------------------------------------------------
 
-def test_login_posts_credentials_and_stores_token(env_config):
+def test_login_sends_logon_envelope_and_parses_sessionid(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 
     client = DSRestClient(env_config)
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.headers = {"X-DS-SessionToken": "tok"}
-    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+    resp = _mock_soap_response(
+        f'<session xmlns="{DS_NS}"><SessionID>SESS-ABC</SessionID></session>'
+    )
+    with patch.object(client._session, "post", return_value=resp) as mock_post:
         token = client.login()
 
-    assert token == "tok"
-    assert client._token == "tok"
-    called_url = mock_post.call_args[0][0]
-    assert called_url == "http://ds.example.com/logon"
-    sent_payload = mock_post.call_args[1]["json"]
-    assert sent_payload == {"userName": "admin", "password": "dspass", "authType": "secEnterprise"}
+    assert token == "SESS-ABC"
+    assert client._token == "SESS-ABC"
+    # Endpoint is the DS webservices URL with the WSDL's ?ver=2.0 query.
+    assert mock_post.call_args[0][0] == env_config.ds_url + "?ver=2.0"
+    sent = mock_post.call_args[1]
+    # SOAPAction header identifies the Logon function.
+    headers = sent["headers"]
+    assert headers["SOAPAction"] == '"function=Logon"'
+    assert "text/xml" in headers["Content-Type"]
+    # Body carries the credentials and cms_authentication (auth type).
+    body = sent["data"] if "data" in sent else mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<username>admin</username>" in body
+    assert "<password>dspass</password>" in body
+    assert "<cms_system>cms-host</cms_system>" in body
+    assert "<cms_authentication>secEnterprise</cms_authentication>" in body
+    assert "LogonRequest" in body
+    # Body must be UNQUALIFIED — a namespaced LogonRequest is rejected by the
+    # live server. Assert the ServerX types namespace is NOT applied to it.
+    assert 'LogonRequest xmlns=' not in body
+
+
+def test_login_requires_cms_system(env_config):
+    """cms_system is mandatory: the live server rejects a Logon without a
+    valid CMS host. Missing ds_cms_system must fail fast with a clear error,
+    not produce the server's misleading 'requires Username node' fault."""
+    from etl_framework.exceptions import DSAPIError
+    from etl_framework.sap_ds.client import DSRestClient
+
+    client = DSRestClient(env_config.model_copy(update={"ds_cms_system": ""}))
+    with pytest.raises(DSAPIError) as exc_info:
+        client.login()
+    assert "CMS system" in (exc_info.value.response_body or "")
 
 
 def test_login_sends_configured_auth_type(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 
-    cfg = env_config.model_copy(update={"ds_auth_type": "secLDAP"})
-    client = DSRestClient(cfg)
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.headers = {"X-DS-SessionToken": "tok"}
-    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+    client = DSRestClient(env_config.model_copy(update={"ds_auth_type": "secLDAP"}))
+    resp = _mock_soap_response(
+        f'<session xmlns="{DS_NS}"><SessionID>x</SessionID></session>'
+    )
+    with patch.object(client._session, "post", return_value=resp) as mock_post:
         client.login()
 
-    sent_payload = mock_post.call_args[1]["json"]
-    assert sent_payload["authType"] == "secLDAP"
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<cms_authentication>secLDAP</cms_authentication>" in body
 
 
-def test_login_raises_ds_api_error_on_http_failure(env_config):
+def test_login_raises_on_soap_fault(env_config):
     from etl_framework.exceptions import DSAPIError
     from etl_framework.sap_ds.client import DSRestClient
 
     client = DSRestClient(env_config)
-    mock_response = MagicMock()
-    mock_response.status_code = 401
-    mock_response.text = "invalid credentials"
-    with patch.object(client._session, "post", return_value=mock_response):
+    fault = (
+        "<soapenv:Fault xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/'>"
+        "<faultcode>soapenv:Server</faultcode>"
+        "<faultstring>Logon failed: invalid credentials</faultstring>"
+        "</soapenv:Fault>"
+    )
+    resp = _mock_soap_response(fault, status_code=500)
+    with patch.object(client._session, "post", return_value=resp):
         with pytest.raises(DSAPIError) as exc_info:
             client.login()
-    assert exc_info.value.http_status == 401
+    assert "invalid credentials" in (exc_info.value.response_body or "")
 
 
-def test_logout_posts_logoff_and_clears_token(authenticated_client):
-    authenticated_client._owns_token = True
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
+def test_ping_returns_true_on_pingversion(env_config):
+    from etl_framework.sap_ds.client import DSRestClient
+
+    client = DSRestClient(env_config)
+    client._token = "SESS-1"
+    resp = _mock_soap_response(f'<pingVersion xmlns="{DS_NS}">14.2.0</pingVersion>')
+    with patch.object(client._session, "post", return_value=resp) as mock_post:
+        assert client.ping() is True
+    assert mock_post.call_args[1]["headers"]["SOAPAction"] == '"function=Ping"'
+
+
+def test_logout_sends_logout_and_clears_token(authenticated_client):
+    resp = _mock_soap_response("<Logout_Input/>")
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
         authenticated_client.logout()
-
     mock_post.assert_called_once()
     assert authenticated_client._token is None
-    assert "X-DS-SessionToken" not in authenticated_client._session.headers
 
 
 def test_logout_is_noop_when_not_authenticated(env_config):
@@ -132,243 +211,177 @@ def test_logout_is_noop_when_not_authenticated(env_config):
 
 
 # ---------------------------------------------------------------------------
-# trigger_job
-#
-# Modeled on a live DevTools capture (2026-09-03) of the real "Execute Batch
-# Job" form submission: a legacy servlet form POST
-# (application/x-www-form-urlencoded to /DataServices/servlet/
-# AwBatchJobExecute), not the JSON REST call originally assumed. See
-# DSRestClient.trigger_job's docstring for what's still unverified
-# (X-CSRF-TOKEN, JOB_SERVER sourcing, response shape).
+# trigger_job (Run_Batch_Job SOAP op) — returns rid as run id
 # ---------------------------------------------------------------------------
 
-def test_trigger_job_posts_to_execute_servlet_using_default_repository(authenticated_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "<html>submitted</html>"
-    with patch("uuid.uuid4", return_value="fixed-guid"), \
-         patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
+def test_trigger_job_sends_runbatchjob_and_returns_rid(authenticated_client):
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>10</pid><cid>2</cid>'
+        f"<rid>4242</rid><repoName>DS_REPO</repoName><returnCode>0</returnCode>"
+        f"</BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
         run_id = authenticated_client.trigger_job("DS_NIGHTLY_LOAD")
 
-    assert run_id == "fixed-guid"
-    called_url = mock_post.call_args[0][0]
-    assert called_url == "http://ds.example.com/DataServices/servlet/AwBatchJobExecute"
-    sent_form = mock_post.call_args[1]["data"]
-    assert sent_form["JobName"] == "DS_NIGHTLY_LOAD"
-    assert sent_form["REPOSITORY_NAME"] == "DS_REPO"
-    assert sent_form["ACTION_REQUEST"] == "Execute"
-    assert sent_form["GUID"] == "fixed-guid"
-    assert sent_form["JOB_SERVER"] == "DS.EXAMPLE.COM:3500"
+    assert run_id == "4242"
+    headers = mock_post.call_args[1]["headers"]
+    assert headers["SOAPAction"] == '"jobAdmin=Run_Batch_Job"'
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<jobName>DS_NIGHTLY_LOAD</jobName>" in body
+    assert "<repoName>DS_REPO</repoName>" in body
+    # SessionID travels in the SOAP header.
+    assert "SESS-123" in body
 
 
-def test_trigger_job_ignores_ds_url_path_and_uses_server_origin(env_config):
-    """Regression test for the 2026-09-08 live 404: this on-prem instance's
-    ds_url is "https://qetl111/DataServices/launch/" -- login is genuinely
-    nested under "/launch", but AwBatchJobExecute is a sibling servlet at
-    the origin. trigger_job must resolve against scheme+host only, not
-    ds_url's configured path, or it doubles "/DataServices" and pulls in
-    the extra "/launch" segment."""
-    from etl_framework.sap_ds.client import DSRestClient
-
-    cfg = env_config.model_copy(update={"ds_url": "https://qetl111/DataServices/launch/"})
-    client = DSRestClient(cfg)
-    client._token = "fake-ds-token-123"
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "<html>submitted</html>"
-    with patch.object(client._session, "post", return_value=mock_response) as mock_post:
-        client.trigger_job("DS_NIGHTLY_LOAD")
-
-    called_url = mock_post.call_args[0][0]
-    assert called_url == "https://qetl111/DataServices/servlet/AwBatchJobExecute"
-
-
-def test_trigger_job_uses_explicit_repository_override(authenticated_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "<html>submitted</html>"
-    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
-        authenticated_client.trigger_job("DS_NIGHTLY_LOAD", repository="OTHER_REPO")
-
-    sent_form = mock_post.call_args[1]["data"]
-    assert sent_form["REPOSITORY_NAME"] == "OTHER_REPO"
-
-
-def test_trigger_job_flattens_job_params_into_form_body(authenticated_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "<html>submitted</html>"
-    with patch.object(authenticated_client._session, "post", return_value=mock_response) as mock_post:
-        authenticated_client.trigger_job("DS_NIGHTLY_LOAD", job_params={"$G_RUN_DATE": "2026-07-24"})
-
-    sent_form = mock_post.call_args[1]["data"]
-    assert sent_form["$G_RUN_DATE"] == "2026-07-24"
+def test_trigger_job_uses_repository_override(authenticated_client):
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>7</rid><repoName>OTHER_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job("J", repository="OTHER_REPO")
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<repoName>OTHER_REPO</repoName>" in body
 
 
 def test_trigger_job_authenticates_first_if_no_token(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 
     client = DSRestClient(env_config)
-    login_response = MagicMock()
-    login_response.status_code = 200
-    login_response.headers = {"X-DS-SessionToken": "tok"}
-    trigger_response = MagicMock()
-    trigger_response.status_code = 200
-    trigger_response.text = "<html>submitted</html>"
-    with patch.object(client._session, "post", side_effect=[login_response, trigger_response]):
-        run_id = client.trigger_job("DS_NIGHTLY_LOAD")
+    logon = _mock_soap_response(
+        f'<session xmlns="{DS_NS}"><SessionID>SESS-9</SessionID></session>'
+    )
+    run = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>55</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(client._session, "post", side_effect=[logon, run]):
+        run_id = client.trigger_job("J")
+    assert run_id == "55"
+    assert client._token == "SESS-9"
 
-    assert run_id
-    assert client._token == "tok"
 
-
-def test_trigger_job_raises_ds_api_error_on_http_failure(authenticated_client):
+def test_trigger_job_raises_when_returncode_nonzero(authenticated_client):
     from etl_framework.exceptions import DSAPIError
 
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-    mock_response.text = "job not found"
-    with patch.object(authenticated_client._session, "post", return_value=mock_response):
-        with pytest.raises(DSAPIError):
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>0</pid><cid>0</cid><rid>0</rid>'
+        f"<repoName>DS_REPO</repoName><returnCode>1</returnCode>"
+        f"<errorMessage>job not found</errorMessage></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp):
+        with pytest.raises(DSAPIError) as exc_info:
             authenticated_client.trigger_job("does-not-exist")
+    assert "job not found" in (exc_info.value.response_body or "")
+
+
+def test_trigger_job_raises_on_soap_fault(authenticated_client):
+    from etl_framework.exceptions import DSAPIError
+
+    fault = (
+        "<soapenv:Fault xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/'>"
+        "<faultstring>boom</faultstring></soapenv:Fault>"
+    )
+    resp = _mock_soap_response(fault, status_code=500)
+    with patch.object(authenticated_client._session, "post", return_value=resp):
+        with pytest.raises(DSAPIError):
+            authenticated_client.trigger_job("J")
 
 
 def test_trigger_job_raises_value_error_when_no_repository_available(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 
-    cfg = env_config.model_copy(update={"ds_repository": ""})
-    client = DSRestClient(cfg)
-    client._token = "tok"
+    client = DSRestClient(env_config.model_copy(update={"ds_repository": ""}))
+    client._token = "SESS"
     with pytest.raises(ValueError, match="repository"):
-        client.trigger_job("DS_NIGHTLY_LOAD")
+        client.trigger_job("J")
 
 
 # ---------------------------------------------------------------------------
-# get_job_status / wait_for_completion
-#
-# Complete rework (2026-09-08) modeled on live captures of the Management
-# Console's own "Batch Job Status" (AwBatchJobHistory) and "Job Trace Log"
-# (AwBatchJobLogs) pages -- see DSRestClient.get_job_status's docstring for
-# what's confirmed live vs. still inferred (only circgreen.gif -> PASSED is
-# directly observed; circred.gif -> FAILED is a traffic-light inference).
+# get_job_status (Get_BatchJob_Status SOAP op)
 # ---------------------------------------------------------------------------
 
-from etl_framework.runner.state import TestStatus
+@pytest.mark.parametrize("raw_status,expected", [
+    ("Completed", TestStatus.PASSED),
+    ("completed", TestStatus.PASSED),
+    ("Success", TestStatus.PASSED),
+    ("succeeded", TestStatus.PASSED),
+    ("Succeeded", TestStatus.PASSED),
+    ("Warning", TestStatus.PASSED),
+    ("Error", TestStatus.FAILED),
+    ("Failed", TestStatus.FAILED),
+    ("Cancelled", TestStatus.FAILED),
+    ("Stopped", TestStatus.FAILED),
+    ("Running", TestStatus.RUNNING),
+    ("Pending", TestStatus.RUNNING),
+    ("Queued", TestStatus.RUNNING),
+    ("Started", TestStatus.RUNNING),
+])
+def test_get_job_status_maps_known_statuses(authenticated_client, raw_status, expected):
+    resp = _mock_soap_response(
+        f'<batchJobStatusResponse xmlns="{DS_NS}"><returnCode>0</returnCode>'
+        f"<status>{raw_status}</status></batchJobStatusResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        status = authenticated_client.get_job_status("4242")
 
-
-def _history_row(job_name: str, icon: str, object_key: str = "306") -> str:
-    """A minimal single-row AwBatchJobHistory table body, matching the real
-    structure captured live: a class=tablerow (lowercase) <TR>, a status
-    icon cell, and a bare job-name cell with no other attributes."""
-    return f"""
-    <TABLE CLASS="JCActaHTMLTableSortable">
-    <TBODY>
-    <TR  class=tablerow ><TD ><input type="checkbox" Name="CBG1" Value= "{object_key}" ></TD>
-    <TD  class="cell" nowrap align=CENTER><IMG alt='' id=IMG1 align=absmiddle src='../images/circ{icon}.gif'></TD>
-    <TD  class="cell" nowrap>{job_name}</TD>
-    <TD  class="cell" nowrap><a HREF=AwBatchJobLogs?ObjectKey={object_key}&JobName={job_name}>Trace</a></TD>
-    </TR>
-    </TBODY>
-    </TABLE>
-    """
-
-
-def _history_response(job_name: str, icon: str, object_key: str = "306") -> MagicMock:
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = _history_row(job_name, icon, object_key)
-    return mock_response
-
-
-def test_get_job_status_maps_green_icon_to_passed(authenticated_client):
-    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
-    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
-        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD", run_id="some-guid")
-
-    assert status == TestStatus.PASSED
-    called_url = mock_get.call_args[0][0]
-    assert called_url == "http://ds.example.com/DataServices/servlet/AwBatchJobHistory"
-    called_params = mock_get.call_args[1]["params"]
-    assert called_params["JobName"] == "DS_NIGHTLY_LOAD"
-    assert called_params["REPOSITORY_NAME"] == "DS_REPO"
-    assert called_params["GROUP_TIME_RADIO"] == "LAST_EXECUTION_RADIO"
-
-
-def test_get_job_status_maps_red_icon_to_failed(authenticated_client):
-    mock_response = _history_response("DS_NIGHTLY_LOAD", "red")
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
-        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
-
-    assert status == TestStatus.FAILED
+    assert status == expected
+    headers = mock_post.call_args[1]["headers"]
+    assert headers["SOAPAction"] == '"jobAdmin=Get_BatchJob_Status"'
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<runID>4242</runID>" in body
+    assert "<repoName>DS_REPO</repoName>" in body
 
 
 def test_get_job_status_uses_repository_override(authenticated_client):
-    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
-    with patch.object(authenticated_client._session, "get", return_value=mock_response) as mock_get:
-        authenticated_client.get_job_status("DS_NIGHTLY_LOAD", repository="OTHER_REPO")
-
-    called_params = mock_get.call_args[1]["params"]
-    assert called_params["REPOSITORY_NAME"] == "OTHER_REPO"
-
-
-def test_get_job_status_ignores_ds_url_path_and_uses_server_origin(env_config):
-    """Regression test for the 2026-09-08 live 404: same bug class as
-    trigger_job's -- ds_url "https://qetl111/DataServices/launch/" must not
-    have its "/launch" path carried into the history check URL."""
-    from etl_framework.sap_ds.client import DSRestClient
-
-    cfg = env_config.model_copy(update={"ds_url": "https://qetl111/DataServices/launch/"})
-    client = DSRestClient(cfg)
-    client._token = "fake-ds-token-123"
-    mock_response = _history_response("DS_NIGHTLY_LOAD", "green")
-    with patch.object(client._session, "get", return_value=mock_response) as mock_get:
-        client.get_job_status("DS_NIGHTLY_LOAD")
-
-    called_url = mock_get.call_args[0][0]
-    assert called_url == "https://qetl111/DataServices/servlet/AwBatchJobHistory"
+    resp = _mock_soap_response(
+        f'<batchJobStatusResponse xmlns="{DS_NS}"><returnCode>0</returnCode>'
+        f"<status>Completed</status></batchJobStatusResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.get_job_status("4242", repository="OTHER_REPO")
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<repoName>OTHER_REPO</repoName>" in body
 
 
-def test_get_job_status_treats_unrecognized_icon_as_running(authenticated_client, caplog):
-    mock_response = _history_response("DS_NIGHTLY_LOAD", "yellow")
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+def test_get_job_status_treats_unrecognized_status_as_running(authenticated_client, caplog):
+    resp = _mock_soap_response(
+        f'<batchJobStatusResponse xmlns="{DS_NS}"><returnCode>0</returnCode>'
+        f"<status>SomeNewDSStatus</status></batchJobStatusResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp):
         with caplog.at_level("WARNING"):
-            status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
-
+            status = authenticated_client.get_job_status("4242")
     assert status == TestStatus.RUNNING
-    assert "yellow" in caplog.text
+    assert "SomeNewDSStatus" in caplog.text
 
 
-def test_get_job_status_treats_no_matching_row_as_running(authenticated_client):
-    """Job not in the history listing yet (e.g. just triggered, DS hasn't
-    registered the run) -- keep polling rather than erroring."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = _history_row("SOME_OTHER_JOB", "green")
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
-        status = authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
-
-    assert status == TestStatus.RUNNING
-
-
-def test_get_job_status_raises_ds_api_error_on_http_failure(authenticated_client):
+def test_get_job_status_raises_on_soap_fault(authenticated_client):
     from etl_framework.exceptions import DSAPIError
 
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    mock_response.text = "server error"
-    with patch.object(authenticated_client._session, "get", return_value=mock_response):
+    fault = (
+        "<soapenv:Fault xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/'>"
+        "<faultstring>server error</faultstring></soapenv:Fault>"
+    )
+    resp = _mock_soap_response(fault, status_code=500)
+    with patch.object(authenticated_client._session, "post", return_value=resp):
         with pytest.raises(DSAPIError):
-            authenticated_client.get_job_status("DS_NIGHTLY_LOAD")
+            authenticated_client.get_job_status("4242")
 
+
+# ---------------------------------------------------------------------------
+# wait_for_completion (unchanged polling logic on top of get_job_status)
+# ---------------------------------------------------------------------------
 
 def test_wait_for_completion_returns_immediately_on_success(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
-        status = authenticated_client.wait_for_completion(
-            "DS_NIGHTLY_LOAD", run_id="some-guid", timeout_s=5, poll_interval_s=0.01,
-        )
-
+        status = authenticated_client.wait_for_completion("4242", timeout_s=5, poll_interval_s=0.01)
     assert status == TestStatus.PASSED
-    mock_get.assert_called_once_with("DS_NIGHTLY_LOAD", run_id="some-guid", repository=None)
+    mock_get.assert_called_once_with("4242", repository=None)
 
 
 def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
@@ -376,22 +389,18 @@ def test_wait_for_completion_polls_until_terminal_status(authenticated_client):
         authenticated_client, "get_job_status",
         side_effect=[TestStatus.RUNNING, TestStatus.RUNNING, TestStatus.PASSED],
     ) as mock_get:
-        status = authenticated_client.wait_for_completion("DS_NIGHTLY_LOAD", timeout_s=5, poll_interval_s=0.01)
-
+        status = authenticated_client.wait_for_completion("4242", timeout_s=5, poll_interval_s=0.01)
     assert status == TestStatus.PASSED
     assert mock_get.call_count == 3
 
 
 def test_wait_for_completion_raises_timeout_error_when_never_terminal(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.RUNNING):
-        with pytest.raises(TimeoutError, match="DS_NIGHTLY_LOAD"):
-            authenticated_client.wait_for_completion("DS_NIGHTLY_LOAD", timeout_s=0.05, poll_interval_s=0.01)
+        with pytest.raises(TimeoutError, match="4242"):
+            authenticated_client.wait_for_completion("4242", timeout_s=0.05, poll_interval_s=0.01)
 
 
 def test_wait_for_completion_passes_repository_override_through(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
-        authenticated_client.wait_for_completion(
-            "DS_NIGHTLY_LOAD", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01,
-        )
-
-    mock_get.assert_called_once_with("DS_NIGHTLY_LOAD", run_id=None, repository="OTHER_REPO")
+        authenticated_client.wait_for_completion("4242", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01)
+    mock_get.assert_called_once_with("4242", repository="OTHER_REPO")

@@ -16,7 +16,7 @@ from api.services.bo_archive import save_bo_download
 from api.services.api_exchange import capture_exchange
 from etl_framework.automic.client import AutomicClient
 from etl_framework.config.models import EnvironmentConfig, resolve_api_endpoint
-from etl_framework.exceptions import AutomicAPIError, BOAPIError, ReportNotFoundError
+from etl_framework.exceptions import AutomicAPIError, BOAPIError, DSAPIError, ReportNotFoundError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.rest_api.client import APIEndpointClient
 from etl_framework.sap_bo.client import BORestClient
@@ -39,7 +39,7 @@ class SAPBOAuthContext:
     auth_type: str | None = None
 
 
-def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
+def _friendly_error(exc: Exception, auth_type: str | None = None, adapter: str = "SAP BO") -> str:
     msg = str(exc)
     exc_type = type(exc).__name__
     if isinstance(exc, ReportNotFoundError):
@@ -58,14 +58,26 @@ def _friendly_error(exc: Exception, auth_type: str | None = None) -> str:
         if body:
             return f"Automic API error {exc.http_status}: {body}"
         return str(exc)
+    if isinstance(exc, DSAPIError):
+        # Return early, before the generic string-sniffing checks below: a
+        # SOAP fault's http_status is our own mock/gateway's choice, not a
+        # real HTTP semantic, and its numeric value (e.g. "401") can spuriously
+        # match the "Unauthorized"/"401" check further down and replace the
+        # actual fault text (e.g. "requires Username node in the Logon
+        # request", "CMS name is invalid", "Job not found") with a generic,
+        # less useful guess.
+        body = (exc.response_body or "").strip()
+        if body:
+            return f"SAP DS API error {exc.http_status}: {body}"
+        return str(exc)
     if isinstance(exc, requests_exc.ProxyError) or "ProxyError" in msg:
         return (
-            "Cannot reach SAP BO through the configured proxy - verify BO proxy "
+            f"Cannot reach {adapter} through the configured proxy - verify proxy "
             "settings or HTTPS_PROXY"
         )
     if isinstance(exc, requests_exc.SSLError) or "certificate verify failed" in msg:
         return (
-            "SAP BO TLS certificate verification failed - install the issuing CA "
+            f"{adapter} TLS certificate verification failed - install the issuing CA "
             "or disable SSL verification only for a trusted internal endpoint"
         )
     if "NameResolutionError" in msg or "getaddrinfo failed" in msg or "Name or service not known" in msg:
@@ -468,24 +480,32 @@ class AdapterService:
             latency = int((time.monotonic() - start) * 1000)
             return AdapterTestOut(ok=True, message="Connected successfully to SAP DS API", latency_ms=max(1, latency))
         except Exception as exc:
-            return AdapterTestOut(ok=False, message=_friendly_error(exc), latency_ms=0)
+            return AdapterTestOut(ok=False, message=_friendly_error(exc, adapter="SAP DS"), latency_ms=0)
 
     def lookup_ds_job(self, config_id: int, identifier: str, id_type: str, repository: str | None = None) -> SAPDSJobStatusOut:
         from datetime import datetime, timezone
-        if id_type == "run_id":
+        if id_type == "job_name":
+            # The DS client speaks SOAP now (Get_BatchJob_Status) -- that
+            # operation is keyed by run id only, there is no job-name-keyed
+            # status lookup in this protocol. Reject up front with a clear
+            # message instead of sending the job name as a runID and getting
+            # a confusing SOAP fault (or worse, a silently wrong status) back.
             raise HTTPException(
                 status_code=400,
-                detail="SAP DS job lookup by run_id is not supported by this on-prem instance's "
-                       "API -- there is no run-id-keyed status endpoint, only a job-name-keyed "
-                       "history lookup. Use id_type='job_name' instead.",
+                detail="SAP DS job lookup by job_name is not supported by the SOAP web service -- "
+                       "Get_BatchJob_Status is keyed by run id only. Use id_type='run_id' with the "
+                       "run id returned by trigger_job.",
             )
         env = self._get_env_config(config_id)
         repo = repository or env.ds_repository
         try:
             client = DSRestClient(env)
-            status = client.get_job_status(identifier, repository=repo)
+            try:
+                status = client.get_job_status(identifier, repository=repo)
+            finally:
+                client.logout()
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+            raise HTTPException(status_code=502, detail=_friendly_error(exc, adapter="SAP DS")) from exc
         return SAPDSJobStatusOut(
             identifier=identifier,
             identifier_type=id_type,

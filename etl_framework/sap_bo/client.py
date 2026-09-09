@@ -213,6 +213,14 @@ class BORestClient:
         proxy_url = env_config.bo_proxy_url.strip()
         if proxy_url:
             self._session.proxies.update({"http": proxy_url, "https": proxy_url})
+        else:
+            # No explicit BO proxy configured: don't let requests inherit
+            # ambient HTTP(S)_PROXY env vars. On corporate hosts those point at
+            # an outbound internet proxy (e.g. Zscaler) that can't route to an
+            # internal BO server, which surfaced as "Cannot reach SAP BO
+            # through the configured proxy". trust_env=False makes the client
+            # connect directly. Set bo_proxy_url if a proxy really is required.
+            self._session.trust_env = False
 
     @property
     def logon_token(self) -> str | None:

@@ -986,7 +986,7 @@ class SAPDSTestRequest(BaseModel):
 class SAPDSLookupRequest(BaseModel):
     config_id: int
     identifier: str
-    id_type: Literal["run_id", "job_name"] = "job_name"
+    id_type: Literal["run_id", "job_name"] = "run_id"
     repository: str | None = None
 
 

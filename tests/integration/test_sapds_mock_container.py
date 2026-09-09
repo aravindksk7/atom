@@ -43,6 +43,9 @@ def _wait_for_sapds() -> None:
     raise AssertionError(f"SAP DS mock did not become ready: {last_error}")
 
 
+CMS_SYSTEM = os.getenv("LIVE_SAPDS_CMS_SYSTEM", "mock-cms")
+
+
 def _env() -> EnvironmentConfig:
     return EnvironmentConfig(
         name="sapds-mock",
@@ -52,6 +55,7 @@ def _env() -> EnvironmentConfig:
         ds_user=USER,
         ds_password=PASSWORD,
         ds_repository="DS_REPO",
+        ds_cms_system=CMS_SYSTEM,
         ds_timeout=5,
         ds_verify_ssl=False,
     )
@@ -63,7 +67,7 @@ def test_trigger_and_wait_for_completion_success():
     client.login()
 
     run_id = client.trigger_job("DS_NIGHTLY_LOAD")
-    status = client.wait_for_completion("DS_NIGHTLY_LOAD", run_id=run_id, timeout_s=5, poll_interval_s=0.1)
+    status = client.wait_for_completion(run_id, timeout_s=5, poll_interval_s=0.1)
     assert status == TestStatus.PASSED
 
 
@@ -73,7 +77,7 @@ def test_trigger_and_wait_for_completion_failure():
     client.login()
 
     run_id = client.trigger_job("DS_BAD_LOAD")
-    status = client.wait_for_completion("DS_BAD_LOAD", run_id=run_id, timeout_s=5, poll_interval_s=0.1)
+    status = client.wait_for_completion(run_id, timeout_s=5, poll_interval_s=0.1)
     assert status == TestStatus.FAILED
 
 
@@ -99,3 +103,36 @@ def test_login_rejects_wrong_credentials():
     with pytest.raises(DSAPIError) as exc_info:
         client.login()
     assert exc_info.value.http_status == 401
+
+
+def test_login_rejects_missing_cms_system():
+    """Logon fails fast locally (before any request) when ds_cms_system is
+    unset -- see DSRestClient.login. Verified separately from the live-server
+    behavior above since this path never reaches the mock."""
+    from etl_framework.exceptions import DSAPIError
+
+    _wait_for_sapds()
+    cfg = _env().model_copy(update={"ds_cms_system": ""})
+    client = DSRestClient(cfg)
+
+    with pytest.raises(DSAPIError) as exc_info:
+        client.login()
+    assert "CMS system" in (exc_info.value.response_body or "")
+
+
+def test_ping_after_login_succeeds():
+    _wait_for_sapds()
+    client = DSRestClient(_env())
+    client.login()
+    assert client.ping() is True
+
+
+def test_get_job_status_for_unknown_run_id_keeps_polling():
+    """No run-id-keyed 'not found' signal exists on the real status
+    operation (see Get_BatchJob_Status docs) -- an unrecognized run id reads
+    back as RUNNING rather than raising."""
+    client = DSRestClient(_env())
+    client.login()
+
+    status = client.get_job_status("not-a-real-run-id")
+    assert status == TestStatus.RUNNING

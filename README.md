@@ -1883,16 +1883,16 @@ Triggers a SAP Data Services (BODS) batch job by name and waits for it to reach 
 
 **How it works (live mode):**
 
-1. The executor logs into the SAP DS Administrator API (`ds_url`, `ds_user`, `ds_password` from the saved config) and triggers the named batch job in the resolved repository (the job's own `repository` param, falling back to the config's `ds_repository`).
+1. The executor logs into SAP Data Services' SOAP web service (`ds_url`, `ds_user`, `ds_password`, `ds_cms_system` from the saved config) and triggers the named batch job in the resolved repository (the job's own `repository` param, falling back to the config's `ds_repository`).
 2. It polls the run's status every `poll_interval_s` seconds.
-3. `Completed`/`Success` maps to `PASSED`; `Error`/`Failed`/`Cancelled` maps to `FAILED`; still running past `timeout_s` produces `ERROR`.
+3. `Completed`/`Success`/`Succeeded`/`Warning` maps to `PASSED`; `Error`/`Failed`/`Cancelled`/`Stopped` maps to `FAILED`; still running past `timeout_s` produces `ERROR`.
 4. Requires **Use Live Connections** enabled — otherwise the job fails fast rather than silently no-op'ing.
 
 **Job editor fields:** DS Job Name, Repository (optional, falls back to config), Job Params (JSON, optional), Poll Interval (seconds), Timeout (seconds).
 
-> SAP DS's Administrator REST API is less standardized across versions than SAP BO's `biprws`; the endpoint shapes this integration uses are best-effort and worth verifying against your own SAP DS instance before relying on it in production.
+> This integration speaks SAP Data Services' native SOAP web service (Logon/Run_Batch_Job/Get_BatchJob_Status), verified against a live on-premises instance. The status lookup is keyed by run id only — there is no job-name-keyed status endpoint in this protocol.
 
-**SAP DS connection setup:** add `ds_url`, `ds_user`, `ds_password`, `ds_repository`, and optionally `ds_timeout` / `ds_proxy_url` / `ds_verify_ssl` to a saved config under **Config → SAP DS** — the same section pattern as the existing SAP BO fields.
+**SAP DS connection setup:** add `ds_url`, `ds_user`, `ds_password`, `ds_repository`, `ds_cms_system` (a reachable CMS host, e.g. the CMS's own hostname — Logon fails without it), and optionally `ds_timeout` / `ds_proxy_url` / `ds_verify_ssl` to a saved config under **Config → SAP DS** — the same section pattern as the existing SAP BO fields.
 
 ---
 

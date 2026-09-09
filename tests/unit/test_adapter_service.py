@@ -110,6 +110,54 @@ def test_friendly_401_error_default_message_when_secEnterprise():
     assert message == "Authentication failed - check username and password"
 
 
+def test_friendly_proxy_error_names_bo_by_default():
+    from api.services.adapter_service import _friendly_error
+    from requests import exceptions as rexc
+
+    message = _friendly_error(rexc.ProxyError("Unable to connect to proxy"))
+
+    assert "SAP BO" in message
+    assert "proxy" in message.lower()
+
+
+def test_friendly_proxy_error_names_ds_when_adapter_is_ds():
+    from api.services.adapter_service import _friendly_error
+    from requests import exceptions as rexc
+
+    message = _friendly_error(rexc.ProxyError("Unable to connect to proxy"), adapter="SAP DS")
+
+    assert "SAP DS" in message
+    assert "SAP BO" not in message
+
+
+def test_friendly_ssl_error_names_ds_when_adapter_is_ds():
+    from api.services.adapter_service import _friendly_error
+    from requests import exceptions as rexc
+
+    message = _friendly_error(
+        rexc.SSLError("certificate verify failed: self-signed certificate"),
+        adapter="SAP DS",
+    )
+
+    assert "SAP DS" in message
+    assert "SAP BO" not in message
+
+
+def test_friendly_ds_api_error_preserves_soap_fault_text():
+    """A DSAPIError's http_status is a SOAP-gateway-chosen HTTP code, not a
+    real auth signal -- when it happens to be 401 the generic 'Unauthorized'
+    heuristic below must not swallow the actual SOAP fault text (e.g. 'CMS
+    system is invalid') with a generic 'check username and password' guess."""
+    from api.services.adapter_service import _friendly_error
+    from etl_framework.exceptions import DSAPIError
+
+    exc = DSAPIError(job_name="<login>", http_status=401, response_body="Logon failed: invalid credentials")
+    message = _friendly_error(exc)
+
+    assert "Logon failed: invalid credentials" in message
+    assert "check username and password" not in message
+
+
 def test_test_bo_connection_401_with_ad_auth_type_hints_at_configured_type(mock_config_repo, service):
     cfg = _make_saved_config()
     cfg.config_json["bo_auth_type"] = "secWinAD"
@@ -585,17 +633,30 @@ def test_lookup_ds_job_success(service):
     with patch("api.services.adapter_service.DSRestClient") as mock_ds:
         instance = mock_ds.return_value
         instance.get_job_status.return_value = TestStatus.PASSED
-        res = service.lookup_ds_job(1, "JOB_DEMO", "job_name", repository="REPO_TEST")
-        assert res.identifier == "JOB_DEMO"
+        res = service.lookup_ds_job(1, "some-guid", "run_id", repository="REPO_TEST")
+        assert res.identifier == "some-guid"
         assert res.status == "PASSED"
         assert res.repository == "REPO_TEST"
+        instance.logout.assert_called_once()
 
 
-def test_lookup_ds_job_rejects_run_id_lookup(service):
-    """This on-prem API has no run-id-keyed status endpoint (see
-    DSRestClient.get_job_status) -- id_type='run_id' must be rejected
-    clearly rather than silently misused as a job_name."""
+def test_lookup_ds_job_logs_out_session_even_on_failure(service):
+    """get_job_status logging in a fresh SOAP session per lookup call must
+    not leak that session when the status call itself fails."""
+    with patch("api.services.adapter_service.DSRestClient") as mock_ds:
+        instance = mock_ds.return_value
+        instance.get_job_status.side_effect = RuntimeError("boom")
+        with pytest.raises(HTTPException):
+            service.lookup_ds_job(1, "some-guid", "run_id", repository="REPO_TEST")
+        instance.logout.assert_called_once()
+
+
+def test_lookup_ds_job_rejects_job_name_lookup(service):
+    """The DS client speaks SOAP now -- Get_BatchJob_Status (see
+    DSRestClient.get_job_status) is keyed by run id only, so
+    id_type='job_name' must be rejected clearly rather than silently sent
+    as a runID."""
     with pytest.raises(HTTPException) as exc_info:
-        service.lookup_ds_job(1, "some-guid", "run_id", repository="REPO_TEST")
+        service.lookup_ds_job(1, "JOB_DEMO", "job_name", repository="REPO_TEST")
     assert exc_info.value.status_code == 400
 

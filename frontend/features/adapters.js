@@ -33,7 +33,7 @@
     dsConfigId: '',
     dsTesting: false,
     dsTestResult: null,
-    dsIdType: 'job_name',
+    dsIdType: 'run_id',
     dsIdentifier: '',
     dsRepository: '',
     dsLoading: false,
@@ -596,12 +596,21 @@
     openAddDSJobModal() {
       if (!this.dsResult) return;
       const rawIdent = this.dsResult.identifier || '';
-      const slug = ('ds_' + rawIdent).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      // A run_id lookup (the only supported kind -- see lookupSAPDS) never
+      // tells us the job's name: Get_BatchJob_Status has no job-name field in
+      // its response. Only prefill job_name when the result actually came
+      // from a job_name-keyed lookup; otherwise leave it for the user to fill
+      // in and note the run id for reference instead.
+      const isJobName = this.dsResult.identifier_type === 'job_name';
+      const jobName = isJobName ? rawIdent : '';
+      const slug = ('ds_' + (jobName || rawIdent)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
       this.dsJobForm = {
         name: slug,
-        job_name: rawIdent,
+        job_name: jobName,
         repository: this.dsResult.repository || '',
-        description: `SAP DS Job: ${rawIdent}`,
+        description: isJobName
+          ? `SAP DS Job: ${rawIdent}`
+          : `SAP DS Job -- looked up via run id ${rawIdent}; enter the job name to trigger`,
         job_params_raw: '',
         poll_interval_s: 5,
         timeout_s: 600,
