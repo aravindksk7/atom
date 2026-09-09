@@ -65,10 +65,16 @@ def test_2_create_regular_token(settings_client):
     _regular_token = resp.json()["raw_token"]
 
 
+_SMTP_DEFAULTS = {
+    "smtp_host": "", "smtp_port": 587, "smtp_from": "", "smtp_user": "",
+    "smtp_password_set": False, "smtp_use_tls": True,
+}
+
+
 def test_3_get_settings_defaults_to_utc(settings_client):
     resp = settings_client.get("/api/settings", headers={"Authorization": f"Bearer {_regular_token}"})
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "UTC", "upload_retention_days": 30, "bo_download_dir": ""}
+    assert resp.json() == {"timezone": "UTC", "upload_retention_days": 30, "bo_download_dir": "", **_SMTP_DEFAULTS}
 
 
 def test_4_put_settings_requires_admin(settings_client):
@@ -96,10 +102,10 @@ def test_6_put_settings_persists_as_admin(settings_client):
         headers={"Authorization": f"Bearer {_admin_token}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": ""}
+    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": "", **_SMTP_DEFAULTS}
 
     get_resp = settings_client.get("/api/settings", headers={"Authorization": f"Bearer {_regular_token}"})
-    assert get_resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": ""}
+    assert get_resp.json() == {"timezone": "America/New_York", "upload_retention_days": 30, "bo_download_dir": "", **_SMTP_DEFAULTS}
 
 
 def test_7_put_settings_updates_upload_retention(settings_client):
@@ -109,4 +115,35 @@ def test_7_put_settings_updates_upload_retention(settings_client):
         headers={"Authorization": f"Bearer {_admin_token}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 14, "bo_download_dir": ""}
+    assert resp.json() == {"timezone": "America/New_York", "upload_retention_days": 14, "bo_download_dir": "", **_SMTP_DEFAULTS}
+
+
+def test_8_put_settings_updates_smtp_config(settings_client):
+    resp = settings_client.put(
+        "/api/settings",
+        json={
+            "smtp_host": "mail.corp.local", "smtp_port": 2525, "smtp_from": "etl@corp.local",
+            "smtp_user": "svc-etl", "smtp_password": "hunter2", "smtp_use_tls": True,
+        },
+        headers={"Authorization": f"Bearer {_admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["smtp_host"] == "mail.corp.local"
+    assert body["smtp_port"] == 2525
+    assert body["smtp_from"] == "etl@corp.local"
+    assert body["smtp_user"] == "svc-etl"
+    assert body["smtp_password_set"] is True
+    assert "smtp_password" not in body  # never echoed back
+
+    get_resp = settings_client.get("/api/settings", headers={"Authorization": f"Bearer {_regular_token}"})
+    assert get_resp.json()["smtp_host"] == "mail.corp.local"
+
+
+def test_9_put_settings_rejects_bad_smtp_port(settings_client):
+    resp = settings_client.put(
+        "/api/settings",
+        json={"smtp_port": 99999},
+        headers={"Authorization": f"Bearer {_admin_token}"},
+    )
+    assert resp.status_code == 422

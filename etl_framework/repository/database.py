@@ -121,6 +121,8 @@ def _ensure_compare_columns(bind) -> None:
             "secret TEXT, "
             "created_at DATETIME)"
         )
+        ensure_column(conn, "notification_hooks", "channel",
+                      "ALTER TABLE notification_hooks ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'generic'")
         ensure_table(conn, "scheduled_runs",
             "CREATE TABLE IF NOT EXISTS scheduled_runs ("
             "id INTEGER PRIMARY KEY, "
@@ -326,6 +328,12 @@ def _ensure_compare_columns(bind) -> None:
         execute_once(conn, "INSERT OR IGNORE INTO app_settings (id, timezone) VALUES (1, 'UTC')")
         ensure_column(conn, "app_settings", "upload_retention_days", "ALTER TABLE app_settings ADD COLUMN upload_retention_days INTEGER NOT NULL DEFAULT 30")
         ensure_column(conn, "app_settings", "bo_download_dir", "ALTER TABLE app_settings ADD COLUMN bo_download_dir VARCHAR(1024) NOT NULL DEFAULT ''")
+        ensure_column(conn, "app_settings", "smtp_host", "ALTER TABLE app_settings ADD COLUMN smtp_host VARCHAR(255) NOT NULL DEFAULT ''")
+        ensure_column(conn, "app_settings", "smtp_port", "ALTER TABLE app_settings ADD COLUMN smtp_port INTEGER NOT NULL DEFAULT 587")
+        ensure_column(conn, "app_settings", "smtp_from", "ALTER TABLE app_settings ADD COLUMN smtp_from VARCHAR(255) NOT NULL DEFAULT ''")
+        ensure_column(conn, "app_settings", "smtp_user", "ALTER TABLE app_settings ADD COLUMN smtp_user VARCHAR(255) NOT NULL DEFAULT ''")
+        ensure_column(conn, "app_settings", "smtp_password", "ALTER TABLE app_settings ADD COLUMN smtp_password TEXT")
+        ensure_column(conn, "app_settings", "smtp_use_tls", "ALTER TABLE app_settings ADD COLUMN smtp_use_tls BOOLEAN NOT NULL DEFAULT 1")
 
         ensure_column(conn, "job_selection_versions", "config_id", "ALTER TABLE job_selection_versions ADD COLUMN config_id INTEGER")
         ensure_column(conn, "job_selection_versions", "sequence_ref",

@@ -925,10 +925,10 @@ class NotificationRepository:
         self._db = db
 
     def create(self, name: str, url: str, events: list[str],
-               secret: str | None = None) -> NotificationHook:
+               secret: str | None = None, channel: str = "generic") -> NotificationHook:
         from api.services.secret_store import encrypt_secret
         stored_secret = encrypt_secret(secret) if secret else secret
-        hook = NotificationHook(name=name, url=url, events=events, secret=stored_secret)
+        hook = NotificationHook(name=name, url=url, events=events, secret=stored_secret, channel=channel)
         self._db.add(hook)
         self._db.commit()
         self._db.refresh(hook)
@@ -947,6 +947,19 @@ class NotificationRepository:
         self._db.delete(hook)
         self._db.commit()
         return True
+
+    def update(self, hook_id: int, enabled: bool | None = None,
+               events: list[str] | None = None) -> NotificationHook | None:
+        hook = self._db.get(NotificationHook, hook_id)
+        if hook is None:
+            return None
+        if enabled is not None:
+            hook.enabled = enabled
+        if events is not None:
+            hook.events = events
+        self._db.commit()
+        self._db.refresh(hook)
+        return hook
 
     def list_enabled_for_event(self, event: str) -> list[NotificationHook]:
         return (
@@ -1581,6 +1594,43 @@ class SettingsRepository:
             raise ValueError("upload_retention_days must be at least 1")
         row = self._get_or_create()
         row.upload_retention_days = int(days)
+        row.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(row)
+        return row
+
+    def get_smtp_config(self) -> dict:
+        """Decrypted SMTP settings for delivery. Never expose smtp_password from this dict."""
+        from api.services.secret_store import decrypt_secret
+        row = self._get_or_create()
+        return {
+            "host": row.smtp_host or "",
+            "port": int(row.smtp_port or 587),
+            "from_addr": row.smtp_from or "",
+            "user": row.smtp_user or "",
+            "password": decrypt_secret(row.smtp_password) if row.smtp_password else "",
+            "use_tls": bool(row.smtp_use_tls),
+        }
+
+    def set_smtp_config(self, host: str | None = None, port: int | None = None,
+                         from_addr: str | None = None, user: str | None = None,
+                         password: str | None = None, use_tls: bool | None = None) -> AppSettings:
+        from api.services.secret_store import encrypt_secret
+        row = self._get_or_create()
+        if host is not None:
+            row.smtp_host = host.strip()
+        if port is not None:
+            if not (1 <= port <= 65535):
+                raise ValueError("smtp_port must be between 1 and 65535")
+            row.smtp_port = port
+        if from_addr is not None:
+            row.smtp_from = from_addr.strip()
+        if user is not None:
+            row.smtp_user = user.strip()
+        if password is not None:
+            row.smtp_password = encrypt_secret(password) if password else ""
+        if use_tls is not None:
+            row.smtp_use_tls = use_tls
         row.updated_at = datetime.now(timezone.utc)
         self._db.commit()
         self._db.refresh(row)

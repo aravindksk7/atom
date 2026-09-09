@@ -312,6 +312,16 @@ function _appRaw() {
     boDownloadDirOpen: false,
     boDownloadDirDraft: '',
     boDownloadDirSaving: false,
+
+    // -----------------------------------------------------------
+    // SMTP – outbound mail relay for email notification hooks
+    // -----------------------------------------------------------
+    smtpOpen: false,
+    smtpSaving: false,
+    smtpTesting: false,
+    smtpTestTo: '',
+    smtpSaved: { host: '', port: 587, from: '', user: '', password_set: false, use_tls: true },
+    smtpDraft: { host: '', port: 587, from: '', user: '', password: '', use_tls: true },
     timezoneOptions: [
       'UTC',
       'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
@@ -1028,7 +1038,57 @@ function _appRaw() {
         this.boDownloadDir = resp.bo_download_dir || '';
         this.timezoneDraft = this.appTimezone;
         this.boDownloadDirDraft = this.boDownloadDir;
+        this._applySmtpSettings(resp);
       } catch {}
+    },
+
+    _applySmtpSettings(resp) {
+      this.smtpSaved = {
+        host: resp.smtp_host || '', port: resp.smtp_port || 587, from: resp.smtp_from || '',
+        user: resp.smtp_user || '', password_set: !!resp.smtp_password_set, use_tls: !!resp.smtp_use_tls,
+      };
+      this.smtpDraft = { ...this.smtpSaved, password: '' };
+    },
+
+    get smtpDirty() {
+      const d = this.smtpDraft, s = this.smtpSaved;
+      return d.host !== s.host || Number(d.port) !== Number(s.port) || d.from !== s.from ||
+        d.user !== s.user || !!d.use_tls !== !!s.use_tls || !!d.password;
+    },
+
+    async saveSmtpSetting() {
+      this.smtpSaving = true;
+      try {
+        const payload = {
+          smtp_host: this.smtpDraft.host,
+          smtp_port: Number(this.smtpDraft.port) || 587,
+          smtp_from: this.smtpDraft.from,
+          smtp_user: this.smtpDraft.user,
+          smtp_use_tls: !!this.smtpDraft.use_tls,
+        };
+        // Blank password means "keep the one already saved" -- only send it when the user typed one.
+        if (this.smtpDraft.password) payload.smtp_password = this.smtpDraft.password;
+        const resp = await api('PUT', '/api/settings', payload);
+        this._applySmtpSettings(resp);
+        this.toast('success', 'SMTP settings saved');
+      } catch (e) {
+        this.toast('error', 'Failed to save SMTP settings', e.message || '');
+      } finally {
+        this.smtpSaving = false;
+      }
+    },
+
+    async sendSmtpTest() {
+      if (!this.smtpTestTo) return;
+      this.smtpTesting = true;
+      try {
+        await api('POST', '/api/settings/smtp/test', { to: this.smtpTestTo });
+        this.toast('success', 'Test email sent', `Check ${this.smtpTestTo}`);
+      } catch (e) {
+        this.toast('error', 'Test email failed', e.message || '');
+      } finally {
+        this.smtpTesting = false;
+      }
     },
 
     async saveTimezoneSetting() {

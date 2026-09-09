@@ -6,8 +6,11 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
+import smtplib
 import socket
 import threading
+from email.message import EmailMessage
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, NamedTuple
@@ -110,14 +113,64 @@ def _post(url: str, payload: dict, secret: str | None) -> DeliveryResult:
         return DeliveryResult(False, error=str(exc)[:500])
 
 
-def _post_and_track(
-    url: str,
-    payload: dict,
-    secret: str | None,
-    delivery_id: int,
-) -> None:
-    """Deliver a webhook and finalize tracking in a thread-owned DB session."""
-    result = _post(url, payload, secret)
+def parse_mailto(url: str) -> list[str]:
+    """Extract recipient list from a mailto: pseudo-URL, else []."""
+    if not url.startswith("mailto:"):
+        return []
+    return [a.strip() for a in url[len("mailto:"):].split(",") if a.strip()]
+
+
+def _resolve_smtp_config() -> dict:
+    """SMTP settings configured in the web UI win; ETL_SMTP_* env vars are the fallback."""
+    try:
+        from etl_framework.repository.database import SessionLocal
+        from etl_framework.repository.repository import SettingsRepository
+
+        with SessionLocal() as db:
+            cfg = SettingsRepository(db).get_smtp_config()
+            if cfg["host"]:
+                return cfg
+    except Exception as exc:
+        logger.warning("Could not load SMTP settings from the database, falling back to env vars: %s", exc)
+
+    return {
+        "host": os.environ.get("ETL_SMTP_HOST", ""),
+        "port": int(os.environ.get("ETL_SMTP_PORT", "25")),
+        "from_addr": os.environ.get("ETL_SMTP_FROM", "etl-framework@localhost"),
+        "user": os.environ.get("ETL_SMTP_USER", ""),
+        "password": os.environ.get("ETL_SMTP_PASSWORD", ""),
+        "use_tls": os.environ.get("ETL_SMTP_STARTTLS", "").lower() in ("1", "true"),
+    }
+
+
+def _send_email(recipients: list[str], subject: str, body: str, config: dict | None = None) -> DeliveryResult:
+    """Synchronous SMTP send. Errors are logged and returned, never raised."""
+    cfg = config if config is not None else _resolve_smtp_config()
+    host = cfg.get("host", "")
+    if not host:
+        return DeliveryResult(False, error="SMTP is not configured — set it under Settings, or ETL_SMTP_HOST")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = cfg.get("from_addr") or "etl-framework@localhost"
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    try:
+        with smtplib.SMTP(host, int(cfg.get("port") or 25), timeout=10) as server:
+            if cfg.get("use_tls"):
+                server.starttls()
+            if cfg.get("user"):
+                server.login(cfg["user"], cfg.get("password") or "")
+            server.send_message(msg)
+        return DeliveryResult(True)
+    except Exception as exc:
+        logger.warning("Email delivery to %s failed: %s", recipients, exc)
+        return DeliveryResult(False, error=str(exc)[:500])
+
+
+def _track_delivery(delivery_id: int, result: DeliveryResult) -> None:
+    """Finalize a delivery attempt in a thread-owned DB session."""
     try:
         from etl_framework.repository.database import SessionLocal
         from etl_framework.repository.repository import NotificationDeliveryRepository
@@ -131,7 +184,15 @@ def _post_and_track(
                 response_body=result.response_body,
             )
     except Exception as exc:
-        logger.warning("Could not update webhook delivery %s: %s", delivery_id, exc)
+        logger.warning("Could not update delivery %s: %s", delivery_id, exc)
+
+
+def _post_and_track(url: str, payload: dict, secret: str | None, delivery_id: int) -> None:
+    _track_delivery(delivery_id, _post(url, payload, secret))
+
+
+def _send_email_and_track(recipients: list[str], subject: str, body: str, config: dict, delivery_id: int) -> None:
+    _track_delivery(delivery_id, _send_email(recipients, subject, body, config))
 
 
 def notify(
@@ -169,7 +230,6 @@ def notify(
         for event in fired_events:
             if event in hook_events:
                 p = {**payload, "event": event}
-                hook_secret = decrypt_secret(hook.secret)
 
                 delivery_id = None
                 if delivery_repo:
@@ -180,9 +240,23 @@ def notify(
                     )
                     delivery_id = delivery_attempt.id
 
-                target = _post_and_track if delivery_id is not None else _post
-                args = ((hook.url, p, hook_secret, delivery_id)
-                        if delivery_id is not None else (hook.url, p, hook_secret))
+                if getattr(hook, "channel", "generic") == "email":
+                    recipients = parse_mailto(hook.url)
+                    if not recipients:
+                        logger.warning("Email hook %s has no valid mailto: recipients", hook.id)
+                        break
+                    subject = f"ETL run {p.get('status', '')}: {run_id}"
+                    body = json.dumps(p, indent=2, default=str)
+                    smtp_config = _resolve_smtp_config()
+                    target = _send_email_and_track if delivery_id is not None else _send_email
+                    args = ((recipients, subject, body, smtp_config, delivery_id)
+                            if delivery_id is not None else (recipients, subject, body, smtp_config))
+                else:
+                    hook_secret = decrypt_secret(hook.secret)
+                    target = _post_and_track if delivery_id is not None else _post
+                    args = ((hook.url, p, hook_secret, delivery_id)
+                            if delivery_id is not None else (hook.url, p, hook_secret))
+
                 t = threading.Thread(
                     target=target,
                     args=args,

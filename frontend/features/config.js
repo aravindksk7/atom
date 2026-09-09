@@ -53,7 +53,7 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showHookModal: false,
-    hookModal: { name: '', url: '', events: [], secret: '' },
+    hookModal: { name: '', channel: 'generic', url: '', events: [], secret: '' },
     hookEventOptions: ['run.passed', 'run.failed', 'run.slow', 'run.error', 'run.completed', 'run.held', 'run.cancelled'],
       // ===== METHODS (extracted from app.js) =====
     // ===========================================================
@@ -488,7 +488,7 @@
     },
 
     openNewHookModal() {
-      this.hookModal = { name: '', url: '', events: ['run.failed', 'run.error'], secret: '' };
+      this.hookModal = { name: '', channel: 'generic', url: '', events: ['run.failed', 'run.error'], secret: '' };
       this.showHookModal = true;
     },
 
@@ -503,33 +503,42 @@
       if (!m.name || !m.url || !m.events.length) return;
       try {
         await api('POST', '/api/notifications', {
-          name: m.name, url: m.url,
+          name: m.name, channel: m.channel, url: m.url,
           events: m.events,
-          secret: m.secret || null,
+          secret: m.channel === 'generic' ? (m.secret || null) : null,
         });
         await this.loadHooks();
         this.showHookModal = false;
-        this.toast('success', 'Webhook saved', m.name);
+        this.toast('success', (m.channel === 'email' ? 'Email alert' : 'Webhook') + ' saved', m.name);
       } catch (e) {
         this.toast('error', 'Save failed', e.message);
       }
     },
 
     async deleteHook(id) {
-      if (!confirm('Delete this webhook?')) return;
+      if (!confirm('Delete this notification hook?')) return;
       try {
         await api('DELETE', `/api/notifications/${id}`);
         await this.loadHooks();
-        this.toast('success', 'Webhook deleted');
+        this.toast('success', 'Notification hook deleted');
       } catch (e) {
         this.toast('error', 'Delete failed', e.message);
+      }
+    },
+
+    async toggleHookEnabled(hook) {
+      try {
+        await api('PATCH', `/api/notifications/${hook.id}`, { enabled: !hook.enabled });
+        await this.loadHooks();
+      } catch (e) {
+        this.toast('error', 'Update failed', e.message);
       }
     },
 
     async testHook(id) {
       try {
         await api('POST', `/api/notifications/${id}/test`);
-        this.toast('success', 'Test ping sent');
+        this.toast('success', (this.hooks.find(h => h.id === id)?.channel === 'email') ? 'Test email sent' : 'Test ping sent');
       } catch (e) {
         this.toast('error', 'Ping failed', e.message);
       }
