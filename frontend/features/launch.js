@@ -1261,6 +1261,11 @@
         targetName: resolved.name,
         targetTypeLabel: label,
         yamlSnippet: yaml,
+        gitlabSignalsNote: 'The job posts a GitLab commit status (context '
+          + `atom/${targetType}/<name>) on every pipeline. On merge-request `
+          + 'pipelines it also keeps one summary comment up to date; branch '
+          + 'pipelines get the commit status only. No extra CI/CD variable is '
+          + 'needed — the job\'s built-in CI_JOB_TOKEN is used.',
       };
       this.showCiIntegrationModal = true;
     },
