@@ -11,7 +11,7 @@ from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
     RunStep, JobSelection, JobSelectionVersion, AppSettings, TERMINAL_STATUSES,
-    SchedulerTelemetryEvent,
+    SchedulerTelemetryEvent, CustomVariable,
 )
 
 
@@ -107,6 +107,47 @@ class ConfigRepository:
         if cfg is None:
             return False
         self._db.delete(cfg)
+        self._db.commit()
+        return True
+
+
+class CustomVariableRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create(self, name: str, var_type: str, default_value: str | None, description: str) -> CustomVariable:
+        var = CustomVariable(name=name, var_type=var_type, default_value=default_value, description=description)
+        self._db.add(var)
+        self._db.commit()
+        self._db.refresh(var)
+        return var
+
+    def get(self, variable_id: int) -> CustomVariable | None:
+        return self._db.get(CustomVariable, variable_id)
+
+    def get_by_name(self, name: str) -> CustomVariable | None:
+        return self._db.query(CustomVariable).filter(CustomVariable.name == name).first()
+
+    def list(self) -> list[CustomVariable]:
+        return self._db.query(CustomVariable).order_by(CustomVariable.name).all()
+
+    def update(self, variable_id: int, **kwargs) -> CustomVariable | None:
+        var = self._db.get(CustomVariable, variable_id)
+        if var is None:
+            return None
+        for field in ("var_type", "default_value", "description"):
+            if field in kwargs:
+                setattr(var, field, kwargs[field])
+        var.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(var)
+        return var
+
+    def delete(self, variable_id: int) -> bool:
+        var = self.get(variable_id)
+        if var is None:
+            return False
+        self._db.delete(var)
         self._db.commit()
         return True
 

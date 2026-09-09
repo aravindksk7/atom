@@ -26,6 +26,18 @@ class SavedConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+class CustomVariable(Base):
+    __tablename__ = "custom_variables"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    var_type = Column(String(20), nullable=False)  # 'text' | 'number' | 'date' | 'alphanumeric'
+    default_value = Column(Text, nullable=True)
+    description = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
 class SavedJob(Base):
     __tablename__ = "saved_jobs"
 
