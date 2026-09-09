@@ -301,8 +301,12 @@ def _snapshot_status(raw_status: str, results: list[ReportResult]) -> str:
 def _basename(path: Any) -> str | None:
     if not path or path in ("__sql__", "__file_source__"):
         return None
-    from pathlib import Path
-    return Path(str(path)).name
+    import ntpath
+    # ntpath.basename splits on both "/" and "\" regardless of host OS: the
+    # stored path may have been recorded by a Windows client/server even when
+    # this report is built on POSIX, where pathlib.Path would leave a
+    # backslash-separated path unsplit.
+    return ntpath.basename(str(path))
 
 
 def _extract_compare_file_names(run: Any) -> tuple[str | None, str | None]:

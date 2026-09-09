@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import ntpath
 import os
 import re
 import shutil
@@ -43,7 +44,13 @@ def safe_filename(name: str | None, fallback: str) -> str:
     defused with a leading underscore so they can never resolve to a device
     file. Falls back to `fallback` if nothing usable survives sanitization.
     """
-    raw = Path(name or fallback).name or fallback
+    # ntpath.basename splits on both "/" and "\" and strips drive/UNC syntax
+    # regardless of the host OS -- the untrusted name can carry Windows-style
+    # separators (an upload from a Windows client, a Content-Disposition
+    # header from a remote server) even when this runs on POSIX, where
+    # pathlib.Path only recognizes "/" and would leave "C:\Windows\System32\
+    # evil.dll" unsplit.
+    raw = ntpath.basename(name or fallback) or fallback
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
     safe = safe or fallback
     stem = safe.split(".", 1)[0]

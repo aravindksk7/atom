@@ -1,9 +1,24 @@
 """Tests for the atom CLI (etl_framework.cli.app)."""
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """Strip ANSI SGR codes from CLI output.
+
+    Typer's error/usage rendering goes through rich, which colors option
+    flags token-by-token -- e.g. "--out" can render as a "-" span followed by
+    a separately-colored "-out" span, so a literal substring check across
+    styled output can fail even though the plain text is present.
+    """
+    return _ANSI_RE.sub("", output)
 
 
 def test_help_lists_commands():
@@ -150,7 +165,7 @@ def test_report_html_requires_out(fake_client):
     fake_client({})
     result = runner.invoke(app, BASE_ARGS + ["report", "r-1", "--format", "html"])
     assert result.exit_code != 0
-    assert "--out" in result.output
+    assert "--out" in _plain(result.output)
 
 
 def test_report_unknown_run_exits_4(fake_client):
@@ -301,7 +316,7 @@ def test_run_requires_source_env(fake_client):
     fake_client({})
     result = runner.invoke(app, BASE_ARGS + ["run", "3"])
     assert result.exit_code != 0
-    assert "source-env" in result.output
+    assert "source-env" in _plain(result.output)
 
 
 def test_run_timeout_exits_6_and_prints_run_id(fake_client):

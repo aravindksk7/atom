@@ -86,6 +86,7 @@ def test_db_engine_build_connection_string_uses_config_fields(cfg):
 
 
 def test_db_engine_netezza_nzpy_connection_url(monkeypatch):
+    pytest.importorskip("nzalchemy", reason=_NZ_DIALECT_HINT)
     captured_urls = []
 
     def fake_create_engine(url, **kwargs):
@@ -109,6 +110,7 @@ def test_db_engine_netezza_nzpy_connection_url(monkeypatch):
 
 
 def test_db_engine_netezza_pyodbc_connection_url(monkeypatch):
+    pytest.importorskip("nzalchemy", reason=_NZ_DIALECT_HINT)
     captured_urls = []
 
     def fake_create_engine(url, **kwargs):
