@@ -143,6 +143,7 @@ Store reusable environment details before creating jobs. Secrets are encrypted a
 | Use SSL / Verify SSL | Enables TLS and controls certificate verification. Keep verification on outside controlled development. |
 | File-source credentials | Stores S3/SFTP credential references used by multi-file discovery and preview. |
 | Save / Update / Delete / Test | Persists, changes, removes, or checks a configuration. Test before enabling live runs. |
+| Custom Variables | Defines global `{{name}}` placeholders (date/text/number/alphanumeric) with a default value, referenced in any job's query or params. Each saved Config can override a variable's value for that environment. See [Custom Variables](#custom-variables-reference). |
 | Security Tokens | Creates, lists, activates, or revokes API bearer tokens. Copy a newly created token immediately. |
 | Webhooks | Registers event URLs, subscribed event types, active state, and optional HMAC secret. |
 
@@ -182,6 +183,7 @@ Create reusable jobs, select jobs or saved sequences, tune one run, schedule it,
 | Fail Fast | Stops scheduling more work after the first blocking failure. |
 | Health Check | Tests live connectivity before jobs begin. |
 | Save Selection | Saves a reusable set of jobs and run settings. |
+| Variable Overrides (launch modal) | One-off `name=value` lines that override a Custom Variable's resolved value for this launch only; nothing is persisted. Leave a line out to inherit the Config's/global value. See [Custom Variables](#custom-variables-reference). |
 | Schedule Name / Cron / Enabled | Creates a recurring launch; **Run Now** triggers it outside its cron time. |
 | Run Tests | Submits the selected jobs and opens a tracked run. |
 
@@ -1363,8 +1365,58 @@ Use this tab to:
 - Validate config values.
 - Store SAP BO and Automic credentials for adapter workflows.
 - **Import YAML** — expand the "Import YAML" card, paste a YAML block defining one or more named environments, and click Import to create all configs in one step.
+- **Custom Variables** — define reusable `{{name}}` placeholders and override them per Config. See [Custom Variables Reference](#custom-variables-reference) below.
 - **Security** — create and manage API tokens. Created tokens are stored in `sessionStorage` (cleared when the browser tab closes).
 - **Notifications** — add webhook endpoints with event filters and optional HMAC-SHA256 secret signing.
+
+### Custom Variables Reference
+
+Custom Variables let you define a named value once and reference it in any job's SQL query, BO/DS/API parameters, or other text fields as `{{name}}`. At run time the placeholder is replaced with the resolved value before the job executes — so a value shared by many jobs (a report date, a batch id) is edited in one place instead of in every job that uses it.
+
+**1. Define a global variable**
+
+- Open **Config** tab → **Custom Variables** card → **+ Add variable**.
+- Enter a **Name** (letters, digits, underscore only — this is exactly what you'll type inside `{{ }}`, so `run_date` becomes `{{run_date}}`). The name cannot be changed after creation; delete and recreate it if you need a new name.
+- Pick a **Type**: `text`, `number`, `date`, or `alphanumeric` (letters and digits only, no spaces or punctuation). See the type table below for the exact format each expects.
+- Optionally set a **Default value**. Leave it blank if every Config/launch should supply its own value.
+- Optionally add a **Description** for your own reference.
+- Click **Save**.
+
+| Type | Accepted values |
+|---|---|
+| `text` | Any string. |
+| `alphanumeric` | Letters and digits only, e.g. `B17`. |
+| `number` | An integer or decimal, e.g. `42` or `3.14`. |
+| `date` | A literal `YYYY-MM-DD`, or a dynamic expression: `today`, `today-1`, `today+7`, etc. A dynamic expression is evaluated fresh every time the variable is resolved, so `today-1` always means "yesterday" without ever editing it. |
+
+**2. (Optional) Override the value for one Config**
+
+- Open **Config** tab → edit (or create) a Config → scroll to the **Variable Overrides** section, which lists every global variable.
+- Type a value into any variable's input to override it for runs launched against this Config. Leave it blank to inherit the global default.
+- Click **Save**.
+
+**3. Reference the variable inside a job**
+
+- Open **Launch** tab → create or edit a job.
+- Anywhere you'd normally type a literal value — the SQL **Query** field, a BO report parameter's value, a DS/API job parameter, a header, a query-string param — type `{{name}}` instead (e.g. `{{run_date}}`). Substitution walks every text field in the job, so it works in nested parameter structures too, not just the main query.
+- Save the job normally. Nothing special is required at save time — the placeholder is stored as literal text and only resolved when the job runs.
+
+```sql
+SELECT * FROM sales WHERE order_date = '{{run_date}}'
+```
+
+**4. (Optional) Override the value for one launch only**
+
+- **Web UI:** When launching a saved Job Selection, expand the launch modal's **Variable overrides** textarea and add one `name=value` line per variable you want to override for this run only (e.g. `run_date=2026-09-08`). Nothing here is saved — it applies to this launch only. Leave a variable out of the textarea to use the Config's value (or the global default if the Config doesn't override it).
+- **CLI:** Pass a repeatable `--var name=value` flag to `atom run`, e.g. `atom run my-selection --source-env dev --var run_date=2026-09-08 --var batch_id=B17`.
+
+**Resolution order**
+
+For any given run, each variable's value is resolved once — global default → the launched Config's override (if any) → the launch-time override (if any) — and that same resolved value is used by every job in the run, even a multi-step sequence, so a `today`-style date can't drift mid-run. A launch- or Config-level override left blank falls through to the next value in that order rather than being treated as an empty string.
+
+**Deleting or renaming a variable**
+
+Clicking a variable's **Delete** button warns you if any saved job currently references `{{that_name}}` (a best-effort text scan across the job catalog), but does not block the deletion. There is no rename — to change a name, delete the old variable and create a new one; any Config override stored under the old name becomes inert (silently ignored) rather than being migrated.
 
 ### Launch
 
@@ -1430,7 +1482,7 @@ All job management is available from the **Job Catalog** card in the Launch tab 
 2. Enter a **Name** (unique, required).
 3. Enter an optional **Description** and comma-separated **Tags**.
 4. Select a **Job Type** — see [Job Types Reference](#job-types-reference) for full details on each type and its required settings.
-5. Fill in the type-specific fields that appear (SQL query or file paths, key columns, BO report IDs, etc.).
+5. Fill in the type-specific fields that appear (SQL query or file paths, key columns, BO report IDs, etc.). Any of these text fields can contain a `{{name}}` placeholder referencing a [Custom Variable](#custom-variables-reference) instead of a literal value — e.g. `WHERE order_date = '{{run_date}}'` — resolved at run time.
 6. Optionally set **Depends On** — enter one or more job names whose results must be available before this job can run. The run executor resolves the execution order with a topological sort; jobs with failed upstreams are skipped automatically.
 7. Optionally add **DQ Rules** — click **+ Add Rule**, pick a rule type, and fill in the parameters. Multiple rules can be stacked on a single job.
 8. Optionally set a **Pass Condition** — override whether the job is considered passed based on row counts, mismatch thresholds, or a custom SQL assertion (see `PassCondition` fields below).

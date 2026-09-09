@@ -89,6 +89,26 @@
           when: 'Managing user session security and encryption settings.',
           warn: 'Never commit hardcoded secrets in JSON configuration files.',
         },
+        {
+          title: 'Custom Variables: define a {{name}} once, reuse it everywhere',
+          text: 'Define a global variable (type text, number, date, or alphanumeric) with an optional default value. Reference it as {{name}} anywhere in a job\'s query or parameters -- SQL query text, BO report parameters, DS/API job params, headers, query-string params. At run time the placeholder is replaced with the resolved value before the job executes, so a date or id shared by many jobs is edited in one place instead of per job. A date variable\'s value can be a literal YYYY-MM-DD or a dynamic today / today-1 / today+7 expression, evaluated fresh on every run.',
+          where: 'Config -> Custom Variables card -> + Add variable',
+          when: 'Running the same jobs repeatedly for different dates, batch ids, or other values that would otherwise mean editing every job.',
+          tip: 'The variable name cannot be changed after creation (it is exactly what you type inside {{ }}). To rename one, delete it and create a new one -- any Config override under the old name is silently ignored, not migrated.',
+        },
+        {
+          title: 'Per-Config variable overrides',
+          text: 'Each saved Config can override a Custom Variable\'s value for that specific environment -- e.g. a dev Config pins a fixed test date while prod uses the global default. Leaving an override input blank means "inherit the global default" for runs launched against that Config.',
+          where: 'Config -> edit a Config -> Variable Overrides section',
+          when: 'Different environments need different values for the same {{name}} placeholder.',
+        },
+        {
+          title: 'Launch-time variable overrides (one-off, not saved)',
+          text: 'Override a variable\'s resolved value for a single launch, without touching the Config or the global default. In the Launch Job Selection modal, add one name=value line per override in the Variable overrides textarea. From the atom CLI, pass a repeatable --var name=value flag, e.g. atom run my-selection --source-env dev --var run_date=2026-09-08.',
+          where: 'Launch -> Launch Job Selection modal -> Variable overrides / CLI: atom run --var name=value',
+          when: 'A CI pipeline or a one-off manual run needs a different value just this once.',
+          tip: 'Resolution order is global default -> Config override -> launch override, resolved once per run so every job in a multi-step sequence sees the identical value even if the run spans midnight.',
+        },
       ],
     },
     {
@@ -120,6 +140,12 @@
           text: 'Tune execution parameters: Parallel vs Sequential mode, Max Workers (concurrency), Retries on failure, Float Tolerance (e.g. 0.001), Null Handling, Hash Precheck (fast path), Chunk Size (for large tables), and Schema Mismatch Policy (Fail / Ignore / Coerce).',
           where: 'Launch -> Run Settings',
           when: 'Optimizing performance for multi-million row datasets.',
+        },
+        {
+          title: 'Use a {{name}} placeholder instead of a literal value',
+          text: 'Any text field on a job -- Query, BO/DS/API parameters, headers, query-string params -- can contain a {{name}} placeholder referencing a Custom Variable defined on the Config tab, instead of a hardcoded literal. Save the job as usual; the placeholder is stored as plain text and only resolved at launch time.',
+          where: 'Job Editor -> any query/parameter field -> type {{variable_name}}',
+          when: 'A value (report date, batch id) is shared across many jobs and should be edited in one place.',
         },
         {
           title: 'Job Dependencies & Topological Sorting',
