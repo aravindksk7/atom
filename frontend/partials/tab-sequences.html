@@ -38,8 +38,12 @@
     <div class="card lg:col-span-2" x-show="selectedSequence" data-testid="sequence-detail">
       <div class="flex items-center justify-between">
         <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
-        <button class="btn btn-secondary btn-sm" data-testid="sequence-edit-btn"
-                @click="openSequenceVersionEditor()">Edit as new version</button>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" data-testid="sequence-ci-btn"
+                  @click="openCiIntegrationModal(selectedSequence, 'sequence')">CI/CD</button>
+          <button class="btn btn-secondary btn-sm" data-testid="sequence-edit-btn"
+                  @click="openSequenceVersionEditor()">Edit as new version</button>
+        </div>
       </div>
       <div class="text-sm text-muted mb-3" x-text="selectedSequence && selectedSequence.description"></div>
 

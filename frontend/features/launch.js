@@ -1233,19 +1233,27 @@
       this.showSelectionRunsModal = true;
     },
 
-    openCiIntegrationModal(sel) {
-      const selection = sel || (this.jobSelections && this.jobSelections[0]) || { id: 1, name: 'default-selection' };
+    openCiIntegrationModal(target, targetType) {
+      targetType = targetType || 'selection';
+      const fallback = targetType === 'sequence'
+        ? { id: 1, name: 'default-sequence' }
+        : { id: 1, name: 'default-selection' };
+      const resolved = target || (targetType === 'selection'
+        ? (this.jobSelections && this.jobSelections[0])
+        : (this.sequences && this.sequences[0])) || fallback;
+      const label = targetType === 'sequence' ? 'Execution Sequence' : 'Job Selection';
       const yaml = [
-        `atom-job-selection:`,
+        `atom-${targetType}:`,
         `  stage: test`,
         `  script:`,
-        `    - ./scripts/ci/run-atom-selection.sh ${selection.id}`,
+        `    - ./scripts/ci/run-atom-target.sh ${targetType} ${resolved.id}`,
         `  rules:`,
         `    - if: '$CI_COMMIT_BRANCH == "main"'`,
       ].join('\n');
       this.ciIntegrationModal = {
-        selectionId: selection.id,
-        selectionName: selection.name,
+        targetId: resolved.id,
+        targetName: resolved.name,
+        targetTypeLabel: label,
         yamlSnippet: yaml,
       };
       this.showCiIntegrationModal = true;
