@@ -251,6 +251,17 @@ class SequenceRef(BaseModel):
     sequence_version: int | None = None   # None resolves to the latest version
 
 
+class SequenceLaunchRequest(BaseModel):
+    source_env: str | None = None       # None = fall back to SequenceDefaults.source_env
+    target_env: str | None = None       # None = fall back to SequenceDefaults.target_env
+    source_connection: str | None = None
+    target_connection: str | None = None
+    config_id: int | None = None        # None = fall back to SequenceDefaults.config_id
+    config_data: dict[str, Any] = Field(default_factory=dict)
+    version: int | None = None          # pin a sequence_version; None = latest
+    ci_context: dict[str, Any] | None = None
+
+
 class SequenceValidationIssue(BaseModel):
     step_id: str | None = None
     field: str
