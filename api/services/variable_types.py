@@ -34,8 +34,15 @@ def validate_variable_value(value: str, var_type: str) -> None:
             raise ValueError(f"'{value}' is not a valid number")
         return
     if var_type == "date":
-        if _DATE_LITERAL_RE.match(value) or _DATE_EXPR_RE.match(value):
+        stripped = value.strip()
+        if _DATE_EXPR_RE.match(stripped):
             return
+        if _DATE_LITERAL_RE.match(stripped):
+            try:
+                date.fromisoformat(stripped)
+                return
+            except ValueError:
+                pass
         raise ValueError(
             f"'{value}' is not a valid date: use YYYY-MM-DD, 'today', 'today+N', or 'today-N'"
         )

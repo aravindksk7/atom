@@ -58,6 +58,16 @@ def test_validate_variable_value_date_rejects(value):
         validate_variable_value(value, "date")
 
 
+@pytest.mark.parametrize("value", ["2026-02-30", "2026-13-01", "9999-99-99"])
+def test_validate_variable_value_date_rejects_calendar_invalid(value):
+    with pytest.raises(ValueError):
+        validate_variable_value(value, "date")
+
+
+def test_validate_variable_value_date_accepts_whitespace_padded_today_expression():
+    validate_variable_value(" today-1 ", "date")
+
+
 def test_resolve_date_expression_literal_passes_through():
     assert resolve_date_expression("2026-09-08") == "2026-09-08"
 
