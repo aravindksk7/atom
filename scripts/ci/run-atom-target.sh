@@ -23,6 +23,8 @@ atom run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}
   --ci-commit-sha "${CI_COMMIT_SHA:-unknown}" \
   --ci-pipeline-url "${CI_PIPELINE_URL:-}" \
   --ci-ref "${CI_COMMIT_REF_NAME:-unknown}" \
+  --timeout "${ATOM_POLL_TIMEOUT_SECONDS:-1800}" \
+  --poll-interval "${ATOM_POLL_INTERVAL_SECONDS:-10}" \
   --output json > "${stdout_file}"
 gate_code=$?
 set -e
