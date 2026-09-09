@@ -269,3 +269,12 @@ def test_launch_precondition_failure_creates_no_run(client):
     from etl_framework.repository.repository import RunRepository
     with _db_module.SessionLocal() as db:
         assert RunRepository(db).list_runs(limit=50) == []
+
+
+def test_launch_dual_env_job_without_target_fails_clearly(client):
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch",
+                        json={"source_env": "dev"})
+    assert resp.status_code == 422
+    assert "load_orders" in resp.json()["detail"]
+    assert "target_env" in resp.json()["detail"]
