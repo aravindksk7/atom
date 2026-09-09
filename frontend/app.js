@@ -597,6 +597,7 @@ function _appRaw() {
     async loadAll() {
       await Promise.allSettled([
         this.loadConfigs(),
+        this.loadCustomVariables(),
         this.loadJobs(),
         this.loadRuns(),
       ]);

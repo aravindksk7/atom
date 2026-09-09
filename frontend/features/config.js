@@ -16,6 +16,11 @@
     configModal: {},
     configValidation: null,
 
+    // Custom Variables (global defaults, referenced as {{name}} in jobs)
+    customVariables: [],
+    variableModal: null,   // null = closed; {} = editor open
+    variableModalEditing: false,
+
     // Schema Explorer
     schemaExplorerId: null,
     schemaExplorerConnection: '',
@@ -61,6 +66,58 @@
     // ===========================================================
     async loadConfigs() {
       try { this.configs = await api('GET', '/api/configs'); } catch {}
+    },
+
+    async loadCustomVariables() {
+      try { this.customVariables = await api('GET', '/api/variables'); } catch {}
+    },
+
+    openNewVariableModal() {
+      this.variableModal = { name: '', var_type: 'text', default_value: '', description: '' };
+      this.variableModalEditing = false;
+    },
+
+    editVariable(v) {
+      this.variableModal = { id: v.id, name: v.name, var_type: v.var_type, default_value: v.default_value || '', description: v.description || '' };
+      this.variableModalEditing = true;
+    },
+
+    async saveVariable() {
+      const m = this.variableModal;
+      const body = {
+        var_type: m.var_type,
+        default_value: m.default_value.trim() || null,
+        description: m.description || '',
+      };
+      try {
+        if (this.variableModalEditing) {
+          await api('PUT', `/api/variables/${m.id}`, body);
+        } else {
+          await api('POST', '/api/variables', { name: m.name.trim(), ...body });
+        }
+        this.variableModal = null;
+        await this.loadCustomVariables();
+        this.toast('success', 'Variable saved', m.name);
+      } catch (e) {
+        this.toast('error', 'Save failed', e.message);
+      }
+    },
+
+    async deleteVariable(id, name) {
+      const referencedIn = this.jobs.filter(j =>
+        (j.query || '').includes(`{{${name}}}`) || JSON.stringify(j.params || {}).includes(`{{${name}}}`)
+      );
+      const warning = referencedIn.length
+        ? ` It's referenced by ${referencedIn.length} job(s): ${referencedIn.map(j => j.name).join(', ')}.`
+        : '';
+      if (!confirm(`Delete variable "${name}"?${warning}`)) return;
+      try {
+        await api('DELETE', `/api/variables/${id}`);
+        await this.loadCustomVariables();
+        this.toast('success', 'Variable deleted', name);
+      } catch (e) {
+        this.toast('error', 'Delete failed', e.message);
+      }
     },
 
     openNewConfigModal() {
