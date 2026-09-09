@@ -634,7 +634,7 @@ def test_test_sap_ds_connection_returns_200(client):
 
 def test_lookup_sap_ds_job_returns_status(client):
     resp = client.post("/api/adapters/sap-ds/lookup", json={
-        "config_id": 1, "identifier": "JOB_1", "id_type": "job_name", "repository": "REPO1"
+        "config_id": 1, "identifier": "JOB_1", "id_type": "run_id", "repository": "REPO1"
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "COMPLETED"
@@ -675,7 +675,7 @@ def test_sapds_schemas():
     assert req.config_id == 1
 
     lookup = SAPDSLookupRequest(config_id=1, identifier="JOB_1")
-    assert lookup.id_type == "job_name"
+    assert lookup.id_type == "run_id"
     assert lookup.repository is None
 
     status = SAPDSJobStatusOut(

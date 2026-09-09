@@ -185,8 +185,7 @@
           <div class="grid-2 mb-2 gap-2">
             <div>
               <label class="field-label" for="a11y-ds-id-type">Lookup Type</label>
-              <select x-model="dsIdType" class="field-input field-select" id="a11y-ds-id-type">
-                <option value="job_name">Job Name</option>
+              <select x-model="dsIdType" class="field-input field-select" id="a11y-ds-id-type" disabled>
                 <option value="run_id">Run ID</option>
               </select>
             </div>
@@ -195,8 +194,9 @@
               <input x-model="dsRepository" class="field-input" placeholder="Config Default" id="a11y-ds-repository" />
             </div>
           </div>
+          <p class="text-xs text-slate-500 mb-2">SAP DS's status lookup only supports run id (the id returned by triggering a job) -- there's no job-name-keyed status check in this API.</p>
           <div class="flex gap-2 mb-3">
-            <input x-model="dsIdentifier" class="field-input" :placeholder="dsIdType === 'run_id' ? 'e.g. run-123' : 'e.g. JOB_ETL_NIGHTLY'" data-testid="ds-identifier-input" />
+            <input x-model="dsIdentifier" class="field-input" placeholder="e.g. run-123" data-testid="ds-identifier-input" />
             <button @click="lookupSAPDS()" :disabled="!dsConfigId || !dsIdentifier || dsLoading" class="btn-primary flex-shrink-0" data-testid="ds-lookup-btn">
               <span x-show="!dsLoading">Lookup</span>
               <span x-show="dsLoading">…</span>

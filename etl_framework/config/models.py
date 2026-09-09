@@ -53,6 +53,7 @@ class EnvironmentConfig(BaseModel):
     ds_password: str = ""
     ds_repository: str = ""
     ds_auth_type: str = "secEnterprise"
+    ds_cms_system: str = ""
     ds_timeout: int = 60
     ds_proxy_url: str = ""
     ds_verify_ssl: bool = True

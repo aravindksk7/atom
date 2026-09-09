@@ -1991,8 +1991,7 @@ class RunExecutor:
                     job.params.get("job_params"),
                 )
                 status = client.wait_for_completion(
-                    job.params["job_name"],
-                    run_id=run_id,
+                    run_id,
                     repository=job.params.get("repository"),
                     timeout_s=job.params.get("timeout_s", 600),
                     poll_interval_s=job.params.get("poll_interval_s", 5),

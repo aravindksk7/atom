@@ -49,6 +49,39 @@ def test_client_applies_proxy_and_ssl_verification_config(env_config):
     assert client._verify_ssl is False
 
 
+def test_client_ignores_env_proxy_when_no_proxy_configured(env_config, monkeypatch):
+    """With no explicit bo_proxy_url, the client must NOT inherit ambient
+    HTTP(S)_PROXY env vars. On corporate hosts those point at an outbound
+    internet proxy (e.g. Zscaler) that can't reach an internal BO server,
+    which surfaced as 'Cannot reach SAP BO through the configured proxy'.
+    """
+    from etl_framework.sap_bo.client import BORestClient
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://zproxy.example.com:8083")
+    monkeypatch.setenv("HTTP_PROXY", "http://zproxy.example.com:8083")
+
+    cfg = env_config.model_copy(update={"bo_proxy_url": ""})
+    client = BORestClient(cfg)
+
+    # trust_env=False makes requests ignore *_PROXY / NO_PROXY env vars, so
+    # an internal BO host is reached directly rather than via the env proxy.
+    assert client._session.trust_env is False
+
+
+def test_client_explicit_proxy_still_wins(env_config, monkeypatch):
+    """An explicitly configured bo_proxy_url is honoured regardless of env."""
+    from etl_framework.sap_bo.client import BORestClient
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://zproxy.example.com:8083")
+    cfg = env_config.model_copy(
+        update={"bo_proxy_url": "http://proxy.example.com:8080"}
+    )
+    client = BORestClient(cfg)
+
+    assert client._session.proxies["https"] == "http://proxy.example.com:8080"
+    assert client._session.proxies["http"] == "http://proxy.example.com:8080"
+
+
 def test_client_requires_url_scheme(env_config):
     from etl_framework.sap_bo.client import BORestClient
 
