@@ -9,6 +9,7 @@ from etl_framework.repository.database import init_db
 from etl_framework.utils.logging import configure_logging
 from etl_framework.utils.tracing import configure_tracing
 from api.routes import configs, runs, jobs, health as health_routes, adapters, compare as compare_routes
+from api.routes import variables as variables_routes
 from api.routes import aws_s3 as aws_s3_routes
 from api.routes import aws_glue as aws_glue_routes
 from api.routes import aws_athena as aws_athena_routes
@@ -53,6 +54,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(BearerTokenMiddleware)
 
 app.include_router(configs.router, prefix="/api/configs")
+app.include_router(variables_routes.router, prefix="/api/variables")
 app.include_router(runs.router, prefix="/api/runs")
 app.include_router(jobs.router, prefix="/api/jobs")
 app.include_router(health_routes.router, prefix="/api/health")
