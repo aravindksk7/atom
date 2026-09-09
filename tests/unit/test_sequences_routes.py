@@ -23,6 +23,7 @@ def client(monkeypatch):
     )
     Base.metadata.create_all(engine)
     monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr("api.routes.sequences._execute_run", lambda *a, **k: None)
 
     with Session(engine) as db:
         raw, _ = TokenRepository(db).create("test-runner")
@@ -182,3 +183,89 @@ def test_usage_is_empty_for_a_fresh_sequence(client):
     assert client.get(f"/api/sequences/{seq_id}/usage").json() == {
         "selections": [], "schedules": [],
     }
+
+
+def test_launch_creates_run_and_returns_202(client):
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch",
+                        json={"source_env": "dev", "target_env": "qa"})
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["status"] == "PENDING"
+    assert resp.json()["run_id"]
+
+
+def test_launch_stores_sequence_provenance_on_run(client):
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch",
+                        json={"source_env": "dev", "target_env": "qa"})
+    run_id = resp.json()["run_id"]
+
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunRepository
+    with _db_module.SessionLocal() as db:
+        run = RunRepository(db).get_run(run_id)
+        assert run.selection_id is None
+        assert run.config_snapshot["sequence"] == {
+            "id": created["id"], "name": "nightly", "version": 1,
+        }
+
+
+def test_launch_stores_ci_context_on_run(client):
+    created = _create(client).json()
+    ctx = {"commit_sha": "deadbeef", "pipeline_url": "https://gitlab.example.com/p/9", "ref": "main"}
+    resp = client.post(
+        f"/api/sequences/{created['id']}/launch",
+        json={"source_env": "dev", "target_env": "qa", "ci_context": ctx},
+    )
+    assert resp.status_code == 202
+
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunRepository
+    with _db_module.SessionLocal() as db:
+        run = RunRepository(db).get_run(resp.json()["run_id"])
+        assert run.ci_context == ctx
+
+
+def test_launch_unknown_sequence_returns_404(client):
+    resp = client.post("/api/sequences/999/launch", json={"source_env": "dev"})
+    assert resp.status_code == 404
+
+
+def test_launch_unknown_pinned_version_returns_404(client):
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch",
+                        json={"source_env": "dev", "version": 99})
+    assert resp.status_code == 404
+
+
+def test_launch_falls_back_to_sequence_default_source_env(client):
+    resp = client.post("/api/sequences", json={
+        "name": "with-defaults", "description": "", "tags": [], "steps": CHAIN,
+        "defaults": {"source_env": "dev", "target_env": "qa"},
+    })
+    seq_id = resp.json()["id"]
+    launch_resp = client.post(f"/api/sequences/{seq_id}/launch", json={})
+    assert launch_resp.status_code == 202, launch_resp.text
+
+
+def test_launch_without_source_env_or_default_returns_422(client):
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch", json={})
+    assert resp.status_code == 422
+    assert "source_env" in resp.json()["detail"]
+
+
+def test_launch_precondition_failure_creates_no_run(client):
+    resp = client.post("/api/sequences", json={
+        "name": "gated", "description": "", "tags": [], "steps": CHAIN,
+        "preconditions": {"weekdays": []},  # no day is ever allowed
+    })
+    seq_id = resp.json()["id"]
+    launch_resp = client.post(f"/api/sequences/{seq_id}/launch",
+                               json={"source_env": "dev", "target_env": "qa"})
+    assert launch_resp.status_code == 422
+
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunRepository
+    with _db_module.SessionLocal() as db:
+        assert RunRepository(db).list_runs(limit=50) == []

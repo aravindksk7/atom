@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -11,17 +13,26 @@ from api.schemas import (
     ExecutionSequenceUpdate,
     ExecutionSequenceVersionCreate,
     ExecutionSequenceVersionOut,
+    RunStatusOut,
+    RunTrigger,
+    SequenceLaunchRequest,
+    SequenceRef,
     SequenceUsageOut,
     SequenceValidateRequest,
     SequenceValidateResponse,
 )
+from api.routes.selections import _dump_job_sequence
+from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
+from api.services.job_env_validation import validate_env_requirements
+from api.services.sequence_preconditions import check_for_session as check_preconditions
+from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from api.services.sequence_validation import (
     SequenceCycleError,
     topological_order,
     validate_steps,
 )
-from etl_framework.repository.repository import JobRepository
+from etl_framework.repository.repository import JobRepository, RunRepository
 from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 
 router = APIRouter(tags=["sequences"])
@@ -205,3 +216,74 @@ def get_sequence_version(
 def get_sequence_usage(sequence_id: int, db: Session = Depends(get_session)):
     _get_or_404(db, sequence_id)
     return SequenceUsageOut(**ExecutionSequenceRepository(db).usage(sequence_id))
+
+
+@router.post("/{sequence_id}/launch", response_model=RunStatusOut, status_code=202)
+def launch_sequence(
+    sequence_id: int,
+    body: SequenceLaunchRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    try:
+        resolved = resolve_sequence(
+            db, SequenceRef(sequence_id=sequence_id, sequence_version=body.version)
+        )
+    except SequenceResolutionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    gate = check_preconditions(db, resolved.preconditions)
+    if not gate.ok:
+        raise HTTPException(status_code=422, detail=gate.reason)
+
+    source_env = body.source_env or resolved.defaults.source_env
+    if not source_env:
+        raise HTTPException(
+            status_code=422,
+            detail="source_env is required: no value was given and the sequence has no default.",
+        )
+    target_env = body.target_env or resolved.defaults.target_env or ""
+    config_id = body.config_id if body.config_id is not None else resolved.defaults.config_id
+    run_settings = resolved.defaults.run_settings or {}
+
+    job_sequence = resolved.as_linear_steps()
+    jobs_by_name = {j.name: j for j in JobRepository(db).list()}
+    validate_env_requirements(job_sequence, jobs_by_name, target_env)
+
+    trigger = RunTrigger(
+        source_env=source_env,
+        target_env=target_env,
+        source_connection=body.source_connection,
+        target_connection=body.target_connection,
+        job_sequence=job_sequence,
+        config_id=config_id,
+        config_data=body.config_data,
+        run_settings=run_settings,
+    )
+
+    run_id = str(uuid.uuid4())
+    config_snapshot = _snapshot_from_trigger(trigger, db)
+    config_snapshot["job_sequence"] = _dump_job_sequence(trigger.job_sequence)
+    config_snapshot["run_settings"] = trigger.run_settings.model_dump()
+    config_snapshot["sequence"] = resolved.snapshot_meta()
+
+    RunRepository(db).create_run(
+        run_id=run_id,
+        source_env=trigger.source_env,
+        target_env=trigger.target_env,
+        config_snapshot=config_snapshot or None,
+        ci_context=body.ci_context,
+    )
+    AuditService(db).log(
+        request, "sequence.launched", "execution_sequence", sequence_id,
+        {
+            "run_id": run_id, "source_env": trigger.source_env,
+            "target_env": trigger.target_env, "version": resolved.version_number,
+        },
+    )
+    background_tasks.add_task(
+        _execute_run, run_id, resolved.steps,
+        trigger.source_env, trigger.target_env, trigger.run_settings, config_snapshot,
+    )
+    return RunStatusOut(run_id=run_id, status="PENDING")
