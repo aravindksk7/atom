@@ -138,11 +138,11 @@ Parsed into `variable_overrides` on the launch payload, alongside the existing `
 
 - `tests/unit/test_variable_resolution.py`: precedence (global → override → launch-override), `today`/`today±N` resolution, `substitute_in_job` over `query` and nested `params` (dict + list of dicts).
 - `tests/unit/test_variables_routes.py`: CRUD, validation per type, duplicate-name 409.
-- `tests/unit/test_run_executor.py` (extend): a job whose `query` contains `{{var}}` gets it substituted before the case runs; confirm the sequence-level resolve-once behavior (two steps see the identical resolved dict even when mocked to straddle a day boundary).
-- One Playwright e2e (`tests/e2e/`): define a variable, override it on a Config, launch a job referencing `{{var}}`, assert the resolved value reached the run's `config_snapshot`.
+- `tests/unit/test_run_executor_variables.py`: a job whose `query` contains `{{var}}` gets it substituted before the case runs, including a nested-`params` case; `tests/unit/test_run_trigger_variables.py` confirms the sequence-level resolve-once behavior via a call-count assertion (`resolve_variables` invoked exactly once per launch, covering both the selection and sequence launch paths).
 
 ## 8. Out of scope (explicitly deferred)
 
 - Renaming a variable auto-migrating existing per-Config override keys.
 - A preflight lint surfacing unresolved `{{...}}` placeholders before a run starts.
 - Variable types beyond the four requested (no boolean/enum/list type).
+- A Playwright e2e test exercising the full UI → launch → substitution path. Coverage for this feature turned out to be strong enough at the route/unit level (variable CRUD, config-save validation, resolve-once-per-run, substitution into `query`/`params`, both launch paths) that a browser-driven e2e test was judged not worth its maintenance cost during implementation; descoped rather than added.
