@@ -214,6 +214,70 @@
     </template>
   </div>
 
+  <!-- Custom Variables -->
+  <div class="card mt-4" data-testid="custom-variables-card">
+    <div class="flex items-center justify-between mb-2">
+      <div>
+        <div class="font-semibold text-slate-700">Custom Variables</div>
+        <div class="text-xs text-muted">Reference as <code>{{name}}</code> in a job's query or params. Edit the value here once instead of per job.</div>
+      </div>
+      <button @click="openNewVariableModal()" type="button" class="btn-primary btn-sm" data-testid="variable-new-btn">+ Add variable</button>
+    </div>
+    <template x-if="customVariables.length === 0">
+      <div class="text-muted text-sm py-2">No custom variables defined yet.</div>
+    </template>
+    <div class="space-y-1">
+      <template x-for="v in customVariables" :key="v.id">
+        <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm" :data-testid="'variable-row-' + v.id">
+          <span class="font-mono font-medium text-slate-700" x-text="v.name"></span>
+          <span class="badge badge-gray text-xs" x-text="v.var_type"></span>
+          <span class="flex-1 text-muted truncate" x-text="v.default_value ? ('default: ' + v.default_value) : 'default: (none)'"></span>
+          <button @click="editVariable(v)" class="btn-secondary btn-sm text-xs">Edit</button>
+          <button @click="deleteVariable(v.id, v.name)" class="btn-danger btn-sm text-xs">Delete</button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Custom Variable editor modal -->
+  <div x-show="variableModal !== null" x-cloak class="modal-backdrop" @click.self="variableModal = null">
+    <div class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="variableDialogTitle">
+      <template x-if="variableModal">
+        <div>
+          <h2 id="variableDialogTitle" class="text-lg font-bold mb-4" x-text="variableModalEditing ? 'Edit Variable' : 'New Variable'"></h2>
+          <div class="space-y-3">
+            <div>
+              <label class="field-label">Name *</label>
+              <input x-model="variableModal.name" :disabled="variableModalEditing" class="field-input font-mono" placeholder="run_date" data-testid="variable-modal-name-input" />
+              <p class="text-xs text-muted mt-1" x-show="!variableModalEditing">Letters, digits, underscore only. Referenced as <code x-text="'{{' + (variableModal.name || 'name') + '}}'"></code>.</p>
+            </div>
+            <div>
+              <label class="field-label">Type</label>
+              <select x-model="variableModal.var_type" class="field-input field-select" data-testid="variable-modal-type-select">
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="date">Date</option>
+                <option value="alphanumeric">Alphanumeric</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Default value</label>
+              <input x-model="variableModal.default_value" class="field-input" :placeholder="variableModal.var_type === 'date' ? 'YYYY-MM-DD, today, today-1, today+1' : ''" data-testid="variable-modal-default-input" />
+            </div>
+            <div>
+              <label class="field-label">Description</label>
+              <input x-model="variableModal.description" class="field-input" placeholder="What this variable is for" />
+            </div>
+          </div>
+          <div class="flex justify-end gap-3 mt-6">
+            <button @click="variableModal = null" class="btn-secondary" data-testid="variable-modal-cancel-btn">Cancel</button>
+            <button @click="saveVariable()" class="btn-primary" :disabled="!variableModal.name" data-testid="variable-modal-save-btn">Save</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
   <!-- Schema Explorer Panel -->
   <template x-if="schemaExplorerId !== null">
     <div class="card mt-3" data-testid="schema-explorer-panel">
@@ -1109,6 +1173,21 @@
           <div><label  class="field-label" for="a11y-config-automic-user">Automic User</label><input x-model="configModal.automic_user" class="field-input" id="a11y-config-automic-user" /></div>
           <div><label  class="field-label" for="a11y-config-automic-password">Automic Password</label><input x-model="configModal.automic_password" type="password" class="field-input" id="a11y-config-automic-password" /></div>
         </div>
+        <template x-if="customVariables.length > 0">
+          <div>
+            <div class="divider"></div>
+            <span class="field-label">VARIABLE OVERRIDES</span>
+            <span class="text-xs text-slate-400 ml-2">Blank = use the global default for this variable.</span>
+            <div class="grid-2 mt-2">
+              <template x-for="v in customVariables" :key="v.id">
+                <div>
+                  <label class="field-label font-mono" x-text="v.name"></label>
+                  <input x-model="configModal.variables[v.name]" class="field-input" :placeholder="'default: ' + (v.default_value || '(none)')" :data-testid="'config-modal-variable-' + v.name + '-input'" />
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
         <template x-if="configValidation">
           <div :class="configValidation.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'"
                class="border rounded-lg p-3 text-sm" data-testid="config-validation-result">
@@ -2478,6 +2557,11 @@
             <option value="dev">Dev</option><option value="qa">QA</option>
             <option value="staging">Staging</option><option value="prod">Prod</option>
           </select>
+        </div>
+        <div>
+          <label class="field-label">Variable overrides (optional, one per line "name=value")</label>
+          <textarea x-model="launchSelectionModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-selection-variable-overrides-textarea"></textarea>
+          <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
         </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
