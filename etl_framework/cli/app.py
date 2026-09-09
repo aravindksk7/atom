@@ -129,7 +129,9 @@ def _write_artifacts(client: AtomClient, run_id: str,
 @app.command()
 def run(
     ctx: typer.Context,
-    selection: str = typer.Argument(..., help="Job selection id or exact name"),
+    selection: str = typer.Argument(
+        ..., help="Job selection or sequence id/exact name (see --target-type)"
+    ),
     target_type: str = typer.Option(
         "selection", "--target-type", help="Target type: 'selection' or 'sequence'"
     ),
@@ -153,7 +155,7 @@ def run(
     no_wait: bool = typer.Option(False, "--no-wait",
                                  help="Launch, print run id, exit 0"),
 ) -> None:
-    """Launch a job selection, wait for it, and gate on the outcome."""
+    """Launch a job selection or execution sequence, wait for it, and gate on the outcome."""
     client, output = ctx.obj["client"], ctx.obj["output"]
     try:
         if target_type not in ("selection", "sequence"):
