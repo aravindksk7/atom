@@ -343,3 +343,85 @@ def test_run_json_output_emits_machine_readable_verdict(fake_client):
     verdict = json.loads(result.output)
     assert verdict["run_id"] == "r-9"
     assert verdict["exit_code"] == 1
+
+
+SEQUENCE_RUN_ARGS = ["run", "7", "--target-type", "sequence",
+                     "--source-env", "dev", "--target-env", "qa",
+                     "--poll-interval", "0"]
+
+
+def _sequence_launch_responses(final_status):
+    return {
+        ("POST", "/api/sequences/7/launch"): {"run_id": "r-9", "status": "PENDING"},
+        ("GET", "/api/runs/r-9/status"): [
+            {"run_id": "r-9", "status": "RUNNING", "passed": 0, "failed": 0, "error": 0},
+            final_status,
+        ],
+    }
+
+
+def test_run_target_type_sequence_calls_sequence_endpoint(fake_client):
+    from etl_framework.cli.app import app
+
+    # _sequence_launch_responses only registers a fake response for
+    # POST /api/sequences/7/launch. If the CLI called the selections endpoint
+    # instead, FakeClient would raise AtomNotFoundError and exit_code would be
+    # 4, not 0 -- so reaching 0 already proves the sequence path was hit.
+    fake_client(_sequence_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + SEQUENCE_RUN_ARGS)
+    assert result.exit_code == 0
+
+
+def test_run_default_target_type_is_selection(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0}))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 0
+
+
+def test_run_resolves_sequence_by_name(fake_client):
+    from etl_framework.cli.app import app
+
+    responses = _sequence_launch_responses(
+        {"run_id": "r-9", "status": "PASSED", "passed": 1, "failed": 0, "error": 0})
+    responses[("GET", "/api/sequences")] = [
+        [{"id": 7, "name": "Nightly DAG", "step_count": 2,
+          "archived": False, "latest_version": 1}],
+    ]
+    fake_client(responses)
+    result = runner.invoke(app, BASE_ARGS + ["run", "Nightly DAG", "--target-type", "sequence",
+                                             "--source-env", "dev", "--poll-interval", "0"])
+    assert result.exit_code == 0
+
+
+def test_run_unknown_sequence_name_exits_4(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET", "/api/sequences"): [[]]})
+    result = runner.invoke(app, BASE_ARGS + ["run", "Ghost", "--target-type", "sequence",
+                                             "--source-env", "dev"])
+    assert result.exit_code == 4
+
+
+def test_run_multiple_sequence_matches_exits_3(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({("GET", "/api/sequences"): [
+        [{"id": 7, "name": "dup", "step_count": 1, "archived": False, "latest_version": 1},
+         {"id": 8, "name": "dup", "step_count": 1, "archived": False, "latest_version": 1}],
+    ]})
+    result = runner.invoke(app, BASE_ARGS + ["run", "dup", "--target-type", "sequence",
+                                             "--source-env", "dev"])
+    assert result.exit_code == 3
+
+
+def test_run_invalid_target_type_fails(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({})
+    result = runner.invoke(app, BASE_ARGS + ["run", "7", "--target-type", "bogus",
+                                             "--source-env", "dev"])
+    assert result.exit_code != 0

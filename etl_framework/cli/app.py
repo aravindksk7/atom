@@ -73,16 +73,16 @@ class WaitTimeoutError(Exception):
         self.run_id = run_id
 
 
-def _resolve_selection(client: AtomClient, selection: str) -> int:
-    if selection.isdigit():
-        return int(selection)
-    matches = [s for s in client.get_json("/api/selections")
-               if s.get("name") == selection]
+def _resolve_target(client: AtomClient, target_type: str, target: str) -> int:
+    path = "/api/selections" if target_type == "selection" else "/api/sequences"
+    if target.isdigit():
+        return int(target)
+    matches = [s for s in client.get_json(path) if s.get("name") == target]
     if not matches:
-        raise AtomNotFoundError(f"no job selection named {selection!r}")
+        raise AtomNotFoundError(f"no {target_type} named {target!r}")
     if len(matches) > 1:
         raise AtomAPIError(
-            f"multiple selections named {selection!r}; use the numeric id"
+            f"multiple {target_type}s named {target!r}; use the numeric id"
         )
     return int(matches[0]["id"])
 
@@ -130,6 +130,9 @@ def _write_artifacts(client: AtomClient, run_id: str,
 def run(
     ctx: typer.Context,
     selection: str = typer.Argument(..., help="Job selection id or exact name"),
+    target_type: str = typer.Option(
+        "selection", "--target-type", help="Target type: 'selection' or 'sequence'"
+    ),
     source_env: str = typer.Option(..., "--source-env",
                                    help="Source environment name"),
     target_env: str = typer.Option("", "--target-env",
@@ -153,7 +156,9 @@ def run(
     """Launch a job selection, wait for it, and gate on the outcome."""
     client, output = ctx.obj["client"], ctx.obj["output"]
     try:
-        selection_id = _resolve_selection(client, selection)
+        if target_type not in ("selection", "sequence"):
+            raise typer.BadParameter("--target-type must be 'selection' or 'sequence'")
+        target_id = _resolve_target(client, target_type, selection)
         payload: dict = {"source_env": source_env, "target_env": target_env}
         ci_context = {k: v for k, v in {
             "commit_sha": ci_commit_sha,
@@ -162,8 +167,11 @@ def run(
         }.items() if v}
         if ci_context:
             payload["ci_context"] = ci_context
-        launched = client.post_json(f"/api/selections/{selection_id}/launch",
-                                    payload)
+        launch_path = (
+            f"/api/selections/{target_id}/launch" if target_type == "selection"
+            else f"/api/sequences/{target_id}/launch"
+        )
+        launched = client.post_json(launch_path, payload)
         run_id = launched["run_id"]
         if no_wait:
             print(json.dumps({"run_id": run_id}) if output == "json" else run_id)
