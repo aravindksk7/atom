@@ -77,6 +77,55 @@ def test_send_email_starttls_and_login(mock_smtp):
 
 
 @patch("smtplib.SMTP")
+def test_send_email_upgrades_tls_opportunistically_when_server_offers_it(mock_smtp):
+    """Reproduces the on-prem "SMTP AUTH extension not supported by server" bug:
+    ETL_SMTP_STARTTLS unset -> use_tls defaults False, but the relay only
+    advertises AUTH after STARTTLS. STARTTLS must be attempted whenever the
+    server offers it, not only when use_tls was explicitly set."""
+    server = MagicMock()
+    server.has_extn.return_value = True
+    mock_smtp.return_value.__enter__.return_value = server
+
+    result = _send_email(["a@x.com"], "subj", "body", config={
+        "host": "mail.internal", "port": 587, "user": "svc", "password": "secret",
+        # use_tls intentionally omitted -> falsy, matching the env-var fallback default.
+    })
+
+    assert result.ok is True
+    server.has_extn.assert_any_call("starttls")
+    server.starttls.assert_called_once()
+    server.login.assert_called_once_with("svc", "secret")
+
+
+@patch("smtplib.SMTP")
+def test_send_email_skips_starttls_when_not_offered_and_not_forced(mock_smtp):
+    server = MagicMock()
+    server.has_extn.return_value = False
+    mock_smtp.return_value.__enter__.return_value = server
+
+    result = _send_email(["a@x.com"], "subj", "body", config={"host": "mail.internal", "port": 25})
+
+    assert result.ok is True
+    server.starttls.assert_not_called()
+
+
+@patch("smtplib.SMTP")
+def test_send_email_reports_clear_error_when_auth_unsupported(mock_smtp):
+    import smtplib as smtplib_module
+    server = MagicMock()
+    server.has_extn.return_value = False  # no STARTTLS offered
+    server.login.side_effect = smtplib_module.SMTPNotSupportedError("SMTP AUTH extension not supported by server.")
+    mock_smtp.return_value.__enter__.return_value = server
+
+    result = _send_email(["a@x.com"], "subj", "body", config={
+        "host": "mail.internal", "port": 25, "user": "svc", "password": "secret",
+    })
+
+    assert result.ok is False
+    assert "does not support authentication" in result.error
+
+
+@patch("smtplib.SMTP")
 def test_send_email_does_not_raise_on_smtp_error(mock_smtp):
     mock_smtp.return_value.__enter__.side_effect = Exception("connection refused")
 

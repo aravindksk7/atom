@@ -170,12 +170,21 @@ def _send_email(recipients: list[str], subject: str, body: str, config: dict | N
 
     try:
         with smtplib.SMTP(host, int(cfg.get("port") or 25), timeout=10) as server:
-            if cfg.get("use_tls"):
+            # Upgrade to TLS whenever the server offers it, not only when explicitly
+            # configured -- most relays only advertise AUTH post-STARTTLS, so a forgotten
+            # "use TLS" setting would otherwise surface as a confusing "AUTH extension
+            # not supported" error instead of just working.
+            if cfg.get("use_tls") or server.has_extn("starttls"):
                 server.starttls()
             if cfg.get("user"):
                 server.login(cfg["user"], cfg.get("password") or "")
             server.send_message(msg)
         return DeliveryResult(True)
+    except smtplib.SMTPNotSupportedError:
+        return DeliveryResult(False, error=(
+            "SMTP server does not support authentication (no STARTTLS offered and AUTH not "
+            "advertised) -- remove the SMTP username/password if this relay doesn't require login"
+        ))
     except Exception as exc:
         logger.warning("Email delivery to %s failed: %s", recipients, exc)
         return DeliveryResult(False, error=str(exc)[:500])
