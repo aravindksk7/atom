@@ -138,7 +138,7 @@ Parsed into `variable_overrides` on the launch payload, alongside the existing `
 
 - `tests/unit/test_variable_resolution.py`: precedence (global → override → launch-override), `today`/`today±N` resolution, `substitute_in_job` over `query` and nested `params` (dict + list of dicts).
 - `tests/unit/test_variables_routes.py`: CRUD, validation per type, duplicate-name 409.
-- `tests/unit/test_run_executor_variables.py`: a job whose `query` contains `{{var}}` gets it substituted before the case runs, including a nested-`params` case; `tests/unit/test_run_trigger_variables.py` confirms the sequence-level resolve-once behavior via a call-count assertion (`resolve_variables` invoked exactly once per launch, covering both the selection and sequence launch paths).
+- `tests/unit/test_run_executor_variables.py`: a job whose `query` contains `{{var}}` gets it substituted before the case runs, including a nested-`params` case. `tests/unit/test_run_trigger_variables.py` confirms the resolve-once-per-run behavior two ways: a call-count assertion (`resolve_variables` invoked exactly once for a selection launch) and a separate test confirming the sequence launch path also lands the resolved value in `config_snapshot`.
 
 ## 8. Out of scope (explicitly deferred)
 
