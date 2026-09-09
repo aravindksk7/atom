@@ -361,33 +361,92 @@
     </template>
   </div>
 
+  <!-- SMTP – outbound mail relay for email notification hooks -->
+  <div class="card mt-4" data-testid="smtp-card">
+    <button type="button" class="card-toggle" data-testid="smtp-toggle" @click="smtpOpen = !smtpOpen" :aria-expanded="smtpOpen.toString()">
+      <div class="font-semibold text-slate-700">📧 SMTP — email relay</div>
+      <span class="text-muted text-sm" x-text="smtpOpen ? '▲ collapse' : '▼ expand'"></span>
+    </button>
+    <template x-if="smtpOpen">
+      <div class="mt-3 space-y-3">
+        <p class="text-muted text-sm">Outbound mail server used by "Email" notification hooks (see Notifications below). Leave blank to fall back to the server's <code>ETL_SMTP_*</code> environment variables.</p>
+        <template x-if="!activeTokenIsAdmin">
+          <div class="text-sm">Current: <span class="font-medium" x-text="smtpSaved.host || '(not configured — using environment defaults)'"></span> <span class="text-muted text-xs">(administrator access required to change)</span></div>
+        </template>
+        <template x-if="activeTokenIsAdmin">
+          <div class="space-y-2">
+            <div class="grid grid-cols-3 gap-2">
+              <div class="col-span-2">
+                <label class="field-label" for="a11y-smtp-host">Host</label>
+                <input x-model="smtpDraft.host" class="field-input" placeholder="smtp.corp.local" id="a11y-smtp-host" />
+              </div>
+              <div>
+                <label class="field-label" for="a11y-smtp-port">Port</label>
+                <input type="number" x-model.number="smtpDraft.port" class="field-input" placeholder="587" id="a11y-smtp-port" />
+              </div>
+            </div>
+            <div>
+              <label class="field-label" for="a11y-smtp-from">From address</label>
+              <input x-model="smtpDraft.from" class="field-input" placeholder="etl-framework@corp.local" id="a11y-smtp-from" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="field-label" for="a11y-smtp-user">Username (optional)</label>
+                <input x-model="smtpDraft.user" class="field-input" placeholder="svc-etl" id="a11y-smtp-user" />
+              </div>
+              <div>
+                <label class="field-label" for="a11y-smtp-password">Password</label>
+                <input type="password" x-model="smtpDraft.password" class="field-input" :placeholder="smtpSaved.password_set ? 'Unchanged (already set)' : 'None'" id="a11y-smtp-password" />
+              </div>
+            </div>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="checkbox" class="rounded" x-model="smtpDraft.use_tls" aria-label="use starttls" /> Use STARTTLS
+            </label>
+            <div class="flex items-center gap-2 pt-1">
+              <button @click="saveSmtpSetting()" :disabled="smtpSaving || !smtpDirty" class="btn-primary btn-sm" data-testid="smtp-save-btn">
+                <span x-show="!smtpSaving">Save</span>
+                <span x-show="smtpSaving">Saving…</span>
+              </button>
+              <input x-model="smtpTestTo" class="field-input flex-1" placeholder="send a test email to…" aria-label="smtp test recipient" />
+              <button @click="sendSmtpTest()" :disabled="smtpTesting || !smtpTestTo" class="btn-secondary btn-sm">
+                <span x-show="!smtpTesting">Send test</span>
+                <span x-show="smtpTesting">Sending…</span>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
   <!-- Notifications – Webhook Hooks -->
   <div class="card mt-4">
     <button type="button" class="card-toggle" @click="notifOpen = !notifOpen; if(notifOpen) loadHooks()" :aria-expanded="notifOpen.toString()">
-      <div class="font-semibold text-slate-700">🔔 Notifications — Webhooks</div>
+      <div class="font-semibold text-slate-700">🔔 Notifications — Webhooks &amp; Email</div>
       <span class="text-muted text-sm" x-text="notifOpen ? '▲ collapse' : '▼ expand'"></span>
     </button>
     <template x-if="notifOpen">
       <div class="mt-3 space-y-3">
         <div class="flex justify-end">
-          <button @click="openNewHookModal()" class="btn-primary btn-sm">+ New Webhook</button>
+          <button @click="openNewHookModal()" class="btn-primary btn-sm">+ New Notification</button>
         </div>
         <template x-if="hooks.length === 0">
-          <div class="empty-state py-4"><div class="empty-state-title">No webhooks configured</div></div>
+          <div class="empty-state py-4"><div class="empty-state-title">No notification hooks configured</div></div>
         </template>
         <div class="space-y-1">
           <template x-for="hook in hooks" :key="hook.id">
             <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm">
+              <span class="badge text-xs" :class="hook.channel === 'email' ? 'badge-purple' : 'badge-sky'" x-text="hook.channel === 'email' ? '✉ Email' : '🔗 Webhook'"></span>
               <div class="flex-1 min-w-0">
                 <span class="font-medium text-slate-700" x-text="hook.name"></span>
-                <span class="text-muted ml-2 text-xs font-mono truncate" x-text="hook.url"></span>
+                <span class="text-muted ml-2 text-xs font-mono truncate" x-text="hook.channel === 'email' ? hook.url.replace(/^mailto:/, '') : hook.url"></span>
                 <div class="flex flex-wrap gap-1 mt-0.5">
                   <template x-for="ev in (hook.events||[])" :key="ev">
                     <span class="badge badge-sky text-xs" x-text="ev"></span>
                   </template>
                 </div>
               </div>
-              <span :class="hook.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs" x-text="hook.enabled ? 'On' : 'Off'"></span>
+              <button @click="toggleHookEnabled(hook)" :class="hook.enabled ? 'badge-green' : 'badge-gray'" class="badge text-xs cursor-pointer" :title="hook.enabled ? 'Click to disable' : 'Click to enable'" x-text="hook.enabled ? 'On' : 'Off'"></button>
               <button @click="testHook(hook.id)" class="btn-secondary btn-sm text-xs">Test</button>
               <button @click="deleteHook(hook.id)" class="btn-danger btn-sm text-xs">Delete</button>
             </div>
@@ -429,12 +488,31 @@
   <!-- Webhook Modal -->
   <div x-show="showHookModal" x-cloak class="modal-backdrop" @click.self="showHookModal = false">
     <div x-ref="hookDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="hookDialogTitle">
-      <h2 id="hookDialogTitle" class="text-lg font-bold mb-4">New Webhook</h2>
+      <h2 id="hookDialogTitle" class="text-lg font-bold mb-4">New Notification</h2>
       <div class="space-y-3">
-        <div><label  class="field-label" for="a11y-config-name">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" id="a11y-config-name" /></div>
-        <div><label  class="field-label" for="a11y-config-url">URL *</label><input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" id="a11y-config-url" /></div>
+        <div><label class="field-label" for="a11y-config-name">Name *</label><input x-model="hookModal.name" class="field-input" placeholder="Slack alerts" id="a11y-config-name" /></div>
         <div>
-          <label  class="field-label" for="a11y-config-events-secret-optional-for-hmac-signing">Events *</label>
+          <label class="field-label" for="a11y-config-channel">Deliver via</label>
+          <div class="flex gap-3 mt-1">
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="hookModal.channel" value="generic" aria-label="channel" /> Webhook (HTTP POST)
+            </label>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="hookModal.channel" value="email" aria-label="channel" /> Email (SMTP)
+            </label>
+          </div>
+        </div>
+        <div x-show="hookModal.channel === 'generic'">
+          <label class="field-label" for="a11y-config-url">URL *</label>
+          <input x-model="hookModal.url" class="field-input" placeholder="https://hooks.slack.com/…" id="a11y-config-url" />
+        </div>
+        <div x-show="hookModal.channel === 'email'">
+          <label class="field-label" for="a11y-config-recipients">Recipients *</label>
+          <input x-model="hookModal.url" class="field-input" placeholder="alice@corp.com, bob@corp.com" id="a11y-config-recipients" />
+          <p class="text-xs text-muted mt-1">Comma-separated addresses. Sent via the server's configured SMTP relay.</p>
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-config-events-secret-optional-for-hmac-signing">Notify on *</label>
           <div class="flex flex-wrap gap-2 mt-1">
             <template x-for="ev in hookEventOptions" :key="ev">
               <label class="flex items-center gap-1 text-sm cursor-pointer">
@@ -444,7 +522,7 @@
             </template>
           </div>
         </div>
-        <div><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" id="a11y-config-events-secret-optional-for-hmac-signing" /></div>
+        <div x-show="hookModal.channel === 'generic'"><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" id="a11y-config-events-secret-optional-for-hmac-signing" /></div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showHookModal = false" class="btn-secondary">Cancel</button>

@@ -310,6 +310,8 @@ class NotificationHook(Base):
     events = Column(JSON, nullable=False, default=list)  # e.g. ["run.failed","run.error"]
     enabled = Column(Boolean, nullable=False, default=True)
     secret = Column(Text, nullable=True)                 # HMAC-SHA256 signing key
+    # Delivery channel: "generic" (raw JSON webhook) or "email" (SMTP; url holds "mailto:a@x.com,b@y.com")
+    channel = Column(String(16), nullable=False, default="generic")
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     # Relationship
@@ -379,6 +381,13 @@ class AppSettings(Base):
     timezone = Column(String(64), nullable=False, default="UTC")
     upload_retention_days = Column(Integer, nullable=False, default=30)
     bo_download_dir = Column(String(1024), nullable=False, default="")
+    # SMTP relay for email notification hooks (falls back to ETL_SMTP_* env vars when smtp_host is blank)
+    smtp_host = Column(String(255), nullable=False, default="")
+    smtp_port = Column(Integer, nullable=False, default=587)
+    smtp_from = Column(String(255), nullable=False, default="")
+    smtp_user = Column(String(255), nullable=False, default="")
+    smtp_password = Column(Text, nullable=True)  # encrypted at rest, see api.services.secret_store
+    smtp_use_tls = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
