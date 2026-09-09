@@ -305,7 +305,7 @@ const dialogCases: DialogCase[] = [
     view: 'jobs',
     firstFocus: '[x-ref="ciIntegrationDialog"] .btn-primary',
     lastFocus: '[x-ref="ciIntegrationDialog"] .btn-secondary',
-    prepare: async (page) => page.evaluate(() => window.Alpine.$data(document.body).ciIntegrationModal = { selectionName: 'Nightly', yamlSnippet: 'atom: test' }),
+    prepare: async (page) => page.evaluate(() => window.Alpine.$data(document.body).ciIntegrationModal = { targetName: 'Nightly', targetTypeLabel: 'Job Selection', yamlSnippet: 'atom: test' }),
   },
   {
     name: 'selection runs',
