@@ -458,9 +458,17 @@ def test_run_rejects_malformed_var():
     from etl_framework.cli.app import app
 
     with patch("etl_framework.cli.app._make_client") as make_client:
-        make_client.return_value = MagicMock()
+        client = MagicMock()
+        make_client.return_value = client
+
+        # Numeric selection id so _resolve_target's isdigit() branch short-circuits
+        # and never calls client.get_json -- this guarantees the command actually
+        # reaches the --var parsing code instead of failing earlier for an
+        # unrelated reason (an unconfigured MagicMock iterated as an empty match
+        # list would otherwise raise AtomNotFoundError first and mask this test).
         result = runner.invoke(app, [
-            "--api-url", "http://atom.test", "run", "my-selection",
+            "--api-url", "http://atom.test", "run", "3",
             "--source-env", "dev", "--var", "no-equals-sign", "--no-wait",
         ])
-    assert result.exit_code != 0
+    assert client.get_json.call_count == 0
+    assert result.exit_code == 2
