@@ -58,3 +58,32 @@ def test_update_config_rejects_invalid_variable_override(client):
     created = client.post("/api/configs", json={"name": "dev-update-var", "env_name": "dev", "config_data": {}}).json()
     resp = client.put(f"/api/configs/{created['id']}", json={"config_data": {"variables": {"batch_id": "not valid!"}}})
     assert resp.status_code == 422
+
+
+def test_create_config_accumulates_multiple_invalid_variable_overrides(client):
+    client.post("/api/variables", json={"name": "run_date", "var_type": "date", "default_value": "today"})
+    client.post("/api/variables", json={"name": "batch_id", "var_type": "alphanumeric", "default_value": None})
+    resp = client.post("/api/configs", json={
+        "name": "dev-multi-bad-var", "env_name": "dev",
+        "config_data": {"variables": {"run_date": "not-a-date", "batch_id": "not valid!"}},
+    })
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert len(detail) == 2
+    field_names = {err["field_name"] for err in detail}
+    assert field_names == {"variables.run_date", "variables.batch_id"}
+
+
+def test_update_config_without_config_data_skips_validation(client):
+    created = client.post("/api/configs", json={"name": "dev-rename-only", "env_name": "dev", "config_data": {}}).json()
+    resp = client.put(f"/api/configs/{created['id']}", json={"name": "renamed"})
+    assert resp.status_code == 200
+
+
+def test_create_config_accepts_blank_variable_override_as_inert(client):
+    client.post("/api/variables", json={"name": "run_date", "var_type": "date", "default_value": "today"})
+    resp = client.post("/api/configs", json={
+        "name": "dev-blank-var", "env_name": "dev",
+        "config_data": {"variables": {"run_date": ""}},
+    })
+    assert resp.status_code == 201
