@@ -50,4 +50,56 @@ case "${http}" in
   *) echo "warning: commit status POST failed (HTTP ${http}): $(head -c 500 "${response}")" >&2 ;;
 esac
 
+# --- Sticky MR comment ------------------------------------------------------
+# Nothing to post, or not a merge-request pipeline (GitLab only sets
+# CI_MERGE_REQUEST_IID on MR pipelines) -- skip silently, this is the common
+# case for a branch push and is not a problem.
+[ -n "${NOTE_BODY_FILE}" ] && [ -s "${NOTE_BODY_FILE}" ] || exit 0
+[ -n "${CI_MERGE_REQUEST_IID:-}" ] || exit 0
+
+# Invisible in rendered markdown, same convention as README's ATOM:JOB-STATUS.
+marker="<!-- ATOM:CI-COMMENT:${TARGET_TYPE}:${TARGET} -->"
+notes_url="${api}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+
+http=$(curl -sS -o "${response}" -w '%{http_code}' -G "${notes_url}" \
+  -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+  --data-urlencode "per_page=100" 2>/dev/null) || http=000
+case "${http}" in
+  2*) ;;
+  *) echo "warning: MR notes list failed (HTTP ${http}); skipping MR comment" >&2; exit 0 ;;
+esac
+
+# Parsed from stdin, not from a path: on Git-for-Windows bash's mktemp returns a
+# POSIX path that native Windows python3 cannot open.
+note_id=$(python3 -c '
+import json, sys
+marker = sys.argv[1]
+try:
+    notes = json.load(sys.stdin)
+except Exception:
+    notes = []
+for note in notes if isinstance(notes, list) else []:
+    if marker in (note.get("body") or ""):
+        print(note.get("id"))
+        break
+' "${marker}" < "${response}" 2>/dev/null) || note_id=""
+
+{ printf '%s\n\n' "${marker}"; cat "${NOTE_BODY_FILE}"; } > "${payload}"
+
+# body@<file> keeps a multi-KB markdown summary out of the shell entirely: no
+# escaping of newlines/quotes/backticks, and no ARG_MAX limit.
+if [ -n "${note_id}" ]; then
+  http=$(curl -sS -o "${response}" -w '%{http_code}' -X PUT "${notes_url}/${note_id}" \
+    -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+    --data-urlencode "body@${payload}" 2>/dev/null) || http=000
+else
+  http=$(curl -sS -o "${response}" -w '%{http_code}' -X POST "${notes_url}" \
+    -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+    --data-urlencode "body@${payload}" 2>/dev/null) || http=000
+fi
+case "${http}" in
+  2*) ;;
+  *) echo "warning: MR comment upsert failed (HTTP ${http}): $(head -c 500 "${response}")" >&2 ;;
+esac
+
 exit 0

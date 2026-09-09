@@ -226,3 +226,105 @@ def test_sequence_target_id_context(tmp_path):
     )
     assert result.data(0)["context"] == "atom/sequence/17"
     assert result.data(0)["state"] == "failed"
+
+
+MR_ENV = dict(GITLAB_ENV, CI_MERGE_REQUEST_IID="7")
+MARKER = "<!-- ATOM:CI-COMMENT:selection:Nightly Regression -->"
+NOTES_MATCH = json.dumps([
+    {"id": 3, "body": "some other reviewer comment"},
+    {"id": 9, "body": MARKER + "\nstale summary"},
+])
+NOTES_NO_MATCH = json.dumps([{"id": 5, "body": "unrelated"}])
+
+
+def test_updates_existing_sticky_comment_when_marker_found(tmp_path):
+    result = run_script(
+        tmp_path,
+        ["success", "selection", "Nightly Regression", "3 passed, 0 failed, 0 error"],
+        env=MR_ENV,
+        responses=[(201, "{}"), (200, NOTES_MATCH), (200, "{}")],
+        note_body="## Atom run\n\n3 passed\n",
+    )
+    assert result.returncode == 0
+    assert len(result.calls) == 3
+    assert result.method(1) == "GET"
+    assert result.url(1) == (
+        "https://gitlab.example.com/api/v4/projects/42/merge_requests/7/notes"
+    )
+    assert result.method(2) == "PUT"
+    assert result.url(2) == (
+        "https://gitlab.example.com/api/v4/projects/42/merge_requests/7/notes/9"
+    )
+
+
+def test_creates_sticky_comment_when_marker_absent(tmp_path):
+    result = run_script(
+        tmp_path,
+        ["failed", "selection", "Nightly Regression", "2 passed, 1 failed, 0 error"],
+        env=MR_ENV,
+        responses=[(201, "{}"), (200, NOTES_NO_MATCH), (201, "{}")],
+        note_body="## Atom run\n",
+    )
+    assert len(result.calls) == 3
+    assert result.method(2) == "POST"
+    assert result.url(2) == (
+        "https://gitlab.example.com/api/v4/projects/42/merge_requests/7/notes"
+    )
+
+
+def test_comment_body_is_marker_then_summary(tmp_path):
+    """The body goes out as --data-urlencode body@<tempfile>, which the script
+    deletes on exit -- the curl stub snapshots it to `last_body` for us."""
+    result = run_script(
+        tmp_path,
+        ["success", "selection", "Nightly Regression", "ok"],
+        env=MR_ENV,
+        responses=[(201, "{}"), (200, NOTES_NO_MATCH), (201, "{}")],
+        note_body="## Atom run\n\nall good\n",
+    )
+    written = (result.stub_dir / "last_body").read_text()
+    assert written.startswith(MARKER)
+    assert "all good" in written
+
+
+def test_branch_pipeline_skips_comment_silently(tmp_path):
+    """No CI_MERGE_REQUEST_IID: commit status only, and no warning about it."""
+    result = run_script(
+        tmp_path,
+        ["success", "selection", "x", "ok"],
+        responses=[(201, "{}")],
+        note_body="## Atom run\n",
+    )
+    assert len(result.calls) == 1
+    assert result.stderr.strip() == ""
+
+
+def test_missing_note_body_file_still_posts_commit_status(tmp_path):
+    result = run_script(
+        tmp_path, ["success", "selection", "x", "ok"], env=MR_ENV, responses=[(201, "{}")]
+    )
+    assert len(result.calls) == 1
+
+
+def test_empty_note_body_file_skips_comment(tmp_path):
+    result = run_script(
+        tmp_path,
+        ["success", "selection", "x", "ok"],
+        env=MR_ENV,
+        responses=[(201, "{}")],
+        note_body="",
+    )
+    assert len(result.calls) == 1
+
+
+def test_notes_list_failure_warns_and_exits_zero(tmp_path):
+    result = run_script(
+        tmp_path,
+        ["success", "selection", "x", "ok"],
+        env=MR_ENV,
+        responses=[(201, "{}"), (500, "boom")],
+        note_body="## Atom run\n",
+    )
+    assert result.returncode == 0
+    assert len(result.calls) == 2
+    assert "MR notes list failed" in result.stderr
