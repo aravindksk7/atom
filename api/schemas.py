@@ -308,6 +308,7 @@ class SequenceLaunchRequest(BaseModel):
     config_data: dict[str, Any] = Field(default_factory=dict)
     version: int | None = None          # pin a sequence_version; None = latest
     ci_context: dict[str, Any] | None = None
+    variable_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class SequenceValidationIssue(BaseModel):
@@ -425,6 +426,7 @@ class RunTrigger(BaseModel):
     config_id: int | None = None
     config_data: dict[str, Any] = Field(default_factory=dict)
     run_settings: RunSettings = Field(default_factory=RunSettings)
+    variable_overrides: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def normalize_job_sequence(self) -> "RunTrigger":
@@ -929,6 +931,7 @@ class JobSelectionLaunchRequest(BaseModel):
     config_data: dict[str, Any] = Field(default_factory=dict)
     version: int | None = None
     ci_context: dict[str, Any] | None = None
+    variable_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

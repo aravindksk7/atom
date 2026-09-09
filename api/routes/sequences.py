@@ -260,6 +260,7 @@ def launch_sequence(
         config_id=config_id,
         config_data=body.config_data,
         run_settings=run_settings,
+        variable_overrides=body.variable_overrides,
     )
 
     run_id = str(uuid.uuid4())

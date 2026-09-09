@@ -283,6 +283,9 @@ def _snapshot_from_trigger(body: RunTrigger, db: Session) -> dict:
         snapshot["automic_credentials"] = {"name": "automic", **cfg_data}
     if "ds_credentials" not in snapshot:
         snapshot["ds_credentials"] = {"name": "ds", **cfg_data}
+
+    from api.services.variable_resolution import resolve_variables
+    snapshot["variables"] = resolve_variables(db, body.config_id, body.variable_overrides)
     return snapshot
 
 

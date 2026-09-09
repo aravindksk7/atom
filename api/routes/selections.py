@@ -237,6 +237,7 @@ def launch_selection(
         config_id=body.config_id if body.config_id is not None else version.config_id,
         config_data=body.config_data,
         run_settings=version.run_settings_json or {},
+        variable_overrides=body.variable_overrides,
     )
 
     run_id = str(uuid.uuid4())
