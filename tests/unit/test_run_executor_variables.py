@@ -31,13 +31,16 @@ class _FakeSavedJob:
     name = "custom_job"
     description = ""
     tags = []
-    job_type = "reconciliation"
+    job_type = "bo_report"
     query = "SELECT * FROM t WHERE dt = '{{run_date}}'"
-    key_columns = ["id"]
+    key_columns = []
     exclude_columns = []
     source_env = None
     target_env = None
-    params = {}
+    params = {
+        "report_id": "R1",
+        "bo_parameters": [{"name": "Date", "value": "{{run_date}}"}],
+    }
     enabled = True
 
 
@@ -64,3 +67,4 @@ def test_build_jobs_index_substitutes_saved_job_query():
     executor._job_repo = _FakeJobRepoWithJob()
     index = executor._build_jobs_index()
     assert index["custom_job"].query == "SELECT * FROM t WHERE dt = '2026-09-08'"
+    assert index["custom_job"].params["bo_parameters"][0]["value"] == "2026-09-08"
