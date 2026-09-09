@@ -38,6 +38,7 @@ def test_missing_api_url_fails():
 
 
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -424,4 +425,42 @@ def test_run_invalid_target_type_fails(fake_client):
     fake_client({})
     result = runner.invoke(app, BASE_ARGS + ["run", "7", "--target-type", "bogus",
                                              "--source-env", "dev"])
+    assert result.exit_code != 0
+
+
+def test_run_forwards_var_overrides_in_launch_payload():
+    from etl_framework.cli.app import app
+
+    with patch("etl_framework.cli.app._make_client") as make_client:
+        client = MagicMock()
+        client.get_json.return_value = [{"id": 1, "name": "my-selection"}]
+        client.post_json.return_value = {"run_id": "abc123"}
+        client.get_json.side_effect = [
+            [{"id": 1, "name": "my-selection"}],  # _resolve_target lookup
+            {"status": "PASSED", "passed": 1, "failed": 0, "error": 0},  # _wait_for_run
+        ]
+        make_client.return_value = client
+
+        result = runner.invoke(app, [
+            "--api-url", "http://atom.test", "run", "my-selection",
+            "--source-env", "dev",
+            "--var", "run_date=2026-09-08",
+            "--var", "batch_id=B1",
+            "--no-wait",
+        ])
+
+    assert result.exit_code == 0
+    payload = client.post_json.call_args[0][1]
+    assert payload["variable_overrides"] == {"run_date": "2026-09-08", "batch_id": "B1"}
+
+
+def test_run_rejects_malformed_var():
+    from etl_framework.cli.app import app
+
+    with patch("etl_framework.cli.app._make_client") as make_client:
+        make_client.return_value = MagicMock()
+        result = runner.invoke(app, [
+            "--api-url", "http://atom.test", "run", "my-selection",
+            "--source-env", "dev", "--var", "no-equals-sign", "--no-wait",
+        ])
     assert result.exit_code != 0

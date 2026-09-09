@@ -142,6 +142,9 @@ def run(
     ci_commit_sha: Optional[str] = typer.Option(None, "--ci-commit-sha"),
     ci_pipeline_url: Optional[str] = typer.Option(None, "--ci-pipeline-url"),
     ci_ref: Optional[str] = typer.Option(None, "--ci-ref"),
+    var: list[str] = typer.Option(
+        [], "--var", help="Override a variable for this run only, NAME=VALUE (repeatable)"
+    ),
     junit_out: Optional[Path] = typer.Option(None, "--junit-out",
                                              help="Write JUnit XML here"),
     json_out: Optional[Path] = typer.Option(None, "--json-out",
@@ -169,6 +172,16 @@ def run(
         }.items() if v}
         if ci_context:
             payload["ci_context"] = ci_context
+        if var:
+            variable_overrides = {}
+            for entry in var:
+                if "=" not in entry:
+                    raise typer.BadParameter(
+                        f"--var must be NAME=VALUE, got {entry!r}"
+                    )
+                name, value = entry.split("=", 1)
+                variable_overrides[name] = value
+            payload["variable_overrides"] = variable_overrides
         launch_path = (
             f"/api/selections/{target_id}/launch" if target_type == "selection"
             else f"/api/sequences/{target_id}/launch"
