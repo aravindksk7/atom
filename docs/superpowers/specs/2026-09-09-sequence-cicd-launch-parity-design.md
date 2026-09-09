@@ -37,30 +37,43 @@ carries a `sequence_ref` — a direct sequence launch just skips the selection w
 
 ```python
 class SequenceLaunchRequest(BaseModel):
-    source_env: str
-    target_env: str = ""
+    source_env: str | None = None       # None = fall back to resolved.defaults.source_env
+    target_env: str | None = None       # None = fall back to resolved.defaults.target_env
     source_connection: str | None = None
     target_connection: str | None = None
-    config_id: int | None = None
+    config_id: int | None = None        # None = fall back to resolved.defaults.config_id
     config_data: dict[str, Any] = Field(default_factory=dict)
     version: int | None = None          # pin a sequence_version; None = latest
     ci_context: dict[str, Any] | None = None
 ```
 
-Handler reuses every helper `launch_selection` (`api/routes/selections.py`) already calls —
-no new business logic, just no selection row wrapping the run:
+Unlike a selection launch, there is no version row to fall back to for environment and
+config — so this is the first real consumer of `SequenceDefaults.source_env` /
+`target_env` (defined in the sequence spec, never actually read by either the selection
+launch path or the scheduler, which get their env from the selection version / schedule
+row instead). Handler mirrors the sequence branch already in `api/services/scheduler.py`
+(`_run_schedule`, the `sched.sequence_id is not None` branch) plus `launch_selection`'s
+`resolved`/`dag_steps` split:
 
 1. `resolve_sequence(db, SequenceRef(sequence_id=id, sequence_version=body.version))` → 404
    if the sequence or pinned version doesn't exist.
 2. `check_preconditions(db, resolved.preconditions)` → **422, no run row created** if the
    gate refuses (matches the sequence spec's "no run is created" rule).
-3. `_validate_env_requirements(resolved.as_linear_steps(), jobs_by_name, body.target_env)`.
-4. Build `RunTrigger` from `resolved.steps` (the real DAG) and `resolved.defaults` merged
-   under caller-supplied values (sequence defaults lose to explicit request fields, per the
-   sequence spec's environment-agnostic rule).
-5. `RunRepository(db).create_run(selection_id=None, ci_context=body.ci_context, ...)`;
+3. Resolve effective values, caller wins: `source_env = body.source_env or resolved.defaults.source_env`
+   (**422** if still `None` — a sequence with no default and no caller value has nowhere to
+   run), `target_env = body.target_env or resolved.defaults.target_env or ""`,
+   `config_id = body.config_id if body.config_id is not None else resolved.defaults.config_id`,
+   `run_settings = resolved.defaults.run_settings or {}`.
+4. `_validate_env_requirements(resolved.as_linear_steps(), jobs_by_name, target_env)`.
+5. Build `RunTrigger(source_env=..., target_env=..., job_sequence=resolved.as_linear_steps(), config_id=..., config_data=body.config_data, run_settings=run_settings)`
+   — the flat shape, used only for env validation and the config snapshot, exactly as
+   `launch_selection` does. Execution itself is handed `resolved.steps` (the real DAG)
+   directly, not `trigger.job_sequence`, matching the `dag_steps` split already used by
+   both `launch_selection` and the scheduler's sequence branch.
+6. `RunRepository(db).create_run(selection_id=None, ci_context=body.ci_context, ...)`;
    `config_snapshot["sequence"] = resolved.snapshot_meta()`.
-6. Audit-logged as `sequence.launched` (mirrors `selection.launched`), same fields.
+7. `background_tasks.add_task(_execute_run, run_id, resolved.steps, ...)`.
+8. Audit-logged as `sequence.launched` (mirrors `selection.launched`), same fields.
 
 Returns `202` + `RunStatusOut`, identical shape to the selection-launch response.
 
@@ -183,25 +196,28 @@ line: `run-atom-selection.sh 42 prod` → `run-atom-target.sh selection 42 prod`
 
 ## 4. Frontend
 
-Sequence detail view (`frontend/partials/tab-sequences.html`, `frontend/features/sequences.js`)
-gains a "CI/CD Integration" tab, matching the existing Job Selection one:
+Reality check against the actual UI (the 2026-07-05 spec described a detail-view tab;
+what was actually built is a shared modal): `openCiIntegrationModal(sel)` in
+`frontend/features/launch.js`, rendered by the always-mounted CI/CD Integration modal in
+`frontend/partials/tab-launch.html`, triggered today only from a button on the Job
+Selections view. It already covers steps 1–2 (token shortcut, GitLab variables block)
+generically; only the YAML snippet and title are selection-specific.
 
-1. Create an API token — same shortcut to `/api/tokens`, reused as-is.
-2. GitLab CI/CD variables block (`ATOM_API_URL`, `ATOM_API_TOKEN`) — identical to the
-   selection panel.
-3. `.gitlab-ci.yml` snippet, pre-filled with the sequence's real id:
-   ```yaml
-   atom-sequence:
-     stage: test
-     script:
-       - pip install etl-framework
-       - scripts/ci/run-atom-target.sh sequence 17 prod
-   ```
+Generalize in place rather than duplicating the modal:
 
-Purely generative, same as the selection panel — no server-side persistence.
+- `openCiIntegrationModal(target, targetType = 'selection')` — `targetType` selects the
+  script invocation (`run-atom-target.sh selection <id>` vs `run-atom-target.sh sequence
+  <id>`) and a label ("Job Selection" / "Execution Sequence") used in the modal title.
+  `ciIntegrationModal.selectionName` is renamed `targetName`; the title in
+  `tab-launch.html` becomes `CI/CD Integration — <span x-text="ciIntegrationModal.targetTypeLabel"></span> — <span x-text="ciIntegrationModal.targetName"></span>`.
+- The existing selection-list button's call site changes from `openCiIntegrationModal(sel)`
+  to `openCiIntegrationModal(sel, 'selection')` (functionally identical, explicit).
+- `frontend/partials/tab-sequences.html` gains a "CI/CD" button next to "Edit as new
+  version" in the sequence detail card header, calling
+  `openCiIntegrationModal(selectedSequence, 'sequence')`.
 
-The existing Job Selection CI/CD panel's snippet updates to use `run-atom-target.sh
-selection <id> prod` in place of the old script name.
+Purely generative, same as before — no server-side persistence, no new endpoint backing
+the modal.
 
 ---
 
@@ -211,6 +227,7 @@ selection <id> prod` in place of the old script name.
 |---|---|
 | Unknown sequence id/name | `404` from the launch endpoint; CLI exits `4` (`EXIT_NOT_FOUND`). |
 | Pinned `version` doesn't exist | `404`, same as an unknown sequence. |
+| No `source_env` in the request and no `SequenceDefaults.source_env` on the sequence | `422` with a clear "source_env required" message; CLI exits `3`. |
 | Precondition gate refuses | `422`, no run row created; CLI exits `3` (`EXIT_ERROR`) with the gate's reason in the error body. Matches "no run is created" from the sequence spec — the CI script sees a clean non-zero exit with no run_id to report on. |
 | `job_name` in the resolved sequence missing/disabled | `422` from `_validate_env_requirements`, same as today's selection path. |
 | Launch succeeds, run fails/errors/gets cancelled | CLI's existing gate-code mapping (unchanged) — `1`/`3`/`2` respectively. |
@@ -223,7 +240,9 @@ selection <id> prod` in place of the old script name.
 
 - **Server unit:** new route tests mirroring `launch_selection`'s existing suite — happy
   path, precondition failure (422, no run row), missing/pinned version, unknown sequence,
-  `ci_context` stored verbatim, `config_snapshot["sequence"]` provenance present.
+  `ci_context` stored verbatim, `config_snapshot["sequence"]` provenance present,
+  `source_env` falling back to `SequenceDefaults.source_env` when omitted, and 422 when
+  neither is set.
 - **CLI unit:** `--target-type` branching (`selection` vs `sequence` vs invalid value) with
   a mocked `AtomClient`; `_resolve_target` numeric-id and name-lookup paths, including the
   "multiple matches" and "no match" errors, parameterized over both target types.
