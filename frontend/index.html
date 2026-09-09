@@ -696,6 +696,19 @@
           </div>
         </div>
         <div x-show="hookModal.channel === 'generic'"><label class="field-label">Secret (optional, for HMAC signing)</label><input x-model="hookModal.secret" class="field-input" placeholder="my-webhook-secret" id="a11y-config-events-secret-optional-for-hmac-signing" /></div>
+        <template x-if="hookModal.channel === 'email'">
+          <div class="space-y-2 pt-1 border-t border-slate-100">
+            <p class="text-xs text-muted pt-2">Optional message template. Leave blank for a default subject and a raw JSON body. Available: <code>{{run_id}}</code> <code>{{status}}</code> <code>{{event}}</code> <code>{{completed_at}}</code>, plus whatever the event includes (e.g. <code>{{failed}}</code>, <code>{{contract}}</code>).</p>
+            <div>
+              <label class="field-label" for="a11y-config-subject-template">Subject template</label>
+              <input x-model="hookModal.subjectTemplate" class="field-input" placeholder="ETL run {{status}}: {{run_id}}" id="a11y-config-subject-template" />
+            </div>
+            <div>
+              <label class="field-label" for="a11y-config-body-template">Body template</label>
+              <textarea x-model="hookModal.bodyTemplate" class="field-input" rows="4" placeholder="Run {{run_id}} finished with status {{status}}." id="a11y-config-body-template"></textarea>
+            </div>
+          </div>
+        </template>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showHookModal = false" class="btn-secondary">Cancel</button>

@@ -312,6 +312,10 @@ class NotificationHook(Base):
     secret = Column(Text, nullable=True)                 # HMAC-SHA256 signing key
     # Delivery channel: "generic" (raw JSON webhook) or "email" (SMTP; url holds "mailto:a@x.com,b@y.com")
     channel = Column(String(16), nullable=False, default="generic")
+    # Optional {{var}}-substitution templates for the email channel. Unset -> a
+    # default "ETL run {status}: {run_id}" subject and a raw JSON dump body.
+    subject_template = Column(Text, nullable=True)
+    body_template = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     # Relationship

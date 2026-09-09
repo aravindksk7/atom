@@ -123,6 +123,10 @@ def _ensure_compare_columns(bind) -> None:
         )
         ensure_column(conn, "notification_hooks", "channel",
                       "ALTER TABLE notification_hooks ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'generic'")
+        ensure_column(conn, "notification_hooks", "subject_template",
+                      "ALTER TABLE notification_hooks ADD COLUMN subject_template TEXT")
+        ensure_column(conn, "notification_hooks", "body_template",
+                      "ALTER TABLE notification_hooks ADD COLUMN body_template TEXT")
         ensure_table(conn, "scheduled_runs",
             "CREATE TABLE IF NOT EXISTS scheduled_runs ("
             "id INTEGER PRIMARY KEY, "

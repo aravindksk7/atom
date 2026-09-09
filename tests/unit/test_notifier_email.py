@@ -1,13 +1,41 @@
 """SMTP email delivery for channel='email' hooks."""
 from unittest.mock import MagicMock, patch
 
-from api.services.notifier import _resolve_smtp_config, _send_email, parse_mailto
+from api.services.notifier import _resolve_smtp_config, _send_email, parse_mailto, render_template
 
 
 def test_parse_mailto_extracts_recipients():
     assert parse_mailto("mailto:a@x.com,b@y.com") == ["a@x.com", "b@y.com"]
     assert parse_mailto("mailto:a@x.com") == ["a@x.com"]
     assert parse_mailto("https://hooks.slack.com/x") == []
+
+
+# ---------------------------------------------------------------------------
+# render_template — lightweight {{var}} substitution for email hook bodies.
+# ---------------------------------------------------------------------------
+
+def test_render_template_substitutes_known_vars():
+    out = render_template("Run {{run_id}} finished: {{status}}", {"run_id": "abc-123", "status": "FAILED"})
+    assert out == "Run abc-123 finished: FAILED"
+
+
+def test_render_template_blanks_unknown_vars():
+    out = render_template("Hello {{missing}}!", {"run_id": "abc-123"})
+    assert out == "Hello !"
+
+
+def test_render_template_blanks_none_values():
+    out = render_template("Owner: {{owner}}", {"owner": None})
+    assert out == "Owner: "
+
+
+def test_render_template_stringifies_non_string_values():
+    out = render_template("Failed: {{failed}}", {"failed": 3})
+    assert out == "Failed: 3"
+
+
+def test_render_template_leaves_plain_text_untouched():
+    assert render_template("no placeholders here", {}) == "no placeholders here"
 
 
 # ---------------------------------------------------------------------------
