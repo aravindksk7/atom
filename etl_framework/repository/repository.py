@@ -896,7 +896,8 @@ class TokenRepository:
             return _hmac.new(_HMAC_SECRET, raw.encode(), hashlib.sha256).hexdigest()
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False) -> tuple[str, ApiToken]:
+    def create(self, name: str, expires_at: datetime | None = None, is_admin: bool = False,
+               role: str = "full") -> tuple[str, ApiToken]:
         if expires_at is not None:
             cap = datetime.now(timezone.utc) + timedelta(days=_TOKEN_MAX_TTL_DAYS)
             if expires_at.tzinfo is None:
@@ -910,6 +911,7 @@ class TokenRepository:
             expires_at=expires_at,
             is_admin=is_admin,
             token_hint=raw[-8:],
+            role=role,
         )
         self._db.add(token)
         self._db.commit()

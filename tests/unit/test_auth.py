@@ -95,6 +95,18 @@ def test_list_returns_all_tokens():
     assert len(tokens) == 2
 
 
+def test_create_defaults_role_to_full():
+    db = _session()
+    _, token = TokenRepository(db).create("test")
+    assert token.role == "full"
+
+
+def test_create_accepts_ci_trigger_role():
+    db = _session()
+    _, token = TokenRepository(db).create("ci-bot", role="ci_trigger")
+    assert token.role == "ci_trigger"
+
+
 # ---------------------------------------------------------------------------
 # Middleware integration via TestClient
 # ---------------------------------------------------------------------------

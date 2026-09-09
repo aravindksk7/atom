@@ -111,6 +111,7 @@ def _ensure_compare_columns(bind) -> None:
         # --- Token auth hardening: is_admin + token_hint ---
         ensure_column(conn, "api_tokens", "is_admin", "ALTER TABLE api_tokens ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
         ensure_column(conn, "api_tokens", "token_hint", "ALTER TABLE api_tokens ADD COLUMN token_hint VARCHAR(8) NOT NULL DEFAULT ''")
+        ensure_column(conn, "api_tokens", "role", "ALTER TABLE api_tokens ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'full'")
         ensure_table(conn, "notification_hooks",
             "CREATE TABLE IF NOT EXISTS notification_hooks ("
             "id INTEGER PRIMARY KEY, "
