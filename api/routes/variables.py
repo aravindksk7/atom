@@ -40,13 +40,18 @@ def update_variable(variable_id: int, body: CustomVariableUpdate, db: Session = 
     if existing is None:
         raise HTTPException(status_code=404, detail="Variable not found")
     kwargs = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
-    if "default_value" in kwargs and kwargs["default_value"] and "var_type" not in kwargs:
+    effective_var_type = kwargs.get("var_type", existing.var_type)
+    effective_default_value = kwargs.get("default_value", existing.default_value)
+    both_in_request = "var_type" in kwargs and "default_value" in kwargs
+    if not both_in_request and effective_default_value:
         from api.services.variable_types import validate_variable_value
         try:
-            validate_variable_value(kwargs["default_value"], existing.var_type)
+            validate_variable_value(effective_default_value, effective_var_type)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     var = repo.update(variable_id, **kwargs)
+    if var is None:
+        raise HTTPException(status_code=404, detail="Variable not found")
     return _to_out(var)
 
 

@@ -62,6 +62,31 @@ def test_update_default_value_only_validated_against_existing_var_type(client):
     assert resp.status_code == 422
 
 
+def test_update_var_type_alone_revalidated_against_existing_default_value(client):
+    created = client.post("/api/variables", json={"name": "run_date", "var_type": "date", "default_value": "today"}).json()
+    resp = client.put(f"/api/variables/{created['id']}", json={"var_type": "number"})
+    assert resp.status_code == 422
+
+
+def test_update_both_var_type_and_default_value_together(client):
+    created = client.post("/api/variables", json={"name": "run_date", "var_type": "date", "default_value": "today"}).json()
+    resp = client.put(f"/api/variables/{created['id']}", json={"var_type": "date", "default_value": "today"})
+    assert resp.status_code == 200
+
+
+def test_update_race_deleted_between_get_and_update_returns_404(client, monkeypatch):
+    from etl_framework.repository.repository import CustomVariableRepository
+
+    created = client.post("/api/variables", json={"name": "run_date", "var_type": "date", "default_value": "today"}).json()
+    # Simulate another request deleting the row between our existence check
+    # (repo.get) and the actual update (repo.update, which re-fetches
+    # internally) -- repo.update should be treated as authoritative on
+    # whether the row still exists.
+    monkeypatch.setattr(CustomVariableRepository, "update", lambda self, *a, **k: None)
+    resp = client.put(f"/api/variables/{created['id']}", json={"description": "x"})
+    assert resp.status_code == 404
+
+
 def test_update_missing_404(client):
     resp = client.put("/api/variables/999999", json={"description": "x"})
     assert resp.status_code == 404
