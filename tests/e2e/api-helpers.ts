@@ -1,5 +1,7 @@
 import { APIRequestContext, request as pwRequest } from '@playwright/test';
+import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { BASE_URL } from '../../playwright.config';
 
@@ -184,4 +186,100 @@ export async function createConfig(ctx: APIRequestContext, name: string, envName
 // Fire-and-forget cleanup — see deleteJob's comment above for the rationale.
 export async function deleteConfig(ctx: APIRequestContext, id: number) {
   await ctx.delete(`/api/configs/${id}`);
+}
+
+// --- scripts/ci/run-atom-target.sh scratch-repo helpers -------------------
+//
+// Shared by 41-live-run-atom-target.spec.ts and 42-ci-trigger-token.spec.ts —
+// both actually shell out to the real run-atom-target.sh as a child process
+// against the live backend Playwright's own webServer boots. Extracted here
+// so there is exactly one scratch-git-repo implementation instead of two
+// copies drifting apart.
+
+export const RUN_ATOM_TARGET_SCRIPT_PATH = path.resolve(__dirname, '..', '..', 'scripts', 'ci', 'run-atom-target.sh');
+export const SPLICE_START_MARKER = '<!-- ATOM:JOB-STATUS:START -->';
+export const SPLICE_END_MARKER = '<!-- ATOM:JOB-STATUS:END -->';
+
+/**
+ * Creates a brand-new, throwaway git repository (NOT this worktree) seeded with a
+ * README.md carrying the same ATOM:JOB-STATUS markers as the real repo root README
+ * (see scripts/ci/splice_readme.py's START_MARKER/END_MARKER constants). This is
+ * deliberately isolated from the worktree's own .git — run-atom-target.sh does real
+ * `git commit`/`git push` as part of its normal flow, and must never be allowed to
+ * touch this actual repo. The scratch repo has no `origin` remote, so the script's
+ * push (and its retry-after-rebase) fail cleanly and non-fatally, which is the
+ * script's own designed degradation path, not a bypass of it.
+ */
+export function makeScratchGitRepo(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atom-e2e-scratch-repo-'));
+  const readme =
+    '# Scratch Repo\n\n' +
+    '## CI/CD Job Status\n\n' +
+    `${SPLICE_START_MARKER}\n` +
+    '_No CI-triggered run yet._\n' +
+    `${SPLICE_END_MARKER}\n`;
+  fs.writeFileSync(path.join(dir, 'README.md'), readme, 'utf-8');
+
+  const git = (args: string[]) => {
+    const res = spawnSync('git', args, { cwd: dir, encoding: 'utf-8' });
+    if (res.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed (scratch repo setup): ${res.stderr}`);
+    }
+  };
+  git(['init', '-q', '-b', 'main']);
+  git(['config', 'user.email', 'atom-e2e-scratch@localhost']);
+  git(['config', 'user.name', 'atom-e2e-scratch']);
+  git(['add', 'README.md']);
+  git(['commit', '-q', '-m', 'seed scratch README']);
+  return dir;
+}
+
+export function readScratchReadme(dir: string): string {
+  return fs.readFileSync(path.join(dir, 'README.md'), 'utf-8');
+}
+
+/**
+ * Runs the real run-atom-target.sh as a child process, cwd'd into the scratch git
+ * repo so its git config/add/commit/push operate on that repo only. CI_COMMIT_REF_NAME
+ * is deliberately set (unlike CI_COMMIT_SHA/CI_PIPELINE_URL, which the script falls
+ * back to "unknown"/"" for via ${VAR:-...}): the script's git push line references
+ * ${CI_COMMIT_REF_NAME} directly with no :- fallback, and the script runs under
+ * `set -euo pipefail` (nounset), so leaving it completely unset would abort the
+ * script on an "unbound variable" error rather than exercising the push-failure
+ * degradation path this test wants to exercise.
+ *
+ * targetEnv is passed as the script's new optional 4th positional argument
+ * (target_env). A Job Selection has no stored env default of its own (unlike an
+ * Execution Sequence's SequenceDefaults.target_env), so its launch 422s for any
+ * job type outside SINGLE_ENV_JOB_TYPES -- e.g. createFileJob's "reconciliation"
+ * type -- unless target_env is passed explicitly here.
+ *
+ * `token` is deliberately a plain parameter rather than always the admin token:
+ * 42-ci-trigger-token.spec.ts passes a freshly-minted ci_trigger token here to
+ * prove the whole launch -> poll -> gate chain works end to end through a scoped
+ * token against the real script, not just the admin token 41's tests use.
+ */
+export function runAtomTargetScript(
+  targetType: 'selection' | 'sequence',
+  targetId: number,
+  cwd: string,
+  token: string,
+  targetEnv: string,
+): SpawnSyncReturns<string> {
+  const result = spawnSync('bash', [RUN_ATOM_TARGET_SCRIPT_PATH, targetType, String(targetId), 'dev', targetEnv], {
+    cwd,
+    env: {
+      ...process.env,
+      ATOM_API_URL: BASE_URL,
+      ATOM_API_TOKEN: token,
+      CI_COMMIT_REF_NAME: 'e2e-scratch-branch',
+    },
+    encoding: 'utf-8',
+  });
+  if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+    throw new Error(
+      `bash was not found on PATH when spawning run-atom-target.sh (spawnSync ENOENT): ${result.error.message}`,
+    );
+  }
+  return result;
 }
