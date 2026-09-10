@@ -2809,8 +2809,21 @@
 ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
       <div>
-        <div class="label">STEP 3 — Copy this into .gitlab-ci.yml</div>
-        <pre class="bg-slate-50 border rounded p-2 text-xs font-mono gitlab-ci-snippet-code" x-text="ciIntegrationModal.yamlSnippet"></pre>
+        <div class="label">STEP 3 — Environments</div>
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <label class="field-label" for="a11y-ci-modal-source-env">Source env</label>
+            <input x-model="ciIntegrationModal.sourceEnv" id="a11y-ci-modal-source-env" class="field-input" data-testid="ci-modal-source-env-input" placeholder="dev" />
+          </div>
+          <div class="flex-1">
+            <label class="field-label" for="a11y-ci-modal-target-env">Target env (only needed for dual-env jobs, e.g. reconciliation)</label>
+            <input x-model="ciIntegrationModal.targetEnv" id="a11y-ci-modal-target-env" class="field-input" data-testid="ci-modal-target-env-input" placeholder="leave blank if not needed" />
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">STEP 4 — Copy this into .gitlab-ci.yml</div>
+        <pre class="bg-slate-50 border rounded p-2 text-xs font-mono gitlab-ci-snippet-code" x-text="ciYamlSnippet()"></pre>
         <button @click="copyCiYamlSnippet()" class="btn-primary btn-sm text-xs mt-2">Copy snippet</button>
       </div>
       <div>
