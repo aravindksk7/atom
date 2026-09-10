@@ -17,6 +17,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Launching ${TARGET_TYPE} ${TARGET} against ${ENVIRONMENT} via atom CLI..."
 
+# Tell GitLab a run is starting. Best effort: post-gitlab-status.sh handles all
+# of its own errors and always exits 0, so this cannot affect the pipeline.
+bash "${script_dir}/post-gitlab-status.sh" pending "${TARGET_TYPE}" "${TARGET}" \
+  "Running via Atom..."
+
 stdout_file=$(mktemp)
 set +e
 atom run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}" \
@@ -72,5 +77,24 @@ if [ -n "${run_id}" ]; then
 else
   echo "warning: no run_id captured (launch likely failed before a run was created); skipping README update" >&2
 fi
+
+# Map the CLI's gate code (docs/cli.md) onto GitLab's Commit Status vocabulary.
+# GitLab has no error/not-found/timeout state, so everything that isn't a clean
+# pass or a cancel reads as failed.
+case "${gate_code}" in
+  0) gitlab_state=success ;;
+  2) gitlab_state=canceled ;;
+  *) gitlab_state=failed ;;
+esac
+# --output json prints counts on the normal paths but a bare run id on timeout,
+# so fall back to the state itself when the payload isn't JSON.
+description=$(python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+print("{} passed, {} failed, {} error".format(
+    data.get("passed") or 0, data.get("failed") or 0, data.get("error") or 0))
+' < "${stdout_file}" 2>/dev/null) || description="${gitlab_state}"
+bash "${script_dir}/post-gitlab-status.sh" "${gitlab_state}" "${TARGET_TYPE}" "${TARGET}" \
+  "${description}" /tmp/atom-run-summary.md
 
 exit "${gate_code}"

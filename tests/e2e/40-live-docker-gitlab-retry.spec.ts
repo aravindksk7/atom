@@ -27,6 +27,8 @@ test.describe('GitLab CI Integration and Retry', () => {
     await authedPage.click('#btn-gitlab-ci-snippet');
     await expect(authedPage.locator('.gitlab-ci-modal')).toBeVisible();
     await expect(authedPage.locator('.gitlab-ci-snippet-code')).toContainText('run-atom-target.sh selection');
+    await expect(authedPage.locator('.gitlab-signals-note')).toContainText('commit status');
+    await expect(authedPage.locator('.gitlab-signals-note')).toContainText('CI_JOB_TOKEN');
   });
 
   test('renders GitLab CI modal with snippet for a sequence', async ({ authedPage }) => {
