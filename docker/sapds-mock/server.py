@@ -5,7 +5,7 @@ import os
 import re
 import ssl
 import uuid
-from html import escape
+from html import escape, unescape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -37,8 +37,12 @@ JOB_POLLS_TO_TERMINAL = 2
 
 # SessionID -> True, for currently "logged on" sessions.
 _SESSIONS: set[str] = set()
-# run id -> {"job_name": str, "polls_seen": int}
+# run id -> {"job_name": str, "polls_seen": int, "variables": dict[str, str]}
 _JOB_RUNS: dict[str, dict] = {}
+# Most recently triggered run id, so a test that doesn't otherwise learn the DS-side
+# rid (atom's own run API doesn't surface it -- see RunExecutor._build_case_ds_job)
+# can still inspect the last Run_Batch_Job call via GET /debug/last-run.
+_LAST_RUN_ID: str | None = None
 
 
 def _tag(xml: str, local_name: str) -> str | None:
@@ -56,6 +60,20 @@ def _tag(xml: str, local_name: str) -> str | None:
 def _soap_action(headers) -> str:
     raw = headers.get("SOAPAction", "")
     return raw.strip().strip('"')
+
+
+def _parse_global_variables(body: str) -> dict[str, str]:
+    """Extract <globalVariables><variable name="...">value</variable>...</globalVariables>
+    from a RunBatchJobRequest body -- mirrors how DSRestClient.trigger_job serializes
+    `job_params`. Captured per-run so a test can assert the client sent exactly the
+    (already-substituted) variables it expected via GET /debug/runs/{rid} below."""
+    block = re.search(r"<globalVariables>(.*?)</globalVariables>", body, re.S)
+    if not block:
+        return {}
+    return {
+        name: unescape(value)
+        for name, value in re.findall(r'<variable name="([^"]*)">(.*?)</variable>', block.group(1), re.S)
+    }
 
 
 class SAPDSMockHandler(BaseHTTPRequestHandler):
@@ -113,8 +131,35 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
-        if urlparse(self.path).path == "/health":
+        path = urlparse(self.path).path
+        if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True})
+            return
+        # Test-only inspection endpoint (not part of the real DataServices_Server
+        # WSDL): lets a live e2e/integration test confirm the exact globalVariables
+        # DSRestClient.trigger_job sent for a given run -- e.g. that a
+        # `{{custom_variable}}` placeholder in a job's job_params was actually
+        # resolved before reaching the SOAP call, not just persisted as a literal.
+        if path == "/debug/last-run":
+            if _LAST_RUN_ID is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "no run yet"})
+                return
+            run = _JOB_RUNS[_LAST_RUN_ID]
+            self._send_json(
+                HTTPStatus.OK,
+                {"run_id": _LAST_RUN_ID, "job_name": run["job_name"], "variables": run.get("variables", {})},
+            )
+            return
+        if path.startswith("/debug/runs/"):
+            run_id = path[len("/debug/runs/"):]
+            run = _JOB_RUNS.get(run_id)
+            if run is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"job_name": run["job_name"], "variables": run.get("variables", {})},
+            )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -180,8 +225,13 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
         if job_name not in SCHEDULABLE_JOBS:
             self._send_fault(HTTPStatus.NOT_FOUND, f"Job '{job_name}' not found in repository '{repo_name}'")
             return
+        global _LAST_RUN_ID
         run_id = str(uuid.uuid4().int % 100000)
-        _JOB_RUNS[run_id] = {"job_name": job_name, "polls_seen": 0}
+        _JOB_RUNS[run_id] = {
+            "job_name": job_name, "polls_seen": 0,
+            "variables": _parse_global_variables(body),
+        }
+        _LAST_RUN_ID = run_id
         self._send_result(
             HTTPStatus.OK,
             f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
