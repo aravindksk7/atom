@@ -13,21 +13,23 @@ published package); the `atom` entry point is registered via `[project.scripts]`
 
 ## Commands
 
-### atom run SELECTION
+### atom run TARGET
 
-Launch a Job Selection (by numeric id or exact name), poll until it finishes,
-write artifacts, and exit with the gate code.
+Launch a Job Selection or Execution Sequence (by numeric id or exact name), poll
+until it finishes, write artifacts, and exit with the gate code.
 
 ```bash
-atom run "Nightly Regression" --source-env dev --target-env qa \
+atom run "Nightly Regression" --target-type selection --source-env dev --target-env qa \
     --junit-out atom-junit.xml --json-out atom-run.json \
     --ci-commit-sha "$CI_COMMIT_SHA" --ci-pipeline-url "$CI_PIPELINE_URL" \
     --ci-ref "$CI_COMMIT_REF_NAME"
 ```
 
-Options: `--source-env` (required), `--target-env` (default empty),
-`--timeout` (default 3600s), `--poll-interval` (default 10s), `--no-wait`
-(launch, print run id, exit 0), `--junit-out`, `--json-out`, and `--html-out`.
+Options: `--target-type selection|sequence` (default `selection`, so existing
+calls with no flag are unchanged), `--source-env` (required), `--target-env`
+(default empty), `--timeout` (default 3600s), `--poll-interval` (default 10s),
+`--no-wait` (launch, print run id, exit 0), `--junit-out`, `--json-out`, and
+`--html-out`.
 
 ### atom report RUN_ID
 
@@ -61,7 +63,7 @@ atom-tests:
   stage: test
   script:
     - pip install etl-framework
-    - atom run "Nightly Regression" --source-env dev --target-env qa \
+    - atom run "Nightly Regression" --target-type selection --source-env dev --target-env qa \
         --ci-commit-sha "$CI_COMMIT_SHA" \
         --ci-pipeline-url "$CI_PIPELINE_URL" \
         --ci-ref "$CI_COMMIT_REF_NAME" \
@@ -71,6 +73,12 @@ atom-tests:
     reports:
       junit: atom-junit.xml
 ```
+
+This calls `atom` directly for JUnit reporting into GitLab's own test-report UI. To also
+get the README status splice and the GitLab-native signals below, call
+`scripts/ci/run-atom-target.sh selection "Nightly Regression" dev` instead — it wraps this
+same CLI and adds both. The Launch tab's / Sequences tab's **CI/CD** button generates the
+`run-atom-target.sh` form of this snippet for either target type.
 
 ## GitLab-native signals
 
