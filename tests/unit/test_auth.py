@@ -260,3 +260,76 @@ def test_rotate_preserves_ci_trigger_role(client):
     )
     assert resp.status_code == 200
     assert resp.json()["role"] == "ci_trigger"
+
+
+def _create_ci_trigger_token(c, admin_raw: str) -> str:
+    resp = c.post(
+        "/api/tokens",
+        json={"name": "ci-bot", "role": "ci_trigger"},
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    )
+    return resp.json()["raw_token"]
+
+
+def test_ci_trigger_token_allowed_on_selections_list(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.get("/api/selections", headers={"Authorization": f"Bearer {ci_raw}"})
+    assert resp.status_code == 200
+
+
+def test_ci_trigger_token_allowed_on_sequences_list(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.get("/api/sequences", headers={"Authorization": f"Bearer {ci_raw}"})
+    assert resp.status_code == 200
+
+
+def test_ci_trigger_token_allowed_on_run_status(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.get("/api/runs/nonexistent-run-id/status", headers={"Authorization": f"Bearer {ci_raw}"})
+    # 404 (route reached, run not found) proves the scope check let it through --
+    # a scope denial would be 403, never 404.
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/configs"),
+    ("GET", "/api/jobs"),
+    ("GET", "/api/tokens"),
+    ("POST", "/api/schedules"),
+    ("GET", "/api/runs"),  # bare list -- deliberately excluded, see spec
+    ("DELETE", "/api/runs/some-run-id"),
+])
+def test_ci_trigger_token_denied_outside_allowlist(client, method, path):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.request(method, path, headers={"Authorization": f"Bearer {ci_raw}"})
+    assert resp.status_code == 403
+
+
+def test_full_token_unaffected_by_scope_check(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    full_raw = c.post(
+        "/api/tokens", json={"name": "full-user"},
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    ).json()["raw_token"]
+    resp = c.get("/api/configs", headers={"Authorization": f"Bearer {full_raw}"})
+    assert resp.status_code == 200
+
+
+def test_ci_trigger_scope_denial_is_audit_logged(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    c.get("/api/configs", headers={"Authorization": f"Bearer {ci_raw}"})
+    resp = c.get("/api/audit", headers={"Authorization": f"Bearer {admin_raw}"})
+    assert resp.status_code == 200
+    reasons = [e.get("diff", {}).get("reason") for e in resp.json() if e.get("action") == "token.auth_failed"]
+    assert "ci_trigger_scope_denied" in reasons

@@ -25,6 +25,28 @@ _EXEMPT_PREFIXES = ("/api/health",)
 _EXEMPT_EXACT = {"/", "/api/health", "/api/auth/setup-status"}
 _EXEMPT_PATTERNS = [re.compile(r"^/api/runs/[^/]+/badge\.svg$")]
 
+_CI_TRIGGER_ALLOWED: list[tuple[str, re.Pattern]] = [
+    ("GET", re.compile(r"^/api/selections$")),
+    ("GET", re.compile(r"^/api/selections/\d+$")),
+    ("POST", re.compile(r"^/api/selections/\d+/launch$")),
+    ("GET", re.compile(r"^/api/sequences$")),
+    ("GET", re.compile(r"^/api/sequences/\d+$")),
+    ("POST", re.compile(r"^/api/sequences/\d+/launch$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/status$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/junit$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/markdown-summary$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/report$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/export$")),
+]
+
+
+def _ci_trigger_denied(method: str, path: str) -> bool:
+    return not any(
+        method == allowed_method and pattern.match(path)
+        for allowed_method, pattern in _CI_TRIGGER_ALLOWED
+    )
+
 
 def _has_sap_bo_auth(request: Request) -> bool:
     if not request.url.path.startswith("/api/adapters/sap-bo/"):
@@ -98,6 +120,12 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 request.state.token_actor = token.name
                 request.state.token_id = token.id
                 request.state.token = token
+                if token.role == "ci_trigger" and _ci_trigger_denied(request.method, request.url.path):
+                    self._audit_failure(request, "ci_trigger_scope_denied")
+                    return JSONResponse(
+                        {"detail": "This token is not permitted to call this endpoint"},
+                        status_code=403,
+                    )
                 return await call_next(request)
             else:
                 del _cache[token_hash]
@@ -136,6 +164,13 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 {"detail": "Invalid or expired token"},
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if token.role == "ci_trigger" and _ci_trigger_denied(request.method, request.url.path):
+            self._audit_failure(request, "ci_trigger_scope_denied")
+            return JSONResponse(
+                {"detail": "This token is not permitted to call this endpoint"},
+                status_code=403,
             )
 
         return await call_next(request)
