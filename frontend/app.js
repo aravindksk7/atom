@@ -199,6 +199,8 @@ function _appRaw() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>' },
       { id: 'history',  label: 'History', group: 'analysis',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>' },
+      { id: 'ci-runs', label: 'CI Runs', group: 'analysis',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"></path><path d="M12 19h8"></path></svg>' },
       { id: 'reports',  label: 'Reports', group: 'analysis',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>' },
       { id: 'scheduler-reports', label: 'Scheduler Reports', group: 'analysis',
@@ -366,6 +368,7 @@ function _appRaw() {
     onTabEnter(id) {
       this.currentView = id;
       if (id === 'contracts') this.loadContracts();
+      if (id === 'ci-runs') this.loadCiRuns();
       if (id === 'scheduler-reports') this.startSchedulerReportPolling();
       else this.stopSchedulerReportPolling();
       if (id === 'logs') this.startGlobalLogsPolling();
@@ -457,14 +460,14 @@ function _appRaw() {
         const rawHash = window.location.hash.replace('#', '');
         const hashView = rawHash === 'launch' ? 'jobs' : rawHash;
         if (hashView && this.tabs && this.tabs.some(t => t.id === hashView)) {
-          this.currentView = hashView;
+          this.onTabEnter(hashView);
         }
       }
       window.addEventListener('hashchange', () => {
         const rawHash = window.location.hash.replace('#', '');
         const hashView = rawHash === 'launch' ? 'jobs' : rawHash;
         if (hashView && this.tabs && this.tabs.some(t => t.id === hashView)) {
-          this.currentView = hashView;
+          this.onTabEnter(hashView);
         }
       });
       this._applyDeepLink();
@@ -1522,7 +1525,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_CI_RUNS(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}

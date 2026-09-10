@@ -9,8 +9,9 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, JSONResponse, StreamingResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -53,9 +54,17 @@ from api.schemas import (
     TestResultOverrideRequest,
     TestSuiteTrigger,
 )
+from api.services.ci_runs_reporting import CiRunsFilters, CiRunsReportingService
 from api.services.run_executor import RunExecutor
 from api.services.pytest_runner import PytestRunExecutor
-from etl_framework.repository.repository import ConfigRepository, JobRepository, RunRepository, RunStepRepository
+from etl_framework.repository.repository import (
+    ConfigRepository,
+    JobRepository,
+    JobSelectionRepository,
+    RunRepository,
+    RunStepRepository,
+    infer_run_target_type,
+)
 from api.services.artifact_service import ArtifactService
 from api.services.run_data_artifact import run_has_row_diffable_artifact
 from api.services.artifact_views import render_logs_html, render_metrics_html
@@ -183,8 +192,16 @@ def _metrics_from_run(run) -> dict:
     return build_run_report_snapshot(run).to_metrics()
 
 
-def _run_status_out(run) -> RunStatusOut:
+def _run_status_out(run, selection_names_map: dict[int, str] | None = None) -> RunStatusOut:
+    selection_names_map = selection_names_map or {}
     snapshot = build_run_report_snapshot(run)
+
+    config_snapshot = run.config_snapshot if isinstance(run.config_snapshot, dict) else {}
+    sequence = config_snapshot.get("sequence")
+    selection_name = selection_names_map.get(run.selection_id)
+    target_type = infer_run_target_type(run.selection_id, config_snapshot, selection_name)
+    target_name = sequence["name"] if target_type == "sequence" else selection_name
+
     return RunStatusOut(
         run_id=snapshot.run_id,
         label=snapshot.run_label,
@@ -200,6 +217,9 @@ def _run_status_out(run) -> RunStatusOut:
         run_type=snapshot.run_type,
         pair_id=snapshot.pair_id,
         has_data_artifact=run_has_row_diffable_artifact(run),
+        ci_context=run.ci_context,
+        target_type=target_type,
+        target_name=target_name,
     )
 
 
@@ -379,11 +399,36 @@ def list_runs(
     offset: int = 0,
     status: str | None = None,
     run_type: str | None = None,
+    ci_only: bool = False,
+    days: int | None = Query(None, ge=1, le=365),
+    target_type: Literal["selection", "sequence"] | None = None,
     db: Session = Depends(get_session),
 ):
     repo = RunRepository(db)
-    runs = repo.list_runs(limit=limit, offset=offset, status=status, run_type=run_type)
-    return [_run_status_out(r) for r in runs]
+    runs = repo.list_runs(
+        limit=limit,
+        offset=offset,
+        status=status,
+        run_type=run_type,
+        ci_only=ci_only,
+        days=days,
+        target_type=target_type,
+    )
+
+    selection_ids = list({run.selection_id for run in runs if run.selection_id is not None})
+    selection_names_map = JobSelectionRepository(db).names_by_ids(selection_ids)
+    return [_run_status_out(r, selection_names_map) for r in runs]
+
+
+@router.get("/ci-summary")
+def ci_summary(
+    days: int = Query(30, ge=1, le=365),
+    target_type: Literal["selection", "sequence"] | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_session),
+):
+    filters = CiRunsFilters(days=days, target_type=target_type, status=status)
+    return CiRunsReportingService(db).summary(filters)
 
 
 @router.post("/test-suite", response_model=RunStatusOut, status_code=202)
@@ -468,7 +513,9 @@ def get_run_status(run_id: str, db: Session = Depends(get_session)):
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _run_status_out(run)
+    selection_ids = [run.selection_id] if run.selection_id is not None else []
+    selection_names = JobSelectionRepository(db).names_by_ids(selection_ids)
+    return _run_status_out(run, selection_names)
 
 
 @router.get("/{run_id}/artifacts", response_model=list[GeneratedArtifactOut])

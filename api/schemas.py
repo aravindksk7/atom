@@ -467,6 +467,9 @@ class RunStatusOut(BaseModel):
     # True when the run kept exactly one tabular data artifact, so it can be
     # row-diffed against a file in the Compare tab rather than only stat-compared.
     has_data_artifact: bool = False
+    ci_context: dict[str, Any] | None = None
+    target_type: Literal["selection", "sequence"] | None = None
+    target_name: str | None = None
 
     model_config = {"from_attributes": True}
 

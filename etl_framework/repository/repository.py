@@ -2,7 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from sqlalchemy import case, insert, or_, cast, String, func
+from typing import Literal
+from sqlalchemy import String, case, cast, func, insert, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
@@ -16,6 +17,36 @@ from etl_framework.repository.models import (
 
 
 _UNSET = object()  # distinguishes "config_id kwarg omitted" from "config_id=None"
+
+
+def ci_context_present_filter():
+    return (
+        TestRun.ci_context.isnot(None),
+        cast(TestRun.ci_context, String) != "null",
+    )
+
+
+def infer_run_target_type(selection_id, snapshot, existing_selection_id):
+    config_snapshot = snapshot if isinstance(snapshot, dict) else {}
+    sequence = config_snapshot.get("sequence")
+    name = sequence.get("name") if isinstance(sequence, dict) else None
+    if isinstance(name, str) and name.strip():
+        return "sequence"
+    if selection_id is not None and existing_selection_id is not None:
+        return "selection"
+    return None
+
+
+def run_target_predicates():
+    sequence_value = TestRun.config_snapshot["sequence"]["name"]
+    sequence_name = sequence_value.as_string()
+    valid_sequence = (
+        sequence_name.isnot(None)
+        & (func.trim(sequence_name) != "")
+        & cast(sequence_value, String).like('"%"')
+    )
+    valid_selection = ~valid_sequence & JobSelection.id.isnot(None)
+    return valid_selection, valid_sequence
 
 
 def _transform_secret_fields(data: dict, transform) -> dict:
@@ -336,6 +367,12 @@ class JobSelectionRepository:
             .all()
         )
 
+    def names_by_ids(self, ids: list[int]) -> dict[int, str]:
+        if not ids:
+            return {}
+        rows = self._db.query(JobSelection.id, JobSelection.name).filter(JobSelection.id.in_(ids)).all()
+        return dict(rows)
+
 
 class RunRepository:
     def __init__(self, db: Session) -> None:
@@ -379,12 +416,23 @@ class RunRepository:
         offset: int = 0,
         status: str | None = None,
         run_type: str | None = None,
+        ci_only: bool = False,
+        days: int | None = None,
+        target_type: Literal["selection", "sequence"] | None = None,
     ) -> list[TestRun]:
         q = self._db.query(TestRun)
         if status:
             q = q.filter(TestRun.status == status)
         if run_type:
             q = q.filter(TestRun.run_type == run_type)
+        if ci_only:
+            q = q.filter(*ci_context_present_filter())
+        if days is not None:
+            q = q.filter(TestRun.started_at >= datetime.now(timezone.utc) - timedelta(days=days))
+        if target_type:
+            selection_target, sequence_target = run_target_predicates()
+            target_predicate = sequence_target if target_type == "sequence" else selection_target
+            q = q.outerjoin(JobSelection, TestRun.selection_id == JobSelection.id).filter(target_predicate)
         return apply_pagination(q.order_by(TestRun.id.desc()), limit, offset).all()
 
     def has_active_run_for_selection(self, selection_id: int) -> bool:

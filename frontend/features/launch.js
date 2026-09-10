@@ -78,6 +78,7 @@
     showScheduleModal: false,
     scheduleModal: {},
     jobSelections: [],
+    jobSelectionSearchQuery: '',
     showSelectionModal: false,
     selectionModal: {},
     selectionModalEditing: false,
@@ -1094,6 +1095,12 @@
       const seq = this.availableSequences.find((s) => s.id === Number(sequenceId));
       if (!seq) return [];
       return Array.from({ length: seq.latest_version }, (_, i) => i + 1).reverse();
+    },
+
+    filteredJobSelections() {
+      const query = this.jobSelectionSearchQuery.trim().toLowerCase();
+      if (!query) return this.jobSelections;
+      return this.jobSelections.filter((selection) => selection.name.toLowerCase().includes(query));
     },
 
     async loadJobSelections() {

@@ -178,6 +178,40 @@ def test_scheduler_reports_tab_is_present_in_frontend(client):
     assert "data-testid=\"scheduler-reports-tab\"" in html
 
 
+def test_ci_runs_tab_is_present_in_frontend(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "CI Runs" in html
+    assert "data-testid=\"nav-tab-ci-runs\"" in html or "nav-tab-' + tab.id" in html
+    assert "data-testid=\"ci-runs-tab\"" in html
+    assert "ci-runs-row-' + run.run_id" in html
+    assert "ci-runs-target-' + run.run_id" in html
+    assert "ci-runs-pipeline-link-' + run.run_id" in html
+    assert 'src="features/ci-runs.js"' in html
+
+    feature = client.get("/features/ci-runs.js")
+    assert feature.status_code == 200
+    source = feature.text
+    assert "/api/runs/ci-summary" in source
+    assert "/api/runs?" in source
+    assert "ci_only" in source
+    assert "target_type" in source
+    assert "params.set('days'" in source
+    assert "filterCiRunRows" not in source
+    assert "ciRunRequestGeneration" in source
+    assert "handleAuthError" in source
+    assert "started_at" in source
+    assert "pipeline_url" in source
+    assert "https:" in source
+    assert "http:" in source
+    assert "viewRunDetail" in source
+    assert '@keydown.stop' in html
+    app_source = client.get("/app.js").text
+    assert app_source.count("this.onTabEnter(hashView)") == 2
+    assert "rawHash === 'launch' ? 'jobs' : rawHash" in app_source
+
+
 def test_failed_result_can_pass_with_agreed_actions(client):
     launch = client.post(
         "/api/runs",

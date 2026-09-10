@@ -10,7 +10,9 @@ from api.routes import runs as runs_module
 from etl_framework.repository.database import Base, get_db
 from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401 — registers ORM models with Base
-from etl_framework.repository.repository import JobRepository, TokenRepository
+from etl_framework.repository.repository import (
+    JobRepository, JobSelectionRepository, RunRepository, TokenRepository,
+)
 from api.main import app
 
 
@@ -421,6 +423,28 @@ def test_get_run_status(client):
     resp2 = client.get(f"/api/runs/{run_id}/status")
     assert resp2.status_code == 200
     assert resp2.json()["run_id"] == run_id
+
+
+def test_get_run_status_resolves_selection_target_with_one_lookup(client):
+    with _db_module.SessionLocal() as db:
+        selection = JobSelectionRepository(db).create("status-selection", "", [], [], {})
+        RunRepository(db).create_run(
+            "run-selection-status", "dev", "prod", selection_id=selection.id,
+            ci_context={"commit_sha": "abc"},
+        )
+
+    engine = _db_module.SessionLocal.kw["bind"]
+    from sqlalchemy import event
+    queries = []
+    event.listen(engine, "before_cursor_execute", lambda *args: queries.append(args[2]))
+
+    response = client.get("/api/runs/run-selection-status/status")
+
+    assert response.status_code == 200
+    assert response.json()["target_type"] == "selection"
+    assert response.json()["target_name"] == "status-selection"
+    selection_queries = [query for query in queries if "job_selections" in query.lower()]
+    assert len(selection_queries) == 1
 
 
 def test_get_run_detail(client):

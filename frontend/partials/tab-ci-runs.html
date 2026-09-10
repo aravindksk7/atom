@@ -1,0 +1,77 @@
+<template x-if="currentView === 'ci-runs'"><div data-testid="ci-runs-tab">
+  <div class="section-header">
+    <div>
+      <div class="section-title">CI Runs</div>
+      <div class="section-sub">Review pipeline-triggered test runs, commits, refs, and launch targets.</div>
+    </div>
+    <button class="btn-primary" @click="loadCiRuns()" :disabled="ciRunLoading">
+      <span x-show="!ciRunLoading">Refresh</span>
+      <span x-show="ciRunLoading">Refreshing...</span>
+    </button>
+  </div>
+
+  <div class="card scheduler-report-filters mb-4">
+    <select class="field-input field-select" x-model.number="ciRunFilters.days" @change="loadCiRuns()" aria-label="CI run period">
+      <option :value="7">Last 7 days</option>
+      <option :value="30">Last 30 days</option>
+      <option :value="90">Last 90 days</option>
+    </select>
+    <select class="field-input field-select" x-model="ciRunFilters.targetType" @change="loadCiRuns()" aria-label="CI run target type">
+      <option value="">All targets</option>
+      <option value="selection">Selections</option>
+      <option value="sequence">Sequences</option>
+    </select>
+    <select class="field-input field-select" x-model="ciRunFilters.status" @change="loadCiRuns()" aria-label="CI run status">
+      <option value="">All statuses</option>
+      <option value="PENDING">Pending</option>
+      <option value="RUNNING">Running</option>
+      <option value="PASSED">Passed</option>
+      <option value="FAILED">Failed</option>
+      <option value="SLOW">Slow</option>
+      <option value="ERROR">Error</option>
+      <option value="COMPLETED">Completed</option>
+      <option value="CANCELLED">Cancelled</option>
+    </select>
+  </div>
+
+  <template x-if="ciRunError">
+    <div class="alert-error mb-4" data-testid="ci-runs-error" x-text="ciRunError"></div>
+  </template>
+
+  <div class="scheduler-report-cards mb-4" x-show="ciRunSummary">
+    <div class="metric-card metric-slate"><div class="metric-label">Total CI Runs</div><div class="metric-value" x-text="ciRunSummary?.total || 0"></div></div>
+    <div class="metric-card metric-emerald"><div class="metric-label">Pass Rate</div><div class="metric-value" x-text="ciRunPassRate()"></div></div>
+    <div class="metric-card metric-indigo"><div class="metric-label">Selections</div><div class="metric-value" x-text="ciRunSummary?.by_target_type?.selection || 0"></div></div>
+    <div class="metric-card metric-slate"><div class="metric-label">Sequences</div><div class="metric-value" x-text="ciRunSummary?.by_target_type?.sequence || 0"></div></div>
+  </div>
+
+  <div class="card overflow-hidden">
+    <div x-show="ciRunLoading && !ciRunRows.length" class="text-muted text-sm py-8 text-center" data-testid="ci-runs-loading">Loading CI runs...</div>
+    <div x-show="!ciRunLoading && !ciRunError && !ciRunRows.length" class="empty-state" data-testid="ci-runs-empty"><div class="empty-state-title">No CI runs found</div></div>
+    <div class="table-scroll" x-show="ciRunRows.length">
+      <table class="data-table" aria-label="CI runs">
+        <thead><tr><th scope="col">Status</th><th scope="col">Target</th><th scope="col">Commit</th><th scope="col">Pipeline</th><th scope="col">Ref</th><th scope="col">Started</th><th scope="col">Duration</th><th scope="col">Run</th></tr></thead>
+        <tbody>
+          <template x-for="run in ciRunRows" :key="run.run_id">
+            <tr class="cursor-pointer" @click="openCiRun(run)" :data-testid="'ci-runs-row-' + run.run_id">
+              <td><span :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
+              <td>
+                <button x-show="run.target_name && (run.target_type === 'selection' || run.target_type === 'sequence')" class="text-indigo-500 hover:underline text-left" @click.stop="navigateToCiRunTarget(run)" @keydown.stop :data-testid="'ci-runs-target-' + run.run_id" x-text="ciRunTargetLabel(run)"></button>
+                <span x-show="!run.target_name || (run.target_type !== 'selection' && run.target_type !== 'sequence')">—</span>
+              </td>
+              <td class="font-mono text-xs" x-text="ciRunCommit(run)"></td>
+              <td>
+                <a x-show="ciRunPipelineUrl(run)" class="text-indigo-500 hover:underline" :href="ciRunPipelineUrl(run)" target="_blank" rel="noopener noreferrer" @click.stop @keydown.stop :data-testid="'ci-runs-pipeline-link-' + run.run_id" aria-label="Open CI pipeline">Open ↗</a>
+                <span x-show="!ciRunPipelineUrl(run)">—</span>
+              </td>
+              <td class="font-mono text-xs" x-text="ciRunRef(run)"></td>
+              <td x-text="fmtDate(run.started_at)"></td>
+              <td :data-testid="'ci-runs-duration-' + run.run_id" x-text="ciRunDuration(run)"></td>
+              <td><button class="btn-secondary btn-sm text-xs" @click.stop="openCiRun(run)" :data-testid="'ci-runs-details-' + run.run_id">Details</button></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div></template>

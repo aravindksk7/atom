@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -185,3 +185,38 @@ def test_list_results_for_job_orders_most_recent_run_first():
     results = repo.list_results_for_job("my_job", limit=2)
 
     assert [r.run_id for r in results] == ["run-c", "run-b"]
+
+
+def test_names_by_ids_returns_empty_dict_for_empty_list_without_query():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    queries = []
+    event.listen(db.bind, "before_cursor_execute", lambda *args: queries.append(args[2]))
+
+    assert repo.names_by_ids([]) == {}
+    assert queries == []
+
+
+def test_names_by_ids_returns_map_in_one_query():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel_a = repo.create(name="selection_a", description="", tags=[], job_sequence=[], run_settings={})
+    sel_b = repo.create(name="selection_b", description="", tags=[], job_sequence=[], run_settings={})
+    selection_ids = [sel_a.id, sel_b.id]
+    queries = []
+    event.listen(db.bind, "before_cursor_execute", lambda *args: queries.append(args[2]))
+
+    result = repo.names_by_ids(selection_ids)
+
+    assert result == {selection_ids[0]: "selection_a", selection_ids[1]: "selection_b"}
+    assert len(queries) == 1
+
+
+def test_names_by_ids_ignores_nonexistent_ids():
+    db = _session()
+    repo = JobSelectionRepository(db)
+    sel_a = repo.create(name="selection_a", description="", tags=[], job_sequence=[], run_settings={})
+
+    result = repo.names_by_ids([sel_a.id, 99999])
+
+    assert result == {sel_a.id: "selection_a"}
