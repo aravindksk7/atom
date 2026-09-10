@@ -207,3 +207,50 @@ def test_token_creation_endpoint_is_exempt(client):
     assert resp.status_code == 201
     data = resp.json()
     assert data["raw_token"].startswith("etl_")
+
+
+def test_token_create_rejects_admin_and_ci_trigger_combo(client):
+    c, _ = client
+    resp = c.post("/api/tokens", json={"name": "bootstrap"})  # bootstrap admin token
+    admin_raw = resp.json()["raw_token"]
+    resp = c.post(
+        "/api/tokens",
+        json={"name": "bad-combo", "is_admin": True, "role": "ci_trigger"},
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    )
+    assert resp.status_code == 422
+
+
+def test_token_create_defaults_role_full_in_response(client):
+    c, _ = client
+    resp = c.post("/api/tokens", json={"name": "bootstrap"})
+    assert resp.json()["role"] == "full"
+
+
+def test_token_create_ci_trigger_role_in_response(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    resp = c.post(
+        "/api/tokens",
+        json={"name": "ci-bot", "role": "ci_trigger"},
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "ci_trigger"
+    assert resp.json()["is_admin"] is False
+
+
+def test_rotate_preserves_ci_trigger_role(client):
+    c, engine = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    created = c.post(
+        "/api/tokens",
+        json={"name": "ci-bot", "role": "ci_trigger"},
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    ).json()
+    resp = c.post(
+        f"/api/tokens/{created['id']}/rotate",
+        headers={"Authorization": f"Bearer {admin_raw}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "ci_trigger"

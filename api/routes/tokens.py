@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -25,6 +26,7 @@ class TokenCreate(BaseModel):
     name: str
     expires_at: datetime | None = None
     is_admin: bool = False
+    role: Literal["full", "ci_trigger"] = "full"
 
 
 class TokenOut(BaseModel):
@@ -36,6 +38,7 @@ class TokenOut(BaseModel):
     enabled: bool
     is_admin: bool
     token_hint: str
+    role: str
     model_config = {"from_attributes": True}
 
 
@@ -89,7 +92,12 @@ def create_token(body: TokenCreate, request: Request, db: Session = Depends(get_
             _verify_admin_from_request(request, db)
 
         is_admin = True if is_bootstrap else body.is_admin
-        raw, token = repo.create(body.name, body.expires_at, is_admin=is_admin)
+        if is_admin and body.role == "ci_trigger":
+            raise HTTPException(
+                status_code=422,
+                detail="A token cannot be both an admin token and a ci_trigger token",
+            )
+        raw, token = repo.create(body.name, body.expires_at, is_admin=is_admin, role=body.role)
 
     if is_bootstrap:
         logger.warning(
@@ -119,6 +127,7 @@ def create_token(body: TokenCreate, request: Request, db: Session = Depends(get_
         enabled=token.enabled,
         is_admin=token.is_admin,
         token_hint=token.token_hint,
+        role=token.role,
         raw_token=raw,
     )
 
@@ -176,7 +185,7 @@ def rotate_token(token_id: int, request: Request, db: Session = Depends(get_sess
     old_hash = repo.revoke(token_id)
     evict_token_cache(old_hash)
 
-    raw, new_token = repo.create(old.name, old.expires_at, is_admin=old.is_admin)
+    raw, new_token = repo.create(old.name, old.expires_at, is_admin=old.is_admin, role=old.role)
     AuditService(db).log(
         request, "token.rotated", "token", new_token.id,
         {"replaced_token_id": token_id, "name": new_token.name},
@@ -190,5 +199,6 @@ def rotate_token(token_id: int, request: Request, db: Session = Depends(get_sess
         enabled=new_token.enabled,
         is_admin=new_token.is_admin,
         token_hint=new_token.token_hint,
+        role=new_token.role,
         raw_token=raw,
     )
