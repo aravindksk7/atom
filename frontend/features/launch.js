@@ -1285,6 +1285,7 @@
         `atom-${m.targetType}:`,
         `  stage: test`,
         `  script:`,
+        `    - pip install etl-framework`,
         `    - ./scripts/ci/run-atom-target.sh ${m.targetType} ${m.targetId} ${envArgs}`,
         `  rules:`,
         `    - if: '$CI_COMMIT_BRANCH == "main"'`,
