@@ -26,6 +26,7 @@ _EXEMPT_EXACT = {"/", "/api/health", "/api/auth/setup-status"}
 _EXEMPT_PATTERNS = [re.compile(r"^/api/runs/[^/]+/badge\.svg$")]
 
 _CI_TRIGGER_ALLOWED: list[tuple[str, re.Pattern]] = [
+    ("GET", re.compile(r"^/api/auth/verify$")),
     ("GET", re.compile(r"^/api/selections$")),
     ("GET", re.compile(r"^/api/selections/\d+$")),
     ("POST", re.compile(r"^/api/selections/\d+/launch$")),

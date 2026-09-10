@@ -308,6 +308,26 @@ def test_ci_trigger_token_allowed_on_run_status(client):
     assert resp.status_code == 404
 
 
+def test_ci_trigger_token_allowed_on_sequence_launch(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.post("/api/sequences/1/launch", json={"source_env": "dev"},
+                  headers={"Authorization": f"Bearer {ci_raw}"})
+    # No sequence with id 1 exists in this fixture, so expect 404 (route reached,
+    # sequence not found) -- not 403, which would mean the scope check wrongly denied it.
+    assert resp.status_code == 404
+
+
+def test_ci_trigger_token_allowed_on_auth_verify(client):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.get("/api/auth/verify", headers={"Authorization": f"Bearer {ci_raw}"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/configs"),
     ("GET", "/api/jobs"),
