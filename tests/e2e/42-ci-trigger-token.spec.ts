@@ -26,6 +26,8 @@ let adminTokenValue: string;
 let jobName: string;
 let selectionId: number | undefined;
 let selectionRepoDir: string | undefined;
+let ciTriggerTokenId: number | undefined;
+let ciTriggerToken: string;
 
 test.beforeAll(async ({ adminToken }) => {
   adminTokenValue = adminToken;
@@ -45,6 +47,16 @@ test.beforeAll(async ({ adminToken }) => {
       throw new Error(`create selection failed: ${selResp.status()} ${await selResp.text()}`);
     }
     selectionId = (await selResp.json()).id;
+
+    const tokenResp = await ctx.post('/api/tokens', {
+      data: { name: `e2e-ci-trigger-${Date.now()}`, role: 'ci_trigger' },
+    });
+    if (!tokenResp.ok()) {
+      throw new Error(`create ci_trigger token failed: ${tokenResp.status()} ${await tokenResp.text()}`);
+    }
+    const tokenBody = await tokenResp.json();
+    ciTriggerTokenId = tokenBody.id;
+    ciTriggerToken = tokenBody.raw_token;
   } finally {
     await ctx.dispose();
   }
@@ -52,46 +64,35 @@ test.beforeAll(async ({ adminToken }) => {
 
 test.afterAll(async () => {
   // Best-effort cleanup, matching deleteJob's fire-and-forget pattern: this runs
-  // regardless of whether the test above passed or failed, and must not itself
-  // throw and mask an earlier assertion failure. The minted ci_trigger token
-  // itself is NOT revoked here -- the test DB is thrown away after the run (see
-  // playwright.config.ts's E2E_DATABASE_URL setup), so an orphaned token there is
-  // harmless, unlike an orphaned selection/job which could show up in some other
-  // test's listing assertions.
+  // regardless of whether the tests above passed or failed, and must not itself
+  // throw and mask an earlier assertion failure. The minted ci_trigger token IS
+  // revoked here (unlike leaving it orphaned): nothing in the code enforces that
+  // a future run of this suite always targets a throwaway DB, so an unconditional
+  // revoke keeps this test from ever being the reason a live, non-expiring
+  // ci_trigger credential survives a run against a longer-lived environment.
   try {
     const ctx = await authedContext(adminTokenValue);
     try {
       if (selectionId !== undefined) await ctx.delete(`/api/selections/${selectionId}`);
       if (jobName) await deleteJob(ctx, jobName);
+      if (ciTriggerTokenId !== undefined) await ctx.delete(`/api/tokens/${ciTriggerTokenId}`);
     } finally {
       await ctx.dispose();
     }
   } catch {
-    // Cleanup must never fail the run — an orphaned e2e-prefixed job/selection is
-    // harmless noise, not silent data loss.
+    // Cleanup must never fail the run — an orphaned e2e-prefixed job/selection/
+    // token is harmless noise, not silent data loss.
   }
   if (selectionRepoDir) fs.rmSync(selectionRepoDir, { recursive: true, force: true });
 });
 
 test.describe('a ci_trigger token against a live backend', () => {
-  test('drives run-atom-target.sh end to end and stays denied outside its scope', async () => {
+  test('drives run-atom-target.sh end to end', async () => {
     expect(selectionId).toBeDefined();
 
-    const adminCtx = await authedContext(adminTokenValue);
-    let ciTriggerToken: string;
-    try {
-      const tokenResp = await adminCtx.post('/api/tokens', {
-        data: { name: `e2e-ci-trigger-${Date.now()}`, role: 'ci_trigger' },
-      });
-      expect(tokenResp.status()).toBe(201);
-      ciTriggerToken = (await tokenResp.json()).raw_token;
-    } finally {
-      await adminCtx.dispose();
-    }
-
-    // (a)+(b)+(c): run the REAL script as a subprocess, authenticated as the
-    // ci_trigger token -- not a direct API call, which would only prove the
-    // route allowlist works in isolation.
+    // Run the REAL script as a subprocess, authenticated as the ci_trigger token
+    // -- not a direct API call, which would only prove the route allowlist works
+    // in isolation.
     selectionRepoDir = makeScratchGitRepo();
     const before = readScratchReadme(selectionRepoDir);
 
@@ -119,9 +120,11 @@ test.describe('a ci_trigger token against a live backend', () => {
     }
     expect(after).toContain(SPLICE_START_MARKER);
     expect(after).toContain(SPLICE_END_MARKER);
+  });
 
-    // (d): the SAME ci_trigger token, used directly (not through the script),
-    // is still denied outside its allowlisted scope.
+  test('is still denied outside its scope', async () => {
+    // The SAME ci_trigger token minted in beforeAll, used directly (not through
+    // the script), is still denied outside its allowlisted scope.
     const ciTriggerCtx = await authedContext(ciTriggerToken);
     try {
       const configsResp = await ciTriggerCtx.get('/api/configs');
