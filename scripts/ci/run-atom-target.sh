@@ -4,12 +4,17 @@
 # markdown status summary.
 #
 # Required env vars: ATOM_API_URL, ATOM_API_TOKEN
-# Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]
+# Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]
 set -euo pipefail
 
-TARGET_TYPE="${1:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]}"
-TARGET="${2:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]}"
+TARGET_TYPE="${1:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]}"
+TARGET="${2:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]}"
 ENVIRONMENT="${3:-prod}"
+# Optional: only Execution Sequences fall back to a stored default (SequenceDefaults.
+# target_env) when this is omitted -- a Job Selection has no such stored default, so
+# any job whose type isn't single-environment (api/services/job_env_validation.py's
+# SINGLE_ENV_JOB_TYPES) needs this passed explicitly or its launch 422s.
+TARGET_ENV="${4:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${ATOM_API_URL:?ATOM_API_URL must be set}"
@@ -24,13 +29,16 @@ bash "${script_dir}/post-gitlab-status.sh" pending "${TARGET_TYPE}" "${TARGET}" 
 
 stdout_file=$(mktemp)
 set +e
-atom run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}" \
+# --output is a top-level `atom` option (etl_framework/cli/app.py's @app.callback()),
+# not an option of the `run` subcommand -- it must precede `run`, not trail it.
+atom --output json run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}" \
+  --target-env "${TARGET_ENV}" \
   --ci-commit-sha "${CI_COMMIT_SHA:-unknown}" \
   --ci-pipeline-url "${CI_PIPELINE_URL:-}" \
   --ci-ref "${CI_COMMIT_REF_NAME:-unknown}" \
   --timeout "${ATOM_POLL_TIMEOUT_SECONDS:-1800}" \
   --poll-interval "${ATOM_POLL_INTERVAL_SECONDS:-10}" \
-  --output json > "${stdout_file}"
+  > "${stdout_file}"
 gate_code=$?
 set -e
 
