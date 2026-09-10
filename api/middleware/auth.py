@@ -48,6 +48,15 @@ def _ci_trigger_denied(method: str, path: str) -> bool:
     )
 
 
+def _check_ci_trigger_scope(token, request: Request) -> JSONResponse | None:
+    if token.role != "ci_trigger" or not _ci_trigger_denied(request.method, request.url.path):
+        return None
+    return JSONResponse(
+        {"detail": "This token is not permitted to call this endpoint"},
+        status_code=403,
+    )
+
+
 def _has_sap_bo_auth(request: Request) -> bool:
     if not request.url.path.startswith("/api/adapters/sap-bo/"):
         return False
@@ -120,12 +129,10 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 request.state.token_actor = token.name
                 request.state.token_id = token.id
                 request.state.token = token
-                if token.role == "ci_trigger" and _ci_trigger_denied(request.method, request.url.path):
+                scope_denial = _check_ci_trigger_scope(token, request)
+                if scope_denial is not None:
                     self._audit_failure(request, "ci_trigger_scope_denied")
-                    return JSONResponse(
-                        {"detail": "This token is not permitted to call this endpoint"},
-                        status_code=403,
-                    )
+                    return scope_denial
                 return await call_next(request)
             else:
                 del _cache[token_hash]
@@ -166,12 +173,10 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if token.role == "ci_trigger" and _ci_trigger_denied(request.method, request.url.path):
+        scope_denial = _check_ci_trigger_scope(token, request)
+        if scope_denial is not None:
             self._audit_failure(request, "ci_trigger_scope_denied")
-            return JSONResponse(
-                {"detail": "This token is not permitted to call this endpoint"},
-                status_code=403,
-            )
+            return scope_denial
 
         return await call_next(request)
 
