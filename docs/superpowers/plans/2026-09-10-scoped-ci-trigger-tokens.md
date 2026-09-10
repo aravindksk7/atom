@@ -34,6 +34,8 @@ they already call).
 | `frontend/index.html` | Rebuilt from the above two partials (generated artifact). |
 | `tests/unit/test_auth.py` | New tests: token creation validation, rotation role-preservation, middleware allow/deny table. |
 | `tests/unit/test_ci_trigger_scope.py` | New file: end-to-end launch+poll+junit flow through a `ci_trigger` token, plus a 403 on an out-of-scope route. |
+| `tests/e2e/42-ci-trigger-token.spec.ts` | New file: a real `ci_trigger` token driving `scripts/ci/run-atom-target.sh` against the live-booted Playwright backend. |
+| `docs/auth.md` | `role` documented on token creation, a `ci_trigger` row in the Token roles table, CI/CD integration section updated (done directly, not a plan task — see the note after Task 5). |
 
 ---
 
@@ -605,7 +607,110 @@ git commit -m "feat(ui): add CI Trigger token role to the Security panel and CI/
 
 ---
 
-## Task 5: End-to-end scope test — real launch flow through a `ci_trigger` token
+## Task 5: Live-docker Playwright coverage — a real `ci_trigger` token driving `run-atom-target.sh`
+
+**Files:**
+- Create: `tests/e2e/42-ci-trigger-token.spec.ts`
+
+Task 6 (next) proves the launch/scope logic works via an in-process `TestClient` — fast,
+but not what a real CI pipeline experiences. This task proves the same thing against the
+actual booted server Playwright's `webServer` config starts, driving the real
+`scripts/ci/run-atom-target.sh` script exactly as `tests/e2e/41-live-run-atom-target.spec.ts`
+does for a `full` token — reusing that file's scratch-git-repo technique so this script
+never touches this repo's own git state.
+
+- [ ] **Step 1: Write the test**
+
+Read `tests/e2e/41-live-run-atom-target.spec.ts` first — copy its scratch-git-repo helper
+and `runAtomTargetScript` invocation pattern rather than reinventing it (extract a shared
+helper into `tests/e2e/api-helpers.ts` if that's cleaner than duplicating; your call, but
+don't let the two files drift into two different scratch-repo implementations).
+
+```typescript
+import { test, expect } from './fixtures';
+import { authedContext, createFileJob } from './api-helpers';
+// (import/reuse whatever scratch-git-repo helper 41-live-run-atom-target.spec.ts uses)
+
+let selectionId: number;
+
+test.beforeAll(async ({ adminToken }) => {
+  const ctx = await authedContext(adminToken);
+  try {
+    const job = await createFileJob(ctx, `e2e-ci-trigger-job-${Date.now()}`);
+    const selResp = await ctx.post('/api/selections', {
+      data: {
+        name: `e2e-ci-trigger-sel-${Date.now()}`, description: '', tags: [],
+        job_sequence: [job.name],
+      },
+    });
+    selectionId = (await selResp.json()).id;
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test('a ci_trigger token drives the real run-atom-target.sh launch flow', async ({ adminToken }) => {
+  const ctx = await authedContext(adminToken);
+  let ciTriggerToken: string;
+  try {
+    const resp = await ctx.post('/api/tokens', {
+      data: { name: `e2e-ci-trigger-${Date.now()}`, role: 'ci_trigger' },
+    });
+    expect(resp.status()).toBe(201);
+    ciTriggerToken = (await resp.json()).raw_token;
+  } finally {
+    await ctx.dispose();
+  }
+
+  // Run the real script with the ci_trigger token as ATOM_API_TOKEN -- reuse
+  // 41-live-run-atom-target.spec.ts's scratch-repo + spawnSync pattern here.
+  // Job is a dual-env "reconciliation" type (createFileJob), so pass target_env too.
+  const result = /* runAtomTargetScript('selection', String(selectionId), 'dev', 'dev', { ATOM_API_TOKEN: ciTriggerToken }) */ null as any;
+  expect(result.status).toBe(1); // createFileJob is deterministically FAILED
+
+  const ctx2 = await authedContext(ciTriggerToken);
+  try {
+    const configsResp = await ctx2.get('/api/configs');
+    expect(configsResp.status()).toBe(403);
+  } finally {
+    await ctx2.dispose();
+  }
+});
+```
+
+The pseudocode above is a sketch, not literal code to paste — read `41-live-run-atom-target.spec.ts`'s
+actual helper signatures and adapt them for real (they likely don't currently accept a
+per-call token override, since that file only ever uses the admin token; you may need to
+extend the shared helper to accept a token parameter, or pass `ATOM_API_TOKEN` through its
+existing `env` parameter if it already exposes one — check before assuming either way).
+
+- [ ] **Step 2: Run it**
+
+Run: `node node_modules/@playwright/test/cli.js test tests/e2e/42-ci-trigger-token.spec.ts`
+(per this repo's known `npx playwright` version-mismatch quirk, use the direct binary
+invocation). Expected: PASS.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/e2e/42-ci-trigger-token.spec.ts
+git commit -m "test(e2e): cover a ci_trigger token driving run-atom-target.sh live"
+```
+
+## Documentation (already done directly, not a subagent task — noted here for the record)
+
+`docs/auth.md` — the canonical, complete auth reference (linked from `README.md`'s
+Authentication section) — already has: a `role` field on `POST /api/tokens`'s parameter
+table, a `role` column in the "Token roles" table with a `ci_trigger` row describing
+exactly what it's permitted to call, and an updated "CI/CD integration" section
+recommending `ci_trigger` for the `atom`-CLI/Selection/Sequence launch pattern — while
+explicitly noting `.github/workflows/ci.yml`'s own existing pattern (`GET /api/jobs` +
+`POST /api/runs` with a raw `job_sequence`) is NOT on the `ci_trigger` allowlist today and
+still needs a `full` token, so as not to overclaim compatibility that doesn't exist.
+
+---
+
+## Task 6: End-to-end scope test — real launch flow through a `ci_trigger` token
 
 **Files:**
 - Create: `tests/unit/test_ci_trigger_scope.py`
@@ -706,7 +811,7 @@ git commit -m "test(auth): cover a real launch+artifact flow through a ci_trigge
 
 ---
 
-## Task 6: Full verification pass
+## Task 7: Full verification pass
 
 - [ ] **Step 1: Run the full unit suite**
 

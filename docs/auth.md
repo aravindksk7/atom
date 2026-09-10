@@ -66,6 +66,7 @@ curl -sS -X POST http://localhost:8000/api/tokens \
 |---|---|---|
 | `name` | Yes | Label for the token — must be unique |
 | `is_admin` | No | `false` by default |
+| `role` | No | `full` (default) or `ci_trigger` — see [Token roles](#token-roles). Cannot be `ci_trigger` together with `is_admin: true`. |
 | `expires_at` | No | ISO-8601 UTC. Capped at 2 years from now. Omit for no expiry. |
 
 ### List tokens
@@ -128,10 +129,17 @@ curl http://localhost:8000/api/auth/verify \
 
 ## Token roles
 
-| Role | `is_admin` | Permitted operations |
-|---|---|---|
-| Admin | `true` | All endpoints + token management (`POST/GET/PATCH/DELETE/rotate /api/tokens`) |
-| Standard | `false` | All read + write endpoints except token management |
+| Role | `is_admin` | `role` | Permitted operations |
+|---|---|---|---|
+| Admin | `true` | `full` | All endpoints + token management (`POST/GET/PATCH/DELETE/rotate /api/tokens`) |
+| Standard | `false` | `full` | All read + write endpoints except token management |
+| CI Trigger | `false` | `ci_trigger` | Only: list/read Job Selections and Execution Sequences, launch either, and read/export a run's result (status, JUnit, markdown summary, HTML report, CSV export). Everything else — configs, jobs, other tokens, settings, schedules, the audit log — returns `403`, even though the token is otherwise valid. Enforced centrally in `BearerTokenMiddleware`, not per-route, so it can't be bypassed by a new endpoint someone forgets to lock down. |
+
+A `ci_trigger` token is a drop-in replacement for a `full` (`is_admin: false`) token in any
+`ATOM_API_TOKEN` CI/CD variable — the `atom` CLI and `scripts/ci/run-atom-target.sh` don't
+need to know or care which kind they were given. Create one from the Web UI (Config →
+Security → Add User Access → Role → **CI Trigger**) or via the API with `"role":
+"ci_trigger"` on `POST /api/tokens`.
 
 ---
 
@@ -140,9 +148,21 @@ curl http://localhost:8000/api/auth/verify \
 Never hardcode tokens. Use the short-lived mint-use-revoke pattern:
 
 1. Store a long-lived admin token in your CI secrets vault (`ATOM_ADMIN_TOKEN`).
-2. At job start, mint a short-lived non-admin token (1 hour TTL).
+2. At job start, mint a short-lived token (1 hour TTL).
 3. Use that token for all API calls in the job.
 4. In an `always`-run cleanup step, revoke the pipeline token by ID.
+
+**Which role to mint** depends on what the job actually calls. A pipeline that launches a
+saved Job Selection or Execution Sequence via `atom run` /
+`scripts/ci/run-atom-target.sh` (see [docs/cli.md](cli.md)) only ever needs `GET
+/api/selections`, `GET /api/sequences`, their `/launch` endpoints, and `GET
+/api/runs/{id}/...` — mint `role: "ci_trigger"` for these; it has no way to read `Config`
+rows (database/BO connection credentials) or manage other tokens. The included
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) predates this role and instead
+resolves jobs directly (`GET /api/jobs`) and triggers an ad-hoc run
+(`POST /api/runs` with a raw `job_sequence`) — neither of those two endpoints is on the
+`ci_trigger` allowlist today, so that workflow still needs a `full` (`is_admin: false`)
+token, not `ci_trigger`.
 
 The included [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) implements this pattern end-to-end.
 
