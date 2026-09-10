@@ -282,6 +282,7 @@
               <select x-model="newTokenRole" class="field-input field-select" data-testid="security-new-token-role-select" id="a11y-config-role">
                 <option value="user">Standard user</option>
                 <option value="admin">Administrator</option>
+                <option value="ci_trigger">CI Trigger (launch + read-only)</option>
               </select>
             </div>
             <div>
@@ -293,7 +294,7 @@
         </template>
         <template x-if="createdToken">
           <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm space-y-1">
-            <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : 'a standard user'"></span> — copy this token now:</div>
+            <div class="font-semibold text-amber-800">Access created for <span x-text="createdTokenRole === 'admin' ? 'an administrator' : (createdTokenRole === 'ci_trigger' ? 'a CI trigger' : 'a standard user')"></span> — copy this token now:</div>
             <div class="text-xs text-amber-700">Give it to the intended user securely. Your current administrator session has not changed.</div>
             <div class="font-mono text-xs break-all text-amber-900 select-all" data-testid="security-created-token-value" x-text="createdToken"></div>
             <template x-if="createdTokenHint">
@@ -307,7 +308,7 @@
             <div class="flex items-center gap-3 px-3 py-2 rounded border border-slate-100 bg-slate-50 text-sm" :data-testid="'security-token-row-' + tok.id">
               <div class="flex-1 min-w-0">
                 <span class="font-medium text-slate-700" x-text="tok.name"></span>
-                <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : 'text-slate-500'" x-text="tok.is_admin ? '(administrator)' : '(standard user)'"></span>
+                <span class="ml-1 text-xs font-medium" :class="tok.is_admin ? 'text-indigo-600' : (tok.role === 'ci_trigger' ? 'text-emerald-600' : 'text-slate-500')" x-text="tok.is_admin ? '(administrator)' : (tok.role === 'ci_trigger' ? '(CI trigger)' : '(standard user)')"></span>
                 <span class="text-muted ml-2 text-xs" x-text="'created ' + fmtDate(tok.created_at)"></span>
                 <span x-show="tok.last_used_at" class="text-muted ml-2 text-xs" x-text="'last used ' + fmtDate(tok.last_used_at)"></span>
                 <span x-show="tok.token_hint" class="text-muted ml-2 text-xs font-mono" x-text="'…' + tok.token_hint"></span>

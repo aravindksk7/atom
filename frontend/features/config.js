@@ -496,6 +496,7 @@
         const body = {
           name,
           is_admin: fromAuthWizard || this.newTokenRole === 'admin',
+          role: !fromAuthWizard && this.newTokenRole === 'ci_trigger' ? 'ci_trigger' : 'full',
           expires_at: !fromAuthWizard && this.newTokenExpiresAt
             ? new Date(this.newTokenExpiresAt).toISOString()
             : null,
@@ -514,7 +515,7 @@
         } else {
           this.createdToken = resp.raw_token;
           this.createdTokenHint = resp.token_hint || null;
-          this.createdTokenRole = resp.is_admin ? 'admin' : 'user';
+          this.createdTokenRole = resp.is_admin ? 'admin' : (resp.role === 'ci_trigger' ? 'ci_trigger' : 'user');
           this.newTokenName = '';
           this.newTokenRole = 'user';
           this.newTokenExpiresAt = '';
