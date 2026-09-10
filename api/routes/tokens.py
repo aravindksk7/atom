@@ -114,6 +114,7 @@ def create_token(body: TokenCreate, request: Request, db: Session = Depends(get_
         {
             "name": token.name,
             "is_admin": token.is_admin,
+            "role": token.role,
             "expires_at": token.expires_at.isoformat() if token.expires_at else None,
         },
         actor=body.name,
@@ -188,7 +189,7 @@ def rotate_token(token_id: int, request: Request, db: Session = Depends(get_sess
     raw, new_token = repo.create(old.name, old.expires_at, is_admin=old.is_admin, role=old.role)
     AuditService(db).log(
         request, "token.rotated", "token", new_token.id,
-        {"replaced_token_id": token_id, "name": new_token.name},
+        {"replaced_token_id": token_id, "name": new_token.name, "role": new_token.role},
     )
     return TokenCreatedOut(
         id=new_token.id,

@@ -209,6 +209,12 @@ def test_token_creation_endpoint_is_exempt(client):
     assert data["raw_token"].startswith("etl_")
 
 
+def test_bootstrap_token_rejects_ci_trigger_role(client):
+    c, _ = client
+    resp = c.post("/api/tokens", json={"name": "bootstrap", "role": "ci_trigger"})
+    assert resp.status_code == 422
+
+
 def test_token_create_rejects_admin_and_ci_trigger_combo(client):
     c, _ = client
     resp = c.post("/api/tokens", json={"name": "bootstrap"})  # bootstrap admin token
