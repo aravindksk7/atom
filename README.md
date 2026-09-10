@@ -1682,7 +1682,7 @@ def test_framework_pytest_suite_passes():
 **Simplest path — the `atom` CLI:** `pip install -e .` gives you the `atom` console
 script, a thin HTTP client purpose-built for this (`atom run <selection-or-sequence>
 --target-type selection|sequence --source-env ... --junit-out ...`, exit code gates the
-pipeline). `scripts/ci/run-atom-target.sh <selection|sequence> <id> [environment]` wraps
+pipeline). `scripts/ci/run-atom-target.sh <selection|sequence> <id> [environment] [target_env]` wraps
 it further: it also splices a markdown run summary into this README's
 `ATOM:JOB-STATUS` block above, and — on GitLab CI — posts a commit status and a sticky
 merge-request comment using the job's own `CI_JOB_TOKEN` (no extra credential to

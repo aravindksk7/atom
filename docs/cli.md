@@ -76,9 +76,12 @@ atom-tests:
 
 This calls `atom` directly for JUnit reporting into GitLab's own test-report UI. To also
 get the README status splice and the GitLab-native signals below, call
-`scripts/ci/run-atom-target.sh selection "Nightly Regression" dev` instead — it wraps this
-same CLI and adds both. The Launch tab's / Sequences tab's **CI/CD** button generates the
-`run-atom-target.sh` form of this snippet for either target type.
+`scripts/ci/run-atom-target.sh <selection|sequence> <id_or_name> [environment]
+[target_env]` instead — e.g. `run-atom-target.sh selection "Nightly Regression" dev` — it
+wraps this same CLI and adds both. `target_env` is only needed for a target containing a
+dual-env job type (e.g. `reconciliation`); omit it for single-env-only targets, same as
+`atom run`'s own `--target-env` default. The Launch tab's / Sequences tab's **CI/CD**
+button generates the `run-atom-target.sh` form of this snippet for either target type.
 
 ## GitLab-native signals
 
