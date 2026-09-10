@@ -4,12 +4,17 @@
 # markdown status summary.
 #
 # Required env vars: ATOM_API_URL, ATOM_API_TOKEN
-# Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]
+# Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]
 set -euo pipefail
 
-TARGET_TYPE="${1:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]}"
-TARGET="${2:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment]}"
+TARGET_TYPE="${1:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]}"
+TARGET="${2:?Usage: run-atom-target.sh <selection|sequence> <id_or_name> [environment] [target_env]}"
 ENVIRONMENT="${3:-prod}"
+# Optional: only Execution Sequences fall back to a stored default (SequenceDefaults.
+# target_env) when this is omitted -- a Job Selection has no such stored default, so
+# any job whose type isn't single-environment (api/services/job_env_validation.py's
+# SINGLE_ENV_JOB_TYPES) needs this passed explicitly or its launch 422s.
+TARGET_ENV="${4:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${ATOM_API_URL:?ATOM_API_URL must be set}"
@@ -17,15 +22,23 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Launching ${TARGET_TYPE} ${TARGET} against ${ENVIRONMENT} via atom CLI..."
 
+# Tell GitLab a run is starting. Best effort: post-gitlab-status.sh handles all
+# of its own errors and always exits 0, so this cannot affect the pipeline.
+bash "${script_dir}/post-gitlab-status.sh" pending "${TARGET_TYPE}" "${TARGET}" \
+  "Running via Atom..."
+
 stdout_file=$(mktemp)
 set +e
-atom run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}" \
+# --output is a top-level `atom` option (etl_framework/cli/app.py's @app.callback()),
+# not an option of the `run` subcommand -- it must precede `run`, not trail it.
+atom --output json run "${TARGET}" --target-type "${TARGET_TYPE}" --source-env "${ENVIRONMENT}" \
+  --target-env "${TARGET_ENV}" \
   --ci-commit-sha "${CI_COMMIT_SHA:-unknown}" \
   --ci-pipeline-url "${CI_PIPELINE_URL:-}" \
   --ci-ref "${CI_COMMIT_REF_NAME:-unknown}" \
   --timeout "${ATOM_POLL_TIMEOUT_SECONDS:-1800}" \
   --poll-interval "${ATOM_POLL_INTERVAL_SECONDS:-10}" \
-  --output json > "${stdout_file}"
+  > "${stdout_file}"
 gate_code=$?
 set -e
 
@@ -72,5 +85,24 @@ if [ -n "${run_id}" ]; then
 else
   echo "warning: no run_id captured (launch likely failed before a run was created); skipping README update" >&2
 fi
+
+# Map the CLI's gate code (docs/cli.md) onto GitLab's Commit Status vocabulary.
+# GitLab has no error/not-found/timeout state, so everything that isn't a clean
+# pass or a cancel reads as failed.
+case "${gate_code}" in
+  0) gitlab_state=success ;;
+  2) gitlab_state=canceled ;;
+  *) gitlab_state=failed ;;
+esac
+# --output json prints counts on the normal paths but a bare run id on timeout,
+# so fall back to the state itself when the payload isn't JSON.
+description=$(python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+print("{} passed, {} failed, {} error".format(
+    data.get("passed") or 0, data.get("failed") or 0, data.get("error") or 0))
+' < "${stdout_file}" 2>/dev/null) || description="${gitlab_state}"
+bash "${script_dir}/post-gitlab-status.sh" "${gitlab_state}" "${TARGET_TYPE}" "${TARGET}" \
+  "${description}" /tmp/atom-run-summary.md
 
 exit "${gate_code}"

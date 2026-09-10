@@ -1248,26 +1248,45 @@
         ? (this.jobSelections && this.jobSelections[0])
         : (this.sequences && this.sequences[0])) || fallback;
       const label = targetType === 'sequence' ? 'Execution Sequence' : 'Job Selection';
-      const yaml = [
-        `atom-${targetType}:`,
-        `  stage: test`,
-        `  script:`,
-        `    - ./scripts/ci/run-atom-target.sh ${targetType} ${resolved.id}`,
-        `  rules:`,
-        `    - if: '$CI_COMMIT_BRANCH == "main"'`,
-      ].join('\n');
       this.ciIntegrationModal = {
         targetId: resolved.id,
         targetName: resolved.name,
+        targetType,
         targetTypeLabel: label,
-        yamlSnippet: yaml,
+        sourceEnv: 'dev',
+        targetEnv: '',
+        gitlabSignalsNote: 'The job posts a GitLab commit status (context '
+          + `atom/${targetType}/<name>) on every pipeline. On merge-request `
+          + 'pipelines it also keeps one summary comment up to date; branch '
+          + 'pipelines get the commit status only. No extra CI/CD variable is '
+          + 'needed — the job\'s built-in CI_JOB_TOKEN is used.',
       };
       this.showCiIntegrationModal = true;
     },
 
+    // Recomputed on every read (not stored) so the STEP 2 source/target env
+    // inputs regenerate the snippet live. target_env is a job-selection/
+    // sequence concern: any dual-env job type (e.g. reconciliation) 422s
+    // without one -- see scripts/ci/run-atom-target.sh's own [target_env]
+    // argument, added after that exact gap was found via live e2e testing.
+    ciYamlSnippet() {
+      const m = this.ciIntegrationModal;
+      if (!m) return '';
+      const sourceEnv = m.sourceEnv || 'dev';
+      const envArgs = m.targetEnv ? `${sourceEnv} ${m.targetEnv}` : sourceEnv;
+      return [
+        `atom-${m.targetType}:`,
+        `  stage: test`,
+        `  script:`,
+        `    - ./scripts/ci/run-atom-target.sh ${m.targetType} ${m.targetId} ${envArgs}`,
+        `  rules:`,
+        `    - if: '$CI_COMMIT_BRANCH == "main"'`,
+      ].join('\n');
+    },
+
     async copyCiYamlSnippet() {
       try {
-        await navigator.clipboard.writeText(this.ciIntegrationModal.yamlSnippet);
+        await navigator.clipboard.writeText(this.ciYamlSnippet());
         this.toast('success', 'Copied', 'Pipeline snippet copied to clipboard');
       } catch {
         this.toast('warn', 'Copy failed', 'Select the text manually');

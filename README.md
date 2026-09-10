@@ -19,7 +19,7 @@ Open `http://127.0.0.1:8000`. On first load the UI prompts for a token — follo
 ## CI/CD Job Status
 
 <!-- ATOM:JOB-STATUS:START -->
-_No CI-triggered run yet. Open a Job Selection's **CI/CD** button in the Launch tab for setup instructions and a ready-to-copy `.gitlab-ci.yml` snippet._
+_No CI-triggered run yet. Open a Job Selection's or Execution Sequence's **CI/CD** button (Launch tab / Sequences tab) for setup instructions and a ready-to-copy `.gitlab-ci.yml` snippet._
 <!-- ATOM:JOB-STATUS:END -->
 
 ## Table of Contents
@@ -1678,6 +1678,20 @@ def test_framework_pytest_suite_passes():
 ```
 
 #### CI/CD pipeline integration
+
+**Simplest path — the `atom` CLI:** `pip install -e .` gives you the `atom` console
+script, a thin HTTP client purpose-built for this (`atom run <selection-or-sequence>
+--target-type selection|sequence --source-env ... --junit-out ...`, exit code gates the
+pipeline). `scripts/ci/run-atom-target.sh <selection|sequence> <id> [environment] [target_env]` wraps
+it further: it also splices a markdown run summary into this README's
+`ATOM:JOB-STATUS` block above, and — on GitLab CI — posts a commit status and a sticky
+merge-request comment using the job's own `CI_JOB_TOKEN` (no extra credential to
+configure). The Launch tab's and Sequences tab's **CI/CD** button generates a ready
+`.gitlab-ci.yml` snippet for either target type. Full CLI reference: `docs/cli.md`.
+
+The rest of this section documents the lower-level path — calling `/api/runs` directly
+and gating on the legacy runner CLI — for CI systems that need to trigger jobs Job
+Selections/Sequences don't cover, or that can't install the `atom` package.
 
 Use secret variables for `ETL_BASE_URL` and `ETL_API_TOKEN`. A pipeline stage can trigger a run through the API, wait for completion, and then use the CLI gate exit code to fail or pass the pipeline when the CI runner can access the same application database/storage as the ETL service. If CI only has HTTP access to the service, fail the pipeline from the API status or gate response instead of the local CLI gate.
 
