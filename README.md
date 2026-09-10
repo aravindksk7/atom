@@ -144,7 +144,7 @@ Store reusable environment details before creating jobs. Secrets are encrypted a
 | File-source credentials | Stores S3/SFTP credential references used by multi-file discovery and preview. |
 | Save / Update / Delete / Test | Persists, changes, removes, or checks a configuration. Test before enabling live runs. |
 | Custom Variables | Defines global `{{name}}` placeholders (date/text/number/alphanumeric) with a default value, referenced in any job's query or params. Each saved Config can override a variable's value for that environment. See [Custom Variables](#custom-variables-reference). |
-| Security Tokens | Creates, lists, activates, or revokes API bearer tokens. Copy a newly created token immediately. |
+| Security Tokens | Creates, lists, activates, or revokes API bearer tokens. Copy a newly created token immediately. Role picks a privilege level: **Standard user** (full read/write, no admin), **Administrator** (also manages tokens/settings), or **CI Trigger** (launch Job Selections/Sequences and read run results only — nothing else, not even Config). See [Scoped CI Trigger Tokens](#cicd-scope-a-token-to-ci-only). |
 | Webhooks | Registers event URLs, subscribed event types, active state, and optional HMAC secret. |
 
 </details>
@@ -186,6 +186,7 @@ Create reusable jobs, select jobs or saved sequences, tune one run, schedule it,
 | Variable Overrides (launch modal) | One-off `name=value` lines that override a Custom Variable's resolved value for this launch only; nothing is persisted. Leave a line out to inherit the Config's/global value. See [Custom Variables](#custom-variables-reference). |
 | Schedule Name / Cron / Enabled | Creates a recurring launch; **Run Now** triggers it outside its cron time. |
 | Run Tests | Submits the selected jobs and opens a tracked run. |
+| CI/CD button (per Job Selection) | Opens the CI/CD Integration modal: token setup, GitLab CI/CD variables, source/target env, and a ready-to-copy `.gitlab-ci.yml` snippet for that selection. See [Launch a Job Selection or Sequence from GitLab](#cicd-launch-a-job-selection-or-sequence-from-gitlab). |
 
 </details>
 
@@ -361,6 +362,7 @@ Build reusable ordered workflows with dependencies and conditions.
 | Validate DAG | Detects missing jobs, cycles, and invalid dependencies before saving. |
 | Save / Clone / Delete | Manages reusable sequence definitions. |
 | Run | Sends the sequence to Launch with selected config, environments, and run settings. |
+| CI/CD button | Same CI/CD Integration modal as a Job Selection's, generating a snippet targeting this sequence. See [Launch a Job Selection or Sequence from GitLab](#cicd-launch-a-job-selection-or-sequence-from-gitlab). |
 
 </details>
 
@@ -402,7 +404,113 @@ Build reusable ordered workflows with dependencies and conditions.
 5. Select **Preview Mapping** and verify every proposed pair before saving.
 6. Run with a sensible **Max Workers** value, then inspect each pair’s isolated result and unmatched groups.
 
-### CI/CD Quality Gates
+### CI/CD: Launch a Job Selection or Sequence from GitLab
+
+Gates a GitLab pipeline on a saved Job Selection or Execution Sequence, using the `atom`
+CLI and `scripts/ci/run-atom-target.sh` — the path the Web UI itself generates for you.
+Works identically for both target types; steps below use a Job Selection, a sequence is
+the same with `sequence` swapped in for `selection`.
+
+1. In **Launch**, save a Job Selection (or in **Sequences**, save a sequence) containing
+   the jobs you want gated. Run it once manually and resolve any configuration errors
+   first — a broken job is easier to fix by hand than to debug from a CI log.
+2. Click the selection's/sequence's **CI/CD** button. A modal opens with four steps.
+3. **Modal STEP 1 — Create an API token.** Click through to **Config → Security**, create
+   one, and pick the **CI Trigger** role — it can launch this selection/sequence and read
+   its results, nothing else (not Config, not other tokens, not settings). Copy the raw
+   token now; it is shown once. See [Scope a Token to CI Only](#cicd-scope-a-token-to-ci-only)
+   for why this role exists and what it can't do.
+4. **Modal STEP 2 — Add GitLab CI/CD variables.** In the GitLab project, go to
+   **Settings → CI/CD → Variables** and add:
+   - `ATOM_API_URL` — your Atom instance's base URL, reachable from the GitLab runner.
+   - `ATOM_API_TOKEN` — the token from step 3. Mark it **Masked** and **Protected**.
+5. **Modal STEP 3 — Environments.** Set **Source env** (defaults `dev`) and, only if the
+   selection/sequence contains a dual-env job type (e.g. `reconciliation`), **Target env**
+   — leave it blank for single-env-only targets (`bo_report`, `freshness`, `profile`,
+   `automic_job`, `dbt_artifact`, `schema_snapshot`, `bo_job`, `ds_job`). The snippet in
+   step 6 updates live as you change these.
+6. **Modal STEP 4 — Copy the snippet** into `.gitlab-ci.yml`:
+   ```yaml
+   atom-selection:
+     stage: test
+     script:
+       - pip install etl-framework
+       - ./scripts/ci/run-atom-target.sh selection 42 dev
+     rules:
+       - if: '$CI_COMMIT_BRANCH == "main"'
+   ```
+   (Your real selection/sequence id is already filled in; adjust the `rules:` condition —
+   branch, MR, tag — to when you want this to run.)
+7. Push. The pipeline job launches the run, polls until it finishes, and exits non-zero
+   on `FAILED`/`ERROR`/`CANCELLED` — the pipeline stage fails exactly when the run does.
+   It also splices a markdown summary into this README's `ATOM:JOB-STATUS` block above
+   (commit, pipeline link, per-job pass/fail table) and, on GitLab, reports the result as
+   a native commit status/MR comment — see
+   [GitLab Commit Status and MR Comments](#cicd-gitlab-commit-status-and-mr-comments).
+8. To gate on JUnit results in GitLab's own test-report UI instead (or in addition), call
+   `atom` directly rather than the wrapper script — see the **GitLab CI example** in
+   [docs/cli.md](docs/cli.md), which also documents every `atom run` flag
+   (`--target-type`, `--junit-out`, `--timeout`, exit codes 0–6, etc.).
+
+### CI/CD: GitLab Commit Status and MR Comments
+
+Once the pipeline above is wired up, nothing further to configure — GitLab's own
+per-job `CI_JOB_TOKEN` (injected automatically, never something you set) is enough for
+`run-atom-target.sh` to report back:
+
+1. **Every pipeline** (branch or MR): watch the commit in GitLab. A status check appears
+   named `atom/selection/<slug>` (or `atom/sequence/<slug>`), starting **pending** when
+   the job launches and updating to **success**/**failed**/**canceled** when it finishes,
+   with a description like `3 passed, 1 failed, 0 error`. Multiple selections/sequences
+   on the same commit each get their own distinctly-named check — they don't overwrite
+   each other.
+2. **Merge-request pipelines only**: the run's markdown summary also appears as one
+   sticky comment on the MR, from the account whose token GitLab CI is running as. Push
+   again to the same branch and the *same* comment updates in place — it does not
+   accumulate a new comment per push.
+3. Clicking either the status check or the comment's "view full run" link opens your
+   Atom instance (not the specific run — Atom doesn't yet have per-run deep links, a
+   known limitation).
+4. If nothing shows up: confirm the pipeline actually reached the `run-atom-target.sh`
+   stage (check the job log for `Launching ... via atom CLI...`), and check the job log
+   for `warning: GitLab CI environment not detected` (means it wasn't run inside GitLab
+   CI at all) or an HTTP warning (means the commit-status/MR-comment call itself failed —
+   check `CI_JOB_TOKEN` permissions on the project). Either way, this never changes the
+   pipeline's own pass/fail result — it's entirely best-effort on top of it.
+
+### CI/CD: Scope a Token to CI Only
+
+A **CI Trigger** token is the recommended credential for any pipeline calling Atom — a
+leaked `full` (or admin) token can read `Config` rows (database/BO connection
+credentials); a leaked CI Trigger token cannot.
+
+1. In **Config → Security**, click **+ Add User Access**.
+2. Name it for the pipeline that will use it (e.g. `gitlab-nightly-recon`).
+3. Set **Role** to **CI Trigger (launch + read-only)**.
+4. Optionally set an expiry, then **Create Access**. Copy the raw token now — it is shown
+   once and cannot be retrieved again.
+5. Store it as `ATOM_API_TOKEN` in GitLab (Masked + Protected), same as any other token —
+   see step 4 of [Launch a Job Selection or Sequence from GitLab](#cicd-launch-a-job-selection-or-sequence-from-gitlab).
+6. What it can do: list and launch any Job Selection or Execution Sequence; read a run's
+   status, JUnit XML, markdown summary, HTML report, and CSV export. What it cannot do:
+   anything else — `Config`, `Jobs`, other `Tokens`, `Settings`, `Schedules`, and the
+   audit log all return `403`, even though the token itself is valid. This is enforced
+   once, centrally, for every request — not per-endpoint, so it can't be silently
+   bypassed by a future route someone forgets to lock down.
+7. To confirm a token really is CI Trigger–scoped, paste it into the **Use existing
+   token** field on any Atom login screen — a valid token (whatever its role) activates
+   successfully; if you instead see it rejected as invalid, you likely pasted an expired
+   or revoked token, not a scope issue (scope denials only affect specific API calls, not
+   login/verification).
+8. To revoke access, find the token's row in Config → Security and click **Revoke** — this
+   takes effect within 30 seconds (the auth cache's TTL). Rotating a token (via the API's
+   `rotate` endpoint) preserves its role, so a rotated CI Trigger token stays CI Trigger–scoped.
+
+### CI/CD Quality Gates (legacy raw-API path)
+
+For CI systems that cannot install the `atom` CLI, or that need to trigger ad-hoc job
+combinations a Job Selection/Sequence doesn't cover — the lower-level path underneath
+everything above:
 
 1. Save the job or sequence, run it once manually, and resolve configuration failures.
 2. Store `ETL_BASE_URL` and `ETL_API_TOKEN` as protected CI secrets.
