@@ -707,8 +707,15 @@
             <input x-model="jobModal.ds_job_repository" class="field-input" placeholder="DS_REPO" id="a11y-launch-repository-optional-falls-back-to-config" />
           </div>
           <div>
-            <label  class="field-label" for="a11y-launch-job-params-json-optional">Job Params (JSON, optional)</label>
-            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' id="a11y-launch-job-params-json-optional" />
+            <div class="flex items-center gap-1 mb-1">
+              <label class="field-label mb-0" for="a11y-launch-job-params-json-optional">Job Params (JSON, optional)</label>
+              <button @click="showHelp('dsJobParams')" class="help-btn" title="Learn more">
+                <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </button>
+            </div>
+            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' title='Global variable name -> value, e.g. {"$G_RUN_DATE": "2026-07-24"}. Use {{VAR_NAME}} to pull from a Custom Variable.' id="a11y-launch-job-params-json-optional" />
           </div>
           <div>
             <label  class="field-label" for="a11y-launch-poll-interval-seconds-2">Poll Interval (seconds)</label>

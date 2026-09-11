@@ -56,6 +56,32 @@ def _xml_escape(value: str) -> str:
     return html.escape(str(value), quote=False)
 
 
+_NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
+
+
+def _bods_literal(value) -> str:
+    """Render a job_params value as the BODS expression SAP DS expects for a
+    global variable substitution.
+
+    Run_Batch_Job evaluates each global variable's substitution value as a
+    BODS expression, not a raw string. A varchar variable therefore needs a
+    quoted string literal -- verified against the live qetl111 console via
+    HAR capture, which always posts e.g. ``$G_BUSINESS_DATE='31-Jul-2026'``
+    (single-quoted), never the bare date. Passing the bare value is not a
+    valid BODS expression, so the substitution silently fails and SAP DS
+    falls back to the variable's compiled default -- this was the root
+    cause of a custom runtime variable appearing to "not get passed".
+
+    A bare int/float value is left unquoted since numeric global variables
+    expect a numeric literal, not a quoted string (quoting one would fail
+    type conversion on the SAP DS side).
+    """
+    text = str(value)
+    if _NUMERIC_RE.match(text):
+        return text
+    return "'" + text.replace("'", "''") + "'"
+
+
 def _first_tag_text(xml: str, local_name: str) -> str | None:
     """Return the text of the first element whose *local* name matches.
 
@@ -286,7 +312,7 @@ class DSRestClient:
         variables = ""
         if job_params:
             var_elems = "".join(
-                f'<variable name="{_xml_escape(k)}">{_xml_escape(v)}</variable>'
+                f'<variable name="{_xml_escape(k)}">{_xml_escape(_bods_literal(v))}</variable>'
                 for k, v in job_params.items()
             )
             variables = f"<globalVariables>{var_elems}</globalVariables>"

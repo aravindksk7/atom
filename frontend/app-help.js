@@ -32,6 +32,10 @@
       title: 'SQL Query',
       content: 'The SELECT statement used to extract data for comparison. Must include all key columns and comparison columns. Parameterized queries use {env} as a placeholder for the environment name.',
     },
+    dsJobParams: {
+      title: 'SAP DS Job Params',
+      content: 'A JSON object mapping SAP Data Services global variable names (including the leading $) to the values to substitute when the job runs, e.g. {"$G_RUN_DATE": "2026-07-24"}. Values are always plain — do not add quotes yourself, the app quotes string values for you automatically to match what the SAP DS global variable type expects.\n\nTo drive a value from an atom Custom Variable (Config > Custom Variables) instead of a fixed literal, use a {{VARIABLE_NAME}} placeholder as the value, e.g. {"$G_BUSINESS_DATE": "{{BUSINESS_DATE}}"}. It is resolved once per run before the job is triggered, using (in priority order) any launch-time override, then the selected Config\'s override, then the variable\'s own default. A placeholder that resolves to blank falls through to the next-lower-priority value; a name with no matching Custom Variable is left as literal text, so check for a typo if the SAP DS side still sees the raw {{...}} string.',
+    },
   };
 
   global.ETL_HELP_METHODS = {

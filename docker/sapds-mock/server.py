@@ -62,16 +62,56 @@ def _soap_action(headers) -> str:
     return raw.strip().strip('"')
 
 
+_NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
+# A BODS single-quoted string literal: opening/closing ', with any embedded
+# ' doubled ('') -- the same escaping DSRestClient._bods_literal applies.
+_QUOTED_LITERAL_RE = re.compile(r"^'(?:[^']|'')*'$")
+
+
+class InvalidGlobalVariableLiteral(ValueError):
+    """Raised when a <variable> value isn't a valid BODS expression.
+
+    Run_Batch_Job on the live server evaluates each global variable's
+    substitution value as a BODS expression: a varchar var needs a quoted
+    string literal (verified via HAR capture against qetl111, which always
+    sends e.g. $G_BUSINESS_DATE='31-Jul-2026'), an int/float var needs a
+    bare numeric literal. The real server doesn't error on a bad expression
+    it silently drops the substitution and falls back to the job's compiled
+    default, which is exactly how the "custom variable didn't get passed"
+    bug went unnoticed. This mock fails loudly instead, so a client
+    regression here is caught by tests rather than only in production.
+    """
+
+
+def _unwrap_bods_literal(literal: str) -> str:
+    """Inverse of DSRestClient._bods_literal: bare numeric text passes
+    through, a quoted string literal is unquoted and '' un-escaped to '."""
+    if _NUMERIC_LITERAL_RE.match(literal):
+        return literal
+    if _QUOTED_LITERAL_RE.match(literal):
+        return literal[1:-1].replace("''", "'")
+    raise InvalidGlobalVariableLiteral(
+        f"global variable value {literal!r} is not a valid BODS expression "
+        "(expected a bare number or a single-quoted string literal)",
+    )
+
+
 def _parse_global_variables(body: str) -> dict[str, str]:
     """Extract <globalVariables><variable name="...">value</variable>...</globalVariables>
     from a RunBatchJobRequest body -- mirrors how DSRestClient.trigger_job serializes
     `job_params`. Captured per-run so a test can assert the client sent exactly the
-    (already-substituted) variables it expected via GET /debug/runs/{rid} below."""
+    (already-substituted) variables it expected via GET /debug/runs/{rid} below.
+
+    Values are BODS expressions on the wire (see InvalidGlobalVariableLiteral);
+    this unwraps them back to the plain value tests compare against, and
+    raises if a value isn't validly quoted/numeric -- catching a client that
+    regresses to sending an unquoted string, per-variable, rather than
+    silently accepting it the way the real DataServices_Server would."""
     block = re.search(r"<globalVariables>(.*?)</globalVariables>", body, re.S)
     if not block:
         return {}
     return {
-        name: unescape(value)
+        name: _unwrap_bods_literal(unescape(value))
         for name, value in re.findall(r'<variable name="([^"]*)">(.*?)</variable>', block.group(1), re.S)
     }
 
@@ -225,11 +265,16 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
         if job_name not in SCHEDULABLE_JOBS:
             self._send_fault(HTTPStatus.NOT_FOUND, f"Job '{job_name}' not found in repository '{repo_name}'")
             return
+        try:
+            variables = _parse_global_variables(body)
+        except InvalidGlobalVariableLiteral as exc:
+            self._send_fault(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         global _LAST_RUN_ID
         run_id = str(uuid.uuid4().int % 100000)
         _JOB_RUNS[run_id] = {
             "job_name": job_name, "polls_seen": 0,
-            "variables": _parse_global_variables(body),
+            "variables": variables,
         }
         _LAST_RUN_ID = run_id
         self._send_result(

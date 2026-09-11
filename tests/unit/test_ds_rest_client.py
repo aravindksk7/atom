@@ -246,6 +246,60 @@ def test_trigger_job_uses_repository_override(authenticated_client):
     assert "<repoName>OTHER_REPO</repoName>" in body
 
 
+def test_trigger_job_quotes_string_global_variable_as_bods_literal(authenticated_client):
+    # SAP DS's Run_Batch_Job evaluates each global variable value as a BODS
+    # expression. A varchar variable needs a quoted string literal -- the
+    # live console always sends one (verified via HAR capture: it posts
+    # $G_BUSINESS_DATE='31-Jul-2026', not bare 31-Jul-2026). An unquoted
+    # date is not a valid expression, so SAP DS silently falls back to the
+    # variable's compiled default instead of erroring -- this is the exact
+    # "custom variable didn't get passed" bug.
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_BUSINESS_DATE": "31-Jul-2026"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert '<variable name="$G_BUSINESS_DATE">\'31-Jul-2026\'</variable>' in body
+
+
+def test_trigger_job_leaves_numeric_global_variable_unquoted(authenticated_client):
+    # BODS int/float variables expect a bare numeric literal -- quoting a
+    # numeric value would make it a string expression and fail type
+    # conversion on the SAP DS side.
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_MONTHS_TO_SEND_OLD_RC": "5", "$G_RATIO": "-3.5"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert '<variable name="$G_MONTHS_TO_SEND_OLD_RC">5</variable>' in body
+    assert '<variable name="$G_RATIO">-3.5</variable>' in body
+
+
+def test_trigger_job_escapes_embedded_single_quote_in_string_variable(authenticated_client):
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_NAME": "O'Brien"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    # BODS doubles an embedded single quote to escape it inside a literal.
+    assert "<variable name=\"$G_NAME\">'O''Brien'</variable>" in body
+
+
 def test_trigger_job_authenticates_first_if_no_token(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 
