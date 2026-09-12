@@ -66,6 +66,10 @@ _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 # A BODS single-quoted string literal: opening/closing ', with any embedded
 # ' doubled ('') -- the same escaping DSRestClient._bods_literal applies.
 _QUOTED_LITERAL_RE = re.compile(r"^'(?:[^']|'')*'$")
+# A BODS function-call expression, e.g. to_date('10-Jun-2026','dd-mon-yyyy')
+# or sysdate() -- mirrors DSRestClient._bods_literal's passthrough case for a
+# date-typed (or other expression-needing) global variable.
+_FUNC_CALL_LITERAL_RE = re.compile(r"^[A-Za-z_]\w*\(.*\)$", re.S)
 
 
 class InvalidGlobalVariableLiteral(ValueError):
@@ -85,14 +89,20 @@ class InvalidGlobalVariableLiteral(ValueError):
 
 def _unwrap_bods_literal(literal: str) -> str:
     """Inverse of DSRestClient._bods_literal: bare numeric text passes
-    through, a quoted string literal is unquoted and '' un-escaped to '."""
+    through, a quoted string literal is unquoted and '' un-escaped to ', and
+    a function-call expression (to_date(...), sysdate(), etc. -- used for a
+    date-typed variable, which can't take a quoted string literal) passes
+    through verbatim since there's no single plain value to unwrap it to."""
     if _NUMERIC_LITERAL_RE.match(literal):
         return literal
     if _QUOTED_LITERAL_RE.match(literal):
         return literal[1:-1].replace("''", "'")
+    if _FUNC_CALL_LITERAL_RE.match(literal):
+        return literal
     raise InvalidGlobalVariableLiteral(
         f"global variable value {literal!r} is not a valid BODS expression "
-        "(expected a bare number or a single-quoted string literal)",
+        "(expected a bare number, a single-quoted string literal, or a "
+        "function-call expression like to_date(...))",
     )
 
 

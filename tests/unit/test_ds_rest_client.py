@@ -300,6 +300,47 @@ def test_trigger_job_escapes_embedded_single_quote_in_string_variable(authentica
     assert "<variable name=\"$G_NAME\">'O''Brien'</variable>" in body
 
 
+def test_trigger_job_passes_through_function_call_expression_unquoted(authenticated_client):
+    # A date-typed global variable can't take a quoted string literal as its
+    # substitution value -- SAP DS needs a real BODS date expression such as
+    # to_date(...), and silently falls back to the variable's compiled
+    # default (confirmed live: a date-typed $G_BUSINESS_DATE kept running
+    # with sysdate() instead of the supplied date even once the value was
+    # auto-quoted as a string). Since job_params carries no type info, a
+    # value shaped like a BODS function call is passed through unchanged
+    # instead of being re-quoted as a string.
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_BUSINESS_DATE": "to_date('10-Jun-2026','dd-mon-yyyy')"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert (
+        "<variable name=\"$G_BUSINESS_DATE\">to_date('10-Jun-2026','dd-mon-yyyy')</variable>"
+        in body
+    )
+
+
+def test_trigger_job_passes_through_already_quoted_literal_unchanged(authenticated_client):
+    # A value the caller already single-quoted (e.g. hand-written to match
+    # exactly what a HAR capture showed) shouldn't be double-quoted.
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_BUSINESS_DATE": "'31-Jul-2026'"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert "<variable name=\"$G_BUSINESS_DATE\">'31-Jul-2026'</variable>" in body
+
+
 def test_trigger_job_authenticates_first_if_no_token(env_config):
     from etl_framework.sap_ds.client import DSRestClient
 

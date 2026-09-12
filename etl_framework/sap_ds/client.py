@@ -57,6 +57,9 @@ def _xml_escape(value: str) -> str:
 
 
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
+# A BODS function-call expression, e.g. to_date('10-Jun-2026','dd-mon-yyyy') or
+# sysdate(). Passed through unquoted -- see _bods_literal.
+_FUNC_CALL_RE = re.compile(r"^[A-Za-z_]\w*\(.*\)$", re.S)
 
 
 def _bods_literal(value) -> str:
@@ -75,9 +78,25 @@ def _bods_literal(value) -> str:
     A bare int/float value is left unquoted since numeric global variables
     expect a numeric literal, not a quoted string (quoting one would fail
     type conversion on the SAP DS side).
+
+    A **date-typed** global variable needs a BODS date expression, not a
+    quoted string -- e.g. ``to_date('10-Jun-2026','dd-mon-yyyy')``. A quoted
+    string literal isn't a valid date expression, so it hits the exact same
+    silent-fallback-to-default behavior as the unquoted-varchar bug above
+    (confirmed against a live on-prem job whose $G_BUSINESS_DATE is declared
+    date-typed: it kept running with sysdate() instead of the supplied date
+    even after values were auto-quoted as strings). There's no way to know a
+    variable's declared type from job_params alone, so: a value that already
+    looks like a BODS function call (``identifier(...)``, e.g. ``to_date(...)``,
+    ``sysdate()``) or an already-quoted literal (``'...'``) is passed through
+    unchanged -- only a plain value gets auto-quoted as a string. This lets a
+    date-typed (or any expression-needing) variable be given its exact BODS
+    expression directly in the Job Params field.
     """
     text = str(value)
     if _NUMERIC_RE.match(text):
+        return text
+    if _FUNC_CALL_RE.match(text) or (text.startswith("'") and text.endswith("'") and len(text) >= 2):
         return text
     return "'" + text.replace("'", "''") + "'"
 
