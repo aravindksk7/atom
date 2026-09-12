@@ -216,6 +216,16 @@ class DSRestClient:
             "SOAPAction": f'"{soap_action}"',
             "Accept": "text/xml",
         }
+        # INFO, not DEBUG: on-prem investigations repeatedly turned out to hinge
+        # on the exact wire body (e.g. whether a global variable value actually
+        # went out quoted) -- DEBUG-level logging of this was invisible in a
+        # prod deployment's default log level the last time this mattered (see
+        # [[sapds-onprem-quirks]]). Logon's body carries a plaintext password,
+        # so log only the SOAP action for it, never body_inner.
+        if soap_action == "function=Logon":
+            logger.info("SAP DS SOAP request: action=%s job=%s (body withheld: contains credentials)", soap_action, job_name)
+        else:
+            logger.info("SAP DS SOAP request: action=%s job=%s body=%s", soap_action, job_name, body_inner)
         response = self._session.post(
             self._endpoint(),
             data=envelope.encode("utf-8"),
@@ -224,6 +234,7 @@ class DSRestClient:
             verify=self._verify_ssl,
         )
         text = response.text or ""
+        logger.info("SAP DS SOAP response: action=%s job=%s status=%s body=%s", soap_action, job_name, response.status_code, text)
         fault = _first_tag_text(text, "faultstring")
         if fault is not None:
             raise DSAPIError(job_name=job_name, http_status=response.status_code, response_body=fault)
