@@ -710,6 +710,7 @@ class JobDefinition(BaseModel):
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
         "aws_glue_catalog_compare", "aws_glue_job_run", "aws_athena_query", "airflow_dag_run", "compare",
+        "file_watcher",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -867,6 +868,41 @@ class JobDefinition(BaseModel):
             _validate_job_file_source(self.params, "source")
             if not self.query.strip() and not _has_job_file_source(self.params, "source"):
                 raise ValueError(f"{self.job_type} jobs require a query or source file")
+        elif self.job_type == "file_watcher":
+            location = self.params.get("location")
+            if not isinstance(location, dict):
+                raise ValueError("file_watcher jobs require a 'location' object in params")
+            kind = location.get("kind")
+            if kind not in ("local", "s3", "sftp", "scp"):
+                raise ValueError("file_watcher location.kind must be 'local', 's3', 'sftp', or 'scp'")
+            if not location.get("root") or not location.get("pattern"):
+                raise ValueError("file_watcher location requires 'root' and 'pattern'")
+            if kind in ("s3", "sftp", "scp") and not location.get("credentials_ref"):
+                raise ValueError(f"file_watcher location.kind '{kind}' requires 'credentials_ref'")
+            max_tries = self.params.get("max_tries")
+            window_end = self.params.get("window_end")
+            if max_tries is None and not window_end:
+                raise ValueError(
+                    "file_watcher jobs require 'max_tries' and/or 'window_end' -- "
+                    "an unbounded watch is not allowed"
+                )
+            if max_tries is not None and (
+                not isinstance(max_tries, int) or isinstance(max_tries, bool) or max_tries < 1
+            ):
+                raise ValueError("file_watcher max_tries must be a positive integer")
+            poll_interval = self.params.get("poll_interval_seconds")
+            if poll_interval is not None:
+                try:
+                    positive_poll_interval = float(poll_interval) > 0
+                except (TypeError, ValueError):
+                    positive_poll_interval = False
+                if not positive_poll_interval:
+                    raise ValueError("file_watcher poll_interval_seconds must be a positive number")
+            content_match = self.params.get("content_match")
+            if content_match is not None and (
+                not isinstance(content_match, dict) or not content_match.get("text")
+            ):
+                raise ValueError("file_watcher content_match, if given, requires a 'text' field")
         if self.job_type == "compare":
             request = self.params.get("request") or {}
             self.key_columns = list(request.get("key_columns") or [])

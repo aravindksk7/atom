@@ -892,6 +892,91 @@ def test_create_dbt_artifact_job(client):
     assert resp.json()["job_type"] == "dbt_artifact"
 
 
+def test_create_file_watcher_job(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "watch_sales_drop",
+            "job_type": "file_watcher",
+            "query": "",
+            "key_columns": [],
+            "params": {
+                "location": {"kind": "local", "root": "/data/inbound", "pattern": "SALES_*.csv"},
+                "max_tries": 10,
+                "poll_interval_seconds": 30,
+            },
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["job_type"] == "file_watcher"
+
+
+def test_create_file_watcher_job_rejects_missing_location(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_watch",
+            "job_type": "file_watcher",
+            "query": "",
+            "key_columns": [],
+            "params": {"max_tries": 10},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_file_watcher_job_rejects_unbounded_watch(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_watch",
+            "job_type": "file_watcher",
+            "query": "",
+            "key_columns": [],
+            "params": {"location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"}},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_file_watcher_job_rejects_remote_kind_without_credentials(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "bad_watch",
+            "job_type": "file_watcher",
+            "query": "",
+            "key_columns": [],
+            "params": {
+                "location": {"kind": "sftp", "root": "/inbound", "pattern": "*.csv"},
+                "max_tries": 5,
+            },
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_create_file_watcher_job_accepts_scp_kind_and_content_match(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "name": "watch_flag",
+            "job_type": "file_watcher",
+            "query": "",
+            "key_columns": [],
+            "params": {
+                "location": {
+                    "kind": "scp", "root": "/inbound", "pattern": "*.flag",
+                    "credentials_ref": "scp_host",
+                },
+                "content_match": {"text": "STATUS=COMPLETE"},
+                "window_end": "23:30",
+            },
+        },
+    )
+    assert resp.status_code == 201
+
+
 def test_health_endpoint(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
