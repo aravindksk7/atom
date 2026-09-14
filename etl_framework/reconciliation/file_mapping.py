@@ -824,3 +824,116 @@ def wait_for_ready_files(
         waited += readiness.poll_interval_seconds
         discovered = discover()
     return discovered
+
+
+class FileWatchTimeout(TimeoutError):
+    """Raised by wait_for_watched_file when no match was found before
+    max_tries was exhausted or the current time passed window_end."""
+
+    def __init__(self, message: str, tries: int, elapsed_seconds: float) -> None:
+        super().__init__(message)
+        self.tries = tries
+        self.elapsed_seconds = elapsed_seconds
+
+
+@dataclass(frozen=True)
+class WatchSpec:
+    poll_interval_seconds: float = 30.0
+    max_tries: int | None = None
+    window_start: str | None = None   # "HH:MM" (recurring) or ISO datetime (one-shot)
+    window_end: str | None = None     # "HH:MM" (recurring) or ISO datetime (one-shot)
+    content_text: str | None = None
+    content_is_regex: bool = False
+
+    def __post_init__(self) -> None:
+        if self.max_tries is None and not self.window_end:
+            raise ValueError(
+                "WatchSpec requires max_tries and/or window_end -- an unbounded watch is not allowed"
+            )
+        if self.poll_interval_seconds <= 0:
+            raise ValueError("WatchSpec.poll_interval_seconds must be a positive number")
+        if self.max_tries is not None and (
+            not isinstance(self.max_tries, int) or isinstance(self.max_tries, bool) or self.max_tries < 1
+        ):
+            raise ValueError("WatchSpec.max_tries must be a positive integer")
+
+
+@dataclass(frozen=True)
+class WatchResult:
+    file: DiscoveredFile
+    tries: int
+    elapsed_seconds: float
+    matched_snippet: str | None = None
+
+
+_CONTENT_SNIPPET_LENGTH = 200
+
+
+def _resolve_window_bound(value: str | None, reference: datetime) -> datetime | None:
+    """"HH:MM" resolves against `reference`'s own date (recurring window);
+    anything else is parsed as a full ISO datetime (one-shot window)."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+    hour_str, sep, minute_str = value.partition(":")
+    if not sep:
+        raise ValueError(f"invalid time window value: {value!r}; expected 'HH:MM' or an ISO datetime")
+    try:
+        hour, minute = int(hour_str), int(minute_str)
+    except ValueError as exc:
+        raise ValueError(f"invalid time window value: {value!r}; expected 'HH:MM' or an ISO datetime") from exc
+    return reference.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def wait_for_watched_file(
+    discover: Callable[[], list[DiscoveredFile]],
+    spec: WatchSpec,
+    read_text: Callable[["DiscoveredFile"], str] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> WatchResult:
+    """Poll `discover()` until a candidate matches (filtered by `spec.content_text`
+    via `read_text`, when given), or raise FileWatchTimeout once `spec.max_tries`
+    is exhausted or `now()` passes `spec.window_end`. If `spec.window_start` is in
+    the future, sleeps until it before the first `discover()` call. `sleep`/`now`
+    are injectable for tests; production callers use the real clock.
+    """
+    start_now = now()
+    window_start = _resolve_window_bound(spec.window_start, start_now)
+    window_end = _resolve_window_bound(spec.window_end, start_now)
+
+    if window_start is not None and start_now < window_start:
+        sleep((window_start - start_now).total_seconds())
+
+    content_regex = re.compile(spec.content_text) if (spec.content_text and spec.content_is_regex) else None
+    tries = 0
+
+    while True:
+        current = now()
+        if window_end is not None and current > window_end:
+            raise FileWatchTimeout(
+                f"no matching file found before window_end ({spec.window_end}) after {tries} attempt(s)",
+                tries=tries,
+                elapsed_seconds=(current - start_now).total_seconds(),
+            )
+        tries += 1
+        for candidate in discover():
+            if spec.content_text is None:
+                return WatchResult(candidate, tries, (now() - start_now).total_seconds())
+            if read_text is None:
+                raise ValueError("content_text match requires a read_text callable")
+            text = read_text(candidate)
+            matched = content_regex.search(text) if content_regex is not None else spec.content_text in text
+            if matched:
+                snippet = text[:_CONTENT_SNIPPET_LENGTH]
+                return WatchResult(candidate, tries, (now() - start_now).total_seconds(), matched_snippet=snippet)
+        if spec.max_tries is not None and tries >= spec.max_tries:
+            raise FileWatchTimeout(
+                f"no matching file found after {tries} attempt(s) (max_tries={spec.max_tries})",
+                tries=tries,
+                elapsed_seconds=(now() - start_now).total_seconds(),
+            )
+        sleep(spec.poll_interval_seconds)
