@@ -185,6 +185,19 @@
           where: 'Launch -> Schedules sub-tab (+ New Schedule)',
           when: 'Automating recurring data quality checks and daily reconciliation jobs.',
         },
+        {
+          title: 'Launch a saved Execution Sequence directly',
+          text: 'A saved sequence no longer has to be wrapped in a Job Selection to run it — open it in the Sequences tab and click Run sequence for a single launch (source/target env, one-off variable overrides), or check Repeat execution in that same modal for a business-date batch (see below). It can still be attached to a Job Selection or a Schedule exactly as before; this is just a third, direct way to launch it.',
+          where: 'Sequences tab -> select a sequence -> Run sequence',
+          when: 'Running or backfilling a saved DAG pipeline without a wrapper Job Selection.',
+        },
+        {
+          title: 'Repeat Execution: business-date batches',
+          text: 'Turns one launch into N runs back-to-back, each advancing a date-type Custom Variable (e.g. business_date, often fed into a SAP DS job\'s $G_BUSINESS_DATE) by a step -- built for backfills ("run this pipeline once per business day for the last two weeks"). Pick the date variable, a start date, iterations, step days, and a weekend policy: skip (weekend dates don\'t run and don\'t count toward the total), shift (moved to the following Monday, still N runs), or ignore (every calendar day counts). Stop on first failed run halts remaining iterations the first time one comes back FAILED/ERROR/BLOCKED. A Batch progress panel tracks completed/total and can cancel what\'s left. The same fields are available on a Schedule (Repeat with date cursor) with Max firings instead of Iterations — the schedule auto-disables itself once it reaches that count.',
+          where: 'Job Selection or Sequence launch modal -> Repeat execution checkbox / Schedules sub-tab -> Repeat with date cursor',
+          when: 'Reprocessing a range of business dates, or running the same pipeline nightly for a fixed number of future business days.',
+          tip: 'The date variable must already exist as a date-type Custom Variable (Config tab) before it shows up in this picker.',
+        },
       ],
     },
     {
@@ -210,6 +223,13 @@
           text: 'The History tab stores durable run execution logs, mismatch summaries, HTML/PDF report downloads, and baseline comparison tools for evaluating run-over-run diffs.',
           where: 'History tab',
           when: 'Reviewing past test results or auditing data quality history.',
+        },
+        {
+          title: 'Restart a Failed Run',
+          text: 'When a run stops partway through -- some steps FAILED/ERROR, others never ran because they were BLOCKED/CANCELLED behind the failure -- Restart from failure creates a new run instead of re-running everything: steps that already passed are carried forward as-is (their results copied over, shown with a "carried over" badge instead of a duration) and only the failed/never-run steps re-execute. Works for ad-hoc job lists, Job Selections, and Execution Sequences alike. The button only appears when the run is ERROR/BLOCKED or has a FAILED/CANCELLED step; a run still in progress, or one that fully passed, can\'t be restarted.',
+          where: 'History tab -> open a run -> Restart from failure button',
+          when: 'Recovering from a transient failure (a flaky connection, a since-fixed job) without re-running the steps that already succeeded.',
+          tip: 'Restart does not re-check the sequence\'s preconditions (time window / weekdays / require-run-success) -- it is a manual recovery action, not a fresh scheduled launch, so it always proceeds when you click it.',
         },
         {
           title: 'Lineage DAG & Segment Drilldown',

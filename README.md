@@ -187,6 +187,7 @@ Create reusable jobs, select jobs or saved sequences, tune one run, schedule it,
 | Schedule Name / Cron / Enabled | Creates a recurring launch; **Run Now** triggers it outside its cron time. |
 | Run Tests | Submits the selected jobs and opens a tracked run. |
 | CI/CD button (per Job Selection) | Opens the CI/CD Integration modal: token setup, GitLab CI/CD variables, source/target env, and a ready-to-copy `.gitlab-ci.yml` snippet for that selection. See [Launch a Job Selection or Sequence from GitLab](#cicd-launch-a-job-selection-or-sequence-from-gitlab). |
+| Repeat execution (launch modal) | Checkbox in the Job Selection launch modal that turns one launch into a batch: pick a date-type Custom Variable, a start date, iterations, step days, weekend policy, and whether to stop the batch on the first failed iteration. A **Batch progress** panel tracks completed/total and lets you cancel remaining iterations. See [Repeat Execution (Business-Date Batches)](#repeat-execution-business-date-batches). |
 
 </details>
 
@@ -224,6 +225,7 @@ Investigate completed and in-progress runs, pin trusted baselines, and inspect t
 | Lineage DAG | Visualizes job dependencies and upstream/downstream impact. |
 | Segment Drill-down | Re-queries row counts by selected low-cardinality segments. |
 | Audit Log / Export / Delete | Reviews actions, downloads results, or removes a run subject to permissions. |
+| Restart from failure | Visible when the run is `ERROR`/`BLOCKED` or has a `FAILED`/`CANCELLED` step. Creates a new run that carries forward already-passed steps' results untouched and re-executes only what didn't succeed. See [Restarting A Failed Run](#restarting-a-failed-run). |
 
 </details>
 
@@ -361,7 +363,7 @@ Build reusable ordered workflows with dependencies and conditions.
 | Continue / stop behavior | Controls whether later eligible work proceeds after failure. |
 | Validate DAG | Detects missing jobs, cycles, and invalid dependencies before saving. |
 | Save / Clone / Delete | Manages reusable sequence definitions. |
-| Run | Sends the sequence to Launch with selected config, environments, and run settings. |
+| Run sequence | Launches the sequence directly from its detail panel — source/target env, one-off variable overrides, and an optional repeat-execution batch (date variable, start date, iterations, step days, weekend policy, stop-on-failure). No need to wrap it in a Job Selection first. `POST /api/sequences/{id}/launch` / `.../launch-batch`. |
 | CI/CD button | Same CI/CD Integration modal as a Job Selection's, generating a snippet targeting this sequence. See [Launch a Job Selection or Sequence from GitLab](#cicd-launch-a-job-selection-or-sequence-from-gitlab). |
 
 </details>
@@ -642,6 +644,9 @@ Do not remove the existing examples below when updating this guide; they are the
 - **Encrypted config secrets at rest** — `db_password`, `bo_password`, `automic_password`, and REST API endpoint secrets (`api_key`, `bearer_token`, `basic_password`) are encrypted in the config's stored JSON using the same Fernet key as webhook signing (`WEBHOOK_ENCRYPTION_KEY`); encryption/decryption is transparent to every existing API/UI consumer.
 - **App-timezone-aware timestamps everywhere** — every timestamp shown in the UI (including the scheduler grid's next-run time, the Compare tab's run picker, and contract breach/version history) is converted through the DB-configured app timezone instead of showing raw UTC or the browser's local time.
 - **AWS S3 storage & schema validation** — read object metadata, count rows across CSV/JSON/Parquet/ORC (S3 Select for row/text formats, pyarrow footer for columnar), discover Hive-style partition schemes, and validate file format with optional schema assertion. See [AWS Data Platform Testing](#aws-data-platform-testing).
+- **Direct sequence launch** — a saved Execution Sequence can be launched straight from the Sequences tab (single run or a repeat-execution batch), not only indirectly via a Job Selection or a Schedule. `POST /api/sequences/{id}/launch` / `.../launch-batch`.
+- **Restart from failure** — `POST /api/runs/{run_id}/restart` re-runs a failed or blocked run as a new run: steps that already passed are carried forward as-is (no re-execution, their prior results are copied into the new run), and only the failed/never-run steps (and anything downstream of them) actually execute again. Works for ad-hoc job lists, Job Selections, and Execution Sequences alike. Available from the History tab's run detail (**Restart from failure**) whenever a run is `ERROR`/`BLOCKED` or has a `FAILED`/`CANCELLED` step. See [Restarting A Failed Run](#restarting-a-failed-run).
+- **Repeat execution / business-date batches** — launch a Job Selection or Execution Sequence N times back-to-back (or on a Schedule, N future cron firings), each iteration advancing a date-type [Custom Variable](#custom-variables-reference) (e.g. `business_date`) by a configurable step, with a `skip`/`shift`/`ignore` policy for what happens when the computed date lands on a weekend. `POST /api/selections/{id}/launch-batch`, `POST /api/sequences/{id}/launch-batch`, and the `batch_*` fields on `POST /api/schedules`. See [Repeat Execution (Business-Date Batches)](#repeat-execution-business-date-batches).
 
 ## AWS Data Platform Testing
 
@@ -1563,6 +1568,10 @@ Click the **Gate** button on any job row to call `POST /api/gates/{job}/evaluate
 
 Click **Run Tests**. The page switches to the **Monitor** tab automatically and streams live progress via Server-Sent Events. When complete, results appear in **History**.
 
+**7. (Optional) Repeat the launch across incrementing business dates**
+
+First save the selected jobs as a **Job Selection** (or use a saved **Execution Sequence** from the Sequences tab), then open its launch modal and check **Repeat execution** instead of clicking Run Tests directly. See [Repeat Execution (Business-Date Batches)](#repeat-execution-business-date-batches).
+
 **Schedules sub-tab**
 
 Create, edit, enable, disable, and manually trigger cron-scheduled runs without opening the Launch form each time. Each schedule stores the full run configuration (env labels, config, job list, run settings) and fires at the configured interval.
@@ -1577,6 +1586,7 @@ Create, edit, enable, disable, and manually trigger cron-scheduled runs without 
 | Run Settings | Full run settings block |
 | Enabled | Toggle without deleting the schedule |
 | Run Now | Trigger immediately outside the normal schedule |
+| Repeat with date cursor | Checkbox that turns the schedule into a business-date batch: pick a date-type Custom Variable, a start date, step days, max firings, and a weekend policy. Each cron firing advances the variable by one step and injects it into that run; once `firings_completed` reaches the max, the schedule auto-disables itself. A `skip`-policy firing that lands on a weekend doesn't run and doesn't count toward the max. See [Repeat Execution (Business-Date Batches)](#repeat-execution-business-date-batches). |
 
 ---
 
@@ -1612,7 +1622,8 @@ Use the same saved job definition everywhere: the UI, REST API, schedules, exter
 |---|---|---|---|
 | Job | Reusable test definition: job type, query or input source, keys, rules, dependencies, and pass condition | UI Job Catalog or `POST /api/jobs` | UI Launch, `POST /api/runs`, schedules, pytest, CI/CD |
 | Run | One execution record with status, results, mismatches, reports, logs, and metrics | UI Run Tests, `POST /api/runs`, `POST /api/runs/test-suite`, schedule trigger | Monitor, History, reports, gates |
-| Schedule | Recurring trigger that stores environment labels, config, job sequence, run settings, cron, and enabled state | UI Schedules sub-tab or `POST /api/schedules` | APScheduler cron or `POST /api/schedules/{schedule_id}/run-now` |
+| Run Batch | N runs launched back-to-back, each with a date-type Custom Variable advanced by a step, stopping early on failure if configured | UI **Repeat execution** checkbox or `POST /api/selections/{id}/launch-batch` / `POST /api/sequences/{id}/launch-batch` | Sequential background loop; `GET /api/run-batches/{batch_id}` for progress, `POST .../cancel` to stop remaining iterations |
+| Schedule | Recurring trigger that stores environment labels, config, job sequence, run settings, cron, and enabled state; optionally a business-date batch cursor (see Run Batch) | UI Schedules sub-tab or `POST /api/schedules` | APScheduler cron or `POST /api/schedules/{schedule_id}/run-now` |
 | Gate | Machine-readable pass/fail decision for automation | Latest job result or run id | `POST /api/gates/{job}/evaluate` or `python -m etl_framework.runner.cli --gate-run <run_id>` |
 
 #### UI workflow
@@ -1717,6 +1728,87 @@ $scheduleBody = @{
 
 $schedule = Invoke-RestMethod -Method Post -Uri "$base/api/schedules" -Headers $h -ContentType "application/json" -Body $scheduleBody
 Invoke-RestMethod -Method Post -Uri "$base/api/schedules/$($schedule.id)/run-now" -Headers $h
+```
+
+#### Restarting A Failed Run
+
+When a run stops partway through — some steps `FAILED`/`ERROR`, others never ran because they were `BLOCKED`/`CANCELLED` behind the failure — restart it instead of re-running the whole thing from scratch. Restart creates a **new run** that references the original: steps that already passed are carried forward as-is (their results copied into the new run, not re-executed); only the failed/never-run steps (and anything downstream of them) actually execute again. Works the same way whether the original run came from an ad-hoc job list, a Job Selection, or an Execution Sequence.
+
+- **UI:** open the run in **History**, and if its status is `ERROR`/`BLOCKED` or any step is `FAILED`/`CANCELLED`, a **Restart from failure** button appears. Click it, and you're taken to the new run — carried-over steps show a "carried over" badge instead of a duration. The original run's detail view gains a "Restarted as `<new_run_id>`" link once a restart exists for it, and the new run shows "Restarted from `<original_run_id>`".
+- **API:** `POST /api/runs/{run_id}/restart` → `202` with the new run's `run_id`; the run executes in the background exactly like a fresh launch. `GET /api/runs/{run_id}/restart` returns the restart that was created from that run, or `null` if it hasn't been restarted.
+
+```powershell
+# $runId is a run that finished ERROR or BLOCKED
+$restart = Invoke-RestMethod -Method Post -Uri "$base/api/runs/$runId/restart" -Headers $h
+$restart.run_id          # the new run
+$restart.restarted_from_run_id   # == $runId
+```
+
+Restart does not re-check the original sequence's preconditions (time window / weekdays / require-run-success) — it's a manual recovery action, not a fresh scheduled launch. A run currently `PENDING`/`RUNNING`, or one where every step already passed, can't be restarted (`422`).
+
+#### Repeat Execution (Business-Date Batches)
+
+Run a Job Selection or Execution Sequence **N times back-to-back**, each iteration advancing a date-type [Custom Variable](#custom-variables-reference) (e.g. `business_date`, commonly wired to a SAP DS job's `$G_BUSINESS_DATE` via its [Job Params](#ds_job)) by a configurable step — a backfill/reprocessing tool for "run this pipeline once per business day for the last two weeks." Two ways to trigger it, sharing the same date-stepping logic:
+
+| Weekend policy | What happens when the computed date lands on Sat/Sun |
+|---|---|
+| `skip` | That date isn't used at all; the walk moves on to the next date. N **iterations still means N actual runs** — weekend dates don't consume one. |
+| `shift` | The date is moved forward to the following Monday before running. Always exactly N runs, one per iteration. |
+| `ignore` | Every calendar day counts, weekends included — the variable just increments by `step_days` each time with no adjustment. |
+
+**Ad-hoc batch (Launch tab / Sequences tab):** open the launch modal for a Job Selection or Execution Sequence, check **Repeat execution**, and fill in:
+
+| Field | Description |
+|---|---|
+| Date variable | Which date-type Custom Variable to advance. Must already exist — see [Custom Variables Reference](#custom-variables-reference). |
+| Start date | First iteration's date (defaults to today). |
+| Iterations | How many times to run (1–200). |
+| Step days | Days between iterations (default 1). |
+| Weekend policy | `skip` / `shift` / `ignore`, per the table above. |
+| Stop on first failed run | If checked, the batch stops launching further iterations the first time one comes back `FAILED`/`ERROR`/`BLOCKED`; otherwise every iteration runs regardless of earlier failures. |
+
+A **Batch progress** panel appears after launch (`N / M complete`, current date, status) and polls until the batch reaches a terminal state; a **Cancel** button stops any remaining iterations (the current one finishes normally).
+
+```powershell
+$varBody = @{ name = "business_date"; var_type = "date"; default_value = "today"; description = "Business date fed to ds_job steps" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$base/api/variables" -Headers $h -ContentType "application/json" -Body $varBody
+
+$batchBody = @{
+  source_env = "dev"; target_env = "prod"
+  batch = @{
+    variable_name = "business_date"; start_value = "2026-09-01"
+    iterations = 10; step_days = 1; weekend_policy = "skip"; stop_on_failure = $false
+  }
+} | ConvertTo-Json -Depth 8
+
+$batch = Invoke-RestMethod -Method Post -Uri "$base/api/selections/$($selection.id)/launch-batch" -Headers $h -ContentType "application/json" -Body $batchBody
+# Same shape works for a saved sequence:
+# Invoke-RestMethod -Method Post -Uri "$base/api/sequences/{sequence_id}/launch-batch" ...
+
+do {
+  Start-Sleep -Seconds 5
+  $status = Invoke-RestMethod -Method Get -Uri "$base/api/run-batches/$($batch.batch_id)" -Headers $h
+  "$($status.completed) / $($status.iterations) — $($status.status)"
+} while ($status.status -notin @("COMPLETED", "STOPPED", "FAILED"))
+```
+
+**On a Schedule:** check **Repeat with date cursor** in the schedule form (same `variable_name`/`start_value`/`step_days`/`weekend_policy` fields, plus **Max firings** instead of Iterations). Each cron firing advances the variable by one step; once `firings_completed` reaches `batch_max_firings` the schedule disables itself automatically. This is independent of the schedule's own `weekdays` precondition — that decides whether the cron fires *at all* on a given calendar day; the batch's weekend policy decides what happens to the *date value* it injects, regardless of what day it actually runs on.
+
+```powershell
+$scheduleBody = @{
+  name = "nightly-orders-backfill"
+  cron_expr = "0 6 * * *"
+  selection_id = $selection.id
+  selection_version = $selection.latest_version
+  source_env = "dev"; target_env = "prod"; enabled = $true
+  batch_variable_name = "business_date"
+  batch_start_value = "2026-09-01"
+  batch_step_days = 1
+  batch_max_firings = 14
+  batch_weekend_policy = "skip"
+} | ConvertTo-Json -Depth 8
+
+Invoke-RestMethod -Method Post -Uri "$base/api/schedules" -Headers $h -ContentType "application/json" -Body $scheduleBody
 ```
 
 Evaluate a job gate after a run has completed:
@@ -2481,6 +2573,7 @@ Use this tab to:
   - **Value Distribution** — click "Load Value Distribution" inside an expanded mismatch panel to see the top-N column/value patterns.
   - Export run results as CSV.
   - Delete a run.
+  - **Restart from failure** — when a run is `ERROR`/`BLOCKED` or has a `FAILED`/`CANCELLED` step, a **Restart from failure** button creates a new run: already-passed steps are carried over (their results copied, not re-executed) and only the failed/never-run steps re-run. See [Restarting A Failed Run](#restarting-a-failed-run).
 - **Trends sub-tab** — select a job and metric (`mismatch_rate`, `row_count_delta`, `duration_seconds`, `total_issues`), choose a rolling window, and view a line chart. Drift is flagged in red when the latest point is more than 2σ above the mean.
 - **Lineage sub-tab** — view the job dependency DAG as an SVG diagram. Nodes are job boxes; arrows show `depends_on` relationships.
 - **Audit sub-tab** — filter audit events by resource type and resource ID.
