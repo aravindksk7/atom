@@ -338,6 +338,115 @@ def test_airflow_dag_run_rejects_invalid_task_assertions():
     assert any(issue.field == "params.task_assertions.extract" for issue in issues)
 
 
+def test_file_watcher_valid_job_has_no_issues():
+    issues = validate_job_definition({
+        "name": "watch_sales_drop",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "SALES_*.csv"},
+            "max_tries": 10,
+            "poll_interval_seconds": 30,
+        },
+    })
+    assert issues == []
+
+
+def test_file_watcher_requires_location():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {"max_tries": 5},
+    })
+    assert any(issue.field == "params.location" for issue in issues)
+
+
+def test_file_watcher_requires_root_and_pattern():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {"location": {"kind": "local"}, "max_tries": 5},
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.location.root" in fields
+    assert "params.location.pattern" in fields
+
+
+def test_file_watcher_requires_credentials_ref_for_remote_kinds():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "sftp", "root": "/inbound", "pattern": "*.csv"},
+            "max_tries": 5,
+        },
+    })
+    assert any(issue.field == "params.location.credentials_ref" for issue in issues)
+
+
+def test_file_watcher_accepts_scp_kind():
+    issues = validate_job_definition({
+        "name": "watch_flag",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {
+                "kind": "scp", "root": "/inbound", "pattern": "*.flag",
+                "credentials_ref": "scp_host",
+            },
+            "max_tries": 5,
+        },
+    })
+    assert issues == []
+
+
+def test_file_watcher_requires_max_tries_or_window_end():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {"location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"}},
+    })
+    assert any(issue.field == "params" for issue in issues)
+
+
+def test_file_watcher_window_end_alone_satisfies_bound_requirement():
+    issues = validate_job_definition({
+        "name": "watch_nightly",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"},
+            "window_end": "23:30",
+        },
+    })
+    assert issues == []
+
+
+def test_file_watcher_rejects_non_positive_max_tries_and_poll_interval():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"},
+            "max_tries": 0,
+            "poll_interval_seconds": -1,
+        },
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.max_tries" in fields
+    assert "params.poll_interval_seconds" in fields
+
+
+def test_file_watcher_content_match_requires_text():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.flag"},
+            "max_tries": 5,
+            "content_match": {"is_regex": True},
+        },
+    })
+    assert any(issue.field == "params.content_match" for issue in issues)
+
+
 def test_compare_job_without_compare_type_reports_an_error():
     from etl_framework.runner.job_validation import validate_job_definition, ValidationSeverity
 

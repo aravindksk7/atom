@@ -212,6 +212,41 @@ def _validate_airflow_dag_run(params: dict[str, Any], issues: list[ValidationIss
                     ))
 
 
+def _validate_file_watcher(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    location = params.get("location")
+    if not isinstance(location, dict):
+        issues.append(ValidationIssue("params.location", "file_watcher jobs require a 'location' object in params"))
+        location = {}
+    kind = location.get("kind")
+    if kind not in ("local", "s3", "sftp", "scp"):
+        issues.append(ValidationIssue(
+            "params.location.kind", "file_watcher location.kind must be 'local', 's3', 'sftp', or 'scp'",
+        ))
+    if not location.get("root"):
+        issues.append(ValidationIssue("params.location.root", "file_watcher location requires 'root'"))
+    if not location.get("pattern"):
+        issues.append(ValidationIssue("params.location.pattern", "file_watcher location requires 'pattern'"))
+    if kind in ("s3", "sftp", "scp") and not location.get("credentials_ref"):
+        issues.append(ValidationIssue(
+            "params.location.credentials_ref",
+            f"file_watcher location.kind '{kind}' requires 'credentials_ref'",
+        ))
+    if params.get("max_tries") is None and not params.get("window_end"):
+        issues.append(ValidationIssue(
+            "params", "file_watcher jobs require 'max_tries' and/or 'window_end' -- an unbounded watch is not allowed",
+        ))
+    _positive_int(params, "max_tries", issues)
+    if "poll_interval_seconds" in params:
+        try:
+            if float(params["poll_interval_seconds"]) <= 0:
+                issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+        except (TypeError, ValueError):
+            issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+    content_match = params.get("content_match")
+    if content_match is not None and (not isinstance(content_match, dict) or not content_match.get("text")):
+        issues.append(ValidationIssue("params.content_match", "file_watcher content_match, if given, requires a 'text' field"))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     job_type = _job_type(job)
@@ -230,6 +265,8 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_aws_athena_query(params, issues)
     elif job_type == "airflow_dag_run":
         _validate_airflow_dag_run(params, issues)
+    elif job_type == "file_watcher":
+        _validate_file_watcher(params, issues)
     query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 
