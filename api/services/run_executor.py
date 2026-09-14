@@ -548,6 +548,8 @@ class RunExecutor:
             return self._build_case_dbt(job)
         if job.job_type == "compare":
             return self._build_case_compare(job)
+        if job.job_type == "file_watcher":
+            return self._build_case_file_watcher(job)
         if job.job_type == "bo_report":
             if not self._settings.use_live_connections:
                 def run_job() -> ReconciliationResult:
@@ -1549,6 +1551,98 @@ class RunExecutor:
                     "airflow_task_status_mismatch",
                 ))
         return self._airflow_result(job, TestStatus.FAILED if mismatches else TestStatus.PASSED, metrics, mismatches, executed_at, time.monotonic() - t0)
+
+    # -- File Watcher -----------------------------------------------------------
+
+    def _build_case_file_watcher(self, job: JobDefinition):
+        def run_file_watcher() -> ReconciliationResult:
+            return self._execute_file_watcher(job)
+        return run_file_watcher
+
+    def _file_watcher_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        tries: int,
+        elapsed_seconds: float,
+        executed_at: datetime,
+        duration_seconds: float,
+        matched_file=None,
+        matched_text: str | None = None,
+        error: str | None = None,
+    ) -> ReconciliationResult:
+        mismatch_summary: dict[str, Any] = {"tries": tries, "elapsed_seconds": elapsed_seconds}
+        mismatches: list[MismatchRecord] = []
+        if matched_text is not None:
+            mismatch_summary["matched_text"] = matched_text
+        if error is not None:
+            mismatch_summary["error"] = error
+            mismatches.append(MismatchRecord({"job": job.name}, "file_watcher", "matched", error, "file_watcher_error"))
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=1 if matched_file else 0,
+            target_row_count=1 if matched_file else 0,
+            matched_count=1 if matched_file else 0,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration_seconds,
+            source_file_name=matched_file.file_name if matched_file else None,
+            data_artifact_path=matched_file.path if matched_file else None,
+            mismatch_summary=mismatch_summary,
+        )
+
+    def _execute_file_watcher(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        from etl_framework.reconciliation.file_mapping import (
+            FileSourceSpec, FileWatchTimeout, WatchSpec, wait_for_watched_file,
+        )
+        from api.services.multi_file_remote import RemoteFileSourceSession
+
+        location = job.params.get("location") or {}
+        kind = location.get("kind")
+        file_spec = FileSourceSpec(
+            kind="sftp" if kind == "scp" else kind,
+            root=location.get("root", ""),
+            pattern=location.get("pattern", ""),
+            credentials_ref=location.get("credentials_ref"),
+        )
+        content_match = job.params.get("content_match") or {}
+        watch_spec = WatchSpec(
+            poll_interval_seconds=float(job.params.get("poll_interval_seconds", 30.0)),
+            max_tries=job.params.get("max_tries"),
+            window_start=job.params.get("window_start"),
+            window_end=job.params.get("window_end"),
+            content_text=content_match.get("text"),
+            content_is_regex=bool(content_match.get("is_regex", False)),
+        )
+        try:
+            with RemoteFileSourceSession(self._config_snapshot) as session:
+                read_text = (lambda f: session.read_text(f, file_spec)) if watch_spec.content_text else None
+                watch_result = wait_for_watched_file(
+                    lambda: session.discover(file_spec), watch_spec, read_text=read_text,
+                )
+        except FileWatchTimeout as exc:
+            return self._file_watcher_result(
+                job, TestStatus.FAILED, tries=exc.tries, elapsed_seconds=exc.elapsed_seconds,
+                executed_at=executed_at, duration_seconds=time.monotonic() - t0, error=str(exc),
+            )
+        except Exception as exc:
+            return self._file_watcher_result(
+                job, TestStatus.ERROR, tries=0, elapsed_seconds=0.0,
+                executed_at=executed_at, duration_seconds=time.monotonic() - t0, error=str(exc),
+            )
+        return self._file_watcher_result(
+            job, TestStatus.PASSED, tries=watch_result.tries, elapsed_seconds=watch_result.elapsed_seconds,
+            executed_at=executed_at, duration_seconds=time.monotonic() - t0,
+            matched_file=watch_result.file, matched_text=watch_result.matched_snippet,
+        )
 
     # -- Freshness -----------------------------------------------------------
 
