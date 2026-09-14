@@ -121,7 +121,12 @@ test.describe('50 launch: a Config-level custom variable flows into a SAP DS job
       // -- proving substitution happened before DSRestClient.trigger_job serialized it.
       const lastRun = await dsDebugLastRun();
       expect(lastRun.job_name).toBe('DS_NIGHTLY_LOAD');
-      expect(lastRun.variables).toEqual({ $G_RUN_DATE: overrideValue });
+      // DSRestClient.trigger_job strips the leading $ before it becomes the
+      // SOAP <variable name="..."> attribute (confirmed live: SAP DS matches
+      // Run_Batch_Job variable names bare -- $ is a Designer display
+      // convention only), so the wire-level name the mock echoes back is
+      // G_RUN_DATE even though the Job Params field was entered as $G_RUN_DATE.
+      expect(lastRun.variables).toEqual({ G_RUN_DATE: overrideValue });
     } finally {
       const cleanupCtx = await authedContext(adminToken);
       try {

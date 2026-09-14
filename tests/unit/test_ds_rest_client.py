@@ -264,7 +264,30 @@ def test_trigger_job_quotes_string_global_variable_as_bods_literal(authenticated
         )
     body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
     body = body.decode() if isinstance(body, bytes) else body
-    assert '<variable name="$G_BUSINESS_DATE">\'31-Jul-2026\'</variable>' in body
+    assert '<variable name="G_BUSINESS_DATE">\'31-Jul-2026\'</variable>' in body
+
+
+def test_trigger_job_strips_leading_dollar_from_variable_name(authenticated_client):
+    # Confirmed live against qetl111: the SOAP <variable name="..."> attribute
+    # must be the bare identifier -- the $ prefix Designer shows for a Global
+    # Variable is a display convention only. Sending it with the $ still gets
+    # a 200/rid response (the call itself is valid), but the name matches no
+    # declared variable, so the substitution is silently dropped and the job
+    # runs with the variable's compiled default. Since users naturally type
+    # the name the way Designer shows it (with $), strip it here.
+    resp = _mock_soap_response(
+        f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
+        f"<rid>1</rid><repoName>DS_REPO</repoName></BatchJobResponse>"
+    )
+    with patch.object(authenticated_client._session, "post", return_value=resp) as mock_post:
+        authenticated_client.trigger_job(
+            "J", job_params={"$G_BUSINESS_DATE": "'10-Jun-2026'", "G_ALREADY_BARE": "5"},
+        )
+    body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
+    body = body.decode() if isinstance(body, bytes) else body
+    assert '<variable name="G_BUSINESS_DATE">\'10-Jun-2026\'</variable>' in body
+    assert '<variable name="G_ALREADY_BARE">5</variable>' in body
+    assert "$G_BUSINESS_DATE" not in body
 
 
 def test_trigger_job_leaves_numeric_global_variable_unquoted(authenticated_client):
@@ -281,8 +304,8 @@ def test_trigger_job_leaves_numeric_global_variable_unquoted(authenticated_clien
         )
     body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
     body = body.decode() if isinstance(body, bytes) else body
-    assert '<variable name="$G_MONTHS_TO_SEND_OLD_RC">5</variable>' in body
-    assert '<variable name="$G_RATIO">-3.5</variable>' in body
+    assert '<variable name="G_MONTHS_TO_SEND_OLD_RC">5</variable>' in body
+    assert '<variable name="G_RATIO">-3.5</variable>' in body
 
 
 def test_trigger_job_escapes_embedded_single_quote_in_string_variable(authenticated_client):
@@ -297,7 +320,7 @@ def test_trigger_job_escapes_embedded_single_quote_in_string_variable(authentica
     body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
     body = body.decode() if isinstance(body, bytes) else body
     # BODS doubles an embedded single quote to escape it inside a literal.
-    assert "<variable name=\"$G_NAME\">'O''Brien'</variable>" in body
+    assert "<variable name=\"G_NAME\">'O''Brien'</variable>" in body
 
 
 def test_trigger_job_passes_through_function_call_expression_unquoted(authenticated_client):
@@ -320,7 +343,7 @@ def test_trigger_job_passes_through_function_call_expression_unquoted(authentica
     body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
     body = body.decode() if isinstance(body, bytes) else body
     assert (
-        "<variable name=\"$G_BUSINESS_DATE\">to_date('10-Jun-2026','dd-mon-yyyy')</variable>"
+        "<variable name=\"G_BUSINESS_DATE\">to_date('10-Jun-2026','dd-mon-yyyy')</variable>"
         in body
     )
 
@@ -338,7 +361,7 @@ def test_trigger_job_passes_through_already_quoted_literal_unchanged(authenticat
         )
     body = mock_post.call_args[1].get("data") or mock_post.call_args[0][1]
     body = body.decode() if isinstance(body, bytes) else body
-    assert "<variable name=\"$G_BUSINESS_DATE\">'31-Jul-2026'</variable>" in body
+    assert "<variable name=\"G_BUSINESS_DATE\">'31-Jul-2026'</variable>" in body
 
 
 def test_trigger_job_authenticates_first_if_no_token(env_config):

@@ -101,6 +101,25 @@ def _bods_literal(value) -> str:
     return "'" + text.replace("'", "''") + "'"
 
 
+def _bods_variable_name(key: str) -> str:
+    """Strip a leading ``$`` from a job_params key before it becomes the
+    ``<variable name="...">`` attribute in Run_Batch_Job.
+
+    Confirmed live against qetl111: the ``$`` prefix Designer shows for a
+    Global Variable ($G_BUSINESS_DATE) is a display convention only -- the
+    SOAP variable name attribute must be the bare identifier
+    (G_BUSINESS_DATE). Sending it with the ``$`` still gets a 200 response
+    with an rid (the call itself is valid), but the name doesn't match any
+    declared variable on the job, so the substitution is silently dropped
+    and the job runs with the variable's compiled default -- the same
+    silent-fallback failure mode as the unquoted-value and quoted-string-for-
+    a-date-variable bugs above, just one layer earlier. Since job_params
+    keys are naturally typed to match what Designer displays (with the
+    ``$``), strip it here rather than pushing this onto every caller.
+    """
+    return key[1:] if key.startswith("$") else key
+
+
 def _first_tag_text(xml: str, local_name: str) -> str | None:
     """Return the text of the first element whose *local* name matches.
 
@@ -342,7 +361,7 @@ class DSRestClient:
         variables = ""
         if job_params:
             var_elems = "".join(
-                f'<variable name="{_xml_escape(k)}">{_xml_escape(_bods_literal(v))}</variable>'
+                f'<variable name="{_xml_escape(_bods_variable_name(k))}">{_xml_escape(_bods_literal(v))}</variable>'
                 for k, v in job_params.items()
             )
             variables = f"<globalVariables>{var_elems}</globalVariables>"
