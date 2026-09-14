@@ -231,16 +231,21 @@ def _validate_file_watcher(params: dict[str, Any], issues: list[ValidationIssue]
             "params.location.credentials_ref",
             f"file_watcher location.kind '{kind}' requires 'credentials_ref'",
         ))
-    if params.get("max_tries") is None and not params.get("window_end"):
+    max_tries = params.get("max_tries")
+    if max_tries is None and not params.get("window_end"):
         issues.append(ValidationIssue(
             "params", "file_watcher jobs require 'max_tries' and/or 'window_end' -- an unbounded watch is not allowed",
         ))
-    _positive_int(params, "max_tries", issues)
+    if isinstance(max_tries, bool):
+        issues.append(ValidationIssue("params.max_tries", "max_tries must be a positive integer"))
+    elif max_tries is not None:
+        _positive_int(params, "max_tries", issues)
     if "poll_interval_seconds" in params:
         try:
-            if float(params["poll_interval_seconds"]) <= 0:
-                issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
+            positive_poll_interval = float(params["poll_interval_seconds"]) > 0
         except (TypeError, ValueError):
+            positive_poll_interval = False
+        if not positive_poll_interval:
             issues.append(ValidationIssue("params.poll_interval_seconds", "poll_interval_seconds must be a positive number"))
     content_match = params.get("content_match")
     if content_match is not None and (not isinstance(content_match, dict) or not content_match.get("text")):

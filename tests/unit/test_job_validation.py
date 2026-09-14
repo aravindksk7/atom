@@ -434,6 +434,33 @@ def test_file_watcher_rejects_non_positive_max_tries_and_poll_interval():
     assert "params.poll_interval_seconds" in fields
 
 
+def test_file_watcher_rejects_boolean_max_tries():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"},
+            "max_tries": True,
+        },
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.max_tries" in fields
+
+
+def test_file_watcher_rejects_nan_poll_interval():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"},
+            "max_tries": 5,
+            "poll_interval_seconds": float("nan"),
+        },
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.poll_interval_seconds" in fields
+
+
 def test_file_watcher_content_match_requires_text():
     issues = validate_job_definition({
         "name": "bad_watch",
