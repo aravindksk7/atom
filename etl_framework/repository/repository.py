@@ -1347,9 +1347,19 @@ class ScheduleRepository:
         *,
         increment_firings: bool,
         disable_if_complete: bool = True,
+        expected_current_value: str | None = None,
     ) -> ScheduledRun | None:
+        """`expected_current_value`, when given, makes this a compare-and-swap:
+        the cursor only advances if `batch_next_value` still matches what the
+        caller read before computing `next_value`. A manual "run now" racing a
+        cron firing (or another run-now) for the same schedule_id -- the one
+        case not already serialized by APScheduler's max_instances=1 -- then
+        loses the race harmlessly (no-op, logged by the caller) instead of
+        silently clobbering the other firing's advance."""
         sched = self._db.get(ScheduledRun, schedule_id)
         if sched is None:
+            return None
+        if expected_current_value is not None and sched.batch_next_value != expected_current_value:
             return None
         sched.batch_next_value = next_value
         if increment_firings:

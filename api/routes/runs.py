@@ -519,7 +519,9 @@ def cancel_run(run_id: str, db: Session = Depends(get_session)):
 
 
 @router.post("/{run_id}/restart", response_model=RunStatusOut, status_code=202)
-def restart_failed_run(run_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_session)):
+def restart_failed_run(
+    run_id: str, background_tasks: BackgroundTasks, request: Request, db: Session = Depends(get_session),
+):
     try:
         plan = restart_run(db, run_id)
     except RestartNotFound as exc:
@@ -527,6 +529,10 @@ def restart_failed_run(run_id: str, background_tasks: BackgroundTasks, db: Sessi
     except RestartError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     new_run = RunRepository(db).get_run(plan.run_id)
+    AuditService(db).log(
+        request, "run.restarted", "run", plan.run_id,
+        {"restarted_from_run_id": plan.restarted_from_run_id},
+    )
     background_tasks.add_task(
         _execute_run,
         plan.run_id,

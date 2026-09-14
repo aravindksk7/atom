@@ -123,29 +123,52 @@ Gain the same fields (all optional). `check_one_target`-style validator: wheneve
 
 ### 4.3 `_run_schedule()` (`api/services/scheduler.py`)
 
-Why a plain `start + step_days * firings_completed` formula doesn't work: `firings_completed` only counts firings that actually **ran**. A `skip`-policy firing that lands on a weekend consumes a calendar slot but produces no run, so it must never be counted — but the *next* firing still needs to try the *next* candidate date, not recompute the same one. Deriving the date purely from `firings_completed` would make a skipped Saturday's candidate reappear on Sunday's firing (same offset, same date, skipped again — stuck). A persisted cursor (`batch_next_value`) avoids this: it advances by `step_days` on *every* firing attempt, run or skipped, independent of the run counter.
+Why a plain `start + step_days * firings_completed` formula doesn't work: `firings_completed` only counts firings that actually **ran**, so it can't reconstruct "where the cursor is" once a `skip` has happened. A persisted cursor (`batch_next_value`) avoids this — it is the single source of truth for "the next candidate to try," advanced explicitly on every firing (run or skipped) rather than re-derived from a counter.
+
+Two small helpers in `api/services/business_calendar.py`, shared with the ad-hoc batch's `step_dates` so there's exactly one implementation of weekend-policy semantics, not two that can drift apart:
+
+```python
+def resolve_weekend(value: date, weekend_policy: WeekendPolicy) -> date | None:
+    """Resolve a candidate *in place*, for the value this firing would use.
+    None means 'skip this occurrence entirely' (skip policy + weekend)."""
+
+def step_business_date(value: date, step_days: int, weekend_policy: WeekendPolicy) -> date:
+    """The next cursor after `value`: advance by step_days, then apply
+    weekend_policy to the result. For 'skip', this WALKS FORWARD repeatedly
+    (step_days at a time) until landing on a weekday -- it eagerly resolves
+    an entire weekend in one call, the same way step_dates' internal loop
+    does, so the cursor is always immediately usable next time rather than
+    landing back on another weekend date to retry later."""
+```
 
 Right before building `trigger = RunTrigger(...)`:
 
 ```python
 variable_overrides = {}
 if sched.batch_variable_name:
-    candidate = date.fromisoformat(sched.batch_next_value or sched.batch_start_value or date.today().isoformat())
     policy = sched.batch_weekend_policy  # required whenever batch_variable_name is set (§4.2)
-    next_cursor = candidate + timedelta(days=sched.batch_step_days)
+    step_days = sched.batch_step_days or 1
+    cursor_read = sched.batch_next_value
+    candidate = date.fromisoformat(cursor_read or sched.batch_start_value or date.today().isoformat())
 
-    if policy == "skip" and candidate.weekday() >= 5:
-        repo.update(schedule_id, {"batch_next_value": next_cursor.isoformat()})  # advance cursor, don't run
+    resolved = resolve_weekend(candidate, policy)
+    if resolved is None:
+        next_cursor = step_business_date(candidate, step_days, policy).isoformat()
+        repo.advance_batch_cursor(
+            schedule_id, next_cursor, increment_firings=False, disable_if_complete=False,
+            expected_current_value=cursor_read,
+        )
         record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary=f"{candidate} is a weekend")
         return   # firings_completed NOT incremented — matches ad-hoc "skip" semantics
 
-    computed = candidate
-    if policy == "shift" and computed.weekday() >= 5:
-        computed += timedelta(days=7 - computed.weekday())  # forward to Monday
-    variable_overrides = {sched.batch_variable_name: computed.isoformat()}
+    batch_value = resolved.isoformat()                                            # what THIS firing uses
+    next_cursor = step_business_date(candidate, step_days, policy).isoformat()    # what the NEXT firing starts from
+    variable_overrides = {sched.batch_variable_name: batch_value}
 ```
 
-`trigger = RunTrigger(..., variable_overrides=variable_overrides)` (currently always `{}` for schedules — this is the one behavioral gap this feature closes). After a successful run, alongside the existing `repo.touch(schedule_id, last_run_at=...)` call: `repo.update(schedule_id, {"batch_next_value": next_cursor.isoformat(), "firings_completed": sched.firings_completed + 1})` (`ScheduleRepository.update` already takes a plain field dict — no signature change needed). If `batch_max_firings` is set and the new count reaches it, also include `"enabled": False` in that same `update()` call and call `scheduler.remove_job(schedule_id)` (auto-disable, same effect as a user toggling the schedule off).
+Note `resolve_weekend` and `step_business_date` both start from the same unresolved `candidate` — a `shift`-policy candidate that lands on a weekend is shifted only for `batch_value` (this firing's actual date); `next_cursor` is computed from the original candidate, keeping the cursor's own cadence evenly spaced by `step_days` regardless of any shift applied to an individual firing's value.
+
+`trigger = RunTrigger(..., variable_overrides=variable_overrides)` (currently always `{}` for schedules — this is the one behavioral gap this feature closes). After a successful run, alongside the existing `repo.touch(schedule_id, last_run_at=...)` call: `repo.advance_batch_cursor(schedule_id, next_cursor, increment_firings=True, expected_current_value=cursor_read)`. `expected_current_value` makes this a compare-and-swap: if `batch_next_value` no longer matches `cursor_read` (a manual "run now" — which bypasses APScheduler's `max_instances=1` serialization, the one path not already safe from overlap — raced a concurrent firing for the same schedule), the advance is silently dropped rather than clobbering the other firing's update; the run itself still completed normally, only the cursor bookkeeping for *this* firing is lost. If `batch_max_firings` is set and the new count reaches it, `ScheduleRepository(db).update(schedule_id, {"enabled": False})` + `scheduler.remove_job(schedule_id)` (auto-disable, same effect as a user toggling the schedule off).
 
 `batch_next_value` starts unset; the first firing falls back to `batch_start_value` (or today), matching the ad-hoc batch's own default.
 

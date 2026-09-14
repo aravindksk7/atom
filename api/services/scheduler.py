@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 logger = logging.getLogger("api.scheduler")
 
@@ -105,18 +105,32 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Schedule disabled")
             return
         batch_value = None
+        batch_next_candidate = None
         if sched.batch_variable_name:
             if sched.batch_max_firings is not None and (sched.firings_completed or 0) >= sched.batch_max_firings:
                 repo.update(schedule_id, {"enabled": False})
                 remove_job(schedule_id)
                 record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Scheduled batch complete")
                 return
-            batch_value = sched.batch_next_value or sched.batch_start_value
-            if sched.batch_weekend_policy == "skip" and date.fromisoformat(batch_value).weekday() >= 5:
-                next_value = _next_schedule_batch_value(batch_value, sched.batch_step_days or 1, "skip")
-                repo.advance_batch_cursor(schedule_id, next_value, increment_firings=False, disable_if_complete=False)
-                record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary=f"{batch_value} is a weekend")
+            from api.services.business_calendar import resolve_weekend, step_business_date
+
+            policy = sched.batch_weekend_policy or "ignore"
+            step_days = sched.batch_step_days or 1
+            batch_cursor_read = sched.batch_next_value
+            candidate = date.fromisoformat(
+                batch_cursor_read or sched.batch_start_value or date.today().isoformat()
+            )
+            resolved = resolve_weekend(candidate, policy)
+            if resolved is None:
+                next_cursor = step_business_date(candidate, step_days, policy).isoformat()
+                repo.advance_batch_cursor(
+                    schedule_id, next_cursor, increment_firings=False, disable_if_complete=False,
+                    expected_current_value=batch_cursor_read,
+                )
+                record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary=f"{candidate} is a weekend")
                 return
+            batch_value = resolved.isoformat()
+            batch_next_candidate = step_business_date(candidate, step_days, policy).isoformat()
 
         from api.schemas import SequenceRef
         from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
@@ -246,11 +260,15 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         repo.touch(schedule_id, last_run_at=datetime.now(timezone.utc))
         if sched.batch_variable_name and batch_value:
             updated = repo.advance_batch_cursor(
-                schedule_id,
-                _next_schedule_batch_value(batch_value, sched.batch_step_days or 1, sched.batch_weekend_policy or "ignore"),
-                increment_firings=True,
+                schedule_id, batch_next_candidate, increment_firings=True,
+                expected_current_value=batch_cursor_read,
             )
-            if updated is not None and not updated.enabled:
+            if updated is None:
+                logger.warning(
+                    "Schedule '%s' batch cursor changed concurrently; this firing's "
+                    "advance was dropped (run %s already executed).", name, run_id,
+                )
+            elif not updated.enabled:
                 remove_job(schedule_id)
         logger.info("Scheduled run '%s' started as %s", name, run_id)
     except Exception as exc:
@@ -269,17 +287,6 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         logger.exception("Scheduled run '%s' failed: %s", name, exc)
     finally:
         db.close()
-
-
-def _next_schedule_batch_value(value: str, step_days: int, weekend_policy: str) -> str:
-    candidate = date.fromisoformat(value) + timedelta(days=step_days)
-    if weekend_policy == "shift":
-        while candidate.weekday() >= 5:
-            candidate += timedelta(days=1)
-    elif weekend_policy == "skip":
-        while candidate.weekday() >= 5:
-            candidate += timedelta(days=step_days)
-    return candidate.isoformat()
 
 
 def start() -> None:

@@ -10,6 +10,8 @@
       sequencesLoading: false,
       selectedSequence: null,          // detail payload from GET /api/sequences/{id}
       sequenceUsage: { selections: [], schedules: [] },
+      showLaunchSequenceModal: false,
+      launchSequenceModal: {},
       sequenceEditorOpen: false,
       sequenceEditorMode: 'create',    // 'create' | 'version'
       sequenceMeta: { name: '', description: '', tags_raw: '' },
@@ -286,6 +288,63 @@
           await this.loadSequences();
         } catch (err) {
           alert((err && err.detail) || 'Could not archive this sequence.');
+        }
+      },
+
+      // ===== LAUNCH =====
+      // A saved sequence is otherwise only runnable indirectly (wrapped in a
+      // Job Selection, or attached to a Schedule) -- this is the direct
+      // "launch it now" path, mirroring openLaunchSelectionModal/
+      // launchSelection in launch.js (batchProgress, pollBatch, cancelBatch,
+      // dateCustomVariables, _batchOptionsFromModal, and loadCustomVariables
+      // all come from that same merged Alpine component -- see FEATURE_SLICES
+      // in app.js -- so they don't need to be redefined here).
+      openLaunchSequenceModal(seq) {
+        if (!seq) return;
+        const latest = seq.versions && seq.versions.length ? seq.versions[seq.versions.length - 1] : null;
+        const defaults = (latest && latest.defaults) || {};
+        this.launchSequenceModal = {
+          sequence_id: seq.id,
+          source_env: defaults.source_env || 'dev',
+          target_env: defaults.target_env || '',
+          variableOverridesRaw: '',
+          repeat_enabled: false,
+          batch_variable_name: '',
+          batch_start_value: new Date().toISOString().slice(0, 10),
+          batch_iterations: 5,
+          batch_step_days: 1,
+          batch_weekend_policy: 'skip',
+          batch_stop_on_failure: false,
+        };
+        if (!this.customVariables?.length && this.loadCustomVariables) this.loadCustomVariables();
+        this.showLaunchSequenceModal = true;
+      },
+
+      async launchSequence() {
+        const m = this.launchSequenceModal;
+        const body = { source_env: m.source_env, target_env: m.target_env || '' };
+        const variable_overrides = {};
+        (m.variableOverridesRaw || '').split('\n').forEach((line) => {
+          const idx = line.indexOf('=');
+          if (idx > 0) variable_overrides[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+        });
+        if (Object.keys(variable_overrides).length > 0) body.variable_overrides = variable_overrides;
+        try {
+          if (m.repeat_enabled) {
+            body.batch = this._batchOptionsFromModal(m);
+            const batch = await api('POST', `/api/sequences/${m.sequence_id}/launch-batch`, body);
+            this.batchProgress = batch;
+            this.pollBatch(batch.batch_id);
+            this.showLaunchSequenceModal = false;
+            this.toast('success', 'Batch started', `${batch.completed} / ${batch.iterations} complete`);
+            return;
+          }
+          const run = await api('POST', `/api/sequences/${m.sequence_id}/launch`, body);
+          this.showLaunchSequenceModal = false;
+          this.toast('success', 'Launched', `Run ${run.run_id} started`);
+          setTimeout(() => this.loadRuns && this.loadRuns(), 1000);
+        } catch (e) {
+          this.toast('error', 'Launch failed', e.message);
         }
       },
     };

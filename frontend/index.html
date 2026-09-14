@@ -1926,8 +1926,15 @@
             <input x-model="jobModal.ds_job_repository" class="field-input" placeholder="DS_REPO" id="a11y-launch-repository-optional-falls-back-to-config" />
           </div>
           <div>
-            <label  class="field-label" for="a11y-launch-job-params-json-optional">Job Params (JSON, optional)</label>
-            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' id="a11y-launch-job-params-json-optional" />
+            <div class="flex items-center gap-1 mb-1">
+              <label class="field-label mb-0" for="a11y-launch-job-params-json-optional">Job Params (JSON, optional)</label>
+              <button @click="showHelp('dsJobParams')" class="help-btn" title="Learn more">
+                <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </button>
+            </div>
+            <input x-model="jobModal.ds_job_params_raw" class="field-input font-mono text-xs" placeholder='{"$G_RUN_DATE": "2026-07-24"}' title='Global variable name -> value, e.g. {"$G_RUN_DATE": "2026-07-24"}. Use {{VAR_NAME}} to pull from a Custom Variable.' id="a11y-launch-job-params-json-optional" />
           </div>
           <div>
             <label  class="field-label" for="a11y-launch-poll-interval-seconds-2">Poll Interval (seconds)</label>
@@ -2565,13 +2572,45 @@
           <textarea x-model="launchSelectionModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-selection-variable-overrides-textarea"></textarea>
           <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
         </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.repeat_enabled" data-testid="selection-repeat-toggle" /> Repeat execution</label>
+        <div x-show="launchSelectionModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="launchSelectionModal.batch_variable_name" class="field-input field-select" data-testid="selection-batch-variable-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="launchSelectionModal.batch_start_value" class="field-input" data-testid="selection-batch-start-date" /></div>
+            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSelectionModal.batch_iterations" class="field-input" data-testid="selection-batch-iterations" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSelectionModal.batch_step_days" class="field-input" data-testid="selection-batch-step-days" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="launchSelectionModal.batch_weekend_policy" class="field-input field-select" data-testid="selection-batch-weekend-policy"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.batch_stop_on_failure" data-testid="selection-batch-stop-on-failure" /> Stop on first failed run</label>
+        </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
-        <button @click="launchSelection()" class="btn-primary">Launch</button>
+        <button @click="launchSelection()" :disabled="launchSelectionModal.repeat_enabled && !launchSelectionModal.batch_variable_name" class="btn-primary" data-testid="launch-selection-submit-btn">Launch</button>
       </div>
     </div>
   </div>
+
+  <template x-if="batchProgress">
+    <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold text-emerald-900">Batch progress</div>
+          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
+          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        </div>
+        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </template>
 
   <!-- Selection Run History / Compare-Pairing Modal -->
   <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
@@ -2687,6 +2726,7 @@
                 <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
                 <span x-show="sched.next_run_at" x-text="'Next: ' + fmtDate(sched.next_run_at)"></span>
               </div>
+              <div x-show="sched.batch_variable_name" class="mt-1 text-xs text-emerald-700" x-text="`Repeats ${sched.firings_completed || 0} / ${sched.batch_max_firings} using ${sched.batch_variable_name}; next ${sched.batch_next_value || sched.batch_start_value}; auto-disables when complete.`"></div>
               <template x-if="schedulerStats">
                 <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 text-xs text-slate-600">
                   <template x-for="stat in schedulerStats.schedules.filter(item => item.id === sched.id)" :key="stat.id">
@@ -2780,6 +2820,25 @@
           <div class="text-xs text-red-600" x-show="jobSelectionsError" data-testid="schedule-selections-error"
                x-text="'Could not load job selections: ' + jobSelectionsError"></div>
           <div class="text-xs text-amber-600" x-show="jobSelections.length === 0 && !jobSelectionsError">You need at least one Job Selection first — create one in the Job Selections tab.</div>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.repeat_enabled" /> Repeat with date cursor</label>
+        <div x-show="scheduleModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="scheduleModal.batch_variable_name" class="field-input field-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="scheduleModal.batch_start_value" class="field-input" /></div>
+            <div><label class="field-label">Max firings</label><input type="number" min="1" max="200" x-model="scheduleModal.batch_max_firings" class="field-input" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="scheduleModal.batch_step_days" class="field-input" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="scheduleModal.batch_weekend_policy" class="field-input field-select"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <div class="text-xs text-muted">The schedule auto-disables after the max firings complete. Skip advances weekend cursor slots without counting a firing.</div>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" aria-label="schedulemodal enabled" /> Enabled</label>
       </div>
@@ -2879,6 +2938,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="flex items-center justify-between">
         <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
         <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" data-testid="sequence-launch-btn"
+                  @click="openLaunchSequenceModal(selectedSequence)">Run sequence</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-ci-btn"
                   @click="openCiIntegrationModal(selectedSequence, 'sequence')">CI/CD</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-edit-btn"
@@ -3139,6 +3200,75 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
     </div>
   </div>
+
+  <!-- Launch Sequence Modal -->
+  <div x-show="showLaunchSequenceModal" x-cloak class="modal-backdrop" @click.self="showLaunchSequenceModal = false">
+    <div class="modal-box w-full max-w-md" x-ref="launchSequenceDialog" role="dialog" aria-modal="true" aria-labelledby="launchSequenceModalTitle">
+      <h2 id="launchSequenceModalTitle" class="text-lg font-bold mb-4">Launch Sequence</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Source Env</label>
+          <select x-model="launchSequenceModal.source_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Target Env (leave blank for single-environment jobs)</label>
+          <select x-model="launchSequenceModal.target_env" class="field-input field-select" data-testid="launch-sequence-target-env">
+            <option value="">— None —</option>
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Variable overrides (optional, one per line "name=value")</label>
+          <textarea x-model="launchSequenceModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-sequence-variable-overrides-textarea"></textarea>
+          <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSequenceModal.repeat_enabled" data-testid="sequence-repeat-toggle" /> Repeat execution</label>
+        <div x-show="launchSequenceModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="launchSequenceModal.batch_variable_name" class="field-input field-select" data-testid="sequence-batch-variable-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="launchSequenceModal.batch_start_value" class="field-input" data-testid="sequence-batch-start-date" /></div>
+            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSequenceModal.batch_iterations" class="field-input" data-testid="sequence-batch-iterations" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSequenceModal.batch_step_days" class="field-input" data-testid="sequence-batch-step-days" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="launchSequenceModal.batch_weekend_policy" class="field-input field-select" data-testid="sequence-batch-weekend-policy"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSequenceModal.batch_stop_on_failure" data-testid="sequence-batch-stop-on-failure" /> Stop on first failed run</label>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showLaunchSequenceModal = false" class="btn-secondary">Cancel</button>
+        <button @click="launchSequence()" :disabled="launchSequenceModal.repeat_enabled && !launchSequenceModal.batch_variable_name" class="btn-primary" data-testid="launch-sequence-submit-btn">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch progress is shared state (set by either the Launch tab's selection
+       batch or this tab's sequence batch) -- rendered here too since Alpine's
+       x-if on currentView unmounts the Launch tab's own copy while this tab is
+       active. -->
+  <template x-if="batchProgress">
+    <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold text-emerald-900">Batch progress</div>
+          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
+          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        </div>
+        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </template>
 </div></template>
 
 
@@ -3323,6 +3453,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <div x-show="selectedRun.restarted_from_run_id"><span class="text-muted">Restarted from</span><br><button @click="viewRunDetail(selectedRun.restarted_from_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_from_run_id"></button></div>
+          <div x-show="selectedRun.restarted_as_run_id"><span class="text-muted">Restarted as</span><br><button @click="viewRunDetail(selectedRun.restarted_as_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_as_run_id"></button></div>
           <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
           <div class="flex gap-3 pt-2 flex-wrap">
             <button @click="openReportTab(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Report</button>
@@ -3342,6 +3474,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
                     data-testid="history-download-full-report-btn"
                     x-text="'Download Full HTML Report ' + differenceExportLabel(selectedRun.run_id, 'html')"></button>
+            <button x-show="canRestartRun(selectedRun)"
+                    @click="restartRun(selectedRun.run_id)"
+                    class="text-rose-500 hover:underline text-xs">Restart from failure</button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
@@ -3395,7 +3530,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
-                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
+                  <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
                   <td class="font-mono text-xs" x-text="((r.source_file_name || selectedRun.file_name_a) || (r.target_file_name || selectedRun.file_name_b)) ? ((r.source_file_name || selectedRun.file_name_a) || 'N/A') + ' → ' + ((r.target_file_name || selectedRun.file_name_b) || 'N/A') : '—'"></td>
                   <td x-text="r.source_row_count ?? '—'"></td>
                   <td x-text="r.target_row_count ?? '—'"></td>

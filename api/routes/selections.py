@@ -28,7 +28,7 @@ from api.services.job_env_validation import (
 )
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from api.services.sequence_preconditions import check_for_session as check_preconditions
-from api.services.batch_launch import run_batch, validate_batch_variable
+from api.services.batch_launch import batch_out, run_batch, validate_batch_variable
 from etl_framework.repository.database import SessionLocal
 from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunBatchRepository, RunRepository
 from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
@@ -316,6 +316,14 @@ def launch_selection_batch(
         weekend_policy=body.batch.weekend_policy,
         stop_on_failure=body.batch.stop_on_failure,
     )
+    AuditService(db).log(
+        request, "selection.batch_launched", "job_selection", selection_id,
+        {
+            "batch_id": batch_id, "variable_name": body.batch.variable_name,
+            "start_value": body.batch.start_value.isoformat(), "iterations": body.batch.iterations,
+            "step_days": body.batch.step_days, "weekend_policy": body.batch.weekend_policy,
+        },
+    )
     launch_body = body.model_dump(exclude={"batch"})
 
     def _launch(iter_db: Session, target_id: int, overrides: dict[str, str]) -> str:
@@ -330,26 +338,22 @@ def launch_selection_batch(
         )
 
     background_tasks.add_task(run_batch, batch_id, SessionLocal, _launch)
-    return _batch_out(db, batch)
+    return batch_out(db, batch)
 
 
 def _validate_selection_launch(selection_id: int, body: JobSelectionLaunchRequest, db: Session) -> None:
+    """Probes launch feasibility (env/precondition/job validation, all of
+    which live inside _do_launch_selection) via a throwaway run, then deletes
+    exactly that run by its own run_id -- never "the most recent run in the
+    whole table", which under concurrent launches could be someone else's
+    real run."""
     class _NoTasks:
         def add_task(self, *args, **kwargs):
             return None
-    _do_launch_selection(selection_id, body, _NoTasks(), None, db)
-    run = RunRepository(db).list_runs(limit=1)[0]
-    db.delete(run)
-    db.commit()
+    probe_run_id = _do_launch_selection(selection_id, body, _NoTasks(), None, db)
+    run = RunRepository(db).get_run(probe_run_id)
+    if run is not None:
+        db.delete(run)
+        db.commit()
 
 
-def _batch_out(db: Session, batch) -> RunBatchOut:
-    runs = RunBatchRepository(db).member_runs(batch.batch_id)
-    return RunBatchOut(
-        **{k: getattr(batch, k) for k in (
-            "batch_id", "target_type", "target_id", "status", "variable_name", "start_value",
-            "iterations", "step_days", "weekend_policy", "stop_on_failure", "completed",
-            "current_iteration", "current_value", "created_at", "completed_at",
-        )},
-        runs=[{"run_id": r.run_id, "status": r.status, "started_at": r.started_at, "completed_at": r.completed_at} for r in runs],
-    )

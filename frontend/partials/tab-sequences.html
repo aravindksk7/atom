@@ -39,6 +39,8 @@
       <div class="flex items-center justify-between">
         <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
         <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" data-testid="sequence-launch-btn"
+                  @click="openLaunchSequenceModal(selectedSequence)">Run sequence</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-ci-btn"
                   @click="openCiIntegrationModal(selectedSequence, 'sequence')">CI/CD</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-edit-btn"
@@ -299,4 +301,73 @@
       </div>
     </div>
   </div>
+
+  <!-- Launch Sequence Modal -->
+  <div x-show="showLaunchSequenceModal" x-cloak class="modal-backdrop" @click.self="showLaunchSequenceModal = false">
+    <div class="modal-box w-full max-w-md" x-ref="launchSequenceDialog" role="dialog" aria-modal="true" aria-labelledby="launchSequenceModalTitle">
+      <h2 id="launchSequenceModalTitle" class="text-lg font-bold mb-4">Launch Sequence</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="field-label">Source Env</label>
+          <select x-model="launchSequenceModal.source_env" class="field-input field-select">
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Target Env (leave blank for single-environment jobs)</label>
+          <select x-model="launchSequenceModal.target_env" class="field-input field-select" data-testid="launch-sequence-target-env">
+            <option value="">— None —</option>
+            <option value="dev">Dev</option><option value="qa">QA</option>
+            <option value="staging">Staging</option><option value="prod">Prod</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Variable overrides (optional, one per line "name=value")</label>
+          <textarea x-model="launchSequenceModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-sequence-variable-overrides-textarea"></textarea>
+          <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSequenceModal.repeat_enabled" data-testid="sequence-repeat-toggle" /> Repeat execution</label>
+        <div x-show="launchSequenceModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="launchSequenceModal.batch_variable_name" class="field-input field-select" data-testid="sequence-batch-variable-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="launchSequenceModal.batch_start_value" class="field-input" data-testid="sequence-batch-start-date" /></div>
+            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSequenceModal.batch_iterations" class="field-input" data-testid="sequence-batch-iterations" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSequenceModal.batch_step_days" class="field-input" data-testid="sequence-batch-step-days" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="launchSequenceModal.batch_weekend_policy" class="field-input field-select" data-testid="sequence-batch-weekend-policy"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSequenceModal.batch_stop_on_failure" data-testid="sequence-batch-stop-on-failure" /> Stop on first failed run</label>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="showLaunchSequenceModal = false" class="btn-secondary">Cancel</button>
+        <button @click="launchSequence()" :disabled="launchSequenceModal.repeat_enabled && !launchSequenceModal.batch_variable_name" class="btn-primary" data-testid="launch-sequence-submit-btn">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch progress is shared state (set by either the Launch tab's selection
+       batch or this tab's sequence batch) -- rendered here too since Alpine's
+       x-if on currentView unmounts the Launch tab's own copy while this tab is
+       active. -->
+  <template x-if="batchProgress">
+    <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold text-emerald-900">Batch progress</div>
+          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
+          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        </div>
+        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </template>
 </div></template>

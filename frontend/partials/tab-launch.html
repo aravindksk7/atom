@@ -1353,11 +1353,11 @@
           <textarea x-model="launchSelectionModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-selection-variable-overrides-textarea"></textarea>
           <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
         </div>
-        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.repeat_enabled" /> Repeat execution</label>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.repeat_enabled" data-testid="selection-repeat-toggle" /> Repeat execution</label>
         <div x-show="launchSelectionModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
           <div>
             <label class="field-label">Date variable</label>
-            <select x-model="launchSelectionModal.batch_variable_name" class="field-input field-select">
+            <select x-model="launchSelectionModal.batch_variable_name" class="field-input field-select" data-testid="selection-batch-variable-select">
               <option value="">Select date variable...</option>
               <template x-for="variable in dateCustomVariables()" :key="variable.name">
                 <option :value="variable.name" x-text="variable.name"></option>
@@ -1365,30 +1365,30 @@
             </select>
           </div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="field-label">Start date</label><input type="date" x-model="launchSelectionModal.batch_start_value" class="field-input" /></div>
-            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSelectionModal.batch_iterations" class="field-input" /></div>
-            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSelectionModal.batch_step_days" class="field-input" /></div>
-            <div><label class="field-label">Weekend policy</label><select x-model="launchSelectionModal.batch_weekend_policy" class="field-input field-select"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+            <div><label class="field-label">Start date</label><input type="date" x-model="launchSelectionModal.batch_start_value" class="field-input" data-testid="selection-batch-start-date" /></div>
+            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSelectionModal.batch_iterations" class="field-input" data-testid="selection-batch-iterations" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSelectionModal.batch_step_days" class="field-input" data-testid="selection-batch-step-days" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="launchSelectionModal.batch_weekend_policy" class="field-input field-select" data-testid="selection-batch-weekend-policy"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
           </div>
-          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.batch_stop_on_failure" /> Stop on first failed run</label>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.batch_stop_on_failure" data-testid="selection-batch-stop-on-failure" /> Stop on first failed run</label>
         </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
-        <button @click="launchSelection()" :disabled="launchSelectionModal.repeat_enabled && !launchSelectionModal.batch_variable_name" class="btn-primary">Launch</button>
+        <button @click="launchSelection()" :disabled="launchSelectionModal.repeat_enabled && !launchSelectionModal.batch_variable_name" class="btn-primary" data-testid="launch-selection-submit-btn">Launch</button>
       </div>
     </div>
   </div>
 
   <template x-if="batchProgress">
-    <div class="card mb-4 border-emerald-200 bg-emerald-50">
+    <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="font-semibold text-emerald-900">Batch progress</div>
           <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
-          <div class="text-xs text-emerald-700" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
         </div>
-        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm">Cancel</button>
+        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
       </div>
     </div>
   </template>
