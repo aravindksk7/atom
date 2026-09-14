@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger("api.scheduler")
 
@@ -104,6 +104,19 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         if not sched.enabled:
             record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Schedule disabled")
             return
+        batch_value = None
+        if sched.batch_variable_name:
+            if sched.batch_max_firings is not None and (sched.firings_completed or 0) >= sched.batch_max_firings:
+                repo.update(schedule_id, {"enabled": False})
+                remove_job(schedule_id)
+                record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary="Scheduled batch complete")
+                return
+            batch_value = sched.batch_next_value or sched.batch_start_value
+            if sched.batch_weekend_policy == "skip" and date.fromisoformat(batch_value).weekday() >= 5:
+                next_value = _next_schedule_batch_value(batch_value, sched.batch_step_days or 1, "skip")
+                repo.advance_batch_cursor(schedule_id, next_value, increment_firings=False, disable_if_complete=False)
+                record_scheduler_event(db, sched, "skipped", "CANCELLED", error_summary=f"{batch_value} is a weekend")
+                return
 
         from api.schemas import SequenceRef
         from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
@@ -183,6 +196,7 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             job_sequence=job_sequence,
             run_settings=run_settings,
             config_id=config_id,
+            variable_overrides={sched.batch_variable_name: batch_value} if sched.batch_variable_name and batch_value else {},
         )
         started_at = datetime.now(timezone.utc)
         started_perf = time.perf_counter()
@@ -230,6 +244,14 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             error_summary=getattr(run, "error_message", None) if run is not None else None,
         )
         repo.touch(schedule_id, last_run_at=datetime.now(timezone.utc))
+        if sched.batch_variable_name and batch_value:
+            updated = repo.advance_batch_cursor(
+                schedule_id,
+                _next_schedule_batch_value(batch_value, sched.batch_step_days or 1, sched.batch_weekend_policy or "ignore"),
+                increment_firings=True,
+            )
+            if updated is not None and not updated.enabled:
+                remove_job(schedule_id)
         logger.info("Scheduled run '%s' started as %s", name, run_id)
     except Exception as exc:
         from etl_framework.repository.database import SessionLocal as _TelemetrySessionLocal
@@ -247,6 +269,17 @@ def _run_schedule(schedule_id: int, name: str) -> None:
         logger.exception("Scheduled run '%s' failed: %s", name, exc)
     finally:
         db.close()
+
+
+def _next_schedule_batch_value(value: str, step_days: int, weekend_policy: str) -> str:
+    candidate = date.fromisoformat(value) + timedelta(days=step_days)
+    if weekend_policy == "shift":
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+    elif weekend_policy == "skip":
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=step_days)
+    return candidate.isoformat()
 
 
 def start() -> None:

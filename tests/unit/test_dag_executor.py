@@ -311,3 +311,55 @@ def test_outcome_collects_states_for_aggregation():
 
     assert set(outcome.states) == {"state-a", "state-b"}
     assert len(outcome.results) == 2
+
+
+def test_seeded_parent_is_not_executed_but_unblocks_child():
+    from api.services.sequence_conditions import ParentOutcome
+
+    seen = []
+
+    def run_step(step):
+        from api.services.dag_executor import StepOutcome
+        seen.append(step.step_id)
+        return StepOutcome(status="PASSED", result=_Result(), state=f"state-{step.step_id}")
+
+    steps = [
+        SequenceStepRef(step_id="already_done", job_name="ja"),
+        SequenceStepRef(step_id="rerun", job_name="jb", depends_on=["already_done"]),
+    ]
+    ex, repo = _executor(
+        steps,
+        run_step,
+        seeded={"already_done": ParentOutcome(status="PASSED", result=_Result("PASSED"))},
+    )
+    outcome = ex.run()
+
+    assert seen == ["rerun"]
+    assert repo.status == {"rerun": "PASSED"}
+    assert outcome.states == ["state-rerun"]
+
+
+def test_seeded_slow_parent_unblocks_child_with_matching_condition():
+    from api.services.sequence_conditions import ParentOutcome
+
+    seen = []
+    steps = [
+        SequenceStepRef(step_id="prior", job_name="ja"),
+        SequenceStepRef(
+            step_id="child",
+            job_name="jb",
+            depends_on=["prior"],
+            condition=StepCondition(require_status=["SLOW"]),
+        ),
+    ]
+    ex, repo = _executor(
+        steps,
+        lambda step: seen.append(step.step_id) or __import__("api.services.dag_executor", fromlist=["StepOutcome"]).StepOutcome(
+            status="PASSED", result=_Result(), state=f"state-{step.step_id}"
+        ),
+        seeded={"prior": ParentOutcome(status="SLOW", result=_Result("SLOW"))},
+    )
+    ex.run()
+
+    assert seen == ["child"]
+    assert repo.status == {"child": "PASSED"}

@@ -143,9 +143,29 @@
     async viewRunDetail(runId) {
       try {
         this.selectedRun = await api('GET', `/api/runs/${runId}`);
+        this.selectedRun.steps = await api('GET', `/api/runs/${runId}/steps`);
+        const restart = await api('GET', `/api/runs/${runId}/restart`);
+        this.selectedRun.restarted_as_run_id = restart?.run_id || null;
         this.$nextTick(() => this.renderChart());
       } catch (e) {
         this.toast('error', 'Load failed', e.message);
+      }
+    },
+
+    canRestartRun(run) {
+      if (!run) return false;
+      if (['ERROR', 'BLOCKED'].includes(run.status)) return true;
+      return (run.steps || []).some(s => ['FAILED', 'CANCELLED', 'BLOCKED', 'ERROR'].includes(s.status));
+    },
+
+    async restartRun(runId) {
+      try {
+        const restarted = await api('POST', `/api/runs/${runId}/restart`);
+        await this.loadRuns();
+        await this.viewRunDetail(restarted.run_id);
+        this.toast('success', 'Restart queued', `New run ${restarted.run_id.substring(0, 8)}… started`);
+      } catch (e) {
+        this.toast('error', 'Restart failed', e.message);
       }
     },
 

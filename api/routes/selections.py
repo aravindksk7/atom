@@ -10,10 +10,12 @@ from api.schemas import (
     JobSelectionCreate,
     JobSelectionDetailOut,
     JobSelectionLaunchRequest,
+    JobSelectionBatchLaunchRequest,
     JobSelectionOut,
     JobSelectionUpdate,
     JobSelectionVersionOut,
     RunStatusOut,
+    RunBatchOut,
     RunTrigger,
     SequenceRef,
 )
@@ -26,7 +28,9 @@ from api.services.job_env_validation import (
 )
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from api.services.sequence_preconditions import check_for_session as check_preconditions
-from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunRepository
+from api.services.batch_launch import run_batch, validate_batch_variable
+from etl_framework.repository.database import SessionLocal
+from etl_framework.repository.repository import ConfigRepository, JobRepository, JobSelectionRepository, RunBatchRepository, RunRepository
 from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 
 router = APIRouter(tags=["selections"])
@@ -196,6 +200,18 @@ def launch_selection(
     request: Request,
     db: Session = Depends(get_session),
 ):
+    run_id = _do_launch_selection(selection_id, body, background_tasks, request, db)
+    return RunStatusOut(run_id=run_id, status="PENDING")
+
+
+def _do_launch_selection(
+    selection_id: int,
+    body: JobSelectionLaunchRequest,
+    background_tasks: BackgroundTasks | None,
+    request: Request | None,
+    db: Session,
+    run_batch_id: str | None = None,
+) -> str:
     repo = JobSelectionRepository(db)
     selection = repo.get(selection_id)
     if selection is None:
@@ -256,16 +272,84 @@ def launch_selection(
         selection_id=selection_id,
         selection_version=version.version_number,
         ci_context=body.ci_context,
+        run_batch_id=run_batch_id,
     )
-    AuditService(db).log(
-        request, "selection.launched", "job_selection", selection_id,
-        {
-            "run_id": run_id, "source_env": trigger.source_env,
-            "target_env": trigger.target_env, "version": version.version_number,
-        },
-    )
-    background_tasks.add_task(
-        _execute_run, run_id, dag_steps if resolved is not None else ordered_jobs,
+    if request is not None:
+        AuditService(db).log(
+            request, "selection.launched", "job_selection", selection_id,
+            {
+                "run_id": run_id, "source_env": trigger.source_env,
+                "target_env": trigger.target_env, "version": version.version_number,
+            },
+        )
+    args = (
+        run_id, dag_steps if resolved is not None else ordered_jobs,
         trigger.source_env, trigger.target_env, trigger.run_settings, config_snapshot,
     )
-    return RunStatusOut(run_id=run_id, status="PENDING")
+    if background_tasks is None:
+        _execute_run(*args)
+    else:
+        background_tasks.add_task(_execute_run, *args)
+    return run_id
+
+
+@router.post("/{selection_id}/launch-batch", response_model=RunBatchOut, status_code=202)
+def launch_selection_batch(
+    selection_id: int,
+    body: JobSelectionBatchLaunchRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    validate_batch_variable(db, body.batch.variable_name)
+    probe = JobSelectionLaunchRequest(**body.model_dump(exclude={"batch"}))
+    _validate_selection_launch(selection_id, probe, db)
+    batch_id = str(uuid.uuid4())
+    batch = RunBatchRepository(db).create(
+        batch_id=batch_id,
+        target_type="selection",
+        target_id=selection_id,
+        variable_name=body.batch.variable_name,
+        start_value=body.batch.start_value.isoformat(),
+        iterations=body.batch.iterations,
+        step_days=body.batch.step_days,
+        weekend_policy=body.batch.weekend_policy,
+        stop_on_failure=body.batch.stop_on_failure,
+    )
+    launch_body = body.model_dump(exclude={"batch"})
+
+    def _launch(iter_db: Session, target_id: int, overrides: dict[str, str]) -> str:
+        merged = {**launch_body.get("variable_overrides", {}), **overrides}
+        return _do_launch_selection(
+            target_id,
+            JobSelectionLaunchRequest(**{**launch_body, "variable_overrides": merged}),
+            None,
+            None,
+            iter_db,
+            run_batch_id=batch_id,
+        )
+
+    background_tasks.add_task(run_batch, batch_id, SessionLocal, _launch)
+    return _batch_out(db, batch)
+
+
+def _validate_selection_launch(selection_id: int, body: JobSelectionLaunchRequest, db: Session) -> None:
+    class _NoTasks:
+        def add_task(self, *args, **kwargs):
+            return None
+    _do_launch_selection(selection_id, body, _NoTasks(), None, db)
+    run = RunRepository(db).list_runs(limit=1)[0]
+    db.delete(run)
+    db.commit()
+
+
+def _batch_out(db: Session, batch) -> RunBatchOut:
+    runs = RunBatchRepository(db).member_runs(batch.batch_id)
+    return RunBatchOut(
+        **{k: getattr(batch, k) for k in (
+            "batch_id", "target_type", "target_id", "status", "variable_name", "start_value",
+            "iterations", "step_days", "weekend_policy", "stop_on_failure", "completed",
+            "current_iteration", "current_value", "created_at", "completed_at",
+        )},
+        runs=[{"run_id": r.run_id, "status": r.status, "started_at": r.started_at, "completed_at": r.completed_at} for r in runs],
+    )

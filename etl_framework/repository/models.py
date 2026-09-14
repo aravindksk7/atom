@@ -155,12 +155,15 @@ class TestRun(Base):
     selection_id = Column(Integer, nullable=True, index=True)
     selection_version = Column(Integer, nullable=True)
     ci_context = Column(JSON, nullable=True)
+    restarted_from_run_id = Column(String(36), nullable=True, index=True)
+    run_batch_id = Column(String(36), ForeignKey("run_batches.batch_id", ondelete="SET NULL"), nullable=True, index=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
     steps = relationship("RunStep", back_populates="run",
-                         cascade="all, delete-orphan", lazy="select",
-                         order_by="RunStep.step_index")
+                          cascade="all, delete-orphan", lazy="select",
+                          order_by="RunStep.step_index")
+    run_batch = relationship("RunBatch", back_populates="runs")
 
     @property
     def test_cases(self):
@@ -277,6 +280,29 @@ class DifferenceExportJob(Base):
     recomputed_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class RunBatch(Base):
+    __tablename__ = "run_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String(36), nullable=False, unique=True, index=True)
+    target_type = Column(String(20), nullable=False)
+    target_id = Column(Integer, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="RUNNING", index=True)
+    variable_name = Column(String(100), nullable=False)
+    start_value = Column(String(10), nullable=False)
+    iterations = Column(Integer, nullable=False)
+    step_days = Column(Integer, nullable=False, default=1)
+    weekend_policy = Column(String(10), nullable=False, default="skip")
+    stop_on_failure = Column(Boolean, nullable=False, default=False)
+    completed = Column(Integer, nullable=False, default=0)
+    current_iteration = Column(Integer, nullable=True)
+    current_value = Column(String(10), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    runs = relationship("TestRun", back_populates="run_batch", lazy="select")
+
+
 # ---------------------------------------------------------------------------
 # P3 — Job Lineage
 # ---------------------------------------------------------------------------
@@ -357,6 +383,13 @@ class ScheduledRun(Base):
     selection_version = Column(Integer, nullable=True)
     sequence_id = Column(Integer, nullable=True, index=True)
     sequence_version = Column(Integer, nullable=True)
+    batch_variable_name = Column(String(100), nullable=True)
+    batch_start_value = Column(String(10), nullable=True)
+    batch_step_days = Column(Integer, nullable=False, default=1)
+    batch_max_firings = Column(Integer, nullable=True)
+    batch_weekend_policy = Column(String(10), nullable=True)
+    batch_next_value = Column(String(10), nullable=True)
+    firings_completed = Column(Integer, nullable=False, default=0)
 
 
 class SchedulerTelemetryEvent(Base):
@@ -455,6 +488,7 @@ class RunStep(Base):
     released_by = Column(String(255), nullable=True)
     release_note = Column(Text, nullable=True)
     release_action = Column(String(20), nullable=True)
+    carried_over = Column(Boolean, nullable=False, default=False)
 
     run = relationship("TestRun", back_populates="steps")
 

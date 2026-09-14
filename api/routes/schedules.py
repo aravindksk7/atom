@@ -11,6 +11,7 @@ from api.dependencies import get_session
 from api.routes.selections import _validate_env_requirements
 from api.schemas import SequenceRef
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
+from api.services.batch_launch import validate_batch_variable
 from etl_framework.repository.repository import JobRepository, JobSelectionRepository, ScheduleRepository
 from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 import api.services.scheduler as _sched_svc
@@ -39,6 +40,11 @@ class ScheduleCreate(BaseModel):
     source_env: str
     target_env: str = ""
     enabled: bool = True
+    batch_variable_name: str | None = None
+    batch_start_value: str | None = None
+    batch_step_days: int = 1
+    batch_max_firings: int | None = None
+    batch_weekend_policy: str | None = None
 
     @field_validator("cron_expr")
     @classmethod
@@ -49,6 +55,20 @@ class ScheduleCreate(BaseModel):
     def check_one_target(self) -> "ScheduleCreate":
         if (self.selection_id is None) == (self.sequence_id is None):
             raise ValueError("Provide exactly one of selection_id or sequence_id")
+        batch_fields = [self.batch_variable_name, self.batch_start_value, self.batch_max_firings, self.batch_weekend_policy]
+        if any(v is not None for v in batch_fields):
+            if not all(v is not None for v in batch_fields):
+                raise ValueError("batch_variable_name, batch_start_value, batch_max_firings, and batch_weekend_policy are required together")
+            if self.batch_step_days < 1:
+                raise ValueError("batch_step_days must be at least 1")
+            if self.batch_max_firings is not None and not 1 <= self.batch_max_firings <= 200:
+                raise ValueError("batch_max_firings must be between 1 and 200")
+            if self.batch_weekend_policy not in {"skip", "shift", "ignore"}:
+                raise ValueError("batch_weekend_policy must be skip, shift, or ignore")
+            try:
+                datetime.strptime(self.batch_start_value, "%Y-%m-%d")
+            except (TypeError, ValueError) as exc:
+                raise ValueError("batch_start_value must be YYYY-MM-DD") from exc
         return self
 
 
@@ -66,6 +86,13 @@ class ScheduleOut(BaseModel):
     last_run_at: datetime | None
     next_run_at: datetime | None
     created_at: datetime
+    batch_variable_name: str | None = None
+    batch_start_value: str | None = None
+    batch_step_days: int = 1
+    batch_max_firings: int | None = None
+    batch_weekend_policy: str | None = None
+    batch_next_value: str | None = None
+    firings_completed: int = 0
     model_config = {"from_attributes": True}
 
 
@@ -108,6 +135,8 @@ def _resolve_and_validate(db: Session, body: "ScheduleCreate") -> tuple[str, int
     "selection" or "sequence".
     """
     jobs_by_name = {j.name: j for j in JobRepository(db).list()}
+    if body.batch_variable_name:
+        validate_batch_variable(db, body.batch_variable_name)
 
     if body.sequence_id is not None:
         version_number = _resolve_sequence_version(db, body.sequence_id, body.sequence_version)
@@ -147,6 +176,8 @@ def create_schedule(body: ScheduleCreate, request: Request, db: Session = Depend
     if repo.get_by_name(body.name):
         raise HTTPException(status_code=409, detail="Schedule name already exists")
     data = body.model_dump()
+    if data.get("batch_variable_name") and not data.get("batch_next_value"):
+        data["batch_next_value"] = data.get("batch_start_value")
     kind, version_number = _resolve_and_validate(db, body)
     if kind == "sequence":
         data["sequence_version"] = version_number
@@ -170,6 +201,8 @@ def update_schedule(
     schedule_id: int, body: ScheduleCreate, request: Request, db: Session = Depends(get_session)
 ):
     data = body.model_dump()
+    if data.get("batch_variable_name") and not data.get("batch_next_value"):
+        data["batch_next_value"] = data.get("batch_start_value")
     kind, version_number = _resolve_and_validate(db, body)
     if kind == "sequence":
         data["sequence_version"] = version_number

@@ -44,6 +44,8 @@
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <div x-show="selectedRun.restarted_from_run_id"><span class="text-muted">Restarted from</span><br><button @click="viewRunDetail(selectedRun.restarted_from_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_from_run_id"></button></div>
+          <div x-show="selectedRun.restarted_as_run_id"><span class="text-muted">Restarted as</span><br><button @click="viewRunDetail(selectedRun.restarted_as_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_as_run_id"></button></div>
           <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
           <div class="flex gap-3 pt-2 flex-wrap">
             <button @click="openReportTab(selectedRun.run_id)" class="text-indigo-500 hover:underline text-xs">Report</button>
@@ -63,6 +65,9 @@
                     class="text-indigo-500 hover:underline text-xs disabled:text-slate-400"
                     data-testid="history-download-full-report-btn"
                     x-text="'Download Full HTML Report ' + differenceExportLabel(selectedRun.run_id, 'html')"></button>
+            <button x-show="canRestartRun(selectedRun)"
+                    @click="restartRun(selectedRun.run_id)"
+                    class="text-rose-500 hover:underline text-xs">Restart from failure</button>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
@@ -116,7 +121,7 @@
                     <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
-                  <td x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></td>
+                  <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
                   <td class="font-mono text-xs" x-text="((r.source_file_name || selectedRun.file_name_a) || (r.target_file_name || selectedRun.file_name_b)) ? ((r.source_file_name || selectedRun.file_name_a) || 'N/A') + ' → ' + ((r.target_file_name || selectedRun.file_name_b) || 'N/A') : '—'"></td>
                   <td x-text="r.source_row_count ?? '—'"></td>
                   <td x-text="r.target_row_count ?? '—'"></td>

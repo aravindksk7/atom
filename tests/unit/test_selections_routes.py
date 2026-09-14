@@ -205,6 +205,30 @@ def test_launch_creates_run_with_selection_fields(client):
     assert [r["run_id"] for r in runs_resp.json()] == [run_id]
 
 
+def test_launch_batch_creates_batch_for_date_variable(client):
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import CustomVariableRepository
+
+    with SessionLocal() as db:
+        CustomVariableRepository(db).create("business_date", "date", "today", "")
+    created = _create_selection(client)
+    resp = client.post(f"/api/selections/{created['id']}/launch-batch", json={
+        "source_env": "dev", "target_env": "qa",
+        "batch": {"variable_name": "business_date", "start_value": "2026-09-11", "iterations": 2},
+    })
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["target_type"] == "selection"
+
+
+def test_launch_batch_rejects_missing_variable(client):
+    created = _create_selection(client)
+    resp = client.post(f"/api/selections/{created['id']}/launch-batch", json={
+        "source_env": "dev", "target_env": "qa",
+        "batch": {"variable_name": "missing_date", "start_value": "2026-09-11", "iterations": 2},
+    })
+    assert resp.status_code == 422
+
+
 def test_launch_single_env_job_type_succeeds_without_target(client):
     created = _create_selection(client, name="bo-only", jobs=["bo_job"])
     resp = client.post(f"/api/selections/{created['id']}/launch", json={"source_env": "dev"})

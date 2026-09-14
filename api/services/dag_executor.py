@@ -63,6 +63,7 @@ class DagExecutor:
         default_max_retries: int = 0,
         default_retry_delay_seconds: float = 0.0,
         retry_on: list[str] | None = None,
+        seeded: dict[str, ParentOutcome] | None = None,
     ) -> None:
         import time as _time
 
@@ -93,9 +94,10 @@ class DagExecutor:
                 if parent in self._children:
                     self._children[parent].append(step.step_id)
 
-        self._pending: list[str] = [s.step_id for s in self._steps]
-        self._outcomes: dict[str, ParentOutcome] = {}
-        self._final: dict[str, str] = {}
+        seeded = seeded or {}
+        self._pending: list[str] = [s.step_id for s in self._steps if s.step_id not in seeded]
+        self._outcomes: dict[str, ParentOutcome] = dict(seeded)
+        self._final: dict[str, str] = {step_id: outcome.status for step_id, outcome in seeded.items()}
         self._held: dict[str, float] = {}          # step_id -> held since (clock)
         self._outcome = DagOutcome()
 

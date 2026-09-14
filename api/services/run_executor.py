@@ -24,6 +24,7 @@ from api.services.aws_athena_service import AthenaQueryFailedError, AwsAthenaSer
 from api.services.aws_glue_service import AwsGlueService
 from api.services.aws_s3_runtime import AwsS3Runtime
 from api.services.frame_engine import FrameEngine
+from api.services.sequence_conditions import ParentOutcome
 from etl_framework.assertions.comparators import evaluate_assertion, normalise_assertion
 from etl_framework.aws_s3.formats import validate_format
 from etl_framework.aws_s3.metadata import read_object_metadata
@@ -241,6 +242,8 @@ class RunExecutor:
         job_sequence: list[str | SequenceStep],
         run_settings: RunSettings,
         config_snapshot: dict[str, Any] | None = None,
+        carried_over_states: list[TestCaseState] | None = None,
+        seeded_outcomes: dict[str, ParentOutcome] | None = None,
     ) -> None:
         self._db = db
         self._run_id = run_id
@@ -250,6 +253,8 @@ class RunExecutor:
         self._settings = run_settings
         self._config_snapshot = config_snapshot or {}
         self._dag_steps: list = []
+        self._carried_over_states = list(carried_over_states or [])
+        self._seeded_outcomes = dict(seeded_outcomes or {})
         self._legacy_chain = True
         self._db_lock = threading.Lock()
         self._worker_session_factory = None
@@ -275,9 +280,12 @@ class RunExecutor:
                 jobs_index = self._build_jobs_index()
                 self._validate_dependencies(steps, jobs_index)
                 step_repo = RunStepRepository(self._db)
-                step_repo.materialize_steps(self._run_id, self._dag_steps)
+                if not step_repo.list_steps(self._run_id):
+                    step_repo.materialize_steps(self._run_id, self._dag_steps)
 
                 outcome = self._build_dag_executor(step_repo, jobs_index).run()
+                if self._carried_over_states:
+                    outcome.states = self._carried_over_states + outcome.states
 
                 if outcome.cancelled:
                     self._run_repo.update_run_status(
@@ -361,6 +369,7 @@ class RunExecutor:
             default_max_retries=self._settings.max_retries,
             default_retry_delay_seconds=self._settings.retry_delay_seconds,
             retry_on=list(self._settings.retry_on or []),
+            seeded=self._seeded_outcomes,
         )
 
     def _run_dag_step(self, step, jobs_index: dict):

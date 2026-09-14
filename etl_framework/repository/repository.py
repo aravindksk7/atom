@@ -13,6 +13,7 @@ from etl_framework.repository.models import (
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
     RunStep, JobSelection, JobSelectionVersion, AppSettings, TERMINAL_STATUSES,
     SchedulerTelemetryEvent, CustomVariable,
+    RunBatch,
 )
 
 
@@ -389,6 +390,8 @@ class RunRepository:
         selection_id: int | None = None,
         selection_version: int | None = None,
         ci_context: dict | None = None,
+        run_batch_id: str | None = None,
+        restarted_from_run_id: str | None = None,
     ) -> TestRun:
         run = TestRun(
             run_id=run_id,
@@ -401,6 +404,8 @@ class RunRepository:
             selection_id=selection_id,
             selection_version=selection_version,
             ci_context=ci_context,
+            run_batch_id=run_batch_id,
+            restarted_from_run_id=restarted_from_run_id,
         )
         self._db.add(run)
         self._db.commit()
@@ -409,6 +414,14 @@ class RunRepository:
 
     def get_run(self, run_id: str) -> TestRun | None:
         return self._db.query(TestRun).filter(TestRun.run_id == run_id).first()
+
+    def find_restart_for_run(self, original_run_id: str) -> TestRun | None:
+        return (
+            self._db.query(TestRun)
+            .filter(TestRun.restarted_from_run_id == original_run_id)
+            .order_by(TestRun.id.desc())
+            .first()
+        )
 
     def list_runs(
         self,
@@ -467,6 +480,15 @@ class RunRepository:
         run.cancel_requested = True
         self._db.commit()
         return True
+
+    def set_run_batch_id(self, run_id: str, batch_id: str) -> TestRun | None:
+        run = self.get_run(run_id)
+        if run is None:
+            return None
+        run.run_batch_id = batch_id
+        self._db.commit()
+        self._db.refresh(run)
+        return run
 
     def is_cancel_requested(self, run_id: str) -> bool:
         """Re-fetch from DB (bypass identity-map cache) and return cancel flag."""
@@ -919,6 +941,91 @@ class RunRepository:
 # P0 — Auth: API token repository
 # ---------------------------------------------------------------------------
 
+
+class RunBatchRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def create(
+        self,
+        *,
+        batch_id: str,
+        target_type: str,
+        target_id: int,
+        variable_name: str,
+        start_value: str,
+        iterations: int,
+        step_days: int,
+        weekend_policy: str,
+        stop_on_failure: bool = False,
+    ) -> RunBatch:
+        batch = RunBatch(
+            batch_id=batch_id,
+            target_type=target_type,
+            target_id=target_id,
+            variable_name=variable_name,
+            start_value=start_value,
+            iterations=iterations,
+            step_days=step_days,
+            weekend_policy=weekend_policy,
+            stop_on_failure=stop_on_failure,
+        )
+        self._db.add(batch)
+        self._db.commit()
+        self._db.refresh(batch)
+        return batch
+
+    def get(self, batch_id: str) -> RunBatch | None:
+        return self._db.query(RunBatch).filter(RunBatch.batch_id == batch_id).first()
+
+    def stop(self, batch_id: str) -> RunBatch | None:
+        batch = self.get(batch_id)
+        if batch is None:
+            return None
+        if batch.status not in {"COMPLETED", "STOPPED", "FAILED"}:
+            batch.status = "STOPPED"
+            batch.completed_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(batch)
+        return batch
+
+    def increment_completed(self, batch_id: str) -> RunBatch | None:
+        batch = self.get(batch_id)
+        if batch is None:
+            return None
+        batch.completed = (batch.completed or 0) + 1
+        self._db.commit()
+        self._db.refresh(batch)
+        return batch
+
+    def complete(self, batch_id: str, status: str = "COMPLETED") -> RunBatch | None:
+        batch = self.get(batch_id)
+        if batch is None:
+            return None
+        batch.status = status
+        batch.completed_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(batch)
+        return batch
+
+    def set_current(self, batch_id: str, iteration: int, value: str) -> RunBatch | None:
+        batch = self.get(batch_id)
+        if batch is None:
+            return None
+        batch.current_iteration = iteration
+        batch.current_value = value
+        self._db.commit()
+        self._db.refresh(batch)
+        return batch
+
+    def member_runs(self, batch_id: str) -> list[TestRun]:
+        return (
+            self._db.query(TestRun)
+            .filter(TestRun.run_batch_id == batch_id)
+            .order_by(TestRun.id)
+            .all()
+        )
+
 import hashlib
 import hmac as _hmac
 import os
@@ -1232,6 +1339,30 @@ class ScheduleRepository:
             if next_run_at:
                 sched.next_run_at = next_run_at
             self._db.commit()
+
+    def advance_batch_cursor(
+        self,
+        schedule_id: int,
+        next_value: str,
+        *,
+        increment_firings: bool,
+        disable_if_complete: bool = True,
+    ) -> ScheduledRun | None:
+        sched = self._db.get(ScheduledRun, schedule_id)
+        if sched is None:
+            return None
+        sched.batch_next_value = next_value
+        if increment_firings:
+            sched.firings_completed = (sched.firings_completed or 0) + 1
+        if (
+            disable_if_complete
+            and sched.batch_max_firings is not None
+            and (sched.firings_completed or 0) >= sched.batch_max_firings
+        ):
+            sched.enabled = False
+        self._db.commit()
+        self._db.refresh(sched)
+        return sched
 
 
 @dataclass(frozen=True)

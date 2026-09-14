@@ -87,6 +87,8 @@
     selectedSelectionJobNames: [],
     showLaunchSelectionModal: false,
     launchSelectionModal: {},
+    batchProgress: null,
+    batchPollingTimer: null,
     showSelectionRunsModal: false,
     selectionRunsPanel: null,
     selectionRuns: [],
@@ -997,6 +999,12 @@
         source_env: 'dev', target_env: 'prod',
         selection_id: this.jobSelections[0]?.id || '',
         enabled: true,
+        repeat_enabled: false,
+        batch_variable_name: '',
+        batch_start_value: new Date().toISOString().slice(0, 10),
+        batch_step_days: 1,
+        batch_max_firings: 5,
+        batch_weekend_policy: 'skip',
       };
       this.scheduleTargetMode = 'selection';
       this.scheduleSequenceRef = { sequence_id: null, sequence_version: null };
@@ -1014,6 +1022,12 @@
         selection_id: sched.selection_id,
         selection_version: sched.selection_version,
         enabled: sched.enabled,
+        repeat_enabled: Boolean(sched.batch_variable_name),
+        batch_variable_name: sched.batch_variable_name || '',
+        batch_start_value: sched.batch_start_value || new Date().toISOString().slice(0, 10),
+        batch_step_days: sched.batch_step_days || 1,
+        batch_max_firings: sched.batch_max_firings || 5,
+        batch_weekend_policy: sched.batch_weekend_policy || 'skip',
       };
       if (sched.sequence_id) {
         this.scheduleTargetMode = 'sequence';
@@ -1046,6 +1060,13 @@
       } else {
         body.selection_id = Number(m.selection_id);
         body.selection_version = m.selection_version || null;
+      }
+      if (m.repeat_enabled) {
+        body.batch_variable_name = m.batch_variable_name;
+        body.batch_start_value = m.batch_start_value;
+        body.batch_step_days = Number(m.batch_step_days || 1);
+        body.batch_max_firings = Number(m.batch_max_firings || 1);
+        body.batch_weekend_policy = m.batch_weekend_policy || 'skip';
       }
       try {
         if (this.scheduleModalEditing) {
@@ -1209,8 +1230,58 @@
     },
 
     openLaunchSelectionModal(sel) {
-      this.launchSelectionModal = { selection_id: sel.id, source_env: 'dev', target_env: 'prod', variableOverridesRaw: '' };
+      this.launchSelectionModal = {
+        selection_id: sel.id,
+        source_env: 'dev',
+        target_env: 'prod',
+        variableOverridesRaw: '',
+        repeat_enabled: false,
+        batch_variable_name: '',
+        batch_start_value: new Date().toISOString().slice(0, 10),
+        batch_iterations: 5,
+        batch_step_days: 1,
+        batch_weekend_policy: 'skip',
+        batch_stop_on_failure: false,
+      };
+      if (!this.customVariables?.length && this.loadCustomVariables) this.loadCustomVariables();
       this.showLaunchSelectionModal = true;
+    },
+
+    dateCustomVariables() {
+      return (this.customVariables || []).filter(v => v.var_type === 'date');
+    },
+
+    _batchOptionsFromModal(m) {
+      return {
+        variable_name: m.batch_variable_name,
+        start_value: m.batch_start_value,
+        iterations: Number(m.batch_iterations || 1),
+        step_days: Number(m.batch_step_days || 1),
+        weekend_policy: m.batch_weekend_policy || 'skip',
+        stop_on_failure: Boolean(m.batch_stop_on_failure),
+      };
+    },
+
+    async pollBatch(batchId) {
+      if (!batchId) return;
+      clearTimeout(this.batchPollingTimer);
+      try {
+        this.batchProgress = await api('GET', `/api/run-batches/${batchId}`);
+        if (!['COMPLETED', 'STOPPED', 'FAILED'].includes(this.batchProgress.status)) {
+          this.batchPollingTimer = setTimeout(() => this.pollBatch(batchId), 2500);
+        }
+      } catch (e) {
+        this.toast('error', 'Batch polling failed', e.message);
+      }
+    },
+
+    async cancelBatch(batchId) {
+      try {
+        this.batchProgress = await api('POST', `/api/run-batches/${batchId}/cancel`);
+        this.toast('success', 'Batch cancelled');
+      } catch (e) {
+        this.toast('error', 'Cancel failed', e.message);
+      }
     },
 
     async launchSelection() {
@@ -1223,6 +1294,15 @@
       });
       if (Object.keys(variable_overrides).length > 0) body.variable_overrides = variable_overrides;
       try {
+        if (m.repeat_enabled) {
+          body.batch = this._batchOptionsFromModal(m);
+          const batch = await api('POST', `/api/selections/${m.selection_id}/launch-batch`, body);
+          this.batchProgress = batch;
+          this.pollBatch(batch.batch_id);
+          this.showLaunchSelectionModal = false;
+          this.toast('success', 'Batch started', `${batch.completed} / ${batch.iterations} complete`);
+          return;
+        }
         const run = await api('POST', `/api/selections/${m.selection_id}/launch`, body);
         this.showLaunchSelectionModal = false;
         this.toast('success', 'Launched', `Run ${run.run_id} started`);

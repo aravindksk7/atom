@@ -89,6 +89,7 @@ from api.services.difference_export import (
     write_stored_differences,
 )
 from api.services.run_report import build_run_report_snapshot
+from api.services.run_restart import RestartError, RestartNotFound, restart_run
 from etl_framework.config.models import resolve_connection as _resolve_connection
 from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
 from etl_framework.runner.job_validation import validate_job_definition
@@ -134,6 +135,7 @@ def _test_result_out(result) -> TestResultOut:
             source_row_count=result.source_row_count,
             target_row_count=result.target_row_count,
         ),
+        carried_over=getattr(result, "carried_over", False),
     )
 
 
@@ -202,6 +204,10 @@ def _run_status_out(run, selection_names_map: dict[int, str] | None = None) -> R
     target_type = infer_run_target_type(run.selection_id, config_snapshot, selection_name)
     target_name = sequence["name"] if target_type == "sequence" else selection_name
 
+    restarted_from_run_id = getattr(run, "restarted_from_run_id", None)
+    if not isinstance(restarted_from_run_id, str):
+        restarted_from_run_id = None
+
     return RunStatusOut(
         run_id=snapshot.run_id,
         label=snapshot.run_label,
@@ -220,6 +226,7 @@ def _run_status_out(run, selection_names_map: dict[int, str] | None = None) -> R
         ci_context=run.ci_context,
         target_type=target_type,
         target_name=target_name,
+        restarted_from_run_id=restarted_from_run_id,
     )
 
 
@@ -355,6 +362,8 @@ def _execute_run(
     target_env: str,
     run_settings,
     config_snapshot: dict | None,
+    carried_over_states: list | None = None,
+    seeded_outcomes: dict | None = None,
     session_factory: Callable[[], Session] | None = None,
 ) -> None:
     from etl_framework.repository.database import SessionLocal
@@ -372,6 +381,8 @@ def _execute_run(
             job_sequence=job_sequence,
             run_settings=run_settings,
             config_snapshot=config_snapshot,
+            carried_over_states=carried_over_states,
+            seeded_outcomes=seeded_outcomes,
         ).execute()
     finally:
         db.close()
@@ -505,6 +516,43 @@ def cancel_run(run_id: str, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Run not found")
     accepted = repo.request_cancel(run_id)
     return {"run_id": run_id, "cancel_requested": accepted}
+
+
+@router.post("/{run_id}/restart", response_model=RunStatusOut, status_code=202)
+def restart_failed_run(run_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_session)):
+    try:
+        plan = restart_run(db, run_id)
+    except RestartNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RestartError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    new_run = RunRepository(db).get_run(plan.run_id)
+    background_tasks.add_task(
+        _execute_run,
+        plan.run_id,
+        plan.steps,
+        new_run.source_env,
+        new_run.target_env,
+        plan.run_settings,
+        plan.config_snapshot,
+        plan.carried_over_states,
+        plan.seeded_outcomes,
+    )
+    return RunStatusOut(
+        run_id=plan.run_id,
+        status=plan.status,
+        restarted_from_run_id=plan.restarted_from_run_id,
+    )
+
+
+@router.get("/{run_id}/restart", response_model=RunStatusOut | None)
+def get_run_restart(run_id: str, db: Session = Depends(get_session)):
+    repo = RunRepository(db)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    restarted = repo.find_restart_for_run(run_id)
+    return _run_status_out(restarted) if restarted is not None else None
 
 
 @router.get("/{run_id}/status", response_model=RunStatusOut)
@@ -1458,7 +1506,13 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     snapshot = build_run_report_snapshot(run)
+    carried_names = {step.job_name for step in RunStepRepository(db).list_steps(run_id) if step.carried_over}
+    for result in snapshot.results:
+        result.carried_over = result.query_name in carried_names
     results = [_test_result_out(r) for r in snapshot.results]
+    restarted_from_run_id = getattr(run, "restarted_from_run_id", None)
+    if not isinstance(restarted_from_run_id, str):
+        restarted_from_run_id = None
     return RunDetailOut(
         run_id=snapshot.run_id,
         report_name=snapshot.report_name,
@@ -1472,6 +1526,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
         error=snapshot.error,
         run_type=snapshot.run_type,
         pair_id=snapshot.pair_id,
+        restarted_from_run_id=restarted_from_run_id,
         source_env=snapshot.source_env,
         target_env=snapshot.target_env,
         config_snapshot=snapshot.config_snapshot,

@@ -506,3 +506,98 @@ def test_run_schedule_passes_the_selections_config_id_into_the_run_snapshot(monk
         assert executed[0]["config_snapshot"]["config_id"] == config_id
     finally:
         _db_module.SessionLocal = previous
+
+
+def test_run_schedule_applies_batch_date_and_disables_at_max(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+        from etl_framework.repository.repository import CustomVariableRepository
+
+        db = testing_session()
+        CustomVariableRepository(db).create("business_date", "date", "today", "")
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection", description="", tags=[], job_sequence=["orders"], run_settings={},
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=1,
+            batch_variable_name="business_date",
+            batch_start_value="2026-09-11",
+            batch_next_value="2026-09-11",
+            batch_step_days=1,
+            batch_max_firings=1,
+            batch_weekend_policy="skip",
+        ))
+        schedule_id, schedule_name = schedule.id, schedule.name
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        monkeypatch.setattr(svc, "remove_job", lambda schedule_id: None)
+        svc._run_schedule(schedule_id, schedule_name)
+
+        assert executed[0]["config_snapshot"]["variables"]["business_date"] == "2026-09-11"
+        db = testing_session()
+        updated = ScheduleRepository(db).get(schedule_id)
+        assert updated.firings_completed == 1
+        assert updated.batch_next_value == "2026-09-14"
+        assert updated.enabled is False
+        db.close()
+    finally:
+        _db_module.SessionLocal = previous
+
+
+def test_run_schedule_skip_policy_advances_weekend_without_firing(monkeypatch):
+    from api.services import scheduler as svc
+    import etl_framework.repository.database as _db_module
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+    previous = _db_module.SessionLocal
+    _db_module.SessionLocal = testing_session
+    try:
+        from api.routes import runs as runs_route
+
+        db = testing_session()
+        selection = JobSelectionRepository(db).create(
+            name="nightly selection", description="", tags=[], job_sequence=["orders"], run_settings={},
+        )
+        schedule = ScheduleRepository(db).create(_sched_data(
+            selection_id=selection.id,
+            selection_version=1,
+            batch_variable_name="business_date",
+            batch_start_value="2026-09-12",
+            batch_next_value="2026-09-12",
+            batch_step_days=1,
+            batch_max_firings=2,
+            batch_weekend_policy="skip",
+        ))
+        schedule_id, schedule_name = schedule.id, schedule.name
+        db.close()
+
+        executed = []
+        monkeypatch.setattr(runs_route, "_execute_run", lambda **kwargs: executed.append(kwargs))
+        svc._run_schedule(schedule_id, schedule_name)
+
+        assert executed == []
+        db = testing_session()
+        updated = ScheduleRepository(db).get(schedule_id)
+        assert updated.firings_completed == 0
+        assert updated.batch_next_value == "2026-09-14"
+        assert updated.enabled is True
+        db.close()
+    finally:
+        _db_module.SessionLocal = previous

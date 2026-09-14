@@ -2,9 +2,10 @@ import pytest
 from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from api.schemas import SequenceStepRef
 from etl_framework.repository.database import Base
 from etl_framework.repository.models import SavedConfig, TestRun, TestResult
-from etl_framework.repository.repository import RunRepository, ConfigRepository
+from etl_framework.repository.repository import RunRepository, ConfigRepository, RunBatchRepository, RunStepRepository
 
 
 @pytest.fixture
@@ -88,6 +89,49 @@ def test_run_create_without_ci_context_defaults_to_none(db):
     assert run.ci_context is None
 
 
+def test_run_create_can_stamp_restart_provenance(db):
+    repo = RunRepository(db)
+    run = repo.create_run(
+        run_id="restart-run",
+        source_env="dev",
+        target_env="prod",
+        restarted_from_run_id="original-run",
+    )
+
+    assert run.restarted_from_run_id == "original-run"
+
+
+def test_find_restart_for_run_returns_newest_restart(db):
+    repo = RunRepository(db)
+    repo.create_run(run_id="original-run", source_env="dev", target_env="prod")
+    repo.create_run(run_id="restart-1", source_env="dev", target_env="prod", restarted_from_run_id="original-run")
+    repo.create_run(run_id="restart-2", source_env="dev", target_env="prod", restarted_from_run_id="original-run")
+
+    assert repo.find_restart_for_run("original-run").run_id == "restart-2"
+
+
+def test_run_step_can_be_marked_carried_over(db):
+    RunRepository(db).create_run(run_id="run-with-carried-step", source_env="dev", target_env="prod")
+    step_repo = RunStepRepository(db)
+    step_repo.materialize_steps("run-with-carried-step", [SequenceStepRef(step_id="a", job_name="orders")])
+
+    step = step_repo.update_status("run-with-carried-step", 0, "PASSED", carried_over=True)
+
+    assert step.carried_over is True
+
+
+def test_run_step_defaults_carried_over_false(db):
+    RunRepository(db).create_run(run_id="run-with-fresh-step", source_env="dev", target_env="prod")
+    step_repo = RunStepRepository(db)
+
+    step = step_repo.materialize_steps(
+        "run-with-fresh-step",
+        [SequenceStepRef(step_id="a", job_name="orders")],
+    )[0]
+
+    assert step.carried_over is False
+
+
 def test_run_get(db):
     repo = RunRepository(db)
     repo.create_run(run_id="run-002", source_env="dev", target_env="prod")
@@ -116,6 +160,59 @@ def test_run_list_clamps_pagination(db):
     runs = repo.list_runs(limit=0, offset=-10)
     assert len(runs) == 1
     assert runs[0].run_id == "run-page-2"
+
+
+def test_run_batch_create_and_get(db):
+    batch = RunBatchRepository(db).create(
+        batch_id="batch-1",
+        target_type="sequence",
+        target_id=10,
+        variable_name="business_date",
+        start_value="2026-09-14",
+        iterations=3,
+        step_days=1,
+        weekend_policy="skip",
+        stop_on_failure=True,
+    )
+
+    fetched = RunBatchRepository(db).get("batch-1")
+    assert fetched is not None
+    assert fetched.id == batch.id
+    assert fetched.status == "RUNNING"
+    assert fetched.stop_on_failure is True
+
+
+def test_run_batch_lists_member_runs_in_creation_order(db):
+    RunBatchRepository(db).create(
+        batch_id="batch-2", target_type="selection", target_id=5,
+        variable_name="business_date", start_value="2026-09-14",
+        iterations=2, step_days=1, weekend_policy="ignore",
+    )
+    runs = RunRepository(db)
+    runs.create_run("run-a", "dev", "qa", run_batch_id="batch-2")
+    runs.create_run("run-b", "dev", "qa", run_batch_id="other")
+    runs.create_run("run-c", "dev", "qa", run_batch_id="batch-2")
+
+    assert [r.run_id for r in RunBatchRepository(db).member_runs("batch-2")] == ["run-a", "run-c"]
+
+
+def test_run_batch_stop_and_complete_updates_terminal_status(db):
+    repo = RunBatchRepository(db)
+    repo.create(
+        batch_id="batch-3", target_type="sequence", target_id=1,
+        variable_name="business_date", start_value="2026-09-14",
+        iterations=1, step_days=1, weekend_policy="skip",
+    )
+    stopped = repo.stop("batch-3")
+    assert stopped.status == "STOPPED"
+    assert stopped.completed_at is not None
+
+
+def test_set_run_batch_id_stamps_existing_member_run(db):
+    RunRepository(db).create_run("run-stamp", "dev", "qa")
+    stamped = RunRepository(db).set_run_batch_id("run-stamp", "batch-4")
+    assert stamped is not None
+    assert stamped.run_batch_id == "batch-4"
 
 
 def test_run_update_status(db):

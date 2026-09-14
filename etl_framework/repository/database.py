@@ -214,6 +214,30 @@ def _ensure_compare_columns(bind) -> None:
         # --- Run cancellation: cancel_requested column on test_runs ---
         ensure_column(conn, "test_runs", "cancel_requested", "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN NOT NULL DEFAULT 0")
 
+        ensure_table(conn, "run_batches",
+            "CREATE TABLE IF NOT EXISTS run_batches ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "batch_id VARCHAR(36) NOT NULL UNIQUE, "
+            "target_type VARCHAR(20) NOT NULL, "
+            "target_id INTEGER NOT NULL, "
+            "status VARCHAR(20) NOT NULL DEFAULT 'RUNNING', "
+            "variable_name VARCHAR(100) NOT NULL, "
+            "start_value VARCHAR(10) NOT NULL, "
+            "iterations INTEGER NOT NULL, "
+            "step_days INTEGER NOT NULL DEFAULT 1, "
+            "weekend_policy VARCHAR(10) NOT NULL DEFAULT 'skip', "
+            "stop_on_failure BOOLEAN NOT NULL DEFAULT 0, "
+            "completed INTEGER NOT NULL DEFAULT 0, "
+            "current_iteration INTEGER, "
+            "current_value VARCHAR(10), "
+            "created_at DATETIME NOT NULL, "
+            "completed_at DATETIME)"
+        )
+        ensure_index(conn, "ix_run_batches_batch_id", "CREATE UNIQUE INDEX IF NOT EXISTS ix_run_batches_batch_id ON run_batches (batch_id)")
+        ensure_index(conn, "ix_run_batches_status", "CREATE INDEX IF NOT EXISTS ix_run_batches_status ON run_batches (status)")
+        ensure_column(conn, "test_runs", "run_batch_id", "ALTER TABLE test_runs ADD COLUMN run_batch_id VARCHAR(36)")
+        ensure_index(conn, "ix_test_runs_run_batch_id", "CREATE INDEX IF NOT EXISTS ix_test_runs_run_batch_id ON test_runs (run_batch_id)")
+
         # --- ETL Capabilities: column_profiles + schema_snapshots tables ---
         ensure_table(conn, "column_profiles",
             "CREATE TABLE IF NOT EXISTS column_profiles ("
@@ -316,7 +340,9 @@ def _ensure_compare_columns(bind) -> None:
         ensure_column(conn, "test_runs", "selection_id", "ALTER TABLE test_runs ADD COLUMN selection_id INTEGER")
         ensure_column(conn, "test_runs", "selection_version", "ALTER TABLE test_runs ADD COLUMN selection_version INTEGER")
         ensure_column(conn, "test_runs", "ci_context", "ALTER TABLE test_runs ADD COLUMN ci_context JSON")
+        ensure_column(conn, "test_runs", "restarted_from_run_id", "ALTER TABLE test_runs ADD COLUMN restarted_from_run_id VARCHAR(36)")
         ensure_index(conn, "ix_test_runs_selection_id", "CREATE INDEX IF NOT EXISTS ix_test_runs_selection_id ON test_runs (selection_id)")
+        ensure_index(conn, "ix_test_runs_restarted_from_run_id", "CREATE INDEX IF NOT EXISTS ix_test_runs_restarted_from_run_id ON test_runs (restarted_from_run_id)")
 
         if scheduled_run_cols:
             ensure_column(conn, "scheduled_runs", "selection_id", "ALTER TABLE scheduled_runs ADD COLUMN selection_id INTEGER")
@@ -348,6 +374,20 @@ def _ensure_compare_columns(bind) -> None:
                           "ALTER TABLE scheduled_runs ADD COLUMN sequence_id INTEGER")
             ensure_column(conn, "scheduled_runs", "sequence_version",
                           "ALTER TABLE scheduled_runs ADD COLUMN sequence_version INTEGER")
+            ensure_column(conn, "scheduled_runs", "batch_variable_name",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_variable_name VARCHAR(100)")
+            ensure_column(conn, "scheduled_runs", "batch_start_value",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_start_value VARCHAR(10)")
+            ensure_column(conn, "scheduled_runs", "batch_step_days",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_step_days INTEGER NOT NULL DEFAULT 1")
+            ensure_column(conn, "scheduled_runs", "batch_max_firings",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_max_firings INTEGER")
+            ensure_column(conn, "scheduled_runs", "batch_weekend_policy",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_weekend_policy VARCHAR(10)")
+            ensure_column(conn, "scheduled_runs", "batch_next_value",
+                          "ALTER TABLE scheduled_runs ADD COLUMN batch_next_value VARCHAR(10)")
+            ensure_column(conn, "scheduled_runs", "firings_completed",
+                          "ALTER TABLE scheduled_runs ADD COLUMN firings_completed INTEGER NOT NULL DEFAULT 0")
         if "run_steps" in tables:
             ensure_column(conn, "run_steps", "step_id",
                           "ALTER TABLE run_steps ADD COLUMN step_id VARCHAR(255)")
@@ -361,6 +401,8 @@ def _ensure_compare_columns(bind) -> None:
                           "ALTER TABLE run_steps ADD COLUMN max_retries INTEGER")
             ensure_column(conn, "run_steps", "on_failure",
                           "ALTER TABLE run_steps ADD COLUMN on_failure VARCHAR(20) NOT NULL DEFAULT 'skip_downstream'")
+            ensure_column(conn, "run_steps", "carried_over",
+                          "ALTER TABLE run_steps ADD COLUMN carried_over BOOLEAN NOT NULL DEFAULT 0")
 
 
 def _backfill_schedule_selections(bind) -> None:

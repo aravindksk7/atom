@@ -311,6 +311,19 @@ class SequenceLaunchRequest(BaseModel):
     variable_overrides: dict[str, str] = Field(default_factory=dict)
 
 
+class BatchOptions(BaseModel):
+    variable_name: str = Field(min_length=1)
+    start_value: date
+    iterations: int = Field(ge=1, le=200)
+    step_days: int = Field(default=1, ge=1)
+    weekend_policy: Literal["skip", "shift", "ignore"] = "skip"
+    stop_on_failure: bool = False
+
+
+class SequenceBatchLaunchRequest(SequenceLaunchRequest):
+    batch: BatchOptions
+
+
 class SequenceValidationIssue(BaseModel):
     step_id: str | None = None
     field: str
@@ -406,6 +419,7 @@ class RunStepOut(BaseModel):
     released_by: str | None = None
     release_note: str | None = None
     release_action: str | None = None
+    carried_over: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -470,6 +484,7 @@ class RunStatusOut(BaseModel):
     ci_context: dict[str, Any] | None = None
     target_type: Literal["selection", "sequence"] | None = None
     target_name: str | None = None
+    restarted_from_run_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -571,6 +586,7 @@ class TestResultOut(BaseModel):
     unmatched_sources: list[UnmatchedFileGroupOut] = Field(default_factory=list)
     unmatched_targets: list[UnmatchedFileGroupOut] = Field(default_factory=list)
     column_stats: list[ColumnMismatchStatOut] = Field(default_factory=list)
+    carried_over: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -935,6 +951,38 @@ class JobSelectionLaunchRequest(BaseModel):
     version: int | None = None
     ci_context: dict[str, Any] | None = None
     variable_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+class JobSelectionBatchLaunchRequest(JobSelectionLaunchRequest):
+    batch: BatchOptions
+
+
+class RunBatchMemberOut(BaseModel):
+    run_id: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class RunBatchOut(BaseModel):
+    batch_id: str
+    target_type: str
+    target_id: int
+    status: str
+    variable_name: str
+    start_value: str
+    iterations: int
+    step_days: int
+    weekend_policy: str
+    stop_on_failure: bool
+    completed: int
+    current_iteration: int | None = None
+    current_value: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+    runs: list[RunBatchMemberOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------

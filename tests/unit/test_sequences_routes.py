@@ -194,6 +194,40 @@ def test_launch_creates_run_and_returns_202(client):
     assert resp.json()["run_id"]
 
 
+def test_launch_batch_creates_batch_for_date_variable(client):
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import CustomVariableRepository
+
+    with SessionLocal() as db:
+        CustomVariableRepository(db).create("business_date", "date", "today", "")
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch-batch", json={
+        "source_env": "dev", "target_env": "qa",
+        "batch": {
+            "variable_name": "business_date", "start_value": "2026-09-11",
+            "iterations": 3, "step_days": 1, "weekend_policy": "skip",
+        },
+    })
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["target_type"] == "sequence"
+    assert body["iterations"] == 3
+
+
+def test_launch_batch_rejects_non_date_variable(client):
+    from etl_framework.repository.database import SessionLocal
+    from etl_framework.repository.repository import CustomVariableRepository
+
+    with SessionLocal() as db:
+        CustomVariableRepository(db).create("batch_id", "text", "B1", "")
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch-batch", json={
+        "source_env": "dev", "target_env": "qa",
+        "batch": {"variable_name": "batch_id", "start_value": "2026-09-11", "iterations": 3},
+    })
+    assert resp.status_code == 422
+
+
 def test_launch_stores_sequence_provenance_on_run(client):
     created = _create(client).json()
     resp = client.post(f"/api/sequences/{created['id']}/launch",

@@ -13,6 +13,7 @@ from api.schemas import SequenceStepRef
 @pytest.fixture
 def client(monkeypatch):
     from api.main import app
+    from api.routes import runs as runs_module
     from etl_framework.repository.database import Base
     from etl_framework.repository import database as _db_module
     import etl_framework.repository.models  # noqa: F401
@@ -27,6 +28,7 @@ def client(monkeypatch):
     )
     Base.metadata.create_all(engine)
     monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.setattr(runs_module, "_execute_run", lambda *args, **kwargs: None)
 
     with Session(engine) as db:
         raw, _ = TokenRepository(db).create("test-runner")
@@ -77,3 +79,41 @@ def test_release_by_step_id_conflicts_when_not_held(client):
         "action": "approve", "note": "n", "released_by": "alice",
     })
     assert resp.status_code == 409
+
+
+def test_restart_route_returns_202_for_failed_run(client):
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunRepository, RunStepRepository
+
+    db = _db_module.SessionLocal()
+    try:
+        RunRepository(db).create_run("failed-run", "dev", "prod", {"run_settings": {}})
+        RunRepository(db).update_run_status("failed-run", "BLOCKED")
+        RunStepRepository(db).materialize_steps("failed-run", [
+            SequenceStepRef(step_id="a", job_name="a"),
+            SequenceStepRef(step_id="b", job_name="b", depends_on=["a"]),
+        ])
+        RunStepRepository(db).update_status("failed-run", 0, "PASSED")
+        RunStepRepository(db).update_status("failed-run", 1, "FAILED")
+    finally:
+        db.close()
+
+    resp = client.post("/api/runs/failed-run/restart")
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["status"] == "PENDING"
+    assert body["restarted_from_run_id"] == "failed-run"
+    assert body["run_id"] != "failed-run"
+
+
+def test_restart_route_returns_404_for_missing_run(client):
+    resp = client.post("/api/runs/missing/restart")
+
+    assert resp.status_code == 404
+
+
+def test_restart_route_returns_422_for_unrestartable_run(client):
+    resp = client.post("/api/runs/run-dag/restart")
+
+    assert resp.status_code == 422

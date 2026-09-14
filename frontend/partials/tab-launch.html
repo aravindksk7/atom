@@ -1353,13 +1353,45 @@
           <textarea x-model="launchSelectionModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-selection-variable-overrides-textarea"></textarea>
           <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
         </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.repeat_enabled" /> Repeat execution</label>
+        <div x-show="launchSelectionModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="launchSelectionModal.batch_variable_name" class="field-input field-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="launchSelectionModal.batch_start_value" class="field-input" /></div>
+            <div><label class="field-label">Iterations</label><input type="number" min="1" max="200" x-model="launchSelectionModal.batch_iterations" class="field-input" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="launchSelectionModal.batch_step_days" class="field-input" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="launchSelectionModal.batch_weekend_policy" class="field-input field-select"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSelectionModal.batch_stop_on_failure" /> Stop on first failed run</label>
+        </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button @click="showLaunchSelectionModal = false" class="btn-secondary">Cancel</button>
-        <button @click="launchSelection()" class="btn-primary">Launch</button>
+        <button @click="launchSelection()" :disabled="launchSelectionModal.repeat_enabled && !launchSelectionModal.batch_variable_name" class="btn-primary">Launch</button>
       </div>
     </div>
   </div>
+
+  <template x-if="batchProgress">
+    <div class="card mb-4 border-emerald-200 bg-emerald-50">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold text-emerald-900">Batch progress</div>
+          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
+          <div class="text-xs text-emerald-700" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        </div>
+        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm">Cancel</button>
+      </div>
+    </div>
+  </template>
 
   <!-- Selection Run History / Compare-Pairing Modal -->
   <div x-show="showSelectionRunsModal" x-cloak class="modal-backdrop" @click.self="showSelectionRunsModal = false">
@@ -1475,6 +1507,7 @@
                 <span x-show="sched.last_run_at" x-text="'Last: ' + fmtDate(sched.last_run_at)"></span>
                 <span x-show="sched.next_run_at" x-text="'Next: ' + fmtDate(sched.next_run_at)"></span>
               </div>
+              <div x-show="sched.batch_variable_name" class="mt-1 text-xs text-emerald-700" x-text="`Repeats ${sched.firings_completed || 0} / ${sched.batch_max_firings} using ${sched.batch_variable_name}; next ${sched.batch_next_value || sched.batch_start_value}; auto-disables when complete.`"></div>
               <template x-if="schedulerStats">
                 <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 text-xs text-slate-600">
                   <template x-for="stat in schedulerStats.schedules.filter(item => item.id === sched.id)" :key="stat.id">
@@ -1568,6 +1601,25 @@
           <div class="text-xs text-red-600" x-show="jobSelectionsError" data-testid="schedule-selections-error"
                x-text="'Could not load job selections: ' + jobSelectionsError"></div>
           <div class="text-xs text-amber-600" x-show="jobSelections.length === 0 && !jobSelectionsError">You need at least one Job Selection first — create one in the Job Selections tab.</div>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.repeat_enabled" /> Repeat with date cursor</label>
+        <div x-show="scheduleModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+          <div>
+            <label class="field-label">Date variable</label>
+            <select x-model="scheduleModal.batch_variable_name" class="field-input field-select">
+              <option value="">Select date variable...</option>
+              <template x-for="variable in dateCustomVariables()" :key="variable.name">
+                <option :value="variable.name" x-text="variable.name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">Start date</label><input type="date" x-model="scheduleModal.batch_start_value" class="field-input" /></div>
+            <div><label class="field-label">Max firings</label><input type="number" min="1" max="200" x-model="scheduleModal.batch_max_firings" class="field-input" /></div>
+            <div><label class="field-label">Step days</label><input type="number" min="1" x-model="scheduleModal.batch_step_days" class="field-input" /></div>
+            <div><label class="field-label">Weekend policy</label><select x-model="scheduleModal.batch_weekend_policy" class="field-input field-select"><option value="skip">Skip</option><option value="shift">Shift</option><option value="ignore">Ignore</option></select></div>
+          </div>
+          <div class="text-xs text-muted">The schedule auto-disables after the max firings complete. Skip advances weekend cursor slots without counting a firing.</div>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="scheduleModal.enabled" aria-label="schedulemodal enabled" /> Enabled</label>
       </div>
