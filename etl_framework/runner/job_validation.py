@@ -238,6 +238,8 @@ def _validate_file_watcher(params: dict[str, Any], issues: list[ValidationIssue]
         ))
     if isinstance(max_tries, bool):
         issues.append(ValidationIssue("params.max_tries", "max_tries must be a positive integer"))
+    elif max_tries is not None and not isinstance(max_tries, int):
+        issues.append(ValidationIssue("params.max_tries", "max_tries must be a positive integer"))
     elif max_tries is not None:
         _positive_int(params, "max_tries", issues)
     if "poll_interval_seconds" in params:

@@ -447,6 +447,19 @@ def test_file_watcher_rejects_boolean_max_tries():
     assert "params.max_tries" in fields
 
 
+def test_file_watcher_rejects_non_integer_max_tries():
+    issues = validate_job_definition({
+        "name": "bad_watch",
+        "job_type": "file_watcher",
+        "params": {
+            "location": {"kind": "local", "root": "/data/inbound", "pattern": "*.csv"},
+            "max_tries": 3.5,
+        },
+    })
+    fields = {issue.field for issue in issues}
+    assert "params.max_tries" in fields
+
+
 def test_file_watcher_rejects_nan_poll_interval():
     issues = validate_job_definition({
         "name": "bad_watch",
