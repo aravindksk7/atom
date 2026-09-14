@@ -162,6 +162,53 @@ def test_remote_file_source_session_read_text_s3(monkeypatch) -> None:
     assert text == "id,value\n1,alpha\n"
 
 
+class _FakeS3ClientInvalidRangeOnEmptyObject:
+    """Like _FakeS3Client, but its one object is 0 bytes and get_object raises
+    the ClientError real S3 (and S3-compatible stores) return when a Range
+    header is sent against an empty object -- HTTP 416 / error code
+    InvalidRange. Used to prove _read_bytes's S3 branch treats that as an
+    empty read instead of letting the error propagate."""
+
+    def __init__(self) -> None:
+        self.objects = {"prefix/DONE.flag": b""}
+        self.closed = False
+
+    def get_paginator(self, name):
+        assert name == "list_objects_v2"
+        return self
+
+    def paginate(self, **kwargs):
+        prefix = kwargs["Prefix"]
+        return [{"Contents": [{"Key": key} for key in self.objects if key.startswith(prefix)]}]
+
+    def get_object(self, **kwargs):
+        import botocore.exceptions
+
+        raise botocore.exceptions.ClientError(
+            error_response={"Error": {"Code": "InvalidRange", "Message": "The requested range is not satisfiable"}},
+            operation_name="GetObject",
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_remote_file_source_session_read_text_s3_empty_object_returns_empty_string(monkeypatch) -> None:
+    """A 0-byte S3 object (e.g. a completion-flag file created but not yet
+    written) must read as "" rather than raising -- read_text's own docstring
+    promises a partial/empty snapshot reads as "no match", not an error."""
+    monkeypatch.setattr(
+        "api.services.multi_file_remote.build_s3_client",
+        lambda config_snapshot, spec: _FakeS3ClientInvalidRangeOnEmptyObject(),
+    )
+
+    spec = FileSourceSpec(kind="s3", root="s3://bucket/prefix", pattern="DONE.flag")
+    session = RemoteFileSourceSession({})
+    discovered = session.discover(spec)
+
+    assert session.read_text(discovered[0], spec) == ""
+
+
 def test_remote_file_source_session_read_text_caps_length(tmp_path, monkeypatch) -> None:
     from api.services import file_source
     from api.services.multi_file_remote import _CONTENT_MATCH_READ_LIMIT

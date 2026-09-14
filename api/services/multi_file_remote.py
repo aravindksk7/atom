@@ -146,12 +146,24 @@ class RemoteFileSourceSession:
             with open(file.path, "rb") as fh:
                 return fh.read(_CONTENT_MATCH_READ_LIMIT)
         if spec.kind == "s3":
+            import botocore.exceptions
+
             parsed = urlparse(file.path)
-            obj = self._client_for(spec).get_object(
-                Bucket=parsed.netloc,
-                Key=unquote(parsed.path.lstrip("/")),
-                Range=f"bytes=0-{_CONTENT_MATCH_READ_LIMIT - 1}",
-            )
+            try:
+                obj = self._client_for(spec).get_object(
+                    Bucket=parsed.netloc,
+                    Key=unquote(parsed.path.lstrip("/")),
+                    Range=f"bytes=0-{_CONTENT_MATCH_READ_LIMIT - 1}",
+                )
+            except botocore.exceptions.ClientError as exc:
+                # A 0-byte object has no valid byte at offset 0, so S3 (and
+                # S3-compatible stores) reject the Range header above with
+                # InvalidRange -- treat that the same as an empty read rather
+                # than raising, matching the local/sftp branches below which
+                # already return b"" for an empty file.
+                if exc.response.get("Error", {}).get("Code") == "InvalidRange":
+                    return b""
+                raise
             return obj["Body"].read()
         if spec.kind == "sftp":
             client = self._client_for(spec)
