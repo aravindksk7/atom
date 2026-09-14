@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import threading
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import pandas as pd
 from fastapi import HTTPException
@@ -54,6 +54,9 @@ from etl_framework.runner.test_runner import TestRunner
 from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.utils.context import set_run_id
 from etl_framework.utils.tracing import span
+
+if TYPE_CHECKING:
+    from etl_framework.reconciliation.file_mapping import DiscoveredFile
 
 HOLD_POLL_INTERVAL_SECONDS = float(os.environ.get("HOLD_POLL_INTERVAL_SECONDS", "5"))
 HOLD_TIMEOUT_SECONDS = float(os.environ.get("HOLD_TIMEOUT_SECONDS", "86400"))
@@ -1567,7 +1570,7 @@ class RunExecutor:
         elapsed_seconds: float,
         executed_at: datetime,
         duration_seconds: float,
-        matched_file=None,
+        matched_file: "DiscoveredFile | None" = None,
         matched_text: str | None = None,
         error: str | None = None,
     ) -> ReconciliationResult:
@@ -1577,7 +1580,7 @@ class RunExecutor:
             mismatch_summary["matched_text"] = matched_text
         if error is not None:
             mismatch_summary["error"] = error
-            mismatches.append(MismatchRecord({"job": job.name}, "file_watcher", "matched", error, "file_watcher_error"))
+            mismatches.append(MismatchRecord({"job": job.name}, "file_watcher", "ok", error, "file_watcher_error"))
         return ReconciliationResult(
             query_name=job.name,
             source_env=self._source_env,
@@ -1606,23 +1609,23 @@ class RunExecutor:
         from api.services.multi_file_remote import RemoteFileSourceSession
 
         location = job.params.get("location") or {}
-        kind = location.get("kind")
-        file_spec = FileSourceSpec(
-            kind="sftp" if kind == "scp" else kind,
-            root=location.get("root", ""),
-            pattern=location.get("pattern", ""),
-            credentials_ref=location.get("credentials_ref"),
-        )
-        content_match = job.params.get("content_match") or {}
-        watch_spec = WatchSpec(
-            poll_interval_seconds=float(job.params.get("poll_interval_seconds", 30.0)),
-            max_tries=job.params.get("max_tries"),
-            window_start=job.params.get("window_start"),
-            window_end=job.params.get("window_end"),
-            content_text=content_match.get("text"),
-            content_is_regex=bool(content_match.get("is_regex", False)),
-        )
         try:
+            kind = location.get("kind")
+            file_spec = FileSourceSpec(
+                kind="sftp" if kind == "scp" else kind,
+                root=location.get("root", ""),
+                pattern=location.get("pattern", ""),
+                credentials_ref=location.get("credentials_ref"),
+            )
+            content_match = job.params.get("content_match") or {}
+            watch_spec = WatchSpec(
+                poll_interval_seconds=float(job.params.get("poll_interval_seconds", 30.0)),
+                max_tries=job.params.get("max_tries"),
+                window_start=job.params.get("window_start"),
+                window_end=job.params.get("window_end"),
+                content_text=content_match.get("text"),
+                content_is_regex=bool(content_match.get("is_regex", False)),
+            )
             with RemoteFileSourceSession(self._config_snapshot) as session:
                 read_text = (lambda f: session.read_text(f, file_spec)) if watch_spec.content_text else None
                 watch_result = wait_for_watched_file(

@@ -105,6 +105,19 @@ def test_execute_file_watcher_errors_on_unexpected_exception(db_session, monkeyp
     assert "sftp host unreachable" in result.mismatches[0].target_value
 
 
+def test_execute_file_watcher_errors_on_malformed_watch_spec_params(db_session):
+    # Simulates a stale DB row from before schema validation existed: JobDefinition's own
+    # validators would reject these params at construction time, so we bypass that by
+    # mutating params after construction -- exercising WatchSpec.__post_init__ raising
+    # ValueError from inside _execute_file_watcher rather than JobDefinition's validator.
+    j = job()
+    j.params["poll_interval_seconds"] = -1
+    result = executor(db_session)._execute_file_watcher(j)
+    assert result.status == TestStatus.ERROR
+    assert result.mismatches[0].mismatch_type == "file_watcher_error"
+    assert "poll_interval_seconds" in result.mismatches[0].target_value
+
+
 def test_execute_file_watcher_normalizes_scp_kind_to_sftp(db_session, monkeypatch):
     captured_specs = []
 
