@@ -130,6 +130,53 @@ def test_remote_file_source_session_local_kind_needs_no_client(tmp_path, monkeyp
     session.close()  # no-op: no remote clients were ever built
 
 
+def test_remote_file_source_session_read_text_local(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    (tmp_path / "DONE.flag").write_bytes(b"STATUS=COMPLETE\n")
+
+    session = RemoteFileSourceSession({})
+    spec = FileSourceSpec(kind="local", root=str(tmp_path), pattern="DONE.flag")
+    discovered = session.discover(spec)
+
+    assert session.read_text(discovered[0], spec) == "STATUS=COMPLETE\n"
+
+
+def test_remote_file_source_session_read_text_s3(monkeypatch) -> None:
+    built_clients: list[_FakeS3Client] = []
+
+    def _fake_build_s3_client(config_snapshot, spec):
+        client = _FakeS3Client()
+        built_clients.append(client)
+        return client
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _fake_build_s3_client)
+
+    spec = FileSourceSpec(kind="s3", root="s3://bucket/prefix", pattern="sales_{region}.csv")
+    session = RemoteFileSourceSession({})
+    discovered = session.discover(spec)
+
+    text = session.read_text(discovered[0], spec)
+    assert text == "id,value\n1,alpha\n"
+
+
+def test_remote_file_source_session_read_text_caps_length(tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+    from api.services.multi_file_remote import _CONTENT_MATCH_READ_LIMIT
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    (tmp_path / "BIG.flag").write_bytes(b"x" * (_CONTENT_MATCH_READ_LIMIT * 2))
+
+    session = RemoteFileSourceSession({})
+    spec = FileSourceSpec(kind="local", root=str(tmp_path), pattern="BIG.flag")
+    discovered = session.discover(spec)
+
+    assert len(session.read_text(discovered[0], spec)) == _CONTENT_MATCH_READ_LIMIT
+
+
 def test_remote_file_source_session_rejects_unknown_kind() -> None:
     # FileSourceSpec's own constructor doesn't validate `kind` (that check
     # lives in _parse_file_source, the config-parsing entry point) -- this

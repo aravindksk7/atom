@@ -29,6 +29,8 @@ from etl_framework.reconciliation.file_mapping import (
     discover_sftp_files,
 )
 
+_CONTENT_MATCH_READ_LIMIT = 65536
+
 
 def resolve_file_source_credentials(config_snapshot: dict[str, Any], spec: FileSourceSpec) -> dict[str, Any]:
     if not spec.credentials_ref:
@@ -128,6 +130,33 @@ class RemoteFileSourceSession:
             with client.open(file.path, "rb") as fh:
                 raw = fh.read()
             return _read_tabular_bytes(raw, Path(file.file_name).suffix.lower())
+        raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
+
+    def read_text(self, file: DiscoveredFile, spec: FileSourceSpec) -> str:
+        """Read up to _CONTENT_MATCH_READ_LIMIT bytes of `file` as text, for
+        file_watcher content matching. Undecodable bytes are dropped rather
+        than raising -- a watcher polling mid-write may see a partial or
+        binary-looking snapshot, which should read as "no match" not error.
+        """
+        raw = self._read_bytes(file, spec)
+        return raw.decode("utf-8", errors="ignore")
+
+    def _read_bytes(self, file: DiscoveredFile, spec: FileSourceSpec) -> bytes:
+        if spec.kind == "local":
+            with open(file.path, "rb") as fh:
+                return fh.read(_CONTENT_MATCH_READ_LIMIT)
+        if spec.kind == "s3":
+            parsed = urlparse(file.path)
+            obj = self._client_for(spec).get_object(
+                Bucket=parsed.netloc,
+                Key=unquote(parsed.path.lstrip("/")),
+                Range=f"bytes=0-{_CONTENT_MATCH_READ_LIMIT - 1}",
+            )
+            return obj["Body"].read()
+        if spec.kind == "sftp":
+            client = self._client_for(spec)
+            with client.open(file.path, "rb") as fh:
+                return fh.read(_CONTENT_MATCH_READ_LIMIT)
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 
     def close(self) -> None:
