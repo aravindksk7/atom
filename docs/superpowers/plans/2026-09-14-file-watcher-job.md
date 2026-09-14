@@ -10,6 +10,14 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-14-file-watcher-job-design.md`
 
+**Status: implemented.** All tasks below executed via subagent-driven-development, each with spec-compliance and code-quality review. Code blocks below are the plan as originally written; four review-driven fixes were applied on top of the literal code shown here (each in its own commit, not reflected in the snippets below):
+- S3 empty-object `Range` request raising instead of returning `b""` (`api/services/multi_file_remote.py`)
+- `max_tries` boolean values and `poll_interval_seconds` NaN not rejected by `job_validation.py`'s validator (drift from `api/schemas.py`)
+- `WatchSpec`/`FileSourceSpec` construction sitting outside `_execute_file_watcher`'s `try:` block, so malformed params would raise uncaught instead of degrading to an `ERROR` result
+- `max_tries` non-integer values (e.g. `3.5`) silently truncated instead of rejected by `job_validation.py`'s validator (a second, more subtle drift from `api/schemas.py`, found on final whole-feature review)
+
+None of these fixes contradict the plan's stated intent — each corrects a bug relative to the plan's own goals. See `git log` on this branch for the fix commits.
+
 ---
 
 ### Task 1: `WatchSpec` / `wait_for_watched_file` poll primitive
@@ -18,7 +26,7 @@
 - Modify: `etl_framework/reconciliation/file_mapping.py` (append after `wait_for_ready_files`, currently ending at line 827)
 - Test: `tests/unit/test_wait_for_watched_file.py` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_wait_for_watched_file.py`:
 
@@ -215,12 +223,12 @@ def test_watch_spec_rejects_non_positive_max_tries() -> None:
         WatchSpec(max_tries=0)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_wait_for_watched_file.py -v`
 Expected: FAIL with `ImportError: cannot import name 'WatchSpec'` (nothing implemented yet)
 
-- [ ] **Step 3: Implement `WatchSpec`, `WatchResult`, `FileWatchTimeout`, `wait_for_watched_file`**
+- [x] **Step 3: Implement `WatchSpec`, `WatchResult`, `FileWatchTimeout`, `wait_for_watched_file`**
 
 Append to `etl_framework/reconciliation/file_mapping.py` (after `wait_for_ready_files`, which currently ends the file at line 827):
 
@@ -340,12 +348,12 @@ def wait_for_watched_file(
         sleep(spec.poll_interval_seconds)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/unit/test_wait_for_watched_file.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add etl_framework/reconciliation/file_mapping.py tests/unit/test_wait_for_watched_file.py
@@ -360,7 +368,7 @@ git commit -m "feat(file-watcher): add WatchSpec/wait_for_watched_file poll prim
 - Modify: `api/services/multi_file_remote.py:119-131` (`read_file` method and the lines right after it)
 - Test: `tests/unit/test_multi_file_remote.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/unit/test_multi_file_remote.py` (near the existing `read_file`/local-kind tests):
 
@@ -412,12 +420,12 @@ def test_remote_file_source_session_read_text_caps_length(tmp_path, monkeypatch)
     assert len(session.read_text(discovered[0], spec)) == _CONTENT_MATCH_READ_LIMIT
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_multi_file_remote.py -v -k read_text`
 Expected: FAIL with `AttributeError: 'RemoteFileSourceSession' object has no attribute 'read_text'`
 
-- [ ] **Step 3: Implement `read_text`/`_read_bytes`**
+- [x] **Step 3: Implement `read_text`/`_read_bytes`**
 
 In `api/services/multi_file_remote.py`, add a module-level constant near the top (after the imports, before `resolve_file_source_credentials`):
 
@@ -456,12 +464,12 @@ Then insert these two methods into `RemoteFileSourceSession`, right after `read_
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/unit/test_multi_file_remote.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/services/multi_file_remote.py tests/unit/test_multi_file_remote.py
@@ -476,7 +484,7 @@ git commit -m "feat(file-watcher): add raw content read to RemoteFileSourceSessi
 - Modify: `api/schemas.py:708-713` (Literal), `api/schemas.py:863-870` (validator chain)
 - Test: `tests/unit/test_api.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/unit/test_api.py` (near `test_create_dbt_artifact_job`):
 
@@ -566,12 +574,12 @@ def test_create_file_watcher_job_accepts_scp_kind_and_content_match(client):
     assert resp.status_code == 201
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_api.py -v -k file_watcher`
 Expected: FAIL — `file_watcher` is not a permitted `job_type` value (Pydantic literal error), so the first test gets a 422 instead of 201.
 
-- [ ] **Step 3: Add `"file_watcher"` to the `job_type` Literal**
+- [x] **Step 3: Add `"file_watcher"` to the `job_type` Literal**
 
 In `api/schemas.py`, modify the `JobDefinition.job_type` Literal (currently lines 708-713):
 
@@ -585,7 +593,7 @@ In `api/schemas.py`, modify the `JobDefinition.job_type` Literal (currently line
     ] = "reconciliation"
 ```
 
-- [ ] **Step 4: Add the `file_watcher` validation branch**
+- [x] **Step 4: Add the `file_watcher` validation branch**
 
 In `api/schemas.py`, insert a new `elif` branch into `validate_reconciliation_contract`, right after the `elif self.job_type in ("schema_snapshot", "profile"):` block and before the final `if self.job_type == "compare":` statement (currently around line 866-870):
 
@@ -629,17 +637,17 @@ In `api/schemas.py`, insert a new `elif` branch into `validate_reconciliation_co
 
 This must stay part of the `if self.job_type == "bo_report": ... elif ...` chain (i.e. `elif`, not `if`) so it doesn't run alongside unrelated branches.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest tests/unit/test_api.py -v -k file_watcher`
 Expected: ALL PASS
 
-- [ ] **Step 6: Run the full API test file to check for regressions**
+- [x] **Step 6: Run the full API test file to check for regressions**
 
 Run: `python -m pytest tests/unit/test_api.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add api/schemas.py tests/unit/test_api.py
@@ -654,7 +662,7 @@ git commit -m "feat(file-watcher): add file_watcher job_type to JobDefinition"
 - Modify: `etl_framework/runner/job_validation.py` (new `_validate_file_watcher` function + dispatch line in `validate_job_definition`)
 - Test: `tests/unit/test_job_validation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/unit/test_job_validation.py` (near the `airflow_dag_run` tests):
 
@@ -768,12 +776,12 @@ def test_file_watcher_content_match_requires_text():
     assert any(issue.field == "params.content_match" for issue in issues)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_job_validation.py -v -k file_watcher`
 Expected: FAIL — `file_watcher` isn't dispatched to any validator yet, so `test_file_watcher_requires_location` etc. find no issues where issues are expected.
 
-- [ ] **Step 3: Implement `_validate_file_watcher` and wire it into the dispatch chain**
+- [x] **Step 3: Implement `_validate_file_watcher` and wire it into the dispatch chain**
 
 In `etl_framework/runner/job_validation.py`, add this function near `_validate_airflow_dag_run` (before `def validate_job_definition`):
 
@@ -822,12 +830,12 @@ Then add one line to the initial job-type-specific block inside `validate_job_de
         _validate_file_watcher(params, issues)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/unit/test_job_validation.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add etl_framework/runner/job_validation.py tests/unit/test_job_validation.py
@@ -842,7 +850,7 @@ git commit -m "feat(file-watcher): validate file_watcher jobs in validate_job_de
 - Modify: `api/services/run_executor.py` (`_build_case` dispatch around line 549-551; new methods placed after `_execute_airflow_dag_run`, currently ending at line 1551)
 - Test: `tests/unit/test_run_executor_file_watcher.py` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_run_executor_file_watcher.py`, mirroring `tests/unit/test_run_executor_airflow.py`'s fixtures:
 
@@ -976,12 +984,12 @@ def test_execute_file_watcher_normalizes_scp_kind_to_sftp(db_session, monkeypatc
     assert captured_specs[0].kind == "sftp"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_run_executor_file_watcher.py -v`
 Expected: FAIL with `AttributeError: 'RunExecutor' object has no attribute '_execute_file_watcher'`
 
-- [ ] **Step 3: Add the `_build_case` dispatch line**
+- [x] **Step 3: Add the `_build_case` dispatch line**
 
 In `api/services/run_executor.py`, insert a new branch into `_build_case` right after the `compare` branch (currently lines 549-550) and before the `bo_report` branch:
 
@@ -993,7 +1001,7 @@ In `api/services/run_executor.py`, insert a new branch into `_build_case` right 
         if job.job_type == "bo_report":
 ```
 
-- [ ] **Step 4: Implement `_build_case_file_watcher`, `_file_watcher_result`, `_execute_file_watcher`**
+- [x] **Step 4: Implement `_build_case_file_watcher`, `_file_watcher_result`, `_execute_file_watcher`**
 
 In `api/services/run_executor.py`, insert these three methods right after `_execute_airflow_dag_run` ends (currently line 1551) and before the `# -- Freshness --` comment (currently line 1553):
 
@@ -1091,12 +1099,12 @@ In `api/services/run_executor.py`, insert these three methods right after `_exec
 
 Note: `wait_for_watched_file` is called via the module attribute (`from etl_framework.reconciliation.file_mapping import ... wait_for_watched_file` inside the method body) specifically so tests can `monkeypatch.setattr("etl_framework.reconciliation.file_mapping.wait_for_watched_file", ...)` — this mirrors the existing local-import pattern already used for `RemoteFileSourceSession` in `_build_case_multi_file_reconciliation` (line 712-720).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest tests/unit/test_run_executor_file_watcher.py -v`
 Expected: ALL PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add api/services/run_executor.py tests/unit/test_run_executor_file_watcher.py
@@ -1109,12 +1117,12 @@ git commit -m "feat(file-watcher): dispatch and execute file_watcher jobs in Run
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Run the full unit test suite**
+- [x] **Step 1: Run the full unit test suite**
 
 Run: `python -m pytest tests/unit -v`
 Expected: ALL PASS (no regressions in existing job-type dispatch, schema validation, or file-mapping tests)
 
-- [ ] **Step 2: Confirm no stray debug code**
+- [x] **Step 2: Confirm no stray debug code**
 
 Run: `git diff master --stat`
 Expected: only the five files touched across Tasks 1-5 plus their test files; no leftover `print`/`breakpoint` statements (spot-check with `git diff master -- api/services/run_executor.py etl_framework/reconciliation/file_mapping.py api/services/multi_file_remote.py api/schemas.py etl_framework/runner/job_validation.py`)
