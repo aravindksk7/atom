@@ -7,7 +7,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
-from api.schemas import RunBatchOut
+from api.schemas import RunBatchMemberOut, RunBatchOut
 from api.services.business_calendar import step_dates
 from etl_framework.repository.models import TERMINAL_STATUSES
 from etl_framework.repository.repository import RunBatchRepository, RunRepository
@@ -26,13 +26,38 @@ def batch_out(db: Session, batch) -> RunBatchOut:
     selections.py, and sequences.py -- one place to add a field instead of
     three copies that can silently drift out of sync."""
     runs = RunBatchRepository(db).member_runs(batch.batch_id)
+    dates = step_dates(
+        date.fromisoformat(batch.start_value),
+        batch.iterations,
+        batch.step_days,
+        batch.weekend_policy,
+    )
+    members = [
+        RunBatchMemberOut(
+            run_id=run.run_id,
+            status=run.status,
+            started_at=run.started_at,
+            completed_at=run.completed_at,
+            iteration_index=index + 1,
+            business_date=dates[index].isoformat(),
+        )
+        for index, run in enumerate(runs)
+    ]
+    members.extend(
+        RunBatchMemberOut(
+            status="PENDING",
+            iteration_index=index + 1,
+            business_date=dates[index].isoformat(),
+        )
+        for index in range(len(runs), batch.iterations)
+    )
     return RunBatchOut(
         **{k: getattr(batch, k) for k in (
             "batch_id", "target_type", "target_id", "status", "variable_name", "start_value",
             "iterations", "step_days", "weekend_policy", "stop_on_failure", "completed",
             "current_iteration", "current_value", "created_at", "completed_at",
         )},
-        runs=[{"run_id": r.run_id, "status": r.status, "started_at": r.started_at, "completed_at": r.completed_at} for r in runs],
+        runs=members,
     )
 
 

@@ -89,6 +89,12 @@
     launchSelectionModal: {},
     batchProgress: null,
     batchPollingTimer: null,
+    batchPollingGeneration: 0,
+    selectedBatchId: '',
+    recentBatchIds: [],
+    batchProgressError: '',
+    expandedBatchRuns: {},
+    batchStepsUnavailable: {},
     showSelectionRunsModal: false,
     selectionRunsPanel: null,
     selectionRuns: [],
@@ -1297,16 +1303,138 @@
       };
     },
 
+    loadRecentBatchIds() {
+      try {
+        const stored = JSON.parse(localStorage.getItem('etl_recent_batches') || '[]');
+        this.recentBatchIds = Array.isArray(stored)
+          ? stored.filter(id => typeof id === 'string' && id).slice(0, 10)
+          : [];
+      } catch (_) {
+        this.recentBatchIds = [];
+      }
+      return this.recentBatchIds;
+    },
+
+    saveRecentBatchIds() {
+      try { localStorage.setItem('etl_recent_batches', JSON.stringify(this.recentBatchIds)); } catch (_) {}
+    },
+
+    rememberRecentBatch(batchId) {
+      if (!batchId) return;
+      const current = this.loadRecentBatchIds();
+      this.recentBatchIds = [batchId, ...current.filter(id => id !== batchId)].slice(0, 10);
+      this.saveRecentBatchIds();
+    },
+
+    removeRecentBatch(batchId) {
+      this.recentBatchIds = this.loadRecentBatchIds().filter(id => id !== batchId);
+      this.saveRecentBatchIds();
+    },
+
+    batchIsTerminal(status) {
+      return ['COMPLETED', 'STOPPED', 'FAILED'].includes(String(status || '').toUpperCase());
+    },
+
+    async fetchBatchProgress(batchId, showPollingError = true) {
+      if (!batchId) return null;
+      this.selectedBatchId = batchId;
+      this.batchProgressError = '';
+      try {
+        const batch = await api('GET', `/api/run-batches/${batchId}`);
+        if (this.selectedBatchId !== batchId) return null;
+        this.batchProgress = batch;
+        return batch;
+      } catch (e) {
+        if (this.selectedBatchId !== batchId) return null;
+        this.batchProgress = null;
+        if (e.status === 404) {
+          this.batchProgressError = 'Batch not found — it may have been deleted';
+          this.removeRecentBatch(batchId);
+        } else if (showPollingError) {
+          this.toast('error', 'Batch polling failed', e.message);
+        }
+        return null;
+      }
+    },
+
     async pollBatch(batchId) {
       if (!batchId) return;
+      const generation = ++this.batchPollingGeneration;
       clearTimeout(this.batchPollingTimer);
-      try {
-        this.batchProgress = await api('GET', `/api/run-batches/${batchId}`);
-        if (!['COMPLETED', 'STOPPED', 'FAILED'].includes(this.batchProgress.status)) {
+      this.batchPollingTimer = null;
+      const batch = await this.fetchBatchProgress(batchId);
+      if (generation !== this.batchPollingGeneration || this.selectedBatchId !== batchId) return;
+      if (batch) {
+        await Promise.all((batch.runs || [])
+          .filter(run => run.run_id && this.expandedBatchRuns[run.run_id])
+          .map(async run => this.setBatchStepsAvailability(run.run_id, await this.loadRunSteps(run.run_id))));
+      }
+      if (generation === this.batchPollingGeneration && this.selectedBatchId === batchId && (!batch || !this.batchIsTerminal(batch.status)) && !this.batchProgressError) {
+        this.batchPollingTimer = setTimeout(() => this.pollBatch(batchId), 2500);
+      }
+    },
+
+    async selectRecentBatch(batchId) {
+      clearTimeout(this.batchPollingTimer);
+      this.batchPollingTimer = null;
+      this.batchProgress = null;
+      this.batchProgressError = '';
+      const params = new URLSearchParams(window.location.search);
+      if (batchId) params.set('batch_id', batchId);
+      else params.delete('batch_id');
+      const query = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+      if (batchId) await this.pollBatch(batchId);
+    },
+
+    async rehydrateBatchProgress() {
+      clearTimeout(this.batchPollingTimer);
+      this.batchPollingTimer = null;
+      const urlBatchId = new URLSearchParams(window.location.search).get('batch_id');
+      const recent = this.loadRecentBatchIds();
+      if (urlBatchId) {
+        await this.pollBatch(urlBatchId);
+        return;
+      }
+      let newestBatch = null;
+      for (const batchId of recent) {
+        const batch = await this.fetchBatchProgress(batchId, false);
+        if (!batch && !this.batchProgressError) {
           this.batchPollingTimer = setTimeout(() => this.pollBatch(batchId), 2500);
+          return;
         }
-      } catch (e) {
-        this.toast('error', 'Batch polling failed', e.message);
+        if (batch && !newestBatch) newestBatch = batch;
+        if (batch && !this.batchIsTerminal(batch.status)) {
+          this.batchPollingTimer = setTimeout(() => this.pollBatch(batchId), 2500);
+          return;
+        }
+      }
+      if (newestBatch) {
+        this.batchProgress = newestBatch;
+        this.selectedBatchId = newestBatch.batch_id;
+      }
+    },
+
+    setBatchStepsAvailability(runId, loaded) {
+      if (!loaded) {
+        this.batchStepsUnavailable = { ...this.batchStepsUnavailable, [runId]: true };
+        return;
+      }
+      const unavailable = { ...this.batchStepsUnavailable };
+      delete unavailable[runId];
+      this.batchStepsUnavailable = unavailable;
+    },
+
+    async toggleBatchRunSteps(runId) {
+      if (!runId) return;
+      const expanded = Boolean(this.expandedBatchRuns[runId]);
+      this.expandedBatchRuns = { ...this.expandedBatchRuns, [runId]: !expanded };
+      if (expanded) return;
+      let loaded = true;
+      if (!Object.prototype.hasOwnProperty.call(this.runStepsCache, runId)) loaded = await this.loadRunSteps(runId);
+      this.setBatchStepsAvailability(runId, loaded);
+      if (loaded && !(this.runStepsCache[runId] || []).length && !this.batchIsTerminal(this.batchProgress?.status)) {
+        delete this.runStepsCache[runId];
       }
     },
 
@@ -1333,6 +1461,9 @@
           body.batch = this._batchOptionsFromModal(m);
           const batch = await api('POST', `/api/selections/${m.selection_id}/launch-batch`, body);
           this.batchProgress = batch;
+          this.selectedBatchId = batch.batch_id;
+          this.batchProgressError = '';
+          this.rememberRecentBatch(batch.batch_id);
           this.pollBatch(batch.batch_id);
           this.showLaunchSelectionModal = false;
           this.toast('success', 'Batch started', `${batch.completed} / ${batch.iterations} complete`);

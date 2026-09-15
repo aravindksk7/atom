@@ -1218,7 +1218,7 @@
      TAB 2 – JOB LAUNCHER
      ==================================================================== -->
 <!-- Partial name is historical: this tab's currentView identity is 'jobs', not 'launch'. See features/launch.js. -->
-<template x-if="currentView === 'jobs'"><div>
+<template x-if="currentView === 'jobs'"><div x-init="rehydrateBatchProgress()">
   <div class="section-header">
     <div>
       <div class="section-title">Job Launcher</div>
@@ -2662,16 +2662,60 @@
     </div>
   </div>
 
-  <template x-if="batchProgress">
+  <template x-if="batchProgress || batchProgressError || recentBatchIds.length">
     <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
       <div class="flex items-start justify-between gap-3">
-        <div>
-          <div class="font-semibold text-emerald-900">Batch progress</div>
-          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
-          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="font-semibold text-emerald-900">Batch progress</div>
+            <select x-show="recentBatchIds.length" x-model="selectedBatchId" @change="selectRecentBatch($event.target.value)"
+                    class="field-input field-select text-xs py-1 w-auto" aria-label="Recent batches" data-testid="recent-batches-picker">
+              <template x-for="batchId in recentBatchIds" :key="batchId">
+                <option :value="batchId" x-text="batchId"></option>
+              </template>
+            </select>
+          </div>
+          <template x-if="batchProgress">
+            <div>
+              <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete`"></div>
+              <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+            </div>
+          </template>
+          <div x-show="batchProgressError" class="text-sm text-rose-700 mt-2" data-testid="batch-progress-error" x-text="batchProgressError"></div>
         </div>
-        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
+        <button x-show="batchProgress && !batchIsTerminal(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
       </div>
+      <template x-if="batchProgress">
+        <div class="mt-4 space-y-2" data-testid="batch-loop-list">
+          <template x-for="loop in (batchProgress.runs || [])" :key="loop.iteration_index">
+            <div class="rounded-lg border border-emerald-200 bg-white overflow-hidden" :data-testid="'batch-loop-' + loop.iteration_index">
+              <div class="flex items-center gap-3 px-3 py-2">
+                <button x-show="loop.run_id" @click="toggleBatchRunSteps(loop.run_id)" class="text-slate-500 w-5" :aria-expanded="Boolean(expandedBatchRuns[loop.run_id])" :aria-label="'Toggle loop ' + loop.iteration_index + ' steps'">
+                  <span x-text="expandedBatchRuns[loop.run_id] ? '⌄' : '›'"></span>
+                </button>
+                <span x-show="!loop.run_id" class="w-5"></span>
+                <span class="text-sm font-semibold text-slate-700" x-text="'Loop ' + loop.iteration_index"></span>
+                <span class="text-sm text-slate-600" x-text="loop.business_date"></span>
+                <span x-show="loop.started_at" class="text-xs text-slate-500" x-text="loop.started_at ? 'Started ' + fmtDate(loop.started_at) : ''"></span>
+                <span x-show="loop.completed_at" class="text-xs text-slate-500" x-text="loop.completed_at ? 'Completed ' + fmtDate(loop.completed_at) : ''"></span>
+                <span class="badge text-xs ml-auto" :class="stepStatusBadgeClass(loop.status)" x-text="loop.status"></span>
+              </div>
+              <template x-if="loop.run_id && expandedBatchRuns[loop.run_id]">
+                <div class="border-t border-slate-100 px-3 py-2 space-y-1.5">
+                  <template x-for="step in (runStepsCache[loop.run_id] || [])" :key="step.step_id || step.step_index">
+                    <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
+                      <span class="text-xs font-bold text-slate-400 w-5 text-center" x-text="step.step_index + 1"></span>
+                      <span class="flex-1 text-sm font-medium text-slate-700" x-text="step.job_name"></span>
+                      <span class="badge text-xs" :class="stepStatusBadgeClass(step.status)" x-text="step.status"></span>
+                    </div>
+                  </template>
+                  <div x-show="batchStepsUnavailable[loop.run_id]" class="text-xs text-slate-500 px-3 py-2">steps unavailable</div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
   </template>
 
@@ -2960,7 +3004,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
   </div>
 </div>
-<template x-if="currentView === 'sequences'"><div data-testid="sequences-panel">
+<template x-if="currentView === 'sequences'"><div data-testid="sequences-panel" x-init="rehydrateBatchProgress()">
   <div class="section-header">
     <div>
       <div class="section-title">Execution Sequences</div>
@@ -3316,20 +3360,34 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
   </div>
 
-  <!-- Batch progress is shared state (set by either the Launch tab's selection
-       batch or this tab's sequence batch) -- rendered here too since Alpine's
-       x-if on currentView unmounts the Launch tab's own copy while this tab is
-       active. -->
-  <template x-if="batchProgress">
+  <template x-if="batchProgress || batchProgressError || recentBatchIds.length">
     <div class="card mb-4 border-emerald-200 bg-emerald-50" data-testid="batch-progress-panel">
       <div class="flex items-start justify-between gap-3">
-        <div>
-          <div class="font-semibold text-emerald-900">Batch progress</div>
-          <div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete - ${batchProgress.current_value || batchProgress.start_value}`"></div>
-          <div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="font-semibold text-emerald-900">Batch progress</div>
+            <select x-show="recentBatchIds.length" x-model="selectedBatchId" @change="selectRecentBatch($event.target.value)" class="field-input field-select text-xs py-1 w-auto" aria-label="Recent batches" data-testid="recent-batches-picker">
+              <template x-for="batchId in recentBatchIds" :key="batchId"><option :value="batchId" x-text="batchId"></option></template>
+            </select>
+          </div>
+          <template x-if="batchProgress"><div><div class="text-sm text-emerald-800" x-text="`${batchProgress.completed} / ${batchProgress.iterations} complete`"></div><div class="text-xs text-emerald-700" data-testid="batch-progress-status" x-text="`${batchProgress.variable_name}, status ${batchProgress.status}`"></div></div></template>
+          <div x-show="batchProgressError" class="text-sm text-rose-700 mt-2" data-testid="batch-progress-error" x-text="batchProgressError"></div>
         </div>
-        <button x-show="!['COMPLETED', 'STOPPED', 'FAILED'].includes(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
+        <button x-show="batchProgress && !batchIsTerminal(batchProgress.status)" @click="cancelBatch(batchProgress.batch_id)" class="btn-danger btn-sm" data-testid="batch-progress-cancel-btn">Cancel</button>
       </div>
+      <template x-if="batchProgress">
+        <div class="mt-4 space-y-2" data-testid="batch-loop-list">
+          <template x-for="loop in (batchProgress.runs || [])" :key="loop.iteration_index">
+            <div class="rounded-lg border border-emerald-200 bg-white overflow-hidden" :data-testid="'batch-loop-' + loop.iteration_index">
+              <div class="flex items-center gap-3 px-3 py-2">
+                <button x-show="loop.run_id" @click="toggleBatchRunSteps(loop.run_id)" class="text-slate-500 w-5" :aria-expanded="Boolean(expandedBatchRuns[loop.run_id])" :aria-label="'Toggle loop ' + loop.iteration_index + ' steps'"><span x-text="expandedBatchRuns[loop.run_id] ? '⌄' : '›'"></span></button>
+                <span x-show="!loop.run_id" class="w-5"></span><span class="text-sm font-semibold text-slate-700" x-text="'Loop ' + loop.iteration_index"></span><span class="text-sm text-slate-600" x-text="loop.business_date"></span><span x-show="loop.started_at" class="text-xs text-slate-500" x-text="loop.started_at ? 'Started ' + fmtDate(loop.started_at) : ''"></span><span x-show="loop.completed_at" class="text-xs text-slate-500" x-text="loop.completed_at ? 'Completed ' + fmtDate(loop.completed_at) : ''"></span><span class="badge text-xs ml-auto" :class="stepStatusBadgeClass(loop.status)" x-text="loop.status"></span>
+              </div>
+              <template x-if="loop.run_id && expandedBatchRuns[loop.run_id]"><div class="border-t border-slate-100 px-3 py-2 space-y-1.5"><template x-for="step in (runStepsCache[loop.run_id] || [])" :key="step.step_id || step.step_index"><div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100"><span class="text-xs font-bold text-slate-400 w-5 text-center" x-text="step.step_index + 1"></span><span class="flex-1 text-sm font-medium text-slate-700" x-text="step.job_name"></span><span class="badge text-xs" :class="stepStatusBadgeClass(step.status)" x-text="step.status"></span></div></template><div x-show="batchStepsUnavailable[loop.run_id]" class="text-xs text-slate-500 px-3 py-2">steps unavailable</div></div></template>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
   </template>
 </div></template>

@@ -334,6 +334,9 @@
             body.batch = this._batchOptionsFromModal(m);
             const batch = await api('POST', `/api/sequences/${m.sequence_id}/launch-batch`, body);
             this.batchProgress = batch;
+            this.selectedBatchId = batch.batch_id;
+            this.batchProgressError = '';
+            this.rememberRecentBatch(batch.batch_id);
             this.pollBatch(batch.batch_id);
             this.showLaunchSequenceModal = false;
             this.toast('success', 'Batch started', `${batch.completed} / ${batch.iterations} complete`);

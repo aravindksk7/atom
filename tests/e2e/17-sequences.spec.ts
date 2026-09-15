@@ -133,6 +133,84 @@ test.describe('Execution sequences', () => {
     }
   });
 
+  test('restores batch loop progress and lazily expands launched run steps', async ({ authedPage: page }) => {
+    const batchId = 'batch-progress-e2e';
+    const runId = '00000000-0000-0000-0000-000000000017';
+    let batchFetches = 0;
+    let stepFetches = 0;
+    let batchLaunches = 0;
+
+    await page.route('**/api/run-batches/**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      batchFetches += 1;
+      await route.fulfill({
+        json: {
+          batch_id: batchId,
+          status: 'RUNNING',
+          variable_name: 'business_date',
+          iterations: 2,
+          completed: 0,
+          runs: [
+            { run_id: runId, status: 'RUNNING', iteration_index: 1, business_date: '2026-09-15', started_at: '2026-09-15T09:00:00Z', completed_at: null },
+            { run_id: null, status: 'PENDING', iteration_index: 2, business_date: '2026-09-16', started_at: null, completed_at: null },
+          ],
+        },
+      });
+    });
+    await page.route(`**/api/runs/${runId}/steps`, async (route) => {
+      stepFetches += 1;
+      if (stepFetches === 1) {
+        await route.fulfill({ status: 503, json: { detail: 'temporarily unavailable' } });
+        return;
+      }
+      await route.fulfill({
+        json: [
+          { step_id: 'extract', step_index: 0, job_name: 'Extract customers', status: 'PASSED' },
+          { step_id: 'reconcile', step_index: 1, job_name: 'Reconcile customers', status: 'RUNNING' },
+        ],
+      });
+    });
+    await page.route('**/api/sequences/*/launch-batch', async (route) => {
+      batchLaunches += 1;
+      await route.fulfill({ status: 500, json: { detail: 'batch must not relaunch' } });
+    });
+
+    await page.evaluate(([key, value]) => localStorage.setItem(key, value), [
+      'etl_recent_batches',
+      JSON.stringify([batchId]),
+    ]);
+    await page.reload();
+    await page.getByTestId('nav-tab-jobs').click();
+
+    await expect(page.getByTestId('batch-progress-status')).toContainText('status RUNNING');
+    const launchedLoop = page.getByTestId('batch-loop-1');
+    await expect(launchedLoop).toContainText('Loop 1');
+    await expect(launchedLoop).toContainText('2026-09-15');
+    await expect(launchedLoop).toContainText('RUNNING');
+    const pendingLoop = page.getByTestId('batch-loop-2');
+    await expect(pendingLoop).toContainText('Loop 2');
+    await expect(pendingLoop).toContainText('2026-09-16');
+    await expect(pendingLoop).toContainText('PENDING');
+    await expect(pendingLoop.getByRole('button')).toHaveCount(0);
+    expect(stepFetches).toBe(0);
+
+    await launchedLoop.getByRole('button', { name: 'Toggle loop 1 steps' }).click();
+    const unavailable = launchedLoop.getByText('steps unavailable', { exact: true });
+    await expect(unavailable).toBeVisible();
+    await expect.poll(() => stepFetches).toBeGreaterThan(1);
+    await expect(unavailable).toBeHidden();
+    await expect(launchedLoop).toContainText('Extract customers');
+    await expect(launchedLoop).toContainText('PASSED');
+    await expect(launchedLoop).toContainText('Reconcile customers');
+
+    const batchFetchesBeforeRemount = batchFetches;
+    await page.getByTestId('nav-tab-home').click();
+    await page.getByTestId('nav-tab-jobs').click();
+    await expect(page.getByTestId('batch-progress-status')).toContainText('status RUNNING');
+    await expect.poll(() => batchFetches).toBeGreaterThan(batchFetchesBeforeRemount);
+    expect(batchLaunches).toBe(0);
+  });
+
   test('repeat-launch a sequence across incrementing business dates', async ({ authedPage: page, adminToken }) => {
     const varName = `e2e_seq_batch_date_${Date.now()}`;
     const ctx = await authedContext(adminToken);

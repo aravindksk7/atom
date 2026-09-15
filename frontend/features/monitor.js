@@ -108,8 +108,10 @@
     async loadRunSteps(runId) {
       try {
         this.runStepsCache[runId] = await api('GET', `/api/runs/${runId}/steps`);
+        return true;
       } catch {
-        this.runStepsCache[runId] = [];
+        delete this.runStepsCache[runId];
+        return false;
       }
     },
 

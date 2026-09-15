@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 
 from etl_framework.repository.database import Base
 import etl_framework.repository.models  # noqa: F401
-from api.services.batch_launch import run_batch
+from api.services.batch_launch import batch_out, run_batch
 from etl_framework.repository.repository import RunBatchRepository, RunRepository
 @pytest.fixture
 def db_session_factory():
@@ -32,6 +32,45 @@ def _batch(db, **overrides):
     }
     data.update(overrides)
     return RunBatchRepository(db).create(**data)
+
+
+def test_batch_out_reports_launched_and_pending_iterations(db_session_factory):
+    with db_session_factory() as db:
+        batch = _batch(db)
+        for index, status in enumerate(("PASSED", "RUNNING"), start=1):
+            run_id = f"run-{index}"
+            RunRepository(db).create_run(run_id, "dev", "qa", run_batch_id="batch-1")
+            RunRepository(db).update_run_status(run_id, status)
+
+        result = batch_out(db, batch)
+
+    assert len(result.runs) == 3
+    assert [member.iteration_index for member in result.runs] == [1, 2, 3]
+    assert [member.business_date for member in result.runs] == [
+        "2026-09-11", "2026-09-14", "2026-09-15",
+    ]
+    assert [member.run_id for member in result.runs] == ["run-1", "run-2", None]
+    assert [member.status for member in result.runs] == ["PASSED", "RUNNING", "PENDING"]
+
+
+def test_batch_out_reports_pending_iterations_after_stopping_early(db_session_factory):
+    with db_session_factory() as db:
+        batch = _batch(db, iterations=4, stop_on_failure=True)
+        RunRepository(db).create_run("run-failed", "dev", "qa", run_batch_id="batch-1")
+        RunRepository(db).update_run_status("run-failed", "FAILED", failed=1)
+        batch = RunBatchRepository(db).complete("batch-1", "STOPPED")
+
+        result = batch_out(db, batch)
+
+    assert len(result.runs) == 4
+    assert [member.iteration_index for member in result.runs] == [1, 2, 3, 4]
+    assert [member.business_date for member in result.runs] == [
+        "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16",
+    ]
+    assert result.runs[0].run_id == "run-failed"
+    assert result.runs[0].status == "FAILED"
+    assert all(member.run_id is None for member in result.runs[1:])
+    assert all(member.status == "PENDING" for member in result.runs[1:])
 
 
 def test_run_batch_launches_iterations_in_date_order(db_session_factory):

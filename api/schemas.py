@@ -994,10 +994,12 @@ class JobSelectionBatchLaunchRequest(JobSelectionLaunchRequest):
 
 
 class RunBatchMemberOut(BaseModel):
-    run_id: str
+    run_id: str | None = None
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    iteration_index: int
+    business_date: str
 
 
 class RunBatchOut(BaseModel):
