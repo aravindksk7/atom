@@ -875,7 +875,7 @@ class CompareService:
                         "save a job instead for s3/sftp sources."
                     )
 
-                with RemoteFileSourceSession({}) as session:
+                with RemoteFileSourceSession(self._db) as session:
                     source_files = session.discover(spec.source)
                     target_files = session.discover(spec.target)
 

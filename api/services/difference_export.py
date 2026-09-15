@@ -600,7 +600,7 @@ def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: Diff
         raise RuntimeError("Ad-hoc multi-file compare only supports 'local' source/target kinds.")
     test_name = req.label_a or "multi_file_compare"
 
-    with RemoteFileSourceSession({}) as session:
+    with RemoteFileSourceSession(db) as session:
         source_files = session.discover(spec.source)
         target_files = session.discover(spec.target)
 
@@ -750,7 +750,7 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         if job.params.get("source_mode") == "bo_live":
             continue
         if job.params.get("source_mode") == "multi_file":
-            _write_multi_file_reconciliation_job(job, settings, writer, snapshot)
+            _write_multi_file_reconciliation_job(db, job, settings, writer, snapshot)
             continue
         src_engine, tgt_engine = executor._build_engines(job)
         df_a = src_engine.execute_query(job.query, job.params)
@@ -767,6 +767,7 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
 
 
 def _write_multi_file_reconciliation_job(
+    db: Session,
     job,
     settings: RunSettings,
     writer: DifferenceWriter,
@@ -781,7 +782,7 @@ def _write_multi_file_reconciliation_job(
     # reused across discovery and every pair's file reads -- one S3/SFTP
     # connection per (kind, credentials_ref) for this whole job, not one per
     # file or per pair.
-    with RemoteFileSourceSession(config_snapshot) as session:
+    with RemoteFileSourceSession(db) as session:
         if spec.source.readiness is not None:
             source_files = wait_for_ready_files(lambda: session.discover(spec.source), spec.source.readiness)
         else:

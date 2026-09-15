@@ -164,7 +164,7 @@ def validate_job_definition_body(body: dict):
 
 
 @router.post("/preview-file-mapping")
-def preview_file_mapping(body: PreviewFileMappingRequest):
+def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(get_session)):
     from etl_framework.reconciliation.file_mapping import FileMappingSpec, pair_files, pair_files_automated
     from api.services.multi_file_remote import RemoteFileSourceSession
 
@@ -174,7 +174,7 @@ def preview_file_mapping(body: PreviewFileMappingRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
     try:
-        with RemoteFileSourceSession({"file_source_credentials": body.file_source_credentials}) as session:
+        with RemoteFileSourceSession(db) as session:
             source_files = session.discover(spec.source)
             target_files = session.discover(spec.target)
 
@@ -190,6 +190,10 @@ def preview_file_mapping(body: PreviewFileMappingRequest):
                 scores_by_pair = {}
     except HTTPException:
         raise
+    except ValueError as exc:
+        # resolve_file_server_profile raises ValueError for a missing/mismatched
+        # credentials_ref -- surface that as a clean 422 rather than a 400/500.
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

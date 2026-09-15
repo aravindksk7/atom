@@ -731,7 +731,7 @@ class RunExecutor:
             # scoring, all happen sequentially here, so one S3/SFTP connection
             # per (kind, credentials_ref) is reused throughout rather than
             # opening a fresh one per call.
-            with RemoteFileSourceSession(self._config_snapshot) as discovery_session:
+            with RemoteFileSourceSession(self._db) as discovery_session:
                 if spec.source.readiness is not None:
                     source_files = wait_for_ready_files(
                         lambda: discovery_session.discover(spec.source), spec.source.readiness,
@@ -795,7 +795,7 @@ class RunExecutor:
                     # match_on) still share one connection through this
                     # session, same as the discovery phase above.
                     from api.services.multi_file_remote import RemoteFileSourceSession
-                    with RemoteFileSourceSession(self._config_snapshot) as pair_session:
+                    with RemoteFileSourceSession(self._db) as pair_session:
                         source_df = pd.concat(
                             [pair_session.read_file(f, spec.source) for f in pair.source.files],
                             ignore_index=True,
@@ -1626,7 +1626,7 @@ class RunExecutor:
                 content_text=content_match.get("text"),
                 content_is_regex=bool(content_match.get("is_regex", False)),
             )
-            with RemoteFileSourceSession(self._config_snapshot) as session:
+            with RemoteFileSourceSession(self._db) as session:
                 read_text = (lambda f: session.read_text(f, file_spec)) if watch_spec.content_text else None
                 watch_result = wait_for_watched_file(
                     lambda: session.discover(file_spec), watch_spec, read_text=read_text,
