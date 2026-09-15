@@ -64,6 +64,55 @@ def test_resolve_file_server_profile_allows_scp_location_with_sftp_or_scp_kind_p
     assert resolve_file_server_profile(db, spec).name == "scp_source"
 
 
+def test_build_sftp_client_verifies_host_key_before_authenticating(db, monkeypatch) -> None:
+    """Host key fingerprint verification must happen BEFORE any credential
+    material (password or key signature) is sent -- otherwise a MITM'd or
+    unpinned host would receive the password/signature before we ever detect
+    the mismatch and abort, defeating the point of pinning a host key at all.
+    Simulates a mismatched/attacker-presented host key and proves neither
+    auth_password nor auth_publickey is ever invoked."""
+    import paramiko
+    from api.services.multi_file_remote import build_sftp_client, resolve_file_server_profile
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    class _FakeKey:
+        def asbytes(self) -> bytes:
+            return b"attacker-presented-key-bytes"
+
+    class _FakeTransport:
+        def __init__(self, addr) -> None:
+            self.addr = addr
+            self.closed = False
+
+        def start_client(self) -> None:
+            pass
+
+        def get_remote_server_key(self):
+            return _FakeKey()
+
+        def auth_password(self, username, password) -> None:
+            raise AssertionError("auth_password must not be called before host key verification passes")
+
+        def auth_publickey(self, username, key) -> None:
+            raise AssertionError("auth_publickey must not be called before host key verification passes")
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(paramiko, "Transport", _FakeTransport)
+
+    FileServerProfileRepository(db).create({
+        "name": "sftp_mitm", "kind": "sftp", "host": "sftp.internal", "port": 22,
+        "username": "svc", "auth_method": "password", "password": "secret",
+        "host_key_fingerprint": "0" * 64,  # will never match _FakeKey's fingerprint
+    })
+    spec = FileSourceSpec(kind="sftp", root="/source", pattern="*.csv", credentials_ref="sftp_mitm")
+    profile = resolve_file_server_profile(db, spec)
+
+    with pytest.raises(RuntimeError, match="Host key verification failed"):
+        build_sftp_client(profile, spec)
+
+
 class _FakeS3Client:
     build_calls = 0
 

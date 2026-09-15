@@ -85,11 +85,12 @@ def build_sftp_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
         raise RuntimeError("paramiko is required for multi_file SFTP sources") from exc
     transport = paramiko.Transport((profile.host, int(profile.port or 22)))
     try:
-        if profile.auth_method == "private_key":
-            key = paramiko.PKey.from_private_key(io.StringIO(profile.private_key), password=profile.key_passphrase or None)
-            transport.connect(username=profile.username, pkey=key)
-        else:
-            transport.connect(username=profile.username, password=profile.password)
+        # start_client() only negotiates the SSH transport and host key -- it
+        # does NOT authenticate. That lets us verify the host key fingerprint
+        # BEFORE any credential material (password or key signature) goes
+        # over the wire, so a MITM'd/unpinned host is rejected before it ever
+        # sees the password or gets a chance to request a key signature.
+        transport.start_client()
         presented = transport.get_remote_server_key()
         fingerprint = hashlib.sha256(presented.asbytes()).hexdigest()
         if not profile.host_key_fingerprint or fingerprint != profile.host_key_fingerprint:
@@ -97,6 +98,11 @@ def build_sftp_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
                 f"Host key verification failed for file server profile '{profile.name}' -- "
                 "run Test Connection in File Servers to review and pin the presented fingerprint"
             )
+        if profile.auth_method == "private_key":
+            key = paramiko.PKey.from_private_key(io.StringIO(profile.private_key), password=profile.key_passphrase or None)
+            transport.auth_publickey(profile.username, key)
+        else:
+            transport.auth_password(profile.username, profile.password)
     except Exception:
         transport.close()
         raise
