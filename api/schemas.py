@@ -31,6 +31,75 @@ class ConfigOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FileServerProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    kind: Literal["sftp", "scp", "s3"]
+    description: str = ""
+    host: str | None = None
+    port: int = 22
+    username: str | None = None
+    auth_method: Literal["password", "private_key"] | None = None
+    password: str | None = None
+    private_key: str | None = None
+    key_passphrase: str | None = None
+    host_key_fingerprint: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+    region_name: str | None = None
+    endpoint_url: str | None = None
+
+
+class FileServerProfileUpdate(BaseModel):
+    name: str | None = None
+    kind: Literal["sftp", "scp", "s3"] | None = None
+    description: str | None = None
+    host: str | None = None
+    port: int | None = None
+    username: str | None = None
+    auth_method: Literal["password", "private_key"] | None = None
+    password: str | None = None
+    private_key: str | None = None
+    key_passphrase: str | None = None
+    host_key_fingerprint: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+    region_name: str | None = None
+    endpoint_url: str | None = None
+
+
+class FileServerProfileOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    description: str
+    host: str | None = None
+    port: int
+    username: str | None = None
+    auth_method: str | None = None
+    password: str | None = None
+    private_key: str | None = None
+    key_passphrase: str | None = None
+    host_key_fingerprint: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+    region_name: str | None = None
+    endpoint_url: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FileServerTestResult(BaseModel):
+    status: Literal["ok", "unpinned", "mismatch", "error"]
+    presented_fingerprint: str | None = None
+    pinned_fingerprint: str | None = None
+    message: str | None = None
+
+
 class CustomVariableCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     var_type: Literal["text", "number", "date", "alphanumeric"]
@@ -1375,18 +1444,14 @@ class PreviewFileMappingRequest(BaseModel):
     """Body for POST /api/jobs/preview-file-mapping. ``file_mapping`` is the
     same config shape used inside a saved multi_file job's
     ``params.file_mapping`` (see FileMappingSpec.from_params). Local sources
-    need nothing else; s3/sftp sources need ``credentials_ref`` set on the
-    relevant side AND a matching entry in ``file_source_credentials`` --
-    there's no saved job yet at preview time to resolve a persisted
-    credentials_ref against (see
-    ``config_snapshot["file_source_credentials"]`` for the saved-job
-    equivalent, ``api/services/multi_file_remote.py``'s
-    ``resolve_file_source_credentials``), so the caller supplies raw
-    credentials inline instead, keyed the same way. These credentials are
-    used for this one preview call only -- never persisted anywhere.
+    need nothing else; s3/sftp/scp sources need ``credentials_ref`` set on
+    the relevant side, matching the ``name`` of a saved ``FileServerProfile``
+    (see ``api/services/multi_file_remote.py``'s ``resolve_file_server_profile``)
+    -- there is no separate inline-credentials path any more; profiles are
+    the only way to authenticate a remote source, at preview time or launch
+    time alike.
     """
     file_mapping: dict[str, Any] = Field(...)
-    file_source_credentials: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class SQLCompareRequest(BaseModel):

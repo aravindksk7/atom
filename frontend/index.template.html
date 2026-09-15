@@ -370,6 +370,11 @@
      ==================================================================== -->
 <!-- INCLUDE: partials/tab-contracts.html -->
 
+<!-- ====================================================================
+     TAB 9 - FILE SERVERS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-file-servers.html -->
+
 <!-- Contract create/edit modal -->
 <template x-if="showContractModal">
   <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
@@ -448,6 +453,7 @@
     <script src="features/history.js"></script>
     <script src="features/ci-runs.js"></script>
     <script src="features/adapters.js"></script>
+    <script src="features/file-servers.js"></script>
     <script src="features/aws.js"></script>
     <script src="features/reports.js"></script>
     <script src="features/differences.js"></script>

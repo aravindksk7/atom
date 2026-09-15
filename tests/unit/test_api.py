@@ -11,7 +11,7 @@ from etl_framework.repository.database import Base, get_db
 from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401 — registers ORM models with Base
 from etl_framework.repository.repository import (
-    JobRepository, JobSelectionRepository, RunRepository, TokenRepository,
+    FileServerProfileRepository, JobRepository, JobSelectionRepository, RunRepository, TokenRepository,
 )
 from api.main import app
 
@@ -37,6 +37,11 @@ def client(monkeypatch):
         raw, _ = TokenRepository(db).create("test")
 
     with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
+        # Exposed so tests that need direct DB access (e.g. seeding a
+        # FileServerProfile before a request) can open their own Session on
+        # the same in-memory engine the app is using -- mirrors the `client`
+        # fixture in tests/unit/test_file_servers_api.py.
+        c.engine = engine
         yield c
     app.dependency_overrides.clear()
 
@@ -735,7 +740,19 @@ def test_preview_file_mapping_supports_s3_pairs(client, monkeypatch):
         def get_object(self, **kwargs):
             return {"Body": _FakeBody(self.objects[kwargs["Key"]])}
 
-    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda config_snapshot, spec: _FakeS3Client())
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda profile, spec: _FakeS3Client())
+
+    with Session(client.engine) as db:
+        FileServerProfileRepository(db).create({
+            "name": "aws_source", "kind": "s3",
+            "aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t",
+            "region_name": "us-east-1",
+        })
+        FileServerProfileRepository(db).create({
+            "name": "aws_target", "kind": "s3",
+            "aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t",
+            "region_name": "us-east-1",
+        })
 
     resp = client.post("/api/jobs/preview-file-mapping", json={
         "file_mapping": {
@@ -743,10 +760,6 @@ def test_preview_file_mapping_supports_s3_pairs(client, monkeypatch):
             "match_on": ["region"],
             "source": {"kind": "s3", "root": "s3://finance/source", "pattern": "sales_{region}.csv", "credentials_ref": "aws_source"},
             "target": {"kind": "s3", "root": "s3://finance/target", "pattern": "financials_{region}.csv", "credentials_ref": "aws_target"},
-        },
-        "file_source_credentials": {
-            "aws_source": {"aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t"},
-            "aws_target": {"aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t"},
         },
     })
 
@@ -792,7 +805,21 @@ def test_preview_file_mapping_supports_sftp_pairs(client, monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda config_snapshot, spec: _FakeSFTPClient())
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda profile, spec: _FakeSFTPClient())
+
+    with Session(client.engine) as db:
+        FileServerProfileRepository(db).create({
+            "name": "sftp_source", "kind": "sftp",
+            "host": "sftp.internal", "port": 22, "username": "svc",
+            "auth_method": "password", "password": "secret",
+            "host_key_fingerprint": "fake-fingerprint-source",
+        })
+        FileServerProfileRepository(db).create({
+            "name": "sftp_target", "kind": "sftp",
+            "host": "sftp.internal", "port": 22, "username": "svc",
+            "auth_method": "password", "password": "secret",
+            "host_key_fingerprint": "fake-fingerprint-target",
+        })
 
     resp = client.post("/api/jobs/preview-file-mapping", json={
         "file_mapping": {
@@ -800,10 +827,6 @@ def test_preview_file_mapping_supports_sftp_pairs(client, monkeypatch):
             "match_on": ["region"],
             "source": {"kind": "sftp", "root": "/source", "pattern": "sales_{region}.csv", "credentials_ref": "sftp_source"},
             "target": {"kind": "sftp", "root": "/target", "pattern": "financials_{region}.csv", "credentials_ref": "sftp_target"},
-        },
-        "file_source_credentials": {
-            "sftp_source": {"host": "sftp.internal", "username": "svc", "password": "secret"},
-            "sftp_target": {"host": "sftp.internal", "username": "svc", "password": "secret"},
         },
     })
 
@@ -814,10 +837,17 @@ def test_preview_file_mapping_supports_sftp_pairs(client, monkeypatch):
 
 
 def test_preview_file_mapping_surfaces_remote_connection_error_as_400(client, monkeypatch):
-    def _raise(config_snapshot, spec):
+    def _raise(profile, spec):
         raise RuntimeError("could not connect")
 
     monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _raise)
+
+    with Session(client.engine) as db:
+        FileServerProfileRepository(db).create({
+            "name": "aws_source", "kind": "s3",
+            "aws_access_key_id": "AKIA_FAKE", "aws_secret_access_key": "s3cr3t",
+            "region_name": "us-east-1",
+        })
 
     resp = client.post("/api/jobs/preview-file-mapping", json={
         "file_mapping": {

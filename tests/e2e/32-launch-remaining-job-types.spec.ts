@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { authedContext, deleteJob } from './api-helpers';
+import { authedContext, deleteJob, deleteFileServerByName } from './api-helpers';
 
 // Closes out Launch-tab editor coverage for every remaining job_type option
 // (job-modal-type-select) that had zero e2e coverage before this file plus
@@ -11,12 +11,16 @@ import { authedContext, deleteJob } from './api-helpers';
 // the same fields -- proving the full round-trip, not just that the POST succeeded.
 test.describe('32 launch: remaining job-type editors', () => {
   const createdJobNames: string[] = [];
+  const createdFileServerNames: string[] = [];
 
   test.afterEach(async ({ adminToken }) => {
-    if (createdJobNames.length === 0) return;
+    if (createdJobNames.length === 0 && createdFileServerNames.length === 0) return;
     const ctx = await authedContext(adminToken);
     try {
+      // Jobs first: a file server profile still referenced by a saved job's
+      // credentials_ref 409s on delete (see api/routes/file_servers.py's in_use check).
       while (createdJobNames.length) await deleteJob(ctx, createdJobNames.pop()!);
+      while (createdFileServerNames.length) await deleteFileServerByName(ctx, createdFileServerNames.pop()!);
     } finally {
       await ctx.dispose();
     }
@@ -214,6 +218,46 @@ test.describe('32 launch: remaining job-type editors', () => {
     await expect(authedPage.locator('[data-testid="job-modal-fw-root-input"]')).toHaveValue('/data/inbound');
     await expect(authedPage.locator('[data-testid="job-modal-fw-pattern-input"]')).toHaveValue('SALES_*.csv');
     await expect(authedPage.locator('[data-testid="job-modal-fw-max-tries-input"]')).toHaveValue('10');
+    await authedPage.locator('[data-testid="job-modal-cancel-btn"]').click();
+  });
+
+  test('file_watcher: sftp location uses a File Server profile via credentials_ref dropdown', async ({ authedPage, adminToken }) => {
+    const jobName = `e2e-file-watcher-sftp-${Date.now()}`;
+    createdJobNames.push(jobName);
+    const profileName = `e2e-sftp-profile-${Date.now()}`;
+    createdFileServerNames.push(profileName);
+
+    const ctx = await authedContext(adminToken);
+    try {
+      await ctx.post('/api/file-servers', {
+        data: { name: profileName, kind: 'sftp', host: 'sftp.example.internal', port: 22, username: 'svc', auth_method: 'password', password: 'x' },
+      });
+    } finally {
+      await ctx.dispose();
+    }
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await authedPage.locator('[data-testid="job-new-btn"]').click();
+    await authedPage.locator('[data-testid="job-modal-name-input"]').fill(jobName);
+    await authedPage.locator('[data-testid="job-modal-type-select"]').selectOption('file_watcher');
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    // The credentials_ref dropdown (data-testid="job-modal-fw-credentials-ref-select") is
+    // only shown when fw_location_kind !== 'local' (tab-launch.html), so switch to sftp first.
+    await authedPage.locator('[data-testid="job-modal-fw-location-kind-select"]').selectOption('sftp');
+    await authedPage.locator('[data-testid="job-modal-fw-root-input"]').fill('/inbound');
+    await authedPage.locator('[data-testid="job-modal-fw-pattern-input"]').fill('*.csv');
+    await authedPage.locator('[data-testid="job-modal-fw-max-tries-input"]').fill('5');
+    await authedPage.locator('[data-testid="job-modal-fw-credentials-ref-select"]').selectOption(profileName);
+
+    await expect(authedPage.locator('[data-testid="job-modal-save-btn"]')).toBeEnabled();
+    await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeHidden();
+
+    await authedPage.locator(`[data-testid="job-row-${jobName}-edit-btn"]`).click();
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal-fw-location-kind-select"]')).toHaveValue('sftp');
+    await expect(authedPage.locator('[data-testid="job-modal-fw-credentials-ref-select"]')).toHaveValue(profileName);
     await authedPage.locator('[data-testid="job-modal-cancel-btn"]').click();
   });
 });

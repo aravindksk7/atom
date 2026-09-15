@@ -261,7 +261,46 @@ def test_run_executor_multi_file_reconciliation_ignore_policy_proceeds_with_unma
     assert result.mismatch_summary["unmatched_sources"][0]["key"] == {"region": "north", "date": "20260101"}
 
 
-def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> None:
+def _make_db_session(monkeypatch, tmp_path):
+    """File-backed sqlite session with the ORM schema created -- mirrors the
+    `_db()` helper in tests/unit/test_file_server_profile_repository.py, but
+    file-backed rather than `:memory:`.
+
+    Also rebinds etl_framework.repository.database.SessionLocal to this same
+    engine: RemoteFileSourceSession._client_for resolves each pair's
+    FileServerProfile on its own short-lived SessionLocal() session (not the
+    caller's shared db Session -- see api/services/multi_file_remote.py), so
+    without this the fresh session would hit the real on-disk sqlite db
+    instead of this test's db and never find the profiles created below.
+
+    Deliberately file-backed instead of `:memory:` with StaticPool: an
+    in-memory StaticPool engine funnels every session -- including the
+    separate SessionLocal() ones each concurrent worker thread opens below
+    -- through ONE shared underlying sqlite3 connection, which races under
+    real concurrent access regardless of how many independent Session
+    objects wrap it. A real file gives each session its own DBAPI
+    connection, as production does, so the max_workers=2 concurrent runs
+    below actually exercise the fix instead of a StaticPool artifact.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.database import Base
+    import etl_framework.repository.models  # noqa: F401 -- registers ORM models with Base
+
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'run_executor_test.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
+    return Session(engine)
+
+
+def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch, tmp_path) -> None:
+    from etl_framework.repository.repository import FileServerProfileRepository
+
     class FakeBody:
         def __init__(self, raw: bytes) -> None:
             self._raw = raw
@@ -303,13 +342,33 @@ def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> N
             },
         },
     )
+    db = _make_db_session(monkeypatch, tmp_path)
+    FileServerProfileRepository(db).create({
+        "name": "aws_source", "kind": "s3",
+        "aws_access_key_id": "AKIAFAKESOURCE", "aws_secret_access_key": "fake-source-secret",
+        "region_name": "us-east-1",
+    })
+    FileServerProfileRepository(db).create({
+        "name": "aws_target", "kind": "s3",
+        "aws_access_key_id": "AKIAFAKETARGET", "aws_secret_access_key": "fake-target-secret",
+        "region_name": "us-east-1",
+    })
+
     executor = RunExecutor(
-        db=None, run_id="test-run", source_env="source", target_env="target",
-        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        # The two pairs run concurrently in separate TestRunner worker
+        # threads (max_workers=2). This used to require max_workers=1 here
+        # because both pairs' RemoteFileSourceSession shared this one db
+        # Session for credential resolution, which is unsafe under
+        # concurrency -- now that resolve_file_server_profile runs on its
+        # own short-lived SessionLocal() session per pair (see
+        # api/services/multi_file_remote.py's _client_for), real concurrent
+        # execution is safe to exercise here too.
+        db=db, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=2),
         config_snapshot={},
     )
     executor._resolve_segment_columns = lambda _job: []
-    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda config_snapshot, spec: FakeS3Client())
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda profile, spec: FakeS3Client())
 
     result = executor._build_case(job)()
 
@@ -320,11 +379,12 @@ def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> N
     assert by_region["west"]["value_mismatch_count"] == 1
 
 
-def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch) -> None:
+def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch, tmp_path) -> None:
     """Mirrors test_run_executor_multi_file_reconciliation_reads_s3_pairs above --
     the sftp kind had a discover_sftp_files() unit test but no end-to-end coverage
     of RunExecutor's own _build_sftp_client/_read_file/_close_remote_client dispatch
     before this test was added."""
+    from etl_framework.repository.repository import FileServerProfileRepository
 
     class FakeSFTPFile:
         def __init__(self, raw: bytes) -> None:
@@ -379,13 +439,30 @@ def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch) ->
             },
         },
     )
+    db = _make_db_session(monkeypatch, tmp_path)
+    FileServerProfileRepository(db).create({
+        "name": "sftp_source", "kind": "sftp",
+        "host": "sftp-source.internal", "port": 22, "username": "svc_source",
+        "auth_method": "password", "password": "fake-source-password",
+        "host_key_fingerprint": "fake-fingerprint-source",
+    })
+    FileServerProfileRepository(db).create({
+        "name": "sftp_target", "kind": "sftp",
+        "host": "sftp-target.internal", "port": 22, "username": "svc_target",
+        "auth_method": "password", "password": "fake-target-password",
+        "host_key_fingerprint": "fake-fingerprint-target",
+    })
+
     executor = RunExecutor(
-        db=None, run_id="test-run", source_env="source", target_env="target",
-        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        # max_workers=2: see the matching comment in
+        # test_run_executor_multi_file_reconciliation_reads_s3_pairs above --
+        # real concurrent pair execution is now safe to exercise here too.
+        db=db, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=2),
         config_snapshot={},
     )
     executor._resolve_segment_columns = lambda _job: []
-    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda config_snapshot, spec: FakeSFTPClient())
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda profile, spec: FakeSFTPClient())
 
     result = executor._build_case(job)()
 

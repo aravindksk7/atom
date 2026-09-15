@@ -188,6 +188,23 @@ export async function deleteConfig(ctx: APIRequestContext, id: number) {
   await ctx.delete(`/api/configs/${id}`);
 }
 
+/**
+ * Deletes a File Server profile by name (the API only takes numeric ids, so this
+ * looks the id up via GET /api/file-servers first). Fire-and-forget, like
+ * deleteJob/deleteConfig above -- a leftover e2e-prefixed profile is harmless
+ * noise, not silent data loss. Must run AFTER any job/sequence/schedule that
+ * references the profile by credentials_ref has already been deleted, or the
+ * backend's in-use check (DELETE /api/file-servers/{id} -> 409) will make this
+ * a no-op.
+ */
+export async function deleteFileServerByName(ctx: APIRequestContext, name: string) {
+  const resp = await ctx.get('/api/file-servers');
+  if (!resp.ok()) return;
+  const profiles = (await resp.json()) as Array<{ id: number; name: string }>;
+  const match = profiles.find((p) => p.name === name);
+  if (match) await ctx.delete(`/api/file-servers/${match.id}`);
+}
+
 // --- scripts/ci/run-atom-target.sh scratch-repo helpers -------------------
 //
 // Shared by 41-live-run-atom-target.spec.ts and 42-ci-trigger-token.spec.ts —

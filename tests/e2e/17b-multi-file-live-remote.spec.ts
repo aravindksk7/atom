@@ -1,7 +1,7 @@
 // tests/e2e/17b-multi-file-live-remote.spec.ts
 import path from 'node:path';
 import { test, expect } from './fixtures';
-import { authedContext, createConfig, deleteConfig, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
+import { authedContext, createConfig, deleteConfig, deleteFileServerByName, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
 
 const liveBackends = process.env.E2E_LIVE_BACKENDS === '1';
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
@@ -17,12 +17,16 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
 
   let jobName: string;
   let configId: number;
+  let profileName: string;
 
   test.afterAll(async ({ adminToken }) => {
     const ctx = await authedContext(adminToken);
     try {
+      // Job must go first: the profile delete 409s while a saved job still
+      // references it by credentials_ref.
       if (jobName) await deleteJob(ctx, jobName);
       if (configId) await deleteConfig(ctx, configId);
+      if (profileName) await deleteFileServerByName(ctx, profileName);
     } finally {
       await ctx.dispose();
     }
@@ -30,21 +34,26 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
 
   test('creates, previews, saves, and runs a multi_file job with a real S3 source through the job editor UI', async ({ authedPage, adminToken }) => {
     jobName = `e2e-live-s3-${Date.now()}`;
+    profileName = `e2e-live-minio-${Date.now()}`;
 
     const ctx = await authedContext(adminToken);
     try {
       const cfg = await createConfig(ctx, `e2e-live-s3-cfg-${Date.now()}`, 'dev', {
         db_host: 'unused', db_password: 'unused',
-        file_source_credentials: {
-          minio_live: {
-            aws_access_key_id: 'minioadmin',
-            aws_secret_access_key: 'minioadmin',
-            endpoint_url: MINIO_ENDPOINT,
-            region_name: 'us-east-1',
-          },
-        },
       });
       configId = cfg.id;
+
+      const profileResp = await ctx.post('/api/file-servers', {
+        data: {
+          name: profileName,
+          kind: 's3',
+          aws_access_key_id: 'minioadmin',
+          aws_secret_access_key: 'minioadmin',
+          endpoint_url: MINIO_ENDPOINT,
+          region_name: 'us-east-1',
+        },
+      });
+      if (!profileResp.ok()) throw new Error(`file-server profile creation failed: ${profileResp.status()} ${await profileResp.text()}`);
     } finally {
       await ctx.dispose();
     }
@@ -63,15 +72,13 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
     await authedPage.locator('[data-testid="job-modal-mf-source-kind-select"]').selectOption('s3');
     await authedPage.locator('[data-testid="job-modal-mf-source-root-input"]').fill(`s3://${MINIO_BUCKET}/source`);
     await authedPage.locator('[data-testid="job-modal-mf-source-pattern-input"]').fill('sales_{region}.csv');
-    await authedPage.locator('input[x-model="jobModal.mf_source_credentials_ref"]').fill('minio_live');
 
     await authedPage.locator('[data-testid="job-modal-mf-target-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_target'));
     await authedPage.locator('[data-testid="job-modal-mf-target-pattern-input"]').fill('financials_{region}.csv');
 
-    await authedPage.locator('[data-testid="job-modal-mf-source-s3-access-key-input"]').fill('minioadmin');
-    await authedPage.locator('[data-testid="job-modal-mf-source-s3-secret-key-input"]').fill('minioadmin');
-    await authedPage.locator('input[x-model="jobModal.mf_source_preview_creds.region_name"]').fill('us-east-1');
-    await authedPage.locator('input[x-model="jobModal.mf_source_preview_creds.endpoint_url"]').fill(MINIO_ENDPOINT);
+    const sourceSelect = authedPage.locator('[data-testid="job-modal-mf-source-credentials-ref-select"]');
+    await expect(sourceSelect.locator('option', { hasText: profileName })).toHaveCount(1);
+    await sourceSelect.selectOption(profileName);
 
     await authedPage.locator('[data-testid="job-modal-mf-preview-btn"]').click();
     await expect(authedPage.locator('[data-testid="job-modal-mf-preview-result"]')).toContainText('2 pair(s) matched', { timeout: 20_000 });
@@ -96,12 +103,16 @@ test.describe('17b multi-file reconciliation - live SFTP', () => {
 
   let jobName: string;
   let configId: number;
+  let profileName: string;
 
   test.afterAll(async ({ adminToken }) => {
     const ctx = await authedContext(adminToken);
     try {
+      // Job must go first: the profile delete 409s while a saved job still
+      // references it by credentials_ref.
       if (jobName) await deleteJob(ctx, jobName);
       if (configId) await deleteConfig(ctx, configId);
+      if (profileName) await deleteFileServerByName(ctx, profileName);
     } finally {
       await ctx.dispose();
     }
@@ -109,16 +120,27 @@ test.describe('17b multi-file reconciliation - live SFTP', () => {
 
   test('creates, previews, saves, and runs a multi_file job with a real SFTP target through the job editor UI', async ({ authedPage, adminToken }) => {
     jobName = `e2e-live-sftp-${Date.now()}`;
+    profileName = `e2e-live-sftp-target-${Date.now()}`;
 
     const ctx = await authedContext(adminToken);
     try {
       const cfg = await createConfig(ctx, `e2e-live-sftp-cfg-${Date.now()}`, 'dev', {
         db_host: 'unused', db_password: 'unused',
-        file_source_credentials: {
-          sftp_live: { host: SFTP_HOST, port: Number(SFTP_PORT), username: SFTP_USER, password: SFTP_PASS },
-        },
       });
       configId = cfg.id;
+
+      const profileResp = await ctx.post('/api/file-servers', {
+        data: {
+          name: profileName,
+          kind: 'sftp',
+          host: SFTP_HOST,
+          port: Number(SFTP_PORT),
+          username: SFTP_USER,
+          auth_method: 'password',
+          password: SFTP_PASS,
+        },
+      });
+      if (!profileResp.ok()) throw new Error(`file-server profile creation failed: ${profileResp.status()} ${await profileResp.text()}`);
     } finally {
       await ctx.dispose();
     }
@@ -140,12 +162,10 @@ test.describe('17b multi-file reconciliation - live SFTP', () => {
     await authedPage.locator('[data-testid="job-modal-mf-target-kind-select"]').selectOption('sftp');
     await authedPage.locator('[data-testid="job-modal-mf-target-root-input"]').fill('/upload');
     await authedPage.locator('[data-testid="job-modal-mf-target-pattern-input"]').fill('financials_{region}.csv');
-    await authedPage.locator('input[x-model="jobModal.mf_target_credentials_ref"]').fill('sftp_live');
 
-    await authedPage.locator('[data-testid="job-modal-mf-target-sftp-host-input"]').fill(SFTP_HOST);
-    await authedPage.locator('input[x-model="jobModal.mf_target_preview_creds.port"]').fill(SFTP_PORT);
-    await authedPage.locator('input[x-model="jobModal.mf_target_preview_creds.username"]').fill(SFTP_USER);
-    await authedPage.locator('[data-testid="job-modal-mf-target-sftp-password-input"]').fill(SFTP_PASS);
+    const targetSelect = authedPage.locator('[data-testid="job-modal-mf-target-credentials-ref-select"]');
+    await expect(targetSelect.locator('option', { hasText: profileName })).toHaveCount(1);
+    await targetSelect.selectOption(profileName);
 
     await authedPage.locator('[data-testid="job-modal-mf-preview-btn"]').click();
     await expect(authedPage.locator('[data-testid="job-modal-mf-preview-result"]')).toContainText('2 pair(s) matched', { timeout: 20_000 });
