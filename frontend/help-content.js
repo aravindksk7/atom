@@ -137,6 +137,12 @@
           when: 'Matching the test engine to the data storage technology.',
         },
         {
+          title: 'File Watcher Job Type (gate a sequence on a file arriving)',
+          text: 'Polls a local folder, S3, SFTP, or SCP location for a file matching a Name Pattern -- optionally also containing given text -- and passes once found. "scp" is accepted as a location kind but is treated as SFTP under the hood (same host/port/credentials_ref shape); there is no separate raw-SCP transport. At least one of Max Tries or Window End is required -- an unbounded watch is not allowed. Drop a file_watcher step into a sequence ahead of the job that consumes the file, so the sequence waits for the drop before continuing.',
+          where: 'Job Editor -> Job Type -> file_watcher',
+          when: 'A downstream job depends on an external file (SFTP drop, S3 export, nightly extract) that may not have arrived yet when the sequence starts.',
+        },
+        {
           title: 'Data Quality (DQ) Rule Types',
           text: 'Stack up to 20+ built-in DQ rule types including not_null, unique, min_row_count, max_row_count, match_regex, completeness_ratio, outlier_zscore, distribution_ks_test, and custom_sql checks.',
           where: 'Job Editor -> DQ Rules -> + Add Rule',
@@ -470,6 +476,12 @@
           text: '1) Save a Job Selection (or Execution Sequence) with the jobs you want gated. 2) In your pipeline, run: atom run "my-selection" --target-type selection --source-env dev --junit-out atom-junit.xml. 3) Check exit code: 0 = PASS (proceed to publish step), non-zero = FAILED/ERROR/CANCELLED (abort build). On GitLab, use scripts/ci/run-atom-target.sh selection my-selection dev instead to also get the README status splice and commit-status/MR-comment reporting.',
           where: 'CI/CD pipeline script / atom CLI',
           when: 'Automating quality gates in CI/CD deployment pipelines.',
+        },
+        {
+          title: 'Scenario 6: File Watcher Gating a Sequence on a Nightly Drop',
+          text: '1) Create a job with Job Type file_watcher. 2) Set Location Kind (local/s3/sftp/scp), Folder/Bucket Path, and a File Name Pattern (e.g. SALES_*.csv). 3) For s3/sftp/scp, set Credentials Ref to a configured credential. 4) Set Max Tries and/or a Window End (23:30) so the watch is bounded -- at least one is required. 5) Optionally require the file to contain specific text. 6) Add this job as the first step in an Execution Sequence, with the job that processes the file depending on it -- the sequence blocks until the file shows up or the watch times out.',
+          where: 'Launch -> Job Editor -> Job Type: file_watcher, then Sequences -> add as a step',
+          when: 'A sequence needs to wait for an external file (SFTP drop, S3 export, nightly extract) before the rest of the pipeline can run.',
         },
       ],
     },
