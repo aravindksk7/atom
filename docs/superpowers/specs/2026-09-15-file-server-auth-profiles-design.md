@@ -67,7 +67,9 @@ New `api/routes/file_servers.py`, `router = APIRouter(prefix="/api/file-servers"
 
 `resolve_file_source_credentials(config_snapshot, spec)` in `multi_file_remote.py` is replaced by `resolve_file_server_profile(db, spec.credentials_ref)`, which looks up `FileServerProfile` by name and decrypts its secret fields. `build_s3_client`/`build_sftp_client` take the decrypted profile instead of `config_snapshot`.
 
-`RunTrigger`, `JobSelectionLaunchRequest`, `SequenceLaunchRequest`, and the discovery-preview body in `api/routes/jobs.py:177` all **drop the `file_source_credentials` field** — it's no longer accepted. `job_validation.py`'s existing check (`kind in ("s3","sftp","scp") and not location.get("credentials_ref")`, line 229) is extended to also verify the named profile exists (DB lookup) and its `kind` is compatible (`scp`/`sftp` locations accept either an `sftp` or `scp`-kind profile — same client either way — `s3` locations require an `s3`-kind profile), raising the same validation-error shape as today's "requires credentials_ref" check, so a bad reference fails at save/launch-validation time with a clear message, not as a paramiko/boto3 exception mid-run.
+`RunTrigger`, `JobSelectionLaunchRequest`, `SequenceLaunchRequest`, and the discovery-preview body in `api/routes/jobs.py:177` all **drop the `file_source_credentials` field** — it's no longer accepted.
+
+**Deviation from the original plan (decided during implementation, see the implementation plan's header):** `job_validation.py`'s `validate_job_definition()` is a pure function with no `db` parameter, called from 3 route handlers and ~90 existing unit tests with no DB access anywhere in its call chain — threading a `Session` through it just for this one check would have been a disproportionate signature change. Instead, the DB-backed "does this profile exist and match this kind" check lives in `resolve_file_server_profile()` (§3 above), which is exactly where credential resolution already happens for every real execution and for the synchronous `preview-file-mapping` endpoint alike. `job_validation.py`'s existing pure structural check (`kind in ("s3","sftp","scp") and not location.get("credentials_ref")`) is unchanged — it still only requires a non-empty `credentials_ref` string, not that the referenced profile exists. See §8 for the resulting error-handling shape.
 
 ## 4. SFTP/SCP client — key auth + host-key verification
 
@@ -89,7 +91,11 @@ def build_sftp_client(profile: FileServerProfile):
     return paramiko.SFTPClient.from_transport(transport)
 ```
 
-`paramiko.PKey.from_private_key` auto-detects RSA/Ed25519/ECDSA key types from the PEM/OpenSSH text, so the profile doesn't need a separate `key_type` field.
+**Superseded during implementation — this sketch has two bugs the real code doesn't have**, both found and fixed with independent verification (see the implementation plan for details):
+1. `paramiko.PKey.from_private_key` raises `TypeError` on every key in this project's pinned paramiko version (5.0.0) — it only works on a concrete subclass, not the abstract `PKey` base. The real implementation uses a `_load_sftp_private_key()` helper that sniffs the key type via the `cryptography` library and dispatches to the correct subclass.
+2. `transport.connect(...)` above authenticates (sends the password, or does a key-signature exchange) *before* the host-key fingerprint is checked — so credential material reaches an unpinned/wrong host before the check can abort. The real implementation uses `transport.start_client()` (negotiates the transport/host key only, no auth) → fingerprint check → `transport.auth_password()`/`transport.auth_publickey()`, so nothing is ever sent to an unverified host.
+
+`paramiko.PKey.from_private_key` auto-detects RSA/Ed25519/ECDSA key types from the PEM/OpenSSH text, so the profile doesn't need a separate `key_type` field — this part of the reasoning holds, `_load_sftp_private_key` still auto-detects the same way, just via a working code path.
 
 ## 5. S3 client
 
@@ -114,12 +120,14 @@ SELECT DISTINCT json_extract(value, '$.credentials_ref') FROM saved_jobs, json_e
 
 ## 8. Error handling
 
-- Launch/save-time: unknown `credentials_ref` or kind mismatch → 422 with the profile name and expected kind, from `job_validation.py` (matches the existing "requires credentials_ref" error shape).
+- Save-time (`create_job`/`update_job`/`import_jobs`): only the pure structural check runs (`credentials_ref` non-empty for a remote kind) — a `credentials_ref` naming a profile that doesn't exist is **not** caught here (see §3's deviation note). `POST /preview-file-mapping` is the one save-adjacent path that IS DB-backed: it calls `resolve_file_server_profile` synchronously and returns 422 with the profile name and expected kind on a missing/mismatched reference.
+- Launch/run-time: `resolve_file_server_profile` raises `ValueError` for a missing/mismatched `credentials_ref`, which propagates into `TestRunner`'s generic exception handling and surfaces as a clean `TestStatus.ERROR` result (not a crash) — confirmed by tracing the actual call chain during final verification.
 - Runtime: host-key mismatch or unpinned fingerprint → the job step fails with that explicit message (not a raw paramiko traceback), visible in the run's step/error detail same as any other job failure.
 - `DELETE` on an in-use profile → 409, listing which saved jobs/sequences/schedules reference it (so the user can retarget them first, not just get a bare "can't delete").
+- **Known follow-up, not implemented in this change:** there is no save-time (as opposed to run-time) feedback for a `file_watcher` job's `credentials_ref` pointing at a nonexistent profile. A user won't find out until the job actually runs. Low severity (the run-time failure is clean and clearly worded, and the migration script in §6 lets an operator catch every existing bad reference before cutover), but worth closing in a future change if it proves confusing in practice — likely by threading a `db` session into just the 3 save routes' validation call, not into `job_validation.py`'s pure function itself.
 
 ## 9. Testing
 
-- Unit: profile create/update masking + `_preserve_masked_secrets` round-trip (mirrors `tests/unit/test_api.py`'s existing config-masking tests). `build_sftp_client` kwargs/behavior for both `auth_method`s and host-key match/mismatch/unpinned cases — mock `paramiko.Transport` the way `test_multi_file_remote.py` already mocks the credential-resolution layer (no live SSH server in the unit suite, consistent with existing style). `build_s3_client` kwargs sourced from a profile. `job_validation.py` extended checks (unknown ref, kind mismatch).
+- Unit: profile create/update masking + `_preserve_masked_secrets` round-trip (mirrors `tests/unit/test_api.py`'s existing config-masking tests). `build_sftp_client` kwargs/behavior for both `auth_method`s and host-key match/mismatch/unpinned cases — mock `paramiko.Transport` the way `test_multi_file_remote.py` already mocks the credential-resolution layer (no live SSH server in the unit suite, consistent with existing style). `build_s3_client` kwargs sourced from a profile. `resolve_file_server_profile` checks (unknown ref, kind mismatch) — see §3's deviation note; this replaced the originally-planned `job_validation.py` extension.
 - e2e: File Servers CRUD including the fingerprint-accept flow (mocked `/test` response); Launch/Sequences dropdowns populated and selectable; a file_watcher job saved with a profile-backed `credentials_ref` round-trips correctly.
 - Live e2e (optional follow-up, not required for this change): a real SFTP/S3 target, in the same style as the recent floci AWS live e2e coverage — separate track, separate PR.
