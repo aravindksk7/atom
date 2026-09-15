@@ -1,5 +1,5 @@
 <!-- Partial name is historical: this tab's currentView identity is 'jobs', not 'launch'. See features/launch.js. -->
-<template x-if="currentView === 'jobs'"><div x-init="rehydrateBatchProgress()">
+<template x-if="currentView === 'jobs'"><div x-init="rehydrateBatchProgress(); loadFileServers()">
   <div class="section-header">
     <div>
       <div class="section-title">Job Launcher</div>
@@ -583,28 +583,16 @@
                      data-testid="job-modal-mf-source-root-input" aria-label="spool exports or s3 bucket prefix" />
               <input x-model="jobModal.mf_source_pattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
                      data-testid="job-modal-mf-source-pattern-input" aria-label="sales region date y m d csv" />
-              <input x-model="jobModal.mf_source_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
-                     x-show="jobModal.mf_source_kind !== 'local'" aria-label="credentials ref s3 sftp only" />
-              <input x-model="jobModal.mf_source_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
-                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-access-key-input" aria-label="aws access key id preview only" />
-              <input x-model="jobModal.mf_source_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
-                     x-show="jobModal.mf_source_kind === 's3'" data-testid="job-modal-mf-source-s3-secret-key-input" aria-label="aws secret access key preview only" />
-              <input x-model="jobModal.mf_source_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
-                     x-show="jobModal.mf_source_kind === 's3'" aria-label="region optional" />
-              <input x-model="jobModal.mf_source_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
-                     x-show="jobModal.mf_source_kind === 's3'" aria-label="endpoint url optional" />
-              <input x-model="jobModal.mf_source_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
-                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-host-input" aria-label="sftp host preview only" />
-              <input x-model="jobModal.mf_source_preview_creds.port" class="field-input" placeholder="Port (default 22)"
-                     x-show="jobModal.mf_source_kind === 'sftp'" aria-label="port default 22" />
-              <input x-model="jobModal.mf_source_preview_creds.username" class="field-input" placeholder="Username"
-                     x-show="jobModal.mf_source_kind === 'sftp'" aria-label="username" />
-              <input x-model="jobModal.mf_source_preview_creds.password" type="password" class="field-input" placeholder="Password"
-                     x-show="jobModal.mf_source_kind === 'sftp'" data-testid="job-modal-mf-source-sftp-password-input" aria-label="password" />
+              <div x-show="jobModal.mf_source_kind !== 'local'">
+                <select x-model="jobModal.mf_source_credentials_ref" class="field-input field-select"
+                        data-testid="job-modal-mf-source-credentials-ref-select" aria-label="mf source file server">
+                  <option value="">— select a file server —</option>
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_source_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                    <option :value="fs.name" x-text="fs.name"></option>
+                  </template>
+                </select>
+              </div>
             </div>
-            <p x-show="jobModal.mf_source_kind !== 'local'" class="text-xs text-slate-400 mt-1">
-              Credentials above are used only for Preview Mapping and are never saved with the job.
-            </p>
           </div>
           <div class="border-t border-slate-200 pt-3">
             <p class="text-xs font-medium text-slate-500 mb-2">Target</p>
@@ -618,28 +606,16 @@
                      data-testid="job-modal-mf-target-root-input" aria-label="exports finance or s3 bucket prefix" />
               <input x-model="jobModal.mf_target_pattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
                      data-testid="job-modal-mf-target-pattern-input" aria-label="financials region date y m d dat" />
-              <input x-model="jobModal.mf_target_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp only)"
-                     x-show="jobModal.mf_target_kind !== 'local'" aria-label="credentials ref s3 sftp only" />
-              <input x-model="jobModal.mf_target_preview_creds.aws_access_key_id" class="field-input" placeholder="AWS Access Key ID (preview only)"
-                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-access-key-input" aria-label="aws access key id preview only" />
-              <input x-model="jobModal.mf_target_preview_creds.aws_secret_access_key" type="password" class="field-input" placeholder="AWS Secret Access Key (preview only)"
-                     x-show="jobModal.mf_target_kind === 's3'" data-testid="job-modal-mf-target-s3-secret-key-input" aria-label="aws secret access key preview only" />
-              <input x-model="jobModal.mf_target_preview_creds.region_name" class="field-input" placeholder="Region (optional)"
-                     x-show="jobModal.mf_target_kind === 's3'" aria-label="region optional" />
-              <input x-model="jobModal.mf_target_preview_creds.endpoint_url" class="field-input" placeholder="Endpoint URL (optional)"
-                     x-show="jobModal.mf_target_kind === 's3'" aria-label="endpoint url optional" />
-              <input x-model="jobModal.mf_target_preview_creds.host" class="field-input" placeholder="SFTP host (preview only)"
-                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-host-input" aria-label="sftp host preview only" />
-              <input x-model="jobModal.mf_target_preview_creds.port" class="field-input" placeholder="Port (default 22)"
-                     x-show="jobModal.mf_target_kind === 'sftp'" aria-label="port default 22" />
-              <input x-model="jobModal.mf_target_preview_creds.username" class="field-input" placeholder="Username"
-                     x-show="jobModal.mf_target_kind === 'sftp'" aria-label="username" />
-              <input x-model="jobModal.mf_target_preview_creds.password" type="password" class="field-input" placeholder="Password"
-                     x-show="jobModal.mf_target_kind === 'sftp'" data-testid="job-modal-mf-target-sftp-password-input" aria-label="password" />
+              <div x-show="jobModal.mf_target_kind !== 'local'">
+                <select x-model="jobModal.mf_target_credentials_ref" class="field-input field-select"
+                        data-testid="job-modal-mf-target-credentials-ref-select" aria-label="mf target file server">
+                  <option value="">— select a file server —</option>
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_target_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                    <option :value="fs.name" x-text="fs.name"></option>
+                  </template>
+                </select>
+              </div>
             </div>
-            <p x-show="jobModal.mf_target_kind !== 'local'" class="text-xs text-slate-400 mt-1">
-              Credentials above are used only for Preview Mapping and are never saved with the job.
-            </p>
           </div>
           <div class="border-t border-slate-200 pt-3">
             <div class="flex items-center gap-2">
@@ -774,9 +750,14 @@
                      data-testid="job-modal-fw-pattern-input" id="a11y-launch-fw-pattern" />
             </div>
             <div x-show="jobModal.fw_location_kind !== 'local'">
-              <label  class="field-label" for="a11y-launch-fw-credentials-ref">Credentials Ref</label>
-              <input x-model="jobModal.fw_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp/scp only)"
-                     data-testid="job-modal-fw-credentials-ref-input" id="a11y-launch-fw-credentials-ref" />
+              <label  class="field-label" for="a11y-launch-fw-credentials-ref">File Server</label>
+              <select x-model="jobModal.fw_credentials_ref" class="field-input field-select"
+                      data-testid="job-modal-fw-credentials-ref-select" id="a11y-launch-fw-credentials-ref">
+                <option value="">— select a file server —</option>
+                <template x-for="fs in fileServers.filter(f => jobModal.fw_location_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <option :value="fs.name" x-text="fs.name"></option>
+                </template>
+              </select>
             </div>
           </div>
           <div class="border-t border-slate-200 pt-3">
