@@ -1080,6 +1080,12 @@ class FileServerProfileRepository:
     def get(self, profile_id: int) -> FileServerProfile | None:
         return self._db.get(FileServerProfile, profile_id)
 
+    def get_by_name(self, name: str) -> FileServerProfile | None:
+        """Plain, undecrypted lookup for existence checks (e.g. duplicate-name
+        validation on create) -- callers that need the resolved secrets should
+        use get_decrypted_by_name instead."""
+        return self._db.query(FileServerProfile).filter(FileServerProfile.name == name).first()
+
     def update(self, profile_id: int, data: dict) -> FileServerProfile | None:
         profile = self._db.get(FileServerProfile, profile_id)
         if profile is None:

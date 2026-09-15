@@ -63,6 +63,8 @@ def list_file_servers(db: Session = Depends(get_session)):
 @router.post("", response_model=FileServerProfileOut, status_code=201)
 def create_file_server(body: FileServerProfileCreate, request: Request, db: Session = Depends(get_session)):
     repo = FileServerProfileRepository(db)
+    if repo.get_by_name(body.name) is not None:
+        raise HTTPException(status_code=409, detail=f"File server profile '{body.name}' already exists")
     profile = repo.create(body.model_dump())
     AuditService(db).log(request, "file_server.created", "file_server", profile.id, {"name": profile.name, "kind": profile.kind})
     return _mask(profile)
