@@ -199,6 +199,9 @@
         mfPreviewLoading: false,
         mfPreviewResult: null,
         mfPreviewError: '',
+        fw_location_kind: 'local', fw_location_root: '', fw_location_pattern: '', fw_credentials_ref: '',
+        fw_content_match_text: '', fw_content_is_regex: false,
+        fw_poll_interval_seconds: 30, fw_max_tries: '', fw_window_start: '', fw_window_end: '',
       };
       this.showJobModalCompare = false;
       // Prior Test Compare results belong to whichever job produced them --
@@ -367,6 +370,16 @@
         // start blank, same as newJobModal.
         mf_source_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
         mf_target_preview_creds: { aws_access_key_id: '', aws_secret_access_key: '', region_name: '', endpoint_url: '', host: '', port: '', username: '', password: '' },
+        fw_location_kind: job.params?.location?.kind || 'local',
+        fw_location_root: job.params?.location?.root || '',
+        fw_location_pattern: job.params?.location?.pattern || '',
+        fw_credentials_ref: job.params?.location?.credentials_ref || '',
+        fw_content_match_text: job.params?.content_match?.text || '',
+        fw_content_is_regex: job.params?.content_match?.is_regex || false,
+        fw_poll_interval_seconds: job.params?.poll_interval_seconds ?? 30,
+        fw_max_tries: job.params?.max_tries ?? '',
+        fw_window_start: job.params?.window_start || '',
+        fw_window_end: job.params?.window_end || '',
         mfPreviewLoading: false,
         mfPreviewResult: null,
         mfPreviewError: '',
