@@ -135,8 +135,13 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         # api/services/multi_file_remote.py for the full explanation).
         from api.services.multi_file_remote import _load_sftp_private_key
 
-        transport = paramiko.Transport((profile.host, int(profile.port or 22)))
+        transport = None
         try:
+            # paramiko.Transport.__init__ resolves the host (socket.getaddrinfo)
+            # synchronously, so an unreachable/unresolvable host raises right here --
+            # it must stay inside this try, not before it, or a bad host 500s instead
+            # of surfacing as a normal FileServerTestResult(status="error").
+            transport = paramiko.Transport((profile.host, int(profile.port or 22)))
             if profile.auth_method == "private_key":
                 key = _load_sftp_private_key(profile.private_key, profile.key_passphrase or None)
                 transport.connect(username=profile.username, pkey=key)
@@ -147,7 +152,8 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         except Exception as exc:
             return FileServerTestResult(status="error", message=str(exc))
         finally:
-            transport.close()
+            if transport is not None:
+                transport.close()
 
         if body.accept_fingerprint:
             repo.update(profile_id, {"host_key_fingerprint": fingerprint})
