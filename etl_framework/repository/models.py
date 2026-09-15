@@ -329,7 +329,8 @@ class FileServerProfile(Base):
     kind = Column(String(10), nullable=False)  # "sftp" | "scp" | "s3" -- scp uses the sftp client/fields too
     description = Column(Text, nullable=False, default="")
 
-    # sftp / scp
+    # sftp / scp -- password/private_key/key_passphrase encrypted at rest, see
+    # FileServerProfileRepository (etl_framework.repository.repository)
     host = Column(String(255), nullable=True)
     port = Column(Integer, nullable=False, default=22)
     username = Column(String(255), nullable=True)
@@ -339,7 +340,7 @@ class FileServerProfile(Base):
     key_passphrase = Column(Text, nullable=True)
     host_key_fingerprint = Column(String(128), nullable=True)
 
-    # s3
+    # s3 -- aws_secret_access_key/aws_session_token encrypted at rest, same repository
     aws_access_key_id = Column(String(255), nullable=True)
     aws_secret_access_key = Column(Text, nullable=True)
     aws_session_token = Column(Text, nullable=True)
