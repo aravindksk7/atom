@@ -76,7 +76,12 @@ test.describe('19 AWS Glue tab - live floci', () => {
   test('creates tracked Glue catalog compare job and runs it through the backend', async ({ authedPage, adminToken }) => {
     await openGlueTab(authedPage, configId);
 
-    const jobName = `e2e-glue-live-${Date.now()}`;
+    // Underscores, not hyphens: awsGlueCreateJob() in aws.js sanitizes the job
+    // name via .replace(/[^a-z0-9_]+/gi, '_') before creating it, so a hyphenated
+    // name here would create a job under a different (sanitized) name than the
+    // one triggerRun/deleteJob reference below, silently running 0 jobs against
+    // a nonexistent name (which vacuously reports PASSED with total_tests: 0).
+    const jobName = `e2e_glue_live_${Date.now()}`;
     createdJobs.push(jobName);
 
     await fillGlueCompare(authedPage, 'orders', 'orders_copy');

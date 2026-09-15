@@ -83,9 +83,14 @@ test.describe('20 AWS Athena tab - live floci', () => {
   test('runs passing and row-count-failing tracked Athena jobs through the backend', async ({ authedPage, adminToken }) => {
     await openAthenaTab(authedPage, configId);
 
+    // Underscores, not hyphens: awsCreateAthenaQueryJob() in aws.js sanitizes the
+    // job name via .replace(/[^a-z0-9_]+/gi, '_') before creating it, so a
+    // hyphenated name here would create a job under a different (sanitized) name
+    // than the one triggerRun/deleteJob reference below, silently running 0 jobs
+    // against a nonexistent name (which vacuously reports PASSED with total_tests: 0).
     const suffix = Date.now();
-    const passingJob = `e2e-athena-live-pass-${suffix}`;
-    const failingJob = `e2e-athena-live-row-${suffix}`;
+    const passingJob = `e2e_athena_live_pass_${suffix}`;
+    const failingJob = `e2e_athena_live_row_${suffix}`;
     createdJobs.push(passingJob, failingJob);
 
     await authedPage.locator('[data-testid="aws-athena-query-input"]').fill('select id, sku, amount from orders');
