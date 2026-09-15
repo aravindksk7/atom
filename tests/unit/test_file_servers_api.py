@@ -270,3 +270,33 @@ def test_test_connection_sftp_with_private_key_auth(client, monkeypatch):
     assert len(connect_calls) == 1
     assert "pkey" in connect_calls[0]
     assert isinstance(connect_calls[0]["pkey"], paramiko.RSAKey)
+
+
+def test_test_connection_sftp_unresolvable_host_returns_clean_error(client, monkeypatch):
+    """Regression coverage for the bug fixed in 0af0fc9: paramiko.Transport.__init__
+    resolves the host (socket.getaddrinfo) synchronously, so an unresolvable host
+    raises from the *constructor itself* -- before transport.connect() is ever
+    reached. The endpoint's try/except must wrap the Transport(...) construction
+    call, not just the connect/auth calls after it, or this surfaces as an
+    unhandled 500 instead of FileServerTestResult(status="error"). Every other
+    _FakeTransport in this file has a no-op __init__, which can't catch a
+    regression that moves the construction back outside the try -- this one's
+    __init__ is the part that raises."""
+    created = client.post("/api/file-servers", json={
+        "name": "sftp_unresolvable", "kind": "sftp",
+        "host": "this-host-definitely-does-not-exist.invalid", "port": 22,
+        "username": "u", "auth_method": "password", "password": "p",
+    }).json()
+
+    class _FakeTransport:
+        def __init__(self, *a, **k):
+            import socket
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert "Name or service not known" in body["message"]
