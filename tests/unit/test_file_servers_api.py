@@ -300,3 +300,37 @@ def test_test_connection_sftp_unresolvable_host_returns_clean_error(client, monk
     body = resp.json()
     assert body["status"] == "error"
     assert "Name or service not known" in body["message"]
+
+
+def test_file_servers_module_imports_without_paramiko_installed(monkeypatch):
+    """api/routes/file_servers.py must not hard-crash app startup just because
+    paramiko isn't installed -- SFTP/SCP is one optional feature among several
+    (s3-only deployments, or environments that just never ran `pip install -r
+    requirements.txt` since paramiko was added, have every reason to start
+    fine). Reproduces this by blocking `import paramiko` the way Python would
+    if the package were genuinely absent, then reloading this module and
+    confirming that doesn't raise. Every other paramiko/boto3 user in this
+    codebase (api/services/multi_file_remote.py) imports lazily inside the
+    function that needs it for exactly this reason -- this module's top-level
+    `import paramiko` was the one place that didn't."""
+    import builtins
+    import importlib
+    import sys
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "paramiko" or name.startswith("paramiko."):
+            raise ImportError("No module named 'paramiko'")
+        return real_import(name, *args, **kwargs)
+
+    for mod_name in [m for m in sys.modules if m == "paramiko" or m.startswith("paramiko.")]:
+        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+
+    import api.routes.file_servers as file_servers_module
+    try:
+        importlib.reload(file_servers_module)  # must not raise ImportError/ModuleNotFoundError
+    finally:
+        monkeypatch.undo()
+        importlib.reload(file_servers_module)  # restore real paramiko for every later test in this file

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 
-import paramiko
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -12,6 +11,18 @@ from api.schemas import FileServerProfileCreate, FileServerProfileOut, FileServe
 from api.services.audit_service import AuditService
 from etl_framework.repository.repository import FileServerProfileRepository, _FILE_SERVER_SECRET_FIELDS
 from etl_framework.repository.models import ExecutionSequenceVersion, SavedJob, ScheduledRun
+
+try:
+    import paramiko
+except ImportError:
+    # Every other paramiko/boto3 user in this codebase (multi_file_remote.py)
+    # imports lazily inside the function that needs it, so the app still starts
+    # fine without paramiko installed -- SFTP/SCP is one optional feature among
+    # several. `paramiko = None` (rather than skipping the name entirely) keeps
+    # this a stable, patchable module attribute for tests, and lets
+    # test_file_server below give a clean FileServerTestResult(status="error")
+    # instead of an unhandled crash when an sftp/scp connection is attempted.
+    paramiko = None
 
 router = APIRouter(tags=["file-servers"])
 
@@ -126,6 +137,8 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
     profile = repo.get_decrypted_by_name(existing.name)
 
     if profile.kind in ("sftp", "scp"):
+        if paramiko is None:
+            return FileServerTestResult(status="error", message="paramiko is not installed -- SFTP/SCP connections are unavailable")
         # Reuse the same working key-loading helper build_sftp_client relies
         # on, instead of calling paramiko.PKey.from_private_key() directly.
         # That classmethod only works when called on a concrete subclass
