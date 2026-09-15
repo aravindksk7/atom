@@ -138,7 +138,7 @@
         },
         {
           title: 'File Watcher Job Type (gate a sequence on a file arriving)',
-          text: 'Polls a local folder, S3, SFTP, or SCP location for a file matching a Name Pattern -- optionally also containing given text -- and passes once found. "scp" is accepted as a location kind but is treated as SFTP under the hood (same host/port/credentials_ref shape); there is no separate raw-SCP transport. At least one of Max Tries or Window End is required -- an unbounded watch is not allowed. Drop a file_watcher step into a sequence ahead of the job that consumes the file, so the sequence waits for the drop before continuing.',
+          text: 'Polls a local folder, S3, SFTP, or SCP location for a file matching a Name Pattern -- optionally also containing given text -- and passes once found. "scp" is accepted as a location kind but is treated as SFTP under the hood (same host/port/credentials_ref shape); there is no separate raw-SCP transport. At least one of Max Tries or Window End is required -- an unbounded watch is not allowed. Drop a file_watcher step into a sequence ahead of the job that consumes the file, so the sequence waits for the drop before continuing. credentials_ref must name a saved File Server profile (File Servers tab) — there is no more inline/raw credential entry.',
           where: 'Job Editor -> Job Type -> file_watcher',
           when: 'A downstream job depends on an external file (SFTP drop, S3 export, nightly extract) that may not have arrived yet when the sequence starts.',
         },
