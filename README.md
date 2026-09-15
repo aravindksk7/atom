@@ -704,7 +704,7 @@ Additional runtime capabilities:
 ```text
 Browser
   Alpine.js SPA
-  Tabs: Config, Launch, Monitor, History, Adapters, Reports, Compare, Contracts
+  Tabs: Config, Launch, Monitor, History, Adapters, Reports, Compare, AWS, Contracts
       |
       | HTTP / JSON / HTML
       v
@@ -3990,13 +3990,15 @@ docker compose -f docker-compose.integration.yml down -v
 
 The `sapbo` service is a local HTTPS mock of the SAP BO RESTful Web Services endpoints used by this project. It is not a SAP BusinessObjects distribution. Use `https://127.0.0.1:18443` with username `administrator`, password `Password1`, and SSL verification disabled for the mock's self-signed certificate.
 
-`docker-compose.integration.yml` also has `minio` (S3-compatible object storage, for live multi-file S3 coverage — API at `http://127.0.0.1:19000`, credentials `minioadmin`/`minioadmin`) and `sftp` (`atmoz/sftp`, for live multi-file SFTP coverage — `127.0.0.1:12222`, user `e2euser`/password `e2epass`, chrooted to `/upload`) services, covered by the same `E2E_LIVE_BACKENDS=1` flag and `up -d --wait` / `down -v` lifecycle as `sqlserver`/`sapbo` above — see `tests/e2e/17b-multi-file-live-remote.spec.ts` below.
+`docker-compose.integration.yml` also has `minio` (S3-compatible object storage, for live multi-file S3 coverage — API at `http://127.0.0.1:29000`, credentials `minioadmin`/`minioadmin`) and `sftp` (`atmoz/sftp`, for live multi-file SFTP coverage — `127.0.0.1:12222`, user `e2euser`/password `e2epass`, chrooted to `/upload`) services, covered by the same `E2E_LIVE_BACKENDS=1` flag and `up -d --wait` / `down -v` lifecycle as `sqlserver`/`sapbo` above — see `tests/e2e/17b-multi-file-live-remote.spec.ts` below.
+
+`docker-compose.integration.yml` also runs `floci` ([floci-io/floci](https://github.com/floci-io/floci) — a free, MIT-licensed local AWS emulator; API at `http://127.0.0.1:4566`, no auth token required) for live AWS Glue Catalog and Athena coverage. It replaced `localstack/localstack:3`, whose Community edition doesn't implement the Glue or Athena APIs at all without a paid Pro token — floci implements both for real, so `tests/e2e/global-setup.ts` seeds real Glue Catalog tables (a matching pair and several deliberately mismatched ones) and the live specs assert against genuine query/compare results instead of mocks.
 
 ### End-to-end (Playwright) tests
 
 ```powershell
-npx playwright test                      # full UI suite against a throwaway DB, including mocked AWS Glue UI coverage without E2E_LIVE_BACKENDS
-$env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server / S3 (MinIO) / SFTP paths (requires Docker + ODBC Driver 17 for SQL Server; boto3/paramiko installed via requirements.txt)
+npx playwright test                      # full UI suite against a throwaway DB, including mocked AWS Glue/Athena UI coverage without E2E_LIVE_BACKENDS
+$env:E2E_LIVE_BACKENDS = "1"; npx playwright test  # also covers live SAP BO / SQL Server / S3 (MinIO) / AWS Glue+Athena (floci) / SFTP paths (requires Docker + ODBC Driver 17 for SQL Server; boto3/paramiko installed via requirements.txt)
 npx playwright show-report               # view the last HTML report
 ```
 
@@ -4004,6 +4006,12 @@ For the live AWS S3 tab flow against MinIO:
 
 ```powershell
 $env:E2E_LIVE_BACKENDS = "1"; npx playwright test tests/e2e/18-aws-s3-tab-live.spec.ts
+```
+
+For the live AWS Glue Catalog and Athena tab flows against floci:
+
+```powershell
+$env:E2E_LIVE_BACKENDS = "1"; npx playwright test tests/e2e/19-aws-glue-tab-live.spec.ts tests/e2e/20-aws-athena-tab-live.spec.ts
 ```
 
 If your machine only has ODBC Driver 18 installed, add `$env:LIVE_SQLSERVER_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"` before the command.

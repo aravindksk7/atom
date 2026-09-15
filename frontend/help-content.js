@@ -442,6 +442,53 @@
       ],
     },
     {
+      id: 'aws-tab-ref',
+      category: 'Tab Reference',
+      title: 'AWS Tab: S3, Glue Catalog, Athena & Airflow Reference',
+      intro: 'Ad-hoc and tracked-job checks against AWS data services -- S3 object/format validation, Glue Data Catalog comparison and Spark job execution, Athena query running, and Airflow DAG triggering -- all driven from one saved config\'s AWS credentials.',
+      steps: [
+        {
+          title: 'AWS credentials live on the config',
+          text: 'Every AWS sub-tab reads from the same saved config: Region, Access Key ID, Secret Access Key, Session Token, Endpoint URL, and Verify SSL. The secret fields are encrypted at rest. Endpoint URL only needs to be set to point at a non-AWS-compatible endpoint (a local emulator, a VPC endpoint) -- leave it blank to use real AWS with the default boto3 credential chain.',
+          where: 'Config tab -> Saved Configs -> AWS fields',
+          when: 'Setting up a config before using any AWS sub-tab.',
+          tip: 'Select the config from the AWS tab\'s own config dropdown before filling in any other field -- every AWS action requires one.',
+        },
+        {
+          title: 'S3: metadata, row count, partitions, format validation',
+          text: 'Run ad-hoc checks against a bucket/key: object metadata (size, ETag), row count (S3 Select for CSV/JSON/text, pyarrow footer for Parquet/ORC), Hive-style partition discovery under a prefix, and format validation with an optional expected-schema assertion that surfaces missing/extra columns and type mismatches. Any of these can also be saved as a tracked job (row-count, format-validation, or partition-check) so it runs through history, scheduling, and DQ gates like any other job.',
+          where: 'AWS tab -> S3',
+          when: 'Verifying a landed S3 object or Hive-partitioned table before or after a pipeline run.',
+        },
+        {
+          title: 'Glue Catalog: compare two tables',
+          text: 'Compare a source and target Glue Data Catalog table\'s columns, types, partition keys, storage location, and file format. The result reports missing/extra columns, per-column type mismatches, partition key differences, and location/format mismatches. Location and format comparison are on by default and can be toggled off individually. Save as a tracked aws_glue_catalog_compare job to run it repeatedly.',
+          where: 'AWS tab -> Glue',
+          when: 'Validating that a curated/target table\'s schema and storage still match its raw/source counterpart after a catalog change.',
+          warn: 'Two tables pointing at different S3 locations will always report a location mismatch when Compare Location is on, even if their schemas are identical -- that is expected, not a bug.',
+        },
+        {
+          title: 'Glue: run a Spark/ETL job to completion',
+          text: 'List the Glue ETL jobs visible to the config, pick one, optionally pass JSON script arguments, and run it. The panel polls the job run status until it reaches the expected terminal state (default SUCCEEDED) or the configured max attempts/poll interval is exhausted. Save as a tracked aws_glue_job_run job to trigger the same run from history, scheduling, or a sequence.',
+          where: 'AWS tab -> Glue -> Job Run',
+          when: 'Triggering a Glue Spark job as part of a pipeline and gating downstream steps on its completion.',
+        },
+        {
+          title: 'Athena: run a query and assert on the results',
+          text: 'Run a SQL query against a Glue database through Athena, with a required S3 Output Location for query results. The result view shows query state, row count, execution time, and full data-quality metrics (null counts, distinct counts, numeric summaries). A tracked aws_athena_query job additionally supports Min Rows / Max Rows row-count assertions and arbitrary metric_assertions (path, operator, value/tolerance or min/max range) evaluated against those DQ metrics -- any failed assertion fails the job.',
+          where: 'AWS tab -> Athena',
+          when: 'Validating a data lake table\'s query-time shape, or gating a pipeline on a row-count/metric threshold.',
+          tip: 'Metric assertion paths reach into the same DQ metrics object the ad-hoc result view shows -- e.g. null_counts.amount or numeric.amount.avg -- so preview a query first to see which paths are available.',
+        },
+        {
+          title: 'Airflow: trigger a DAG and wait for completion',
+          text: 'List DAGs visible to the config, trigger a run with optional JSON conf, and either poll it to completion or fire-and-forget. The result view shows per-task-instance state. Save as a tracked airflow_dag_run job to trigger the same DAG from history, scheduling, or a sequence.',
+          where: 'AWS tab -> Airflow',
+          when: 'Orchestrating a pipeline stage that lives in Airflow rather than this framework\'s own job runner, and gating on its outcome.',
+        },
+      ],
+    },
+    {
       id: 'scenarios-task-guides',
       category: 'Scenario',
       title: 'Task-Based Scenario Walkthroughs',

@@ -60,6 +60,19 @@ test.describe('11 help', () => {
     await expect(authedPage.locator('text=Compare mismatches across runs')).toBeVisible();
   });
 
+  test('AWS help is visible and searchable', async ({ authedPage }) => {
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-help"]').click();
+
+    await expect(authedPage.locator('text=S3, Glue Catalog, Athena & Airflow').first()).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('metric_assertions');
+    await expect(authedPage.locator('text=Athena: run a query and assert on the results')).toBeVisible();
+
+    await authedPage.locator('[data-testid="help-search-input"]').fill('location mismatch');
+    await expect(authedPage.locator('text=Glue Catalog: compare two tables')).toBeVisible();
+  });
+
   test('Help deep-link loads content on first paint and after reload', async ({ authedPage }) => {
     await authedPage.goto('/?tab=help');
     await expect(authedPage.locator('.help-nav-item').first()).toBeVisible();
