@@ -226,3 +226,47 @@ def test_test_connection_sftp_reports_mismatch_after_pinning(client, monkeypatch
 
     resp = client.post(f"/api/file-servers/{created['id']}/test")
     assert resp.json()["status"] == "mismatch"
+
+
+def test_test_connection_sftp_with_private_key_auth(client, monkeypatch):
+    """Regression coverage for the private_key auth branch, which used to call
+    the broken paramiko.PKey.from_private_key(io.StringIO(...)) directly --
+    that raises TypeError on the paramiko version this project pins, since
+    from_private_key only works on a concrete key subclass (RSAKey/
+    Ed25519Key/ECDSAKey), not the abstract PKey base. The endpoint now reuses
+    _load_sftp_private_key (api/services/multi_file_remote.py) instead, and
+    this test proves that helper really runs end-to-end here and produces a
+    real key object that gets passed to transport.connect(pkey=...)."""
+    import io
+    import paramiko
+
+    generated_key = paramiko.RSAKey.generate(1024)
+    key_buf = io.StringIO()
+    generated_key.write_private_key(key_buf)
+    private_key_pem = key_buf.getvalue()
+
+    created = client.post("/api/file-servers", json={
+        "name": "sftp_keyauth", "kind": "sftp", "host": "h", "port": 22,
+        "username": "u", "auth_method": "private_key", "private_key": private_key_pem,
+    }).json()
+
+    class _FakeKey:
+        def asbytes(self):
+            return b"fake-key-bytes"
+
+    connect_calls = []
+
+    class _FakeTransport:
+        def __init__(self, *a, **k): pass
+        def connect(self, **k): connect_calls.append(k)
+        def get_remote_server_key(self): return _FakeKey()
+        def close(self): pass
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "unpinned"
+    assert len(connect_calls) == 1
+    assert "pkey" in connect_calls[0]
+    assert isinstance(connect_calls[0]["pkey"], paramiko.RSAKey)
