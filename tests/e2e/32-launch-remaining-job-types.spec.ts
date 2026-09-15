@@ -5,8 +5,8 @@ import { authedContext, deleteJob } from './api-helpers';
 // (job-modal-type-select) that had zero e2e coverage before this file plus
 // 28-launch-automic-job-type.spec.ts / 30-launch-ds-job-type.spec.ts: bo_job,
 // api_reconciliation, dbt_artifact, freshness, profile, schema_snapshot,
-// cross_job_assertion. Each test creates the job through the New Job modal, confirms
-// canSaveJob()'s type-specific requirement actually enables Save, then re-opens the
+// cross_job_assertion, file_watcher. Each test creates the job through the New Job modal,
+// confirms canSaveJob()'s type-specific requirement actually enables Save, then re-opens the
 // row's Edit modal and confirms openEditJobModal() reads the saved params back into
 // the same fields -- proving the full round-trip, not just that the POST succeeded.
 test.describe('32 launch: remaining job-type editors', () => {
@@ -186,6 +186,34 @@ test.describe('32 launch: remaining job-type editors', () => {
     await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
     await expect(authedPage.locator('#a11y-launch-source-job-name')).toHaveValue('orders_profile');
     await expect(authedPage.locator('#a11y-launch-target-job-name')).toHaveValue('payments_profile');
+    await authedPage.locator('[data-testid="job-modal-cancel-btn"]').click();
+  });
+
+  test('file_watcher: location and max tries round-trip', async ({ authedPage }) => {
+    const name = `e2e-file-watcher-${Date.now()}`;
+    createdJobNames.push(name);
+
+    await authedPage.goto('/');
+    await authedPage.locator('[data-testid="nav-tab-jobs"]').click();
+    await authedPage.locator('[data-testid="job-new-btn"]').click();
+    await authedPage.locator('[data-testid="job-modal-name-input"]').fill(name);
+    await authedPage.locator('[data-testid="job-modal-type-select"]').selectOption('file_watcher');
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    await authedPage.locator('[data-testid="job-modal-fw-root-input"]').fill('/data/inbound');
+    await authedPage.locator('[data-testid="job-modal-fw-pattern-input"]').fill('SALES_*.csv');
+    await authedPage.locator('[data-testid="job-modal-fw-max-tries-input"]').fill('10');
+    // location kind defaults to 'local', so no credentials_ref field is shown/needed;
+    // max_tries alone satisfies the "max_tries and/or window_end" bound requirement.
+
+    await expect(authedPage.locator('[data-testid="job-modal-save-btn"]')).toBeEnabled();
+    await authedPage.locator('[data-testid="job-modal-save-btn"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal"]')).toBeHidden();
+
+    await authedPage.locator(`[data-testid="job-row-${name}-edit-btn"]`).click();
+    await authedPage.locator('[data-testid="job-modal-tab-settings"]').click();
+    await expect(authedPage.locator('[data-testid="job-modal-fw-root-input"]')).toHaveValue('/data/inbound');
+    await expect(authedPage.locator('[data-testid="job-modal-fw-pattern-input"]')).toHaveValue('SALES_*.csv');
+    await expect(authedPage.locator('[data-testid="job-modal-fw-max-tries-input"]')).toHaveValue('10');
     await authedPage.locator('[data-testid="job-modal-cancel-btn"]').click();
   });
 });
