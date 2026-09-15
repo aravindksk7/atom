@@ -318,6 +318,39 @@ class JobLineageEdge(Base):
 
 
 # ---------------------------------------------------------------------------
+# File server authentication profiles (SFTP / SCP / S3)
+# ---------------------------------------------------------------------------
+
+class FileServerProfile(Base):
+    __tablename__ = "file_server_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    kind = Column(String(10), nullable=False)  # "sftp" | "scp" | "s3" -- scp uses the sftp client/fields too
+    description = Column(Text, nullable=False, default="")
+
+    # sftp / scp
+    host = Column(String(255), nullable=True)
+    port = Column(Integer, nullable=False, default=22)
+    username = Column(String(255), nullable=True)
+    auth_method = Column(String(20), nullable=True)   # "password" | "private_key"
+    password = Column(Text, nullable=True)
+    private_key = Column(Text, nullable=True)
+    key_passphrase = Column(Text, nullable=True)
+    host_key_fingerprint = Column(String(128), nullable=True)
+
+    # s3
+    aws_access_key_id = Column(String(255), nullable=True)
+    aws_secret_access_key = Column(Text, nullable=True)
+    aws_session_token = Column(Text, nullable=True)
+    region_name = Column(String(50), nullable=True)
+    endpoint_url = Column(String(1024), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
 # P0 — Auth
 # ---------------------------------------------------------------------------
 
