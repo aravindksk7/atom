@@ -114,7 +114,6 @@ source_mismatch_csv = b"id,sku,amount,source_only,order_date\\n1,A100,25.50,lega
 target_mismatch_csv = b"id,sku,target_only,business_date\\n1,A100,open,2026-09-15\\n2,B200,closed,2026-09-15\\n3,C300,open,2026-09-16\\n"
 empty_csv = b"id,sku,amount,order_date\\n"
 s3.put_object(Bucket=bucket, Key="raw/orders/part-0.csv", Body=orders_csv)
-s3.put_object(Bucket=bucket, Key="raw/orders_copy/part-0.csv", Body=orders_csv)
 s3.put_object(Bucket=bucket, Key="raw/orders_source_mismatch/part-0.csv", Body=source_mismatch_csv)
 s3.put_object(Bucket=bucket, Key="raw/orders_target_mismatch/part-0.csv", Body=target_mismatch_csv)
 s3.put_object(Bucket=bucket, Key="raw/empty_orders/part-0.csv", Body=empty_csv)
@@ -135,7 +134,13 @@ partition_keys = [{"Name": "order_date", "Type": "string"}]
 
 tables = [
     ("orders", orders_columns, partition_keys, f"s3://{bucket}/raw/orders/"),
-    ("orders_copy", orders_columns, partition_keys, f"s3://{bucket}/raw/orders_copy/"),
+    # Same location as "orders": this table exists purely as an identical Glue
+    # Catalog duplicate for the Glue-compare "matching pair" happy-path test.
+    # A different location here would make compare_tables() correctly report a
+    # location_mismatch (compare_location defaults to true in the UI), which
+    # defeats the point of a "matching" fixture -- location-difference behavior
+    # is already covered by the orders_source_mismatch/orders_target_mismatch pair.
+    ("orders_copy", orders_columns, partition_keys, f"s3://{bucket}/raw/orders/"),
     ("orders_source_mismatch", orders_columns + [{"Name": "source_only", "Type": "string"}], partition_keys, f"s3://{bucket}/raw/orders_source_mismatch/"),
     ("orders_target_mismatch", [
         {"Name": "id", "Type": "string"},
