@@ -2,9 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
-const PORT = 8055;
-export const BASE_URL = `http://127.0.0.1:${PORT}`;
+import { BASE_URL, PORT } from './playwright-constants';
 
 // Playwright evaluates `webServer.env` when this config module loads — before
 // `globalSetup` runs — so the throwaway DB path must be computed here, not in

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give every AWS tab connector (S3, Glue, Athena, Airflow) real, live-docker Playwright coverage for both the AWS tab's direct operations (including tracked-job/reconcile creation+run) and the Compare tab's Matrix comparison — fixing the two backend gaps (`aws_glue` has no data-extraction branch at all; `aws_athena`'s Matrix branch requires a `query_runner` object that is never actually built from `config_id`) and adding the missing live Airflow container and LocalStack Glue/Athena seed data that make those live tests possible.
+**Goal:** Give every AWS tab connector (S3, Glue, Athena, Airflow) real, live-docker Playwright coverage for both the AWS tab's direct operations (including tracked-job/reconcile creation+run) and the Compare tab's Matrix comparison — fixing the two backend gaps (`aws_glue` has no data-extraction branch at all; `aws_athena`'s Matrix branch requires a `query_runner` object that is never actually built from `config_id`) and adding the missing live Airflow container plus floci Glue/Athena seed data that make those live tests possible.
 
-**Architecture:** LocalStack (`localstack/localstack:3`, already in `docker-compose.integration.yml`, running `s3,glue,athena`) backs live S3/Glue/Athena; a new `apache/airflow` standalone container backs live Airflow. `tests/e2e/global-setup.ts` gets a new `seedGlueAthena()` step (S3 bucket + Glue database/table pointing at it) alongside the existing `seedMinio()`. The Matrix-compare gap is fixed entirely inside `api/services/compare_service.py` (a new `_resolve_source_spec()` that turns a `config_id`-bearing `aws_athena`/`aws_glue` `DataSourceSpec` into the `query_runner`/`rows` shapes `etl_framework/reconciliation/data_sources.py` already knows how to consume) plus one small, symmetric addition to that file itself (an `aws_glue` dispatch branch, mirroring the existing `sap_bo` raw-data fallback) — `etl_framework` stays free of boto3/AWS-specific code; only `api/services/` talks to AWS. Frontend gets two additive changes: new Athena-mode fields (database/output-location/workgroup) and an entirely new Glue mode, both in the Matrix source-A/B cards.
+**Architecture:** floci (`floci/floci:latest`, exposed by `docker-compose.integration.yml` on port `4566`) backs live Glue/Athena because LocalStack Community does not implement those APIs without LocalStack Pro; MinIO remains the live S3 backend and `apache/airflow` backs live Airflow. `tests/e2e/global-setup.ts` seeds Glue/Athena fixtures through `seedGlueAthena()` alongside the existing `seedMinio()`. The Matrix-compare gap is fixed entirely inside `api/services/compare_service.py` (a new `_resolve_source_spec()` that turns a `config_id`-bearing `aws_athena`/`aws_glue` `DataSourceSpec` into the `query_runner`/`rows` shapes `etl_framework/reconciliation/data_sources.py` already knows how to consume) plus one small, symmetric addition to that file itself (an `aws_glue` dispatch branch, mirroring the existing `sap_bo` raw-data fallback) — `etl_framework` stays free of boto3/AWS-specific code; only `api/services/` talks to AWS. Frontend gets two additive changes: new Athena-mode fields (database/output-location/workgroup) and an entirely new Glue mode, both in the Matrix source-A/B cards.
 
-**Tech Stack:** FastAPI + Pydantic (backend), Alpine.js (frontend), Playwright + TypeScript (e2e), pytest (unit), Docker Compose + LocalStack + Apache Airflow (live infra).
+**Tech Stack:** FastAPI + Pydantic (backend), Alpine.js (frontend), Playwright + TypeScript (e2e), pytest (unit), Docker Compose + floci + MinIO + Apache Airflow (live infra).
 
 ---
 
@@ -19,9 +19,9 @@ Read these first if anything below is unclear — this plan assumes you have NOT
 - `api/services/aws_athena_service.py`, `api/services/aws_glue_service.py`, and their `*_runtime.py` siblings — the real, working AWS clients this plan reuses (never re-implemented).
 - `tests/e2e/45-oracle-compare.spec.ts` and `tests/e2e/18-aws-s3-tab-live.spec.ts` — the reference patterns for every new live spec in this plan.
 - `tests/e2e/global-setup.ts` — `seedMinio()`/`seedSqlServer()`/`seedOracle()` are the templates for the new `seedGlueAthena()`.
-- `docker-compose.integration.yml` — note the `localstack` service is already present (`SERVICES=s3,glue,athena`) but **never seeded**, and there is **no Airflow service at all** yet.
+- `docker-compose.integration.yml` — floci now replaces the old LocalStack Community service for Glue/Athena live coverage; MinIO remains the live S3 backend.
 
-**Known environment risk (verify at Task 9, not before):** LocalStack Community's Athena emulation may only support a subset of SQL against Glue-catalog-registered S3 tables. If `SELECT * FROM e2e_raw.orders` fails against the seeded table in Task 9's manual verification step, the fallback is documented inline in that task — don't silently swap approaches without hitting that checkpoint.
+**Known environment risk resolved:** LocalStack Community does not implement Glue/Athena without LocalStack Pro, so floci now supplies the local Glue/Athena endpoint on `http://127.0.0.1:4566`.
 
 ---
 

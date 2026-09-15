@@ -21,15 +21,15 @@ This design specification establishes a live Docker-backed integration test envi
 3. **`sqlserver`** (`atom-sqlserver-integration`): Microsoft SQL Server 2022 container exposing port `14333`.
 4. **`minio`** (`atom-minio-integration`): MinIO object storage container exposing S3 API port `29000`.
 5. **`sftp`** (`atom-sftp-integration`): SFTP server container exposing port `12222` with pre-seeded test fixtures.
-6. **`localstack`** (`atom-localstack-integration`): LocalStack container exposing port `4566` emulating AWS S3, AWS Glue Catalog, and AWS Athena query engine.
+6. **`floci`** (`atom-floci-integration`): floci container exposing port `4566` for AWS Glue Catalog and AWS Athena live tests; this replaced LocalStack Community because Glue/Athena require LocalStack Pro.
 7. **`gitlab-ci-runner`** (`atom-gitlab-integration`): Container exposing port `18080` mocking GitLab SaaS API endpoints (`/api/v4/projects/:id/pipelines`, `/api/v4/projects/:id/jobs/:job_id/retry`), enabling pipeline triggers, status polling, and job retries.
 
 ### 2.2 Global Test Environment Lifecycle (`tests/e2e/global-setup.ts`)
 
 - **Health Checks**: Wait for container endpoints (`localhost:18443`, `localhost:4566`, `localhost:29000`, `localhost:18080`) to pass HTTP/TCP health probes.
 - **Fixture Seeding**:
-  - Seed S3 buckets (`atom-source-bucket`, `atom-target-bucket`) in MinIO and LocalStack.
-  - Create AWS Glue catalog databases and tables in LocalStack.
+  - Seed S3 buckets in MinIO and floci-backed AWS fixtures.
+  - Create AWS Glue catalog databases and tables in floci.
   - Seed SQL Server test databases.
   - Upload target CSV/XLSX files to SFTP container directory (`/home/e2euser/upload`).
 
@@ -40,15 +40,15 @@ This design specification establishes a live Docker-backed integration test envi
 ### 3.1 AWS Compare Specs (`tests/e2e/38-live-docker-aws-compare.spec.ts`)
 
 - **AWS Glue Catalog Compare**:
-  - Connect to live LocalStack Glue catalog.
+  - Connect to live floci Glue catalog.
   - Run catalog comparison between source and target databases.
   - Assert column schema differences, type mismatches, and structural stats in the UI.
 - **AWS Athena Query Runner Compare**:
-  - Execute Athena SQL queries against LocalStack query engine.
+  - Execute Athena SQL queries against floci.
   - Compare Athena result set with baseline S3 CSV datasets.
   - Validate mismatch counts and diff table rendering.
 - **AWS S3 File Compare**:
-  - Compare S3 object pairs across MinIO and LocalStack S3 buckets using both key-based and positional row diffing.
+  - Compare S3 object pairs across MinIO/floci S3-compatible buckets using both key-based and positional row diffing.
 
 ### 3.2 Multi-File & SAP BO Compare Specs (`tests/e2e/39-live-docker-files-sapbo-compare.spec.ts`)
 

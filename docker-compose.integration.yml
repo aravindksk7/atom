@@ -106,20 +106,20 @@ services:
     # here -- unlike MinIO, there's no seed *script* to gate a real readiness
     # check on for this service.
 
-  localstack:
-    # Pinned to the last community line: from the 2026.x images onward,
-    # localstack/localstack:latest exits at boot with "License activation failed"
-    # unless LOCALSTACK_AUTH_TOKEN holds a valid pro key, which broke
-    # `docker compose up --wait` (and therefore tests/e2e/global-setup.ts) for
-    # everyone without a licence. 3.8.1 starts s3/glue/athena as before.
-    image: localstack/localstack:3
-    container_name: atom-localstack-integration
+  floci:
+    # Free local AWS emulator used for Glue/Athena live e2e coverage. LocalStack
+    # Community does not implement Glue/Athena without a Pro auth token, while
+    # floci exposes these APIs on the same edge port used by the app's
+    # aws_endpoint_url plumbing.
+    image: floci/floci:latest
+    container_name: atom-floci-integration
     ports:
       - "4566:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - SERVICES=s3,glue,athena
       - AWS_DEFAULT_REGION=us-east-1
-      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
+      - FLOCI_SERVICES_DOCKER_NETWORK=atom_default
 
   airflow:
     # Single-container "standalone-ish" Airflow: SequentialExecutor + its default

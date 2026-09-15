@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import path from 'node:path';
-import { BASE_URL } from '../../playwright.config';
+import { BASE_URL } from '../../playwright-constants';
 
 const dataFile = (name: string) => path.join(__dirname, 'fixtures', 'data', name);
 

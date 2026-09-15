@@ -5071,6 +5071,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <div>Extra columns: <span x-text="(awsGlueResult.diff.extra_columns || []).join(', ')"></span></div>
             <div>Type mismatches: <span x-text="(awsGlueResult.diff.type_mismatches || []).map(m => m.column + ': ' + m.expected_type + ' -> ' + m.actual_type).join(', ')"></span></div>
             <div x-show="awsGlueResult.diff.location_mismatch">Location mismatch</div>
+            <div x-show="(awsGlueResult.diff.partition_key_mismatches || []).length">Partition mismatch</div>
             <div x-show="awsGlueResult.diff.format_mismatch">Format mismatch</div>
           </div>
         </template>

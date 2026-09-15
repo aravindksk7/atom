@@ -82,22 +82,10 @@ print("seeded")
 }
 
 function seedGlueAthena() {
-  // LocalStack backs s3+glue+athena on one endpoint (docker-compose.integration.yml's
-  // `localstack` service, SERVICES=s3,glue,athena). Real AWS would need a Glue
-  // crawler or DDL to register a table; here we just PUT a CSV and register its
-  // location directly via create_table, matching how a real data lake table
-  // looks once already cataloged (which is all _read_glue_table_rows in
-  // compare_service.py or a direct AWS-tab Glue call ever needs to see).
-  //
-  // KNOWN GAP: localstack/localstack:3 Community edition does not implement
-  // the Glue or Athena APIs at all (confirmed via GET /_localstack/health --
-  // neither service appears in the response, not even as "disabled"; both
-  // require a paid LOCALSTACK_AUTH_TOKEN / LocalStack Pro). This seed step
-  // will therefore always fail in this environment. It's kept here (rather
-  // than deleted) as the one place that documents exactly what's missing and
-  // exactly what a Pro token would unlock, but it must never take down the
-  // rest of global-setup (SQL Server/Oracle/MinIO/Airflow seeding all still
-  // need to succeed) -- so failure here is caught and logged, not thrown.
+  // floci backs s3+glue+athena on one endpoint (docker-compose.integration.yml's
+  // `floci` service). Real AWS would need a Glue crawler or DDL to register a
+  // table; here we PUT CSV objects and register their locations directly via
+  // create_table, matching how a data lake table looks once already cataloged.
   const script = `
 import time
 import boto3
@@ -114,15 +102,23 @@ for attempt in range(30):
     except Exception:
         time.sleep(1)
 else:
-    raise RuntimeError("LocalStack did not become ready within 30s")
+    raise RuntimeError("floci did not become ready within 30s")
 
 bucket = "atom-e2e-glue"
 existing = {b["Name"] for b in s3.list_buckets().get("Buckets", [])}
 if bucket not in existing:
     s3.create_bucket(Bucket=bucket)
 
-csv_body = b"id,sku,amount\\n1,A100,25.50\\n2,B200,50.00\\n3,C300,75.00\\n"
-s3.put_object(Bucket=bucket, Key="raw/orders/part-0.csv", Body=csv_body)
+orders_csv = b"id,sku,amount,order_date\\n1,A100,25.50,2026-09-15\\n2,B200,50.00,2026-09-15\\n3,C300,75.00,2026-09-16\\n"
+source_mismatch_csv = b"id,sku,amount,source_only,order_date\\n1,A100,25.50,legacy,2026-09-15\\n2,B200,50.00,legacy,2026-09-15\\n3,C300,75.00,legacy,2026-09-16\\n"
+target_mismatch_csv = b"id,sku,target_only,business_date\\n1,A100,open,2026-09-15\\n2,B200,closed,2026-09-15\\n3,C300,open,2026-09-16\\n"
+empty_csv = b"id,sku,amount,order_date\\n"
+s3.put_object(Bucket=bucket, Key="raw/orders/part-0.csv", Body=orders_csv)
+s3.put_object(Bucket=bucket, Key="raw/orders_copy/part-0.csv", Body=orders_csv)
+s3.put_object(Bucket=bucket, Key="raw/orders_source_mismatch/part-0.csv", Body=source_mismatch_csv)
+s3.put_object(Bucket=bucket, Key="raw/orders_target_mismatch/part-0.csv", Body=target_mismatch_csv)
+s3.put_object(Bucket=bucket, Key="raw/empty_orders/part-0.csv", Body=empty_csv)
+s3.put_object(Bucket=bucket, Key="athena-output/.keep", Body=b"")
 
 database = "e2e_raw"
 try:
@@ -130,39 +126,53 @@ try:
 except glue.exceptions.EntityNotFoundException:
     glue.create_database(DatabaseInput={"Name": database})
 
-table_input = {
-    "Name": "orders",
-    "TableType": "EXTERNAL_TABLE",
-    "StorageDescriptor": {
-        "Columns": [
-            {"Name": "id", "Type": "int"},
-            {"Name": "sku", "Type": "string"},
-            {"Name": "amount", "Type": "double"},
-        ],
-        "Location": f"s3://{bucket}/raw/orders/",
-        "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
-        "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
-        "SerdeInfo": {
-            "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
-            "Parameters": {"field.delim": ",", "skip.header.line.count": "1"},
+orders_columns = [
+    {"Name": "id", "Type": "int"},
+    {"Name": "sku", "Type": "string"},
+    {"Name": "amount", "Type": "double"},
+]
+partition_keys = [{"Name": "order_date", "Type": "string"}]
+
+tables = [
+    ("orders", orders_columns, partition_keys, f"s3://{bucket}/raw/orders/"),
+    ("orders_copy", orders_columns, partition_keys, f"s3://{bucket}/raw/orders_copy/"),
+    ("orders_source_mismatch", orders_columns + [{"Name": "source_only", "Type": "string"}], partition_keys, f"s3://{bucket}/raw/orders_source_mismatch/"),
+    ("orders_target_mismatch", [
+        {"Name": "id", "Type": "string"},
+        {"Name": "sku", "Type": "string"},
+        {"Name": "target_only", "Type": "string"},
+    ], [{"Name": "business_date", "Type": "string"}], f"s3://{bucket}/raw/orders_target_mismatch/"),
+    ("empty_orders", orders_columns, partition_keys, f"s3://{bucket}/raw/empty_orders/"),
+]
+
+for name, columns, partitions, location in tables:
+    table_input = {
+        "Name": name,
+        "TableType": "EXTERNAL_TABLE",
+        "StorageDescriptor": {
+            "Columns": columns,
+            "Location": location,
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+                "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+                "Parameters": {"field.delim": ",", "skip.header.line.count": "1"},
+            },
         },
-    },
-}
-try:
-    glue.delete_table(DatabaseName=database, Name="orders")
-except glue.exceptions.EntityNotFoundException:
-    pass
-glue.create_table(DatabaseName=database, TableInput=table_input)
+        "PartitionKeys": partitions,
+        "Parameters": {"classification": "csv", "skip.header.line.count": "1"},
+    }
+    try:
+        glue.delete_table(DatabaseName=database, Name=name)
+    except glue.exceptions.EntityNotFoundException:
+        pass
+    glue.create_table(DatabaseName=database, TableInput=table_input)
 
 print("seeded")
 `;
   const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
   if (result.status !== 0) {
-    console.warn(
-      '[global-setup] Glue/Athena seed skipped (expected -- LocalStack Community does not implement Glue/Athena):',
-      result.stderr.trim() || result.stdout.trim(),
-    );
-    return;
+    throw new Error(`Glue/Athena seed failed:\n${result.stdout}\n${result.stderr}`);
   }
   console.log('[global-setup] Glue/Athena seeded:', result.stdout.trim());
 }

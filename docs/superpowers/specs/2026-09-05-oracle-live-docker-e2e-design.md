@@ -10,7 +10,7 @@
 
 Oracle has database-engine support in `etl_framework` (`db_type: "oracle"`, `oracledb` SQLAlchemy driver in `etl_framework/db/engine.py`) and is exercised by unit tests (`tests/test_oracle_integration.py`), but has no live Docker container and no live Playwright E2E coverage — unlike SQL Server, which has a live container in `docker-compose.integration.yml`, a seed step in `tests/e2e/global-setup.ts`, and a live compare spec (`tests/e2e/08c-compare-sql.spec.ts`).
 
-AWS (S3, Glue, Athena, Airflow) already has full live-docker coverage via LocalStack and `tests/e2e/18-21`, `38`, `41-43`. This effort does not add new AWS surface — it brings up the full stack and verifies that suite still passes.
+AWS (S3, Glue, Athena, Airflow) has live-docker coverage through MinIO, floci, and Airflow containers; floci replaced LocalStack Community for Glue/Athena because those APIs require LocalStack Pro. This effort does not add new AWS surface — it brings up the full stack and verifies that suite still passes.
 
 Scope of this spec:
 1. Add a live Oracle container to `docker-compose.integration.yml`.

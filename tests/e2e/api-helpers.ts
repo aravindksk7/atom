@@ -3,7 +3,7 @@ import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { BASE_URL } from '../../playwright.config';
+import { BASE_URL } from '../../playwright-constants';
 
 // File-based (not in-memory) cache: the `setup` Playwright project (00-auth-setup.spec.ts)
 // and the `chromium` project (everything else, via `dependencies: ['setup']` in
