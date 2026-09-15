@@ -64,6 +64,27 @@ def test_resolve_file_server_profile_allows_scp_location_with_sftp_or_scp_kind_p
     assert resolve_file_server_profile(db, spec).name == "scp_source"
 
 
+def test_build_s3_client_raises_clear_error_when_profile_is_none() -> None:
+    """A misconfigured multi_file source can have kind='s3'/'sftp' with no
+    credentials_ref -- file_mapping's own parsing doesn't require one the way
+    file_watcher's validator does. Without this guard, build_s3_client(None,
+    spec) would crash on `profile.aws_access_key_id` with a bare, unhelpful
+    AttributeError deep inside client construction instead of a clear error."""
+    from api.services.multi_file_remote import build_s3_client
+
+    spec = FileSourceSpec(kind="s3", root="s3://bucket/prefix", pattern="*.csv")
+    with pytest.raises(ValueError, match="'s3' source requires credentials_ref"):
+        build_s3_client(None, spec)
+
+
+def test_build_sftp_client_raises_clear_error_when_profile_is_none() -> None:
+    from api.services.multi_file_remote import build_sftp_client
+
+    spec = FileSourceSpec(kind="sftp", root="/source", pattern="*.csv")
+    with pytest.raises(ValueError, match="'sftp' source requires credentials_ref"):
+        build_sftp_client(None, spec)
+
+
 def test_build_sftp_client_verifies_host_key_before_authenticating(db, monkeypatch) -> None:
     """Host key fingerprint verification must happen BEFORE any credential
     material (password or key signature) is sent -- otherwise a MITM'd or
@@ -99,7 +120,8 @@ def test_build_sftp_client_verifies_host_key_before_authenticating(db, monkeypat
         def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setattr(paramiko, "Transport", _FakeTransport)
+    created: list[_FakeTransport] = []
+    monkeypatch.setattr(paramiko, "Transport", lambda addr: created.append(_FakeTransport(addr)) or created[-1])
 
     FileServerProfileRepository(db).create({
         "name": "sftp_mitm", "kind": "sftp", "host": "sftp.internal", "port": 22,
@@ -111,6 +133,130 @@ def test_build_sftp_client_verifies_host_key_before_authenticating(db, monkeypat
 
     with pytest.raises(RuntimeError, match="Host key verification failed"):
         build_sftp_client(profile, spec)
+
+    assert created[0].closed is True
+
+
+def test_build_sftp_client_authenticates_with_password_when_host_key_matches(db, monkeypatch) -> None:
+    """Positive path: when the presented host key's fingerprint DOES match
+    the pinned fingerprint, authentication must actually be attempted with
+    the resolved credentials -- the mismatch test above only proves the block
+    case, this proves verification doesn't also block the legitimate case."""
+    import hashlib
+    import paramiko
+    from api.services.multi_file_remote import build_sftp_client, resolve_file_server_profile
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    presented_bytes = b"trusted-server-key-bytes"
+    fingerprint = hashlib.sha256(presented_bytes).hexdigest()
+    auth_calls: list[tuple] = []
+
+    class _FakeKey:
+        def asbytes(self) -> bytes:
+            return presented_bytes
+
+    class _FakeTransport:
+        def __init__(self, addr) -> None:
+            self.addr = addr
+            self.closed = False
+
+        def start_client(self) -> None:
+            pass
+
+        def get_remote_server_key(self):
+            return _FakeKey()
+
+        def auth_password(self, username, password) -> None:
+            auth_calls.append(("password", username, password))
+
+        def auth_publickey(self, username, key) -> None:
+            auth_calls.append(("publickey", username, key))
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_sftp_client = object()
+    monkeypatch.setattr(paramiko, "Transport", _FakeTransport)
+    monkeypatch.setattr(paramiko.SFTPClient, "from_transport", lambda t: fake_sftp_client)
+
+    FileServerProfileRepository(db).create({
+        "name": "sftp_trusted", "kind": "sftp", "host": "sftp.internal", "port": 22,
+        "username": "svc", "auth_method": "password", "password": "secret",
+        "host_key_fingerprint": fingerprint,
+    })
+    spec = FileSourceSpec(kind="sftp", root="/source", pattern="*.csv", credentials_ref="sftp_trusted")
+    profile = resolve_file_server_profile(db, spec)
+
+    client = build_sftp_client(profile, spec)
+
+    assert auth_calls == [("password", "svc", "secret")]
+    assert client is fake_sftp_client
+
+
+def test_build_sftp_client_authenticates_with_private_key_when_host_key_matches(db, monkeypatch) -> None:
+    """auth_method='private_key' must parse the stored PEM text into a real
+    paramiko key and authenticate with auth_publickey (not auth_password),
+    passing the key_passphrase through when the key itself is encrypted."""
+    import hashlib
+    import io
+    import paramiko
+    from api.services.multi_file_remote import build_sftp_client, resolve_file_server_profile
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    generated_key = paramiko.RSAKey.generate(1024)
+    key_buf = io.StringIO()
+    generated_key.write_private_key(key_buf, password="key-pass")
+    private_key_pem = key_buf.getvalue()
+
+    presented_bytes = b"trusted-server-key-bytes"
+    fingerprint = hashlib.sha256(presented_bytes).hexdigest()
+    auth_calls: list[tuple] = []
+
+    class _FakeKey:
+        def asbytes(self) -> bytes:
+            return presented_bytes
+
+    class _FakeTransport:
+        def __init__(self, addr) -> None:
+            self.addr = addr
+            self.closed = False
+
+        def start_client(self) -> None:
+            pass
+
+        def get_remote_server_key(self):
+            return _FakeKey()
+
+        def auth_password(self, username, password) -> None:
+            raise AssertionError("auth_password must not be called for auth_method=private_key")
+
+        def auth_publickey(self, username, key) -> None:
+            auth_calls.append(("publickey", username, key))
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_sftp_client = object()
+    monkeypatch.setattr(paramiko, "Transport", _FakeTransport)
+    monkeypatch.setattr(paramiko.SFTPClient, "from_transport", lambda t: fake_sftp_client)
+
+    FileServerProfileRepository(db).create({
+        "name": "sftp_key_auth", "kind": "sftp", "host": "sftp.internal", "port": 22,
+        "username": "svc", "auth_method": "private_key",
+        "private_key": private_key_pem, "key_passphrase": "key-pass",
+        "host_key_fingerprint": fingerprint,
+    })
+    spec = FileSourceSpec(kind="sftp", root="/source", pattern="*.csv", credentials_ref="sftp_key_auth")
+    profile = resolve_file_server_profile(db, spec)
+
+    client = build_sftp_client(profile, spec)
+
+    assert len(auth_calls) == 1
+    method, username, key = auth_calls[0]
+    assert method == "publickey"
+    assert username == "svc"
+    assert key.get_base64() == generated_key.get_base64()
+    assert client is fake_sftp_client
 
 
 class _FakeS3Client:

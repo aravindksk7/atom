@@ -56,6 +56,8 @@ def resolve_file_server_profile(db: Session, spec: FileSourceSpec) -> ResolvedFi
 
 
 def build_s3_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
+    if profile is None:
+        raise ValueError(f"'{spec.kind}' source requires credentials_ref, but none was set")
     try:
         import boto3
         from botocore.config import Config as BotoConfig
@@ -78,7 +80,39 @@ def build_s3_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
     return boto3.client("s3", **client_kwargs)
 
 
+def _load_sftp_private_key(private_key_text: str, password: str | None):
+    """Parse PEM/OpenSSH private key text into the matching paramiko key
+    subclass. ``paramiko.PKey.from_private_key`` only works when called on a
+    concrete subclass (``RSAKey``, ``Ed25519Key``, ``ECDSAKey``) -- calling it
+    on the abstract ``PKey`` base raises ``TypeError`` in the paramiko version
+    this project pins, so the key type must be sniffed first. Mirrors the
+    detection ``paramiko.PKey.from_path`` uses for file-based keys, but stays
+    in-memory (no disk write of the decrypted key material)."""
+    import paramiko
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+
+    data = private_key_text.encode()
+    pwd = password.encode() if password else None
+    try:
+        loaded = serialization.load_ssh_private_key(data=data, password=pwd)
+    except ValueError:
+        loaded = serialization.load_pem_private_key(data=data, password=pwd)
+
+    if isinstance(loaded, rsa.RSAPrivateKey):
+        key_class = paramiko.RSAKey
+    elif isinstance(loaded, ed25519.Ed25519PrivateKey):
+        key_class = paramiko.Ed25519Key
+    elif isinstance(loaded, ec.EllipticCurvePrivateKey):
+        key_class = paramiko.ECDSAKey
+    else:
+        raise ValueError(f"Unsupported SSH private key type: {type(loaded).__name__}")
+    return key_class.from_private_key(io.StringIO(private_key_text), password=password)
+
+
 def build_sftp_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
+    if profile is None:
+        raise ValueError(f"'{spec.kind}' source requires credentials_ref, but none was set")
     try:
         import paramiko
     except ImportError as exc:
@@ -99,7 +133,7 @@ def build_sftp_client(profile: ResolvedFileServerProfile, spec: FileSourceSpec):
                 "run Test Connection in File Servers to review and pin the presented fingerprint"
             )
         if profile.auth_method == "private_key":
-            key = paramiko.PKey.from_private_key(io.StringIO(profile.private_key), password=profile.key_passphrase or None)
+            key = _load_sftp_private_key(profile.private_key, profile.key_passphrase or None)
             transport.auth_publickey(profile.username, key)
         else:
             transport.auth_password(profile.username, profile.password)
