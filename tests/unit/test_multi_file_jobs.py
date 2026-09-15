@@ -261,7 +261,26 @@ def test_run_executor_multi_file_reconciliation_ignore_policy_proceeds_with_unma
     assert result.mismatch_summary["unmatched_sources"][0]["key"] == {"region": "north", "date": "20260101"}
 
 
+def _make_db_session():
+    """In-memory sqlite session with the ORM schema created -- mirrors the
+    `_db()` helper in tests/unit/test_file_server_profile_repository.py."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from etl_framework.repository.database import Base
+    import etl_framework.repository.models  # noqa: F401 -- registers ORM models with Base
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return Session(engine)
+
+
 def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> None:
+    from etl_framework.repository.repository import FileServerProfileRepository
+
     class FakeBody:
         def __init__(self, raw: bytes) -> None:
             self._raw = raw
@@ -303,13 +322,32 @@ def test_run_executor_multi_file_reconciliation_reads_s3_pairs(monkeypatch) -> N
             },
         },
     )
+    db = _make_db_session()
+    FileServerProfileRepository(db).create({
+        "name": "aws_source", "kind": "s3",
+        "aws_access_key_id": "AKIAFAKESOURCE", "aws_secret_access_key": "fake-source-secret",
+        "region_name": "us-east-1",
+    })
+    FileServerProfileRepository(db).create({
+        "name": "aws_target", "kind": "s3",
+        "aws_access_key_id": "AKIAFAKETARGET", "aws_secret_access_key": "fake-target-secret",
+        "region_name": "us-east-1",
+    })
+
     executor = RunExecutor(
-        db=None, run_id="test-run", source_env="source", target_env="target",
-        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        # max_workers=1: the two pairs would otherwise run concurrently in
+        # separate TestRunner worker threads, and both would call
+        # resolve_file_server_profile() on this SAME shared db Session --
+        # sharing one raw sqlite3 connection/cursor across concurrent threads
+        # is unsafe and can produce spurious "No file server profile named
+        # ..." failures. Sequential execution here keeps the test focused on
+        # credential resolution + client dispatch, not session concurrency.
+        db=db, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=1),
         config_snapshot={},
     )
     executor._resolve_segment_columns = lambda _job: []
-    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda config_snapshot, spec: FakeS3Client())
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda profile, spec: FakeS3Client())
 
     result = executor._build_case(job)()
 
@@ -325,6 +363,7 @@ def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch) ->
     the sftp kind had a discover_sftp_files() unit test but no end-to-end coverage
     of RunExecutor's own _build_sftp_client/_read_file/_close_remote_client dispatch
     before this test was added."""
+    from etl_framework.repository.repository import FileServerProfileRepository
 
     class FakeSFTPFile:
         def __init__(self, raw: bytes) -> None:
@@ -379,13 +418,30 @@ def test_run_executor_multi_file_reconciliation_reads_sftp_pairs(monkeypatch) ->
             },
         },
     )
+    db = _make_db_session()
+    FileServerProfileRepository(db).create({
+        "name": "sftp_source", "kind": "sftp",
+        "host": "sftp-source.internal", "port": 22, "username": "svc_source",
+        "auth_method": "password", "password": "fake-source-password",
+        "host_key_fingerprint": "fake-fingerprint-source",
+    })
+    FileServerProfileRepository(db).create({
+        "name": "sftp_target", "kind": "sftp",
+        "host": "sftp-target.internal", "port": 22, "username": "svc_target",
+        "auth_method": "password", "password": "fake-target-password",
+        "host_key_fingerprint": "fake-fingerprint-target",
+    })
+
     executor = RunExecutor(
-        db=None, run_id="test-run", source_env="source", target_env="target",
-        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True),
+        # max_workers=1: see the matching comment in
+        # test_run_executor_multi_file_reconciliation_reads_s3_pairs above --
+        # avoids two pair threads racing on this one shared sqlite db Session.
+        db=db, run_id="test-run", source_env="source", target_env="target",
+        job_sequence=[], run_settings=RunSettings(chunk_size=100, use_hash_precheck=True, max_workers=1),
         config_snapshot={},
     )
     executor._resolve_segment_columns = lambda _job: []
-    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda config_snapshot, spec: FakeSFTPClient())
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda profile, spec: FakeSFTPClient())
 
     result = executor._build_case(job)()
 
