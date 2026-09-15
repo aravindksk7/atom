@@ -13,11 +13,31 @@ from etl_framework.repository.models import (
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
     RunStep, JobSelection, JobSelectionVersion, AppSettings, TERMINAL_STATUSES,
     SchedulerTelemetryEvent, CustomVariable,
-    RunBatch,
+    RunBatch, FileServerProfile,
 )
 
 
 _UNSET = object()  # distinguishes "config_id kwarg omitted" from "config_id=None"
+
+
+@dataclass(frozen=True)
+class ResolvedFileServerProfile:
+    id: int
+    name: str
+    kind: str
+    host: str | None
+    port: int
+    username: str | None
+    auth_method: str | None
+    password: str | None
+    private_key: str | None
+    key_passphrase: str | None
+    host_key_fingerprint: str | None
+    aws_access_key_id: str | None
+    aws_secret_access_key: str | None
+    aws_session_token: str | None
+    region_name: str | None
+    endpoint_url: str | None
 
 
 def ci_context_present_filter():
@@ -1025,6 +1045,80 @@ class RunBatchRepository:
             .order_by(TestRun.id)
             .all()
         )
+
+
+_FILE_SERVER_SECRET_FIELDS = frozenset({"password", "private_key", "key_passphrase", "aws_secret_access_key", "aws_session_token"})
+
+
+class FileServerProfileRepository:
+    """CRUD + encrypt-at-rest for FileServerProfile. Kept separate from
+    ConfigRepository's `_transform_secret_fields` (which walks a JSON blob
+    keyed by the shared SECRET_FIELDS set) because this is a plain table with
+    its own explicit field list -- a generic name like `password` here would
+    otherwise collide with unrelated uses of SECRET_FIELDS elsewhere."""
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def _encrypt_fields(self, data: dict) -> dict:
+        from api.services.secret_store import encrypt_secret
+        return {
+            k: (encrypt_secret(v) if k in _FILE_SERVER_SECRET_FIELDS and isinstance(v, str) and v else v)
+            for k, v in data.items()
+        }
+
+    def create(self, data: dict) -> FileServerProfile:
+        profile = FileServerProfile(**self._encrypt_fields(data))
+        self._db.add(profile)
+        self._db.commit()
+        self._db.refresh(profile)
+        return profile
+
+    def list(self) -> list[FileServerProfile]:
+        return self._db.query(FileServerProfile).order_by(FileServerProfile.name).all()
+
+    def get(self, profile_id: int) -> FileServerProfile | None:
+        return self._db.get(FileServerProfile, profile_id)
+
+    def update(self, profile_id: int, data: dict) -> FileServerProfile | None:
+        profile = self._db.get(FileServerProfile, profile_id)
+        if profile is None:
+            return None
+        for key, value in self._encrypt_fields(data).items():
+            setattr(profile, key, value)
+        profile.updated_at = datetime.now(timezone.utc)
+        self._db.commit()
+        self._db.refresh(profile)
+        return profile
+
+    def delete(self, profile_id: int) -> bool:
+        profile = self._db.get(FileServerProfile, profile_id)
+        if profile is None:
+            return False
+        self._db.delete(profile)
+        self._db.commit()
+        return True
+
+    def get_decrypted_by_name(self, name: str) -> "ResolvedFileServerProfile | None":
+        profile = self._db.query(FileServerProfile).filter(FileServerProfile.name == name).first()
+        if profile is None:
+            return None
+        from api.services.secret_store import decrypt_secret
+        return ResolvedFileServerProfile(
+            id=profile.id, name=profile.name, kind=profile.kind,
+            host=profile.host, port=profile.port, username=profile.username,
+            auth_method=profile.auth_method,
+            password=decrypt_secret(profile.password) if profile.password else None,
+            private_key=decrypt_secret(profile.private_key) if profile.private_key else None,
+            key_passphrase=decrypt_secret(profile.key_passphrase) if profile.key_passphrase else None,
+            host_key_fingerprint=profile.host_key_fingerprint,
+            aws_access_key_id=profile.aws_access_key_id,
+            aws_secret_access_key=decrypt_secret(profile.aws_secret_access_key) if profile.aws_secret_access_key else None,
+            aws_session_token=decrypt_secret(profile.aws_session_token) if profile.aws_session_token else None,
+            region_name=profile.region_name,
+            endpoint_url=profile.endpoint_url,
+        )
+
 
 import hashlib
 import hmac as _hmac
