@@ -1,16 +1,19 @@
 # tests/unit/test_multi_file_remote.py
 from __future__ import annotations
 
+import concurrent.futures
+
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.services.multi_file_remote import (
     RemoteFileSourceSession,
     resolve_file_server_profile,
 )
+from etl_framework.repository import database as _db_module
 from etl_framework.repository.database import Base
 import etl_framework.repository.models  # noqa: F401
 from etl_framework.repository.repository import FileServerProfileRepository
@@ -18,11 +21,45 @@ from etl_framework.reconciliation.file_mapping import FileSourceSpec
 
 
 @pytest.fixture
-def db():
+def db(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
+    # RemoteFileSourceSession._client_for resolves each pair's
+    # FileServerProfile on its own short-lived SessionLocal() session, not
+    # the db Session this fixture hands to tests -- rebind SessionLocal to
+    # this same in-memory engine so that fresh session sees the profiles
+    # tests create below instead of hitting the real on-disk sqlite db.
+    monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def file_db_session_local(tmp_path, monkeypatch):
+    """Rebinds SessionLocal to a real *file-backed* sqlite database (default
+    connection pooling, not StaticPool) and returns a sessionmaker bound to
+    that same engine for writing fixture rows.
+
+    The plain `db` fixture above uses an in-memory sqlite engine with
+    StaticPool, which funnels every session through ONE shared underlying
+    sqlite3 connection -- fine for sequential single-session tests, but it
+    silently reintroduces a concurrency hazard for a test that specifically
+    wants to prove multiple independent SessionLocal() sessions are safe to
+    use from separate threads at once: concurrent threads all issuing
+    queries against that one shared raw connection race each other
+    regardless of how many Session objects wrap it. A real file gives each
+    checked-out session its own independent DBAPI connection (as it does in
+    production), so this fixture is what the concurrency test needs to
+    actually exercise the fix rather than a StaticPool artifact.
+    """
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'concurrency_test.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", session_local)
+    return session_local
 
 
 def test_resolve_file_server_profile_by_ref(db):
@@ -461,6 +498,61 @@ def test_remote_file_source_session_rejects_unknown_kind(db) -> None:
 
     with pytest.raises(ValueError, match="Unsupported multi_file source kind"):
         session.discover(spec)
+
+
+def test_client_for_resolves_profiles_safely_across_concurrent_threads(file_db_session_local, monkeypatch) -> None:
+    """Reproduces the original production bug: RunExecutor runs every
+    multi_file pair concurrently in its own TestRunner worker thread (up to
+    max_workers=4 by default), and each pair's RemoteFileSourceSession is
+    constructed with the SAME caller-supplied db Session -- but SQLAlchemy's
+    Session is documented as not safe for concurrent use across threads.
+    When _client_for resolved credentials via self._db, this produced
+    intermittent spurious "No file server profile named ..." ValueErrors
+    (and worse, corrupted-cursor IndexErrors) under real concurrent access.
+
+    This drives many real threads (not sequential calls) through
+    RemoteFileSourceSession(shared_db)._client_for(spec), all sharing one
+    Session object exactly like RunExecutor does, and asserts every call
+    resolves the correct profile with no exception -- which is only
+    reliably true once _client_for stops touching self._db and instead
+    opens its own short-lived SessionLocal() session per call.
+    """
+    build_calls: list[str] = []
+
+    def _fake_build_s3_client(profile, spec):
+        build_calls.append(profile.name)
+        return object()
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _fake_build_s3_client)
+
+    with file_db_session_local() as setup_db:
+        FileServerProfileRepository(setup_db).create({"name": "ref_a", "kind": "s3", "aws_access_key_id": "AKIA_A"})
+        FileServerProfileRepository(setup_db).create({"name": "ref_b", "kind": "s3", "aws_access_key_id": "AKIA_B"})
+
+    errors: list[BaseException] = []
+
+    # The one Session every pair's RemoteFileSourceSession shares -- exactly
+    # how RunExecutor.__init__ creates a single self._db and passes it to
+    # RemoteFileSourceSession(self._db) once per pair.
+    with file_db_session_local() as shared_db:
+
+        def _resolve_one(ref: str) -> None:
+            spec = FileSourceSpec(kind="s3", root=f"s3://bucket/{ref}", pattern="*.csv", credentials_ref=ref)
+            session = RemoteFileSourceSession(shared_db)
+            try:
+                session._client_for(spec)
+            except BaseException as exc:  # noqa: BLE001 -- capture anything, including SQLAlchemy internals
+                errors.append(exc)
+
+        refs = (["ref_a", "ref_b"] * 15)  # 30 calls total, alternating credentials_ref
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_resolve_one, ref) for ref in refs]
+            for future in futures:
+                future.result()
+
+    assert errors == [], f"concurrent _client_for calls raised: {errors!r}"
+    assert len(build_calls) == len(refs)
+    assert set(build_calls) == {"ref_a", "ref_b"}
 
 
 def test_remote_file_source_session_context_manager_closes_clients(db, monkeypatch) -> None:

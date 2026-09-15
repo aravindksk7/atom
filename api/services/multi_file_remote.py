@@ -162,13 +162,32 @@ class RemoteFileSourceSession:
     """
 
     def __init__(self, db: Session) -> None:
+        # Not used for credential resolution (see _client_for) -- that opens
+        # its own short-lived Session instead, since resolve_file_server_profile
+        # is a self-contained read and RunExecutor's multi_file pairs run this
+        # session's methods concurrently across worker threads while sharing
+        # one caller-supplied Session, which SQLAlchemy documents as unsafe.
+        # Kept for API stability / potential future use by other methods.
         self._db = db
         self._clients: dict[tuple[str, str | None], Any] = {}
 
     def _client_for(self, spec: FileSourceSpec):
         key = (spec.kind, spec.credentials_ref)
         if key not in self._clients:
-            profile = resolve_file_server_profile(self._db, spec)
+            # Resolve credentials on a fresh, thread-local Session rather than
+            # self._db: RunExecutor runs each multi_file pair concurrently in
+            # a worker thread, and every pair's RemoteFileSourceSession shares
+            # the SAME caller Session object. SQLAlchemy's Session is not safe
+            # for concurrent use across threads, so reusing self._db here was
+            # producing intermittent spurious "No file server profile" /
+            # internal SQLAlchemy errors under concurrency. This lookup is a
+            # self-contained read that doesn't need to join the caller's
+            # transaction, so a short-lived session scoped to just this call
+            # sidesteps the race entirely.
+            from etl_framework.repository.database import SessionLocal
+
+            with SessionLocal() as resolve_db:
+                profile = resolve_file_server_profile(resolve_db, spec)
             if spec.kind == "s3":
                 self._clients[key] = build_s3_client(profile, spec)
             elif spec.kind == "sftp":
