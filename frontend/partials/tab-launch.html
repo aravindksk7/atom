@@ -352,6 +352,7 @@
             <option value="profile">profile</option>
             <option value="cross_job_assertion">cross_job_assertion</option>
             <option value="api_reconciliation">api_reconciliation</option>
+            <option value="file_watcher">file_watcher</option>
           </select>
         </div>
         <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
@@ -749,6 +750,68 @@
             <label  class="field-label" for="a11y-launch-run-results-json-path">run_results.json path</label>
             <input x-model="jobModal.dbt_run_results_path" class="field-input" placeholder="target/run_results.json" id="a11y-launch-run-results-json-path" />
           </div>
+        </div>
+        <!-- File Watcher params -->
+        <div x-show="jobModal.job_type === 'file_watcher'" class="space-y-3">
+          <div class="grid-2">
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-location-kind">Location Kind</label>
+              <select x-model="jobModal.fw_location_kind" class="field-input field-select" data-testid="job-modal-fw-location-kind-select" id="a11y-launch-fw-location-kind">
+                <option value="local">local</option>
+                <option value="s3">s3</option>
+                <option value="sftp">sftp</option>
+                <option value="scp">scp</option>
+              </select>
+            </div>
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-root">Folder / Bucket Path</label>
+              <input x-model="jobModal.fw_location_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix"
+                     data-testid="job-modal-fw-root-input" id="a11y-launch-fw-root" />
+            </div>
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-pattern">File Name Pattern</label>
+              <input x-model="jobModal.fw_location_pattern" class="field-input" placeholder="SALES_*.csv"
+                     data-testid="job-modal-fw-pattern-input" id="a11y-launch-fw-pattern" />
+            </div>
+            <div x-show="jobModal.fw_location_kind !== 'local'">
+              <label  class="field-label" for="a11y-launch-fw-credentials-ref">Credentials Ref</label>
+              <input x-model="jobModal.fw_credentials_ref" class="field-input" placeholder="credentials_ref (s3/sftp/scp only)"
+                     data-testid="job-modal-fw-credentials-ref-input" id="a11y-launch-fw-credentials-ref" />
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <p class="text-xs font-medium text-slate-500 mb-2">Also require file to contain (optional)</p>
+            <div class="grid-2">
+              <input x-model="jobModal.fw_content_match_text" class="field-input" placeholder="STATUS=COMPLETE"
+                     data-testid="job-modal-fw-content-text-input" aria-label="content match text" />
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.fw_content_is_regex" class="rounded" aria-label="content match is regex" /> Treat as regex
+              </label>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-poll-interval">Poll Interval (seconds)</label>
+              <input type="number" x-model="jobModal.fw_poll_interval_seconds" min="1" class="field-input" placeholder="30" id="a11y-launch-fw-poll-interval" />
+            </div>
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-max-tries">Max Tries</label>
+              <input type="number" x-model="jobModal.fw_max_tries" min="1" class="field-input" placeholder="10"
+                     data-testid="job-modal-fw-max-tries-input" id="a11y-launch-fw-max-tries" />
+            </div>
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-window-start">Window Start (optional)</label>
+              <input x-model="jobModal.fw_window_start" class="field-input" placeholder="22:00 or ISO datetime" id="a11y-launch-fw-window-start" />
+            </div>
+            <div>
+              <label  class="field-label" for="a11y-launch-fw-window-end">Window End (required if no Max Tries)</label>
+              <input x-model="jobModal.fw_window_end" class="field-input" placeholder="23:30 or ISO datetime"
+                     data-testid="job-modal-fw-window-end-input" id="a11y-launch-fw-window-end" />
+            </div>
+          </div>
+          <p class="text-xs text-slate-400">
+            At least one of Max Tries or Window End is required — an unbounded watch is not allowed. "scp" targets are treated as SFTP under the hood (same credentials shape).
+          </p>
         </div>
         <!-- Freshness params -->
         <div x-show="jobModal.job_type === 'freshness'" class="space-y-3">
