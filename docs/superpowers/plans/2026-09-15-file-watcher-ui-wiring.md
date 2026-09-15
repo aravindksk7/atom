@@ -12,6 +12,8 @@
 
 **Design spec:** `docs/superpowers/specs/2026-09-14-file-watcher-job-design.md` §6 (Frontend)
 
+**Status: implemented.** Two deviations from this plan's literal text, both in their own commits: `frontend/index.html` (a generated build artifact from `frontend/index.template.html` + partials, via `npm run build:html`) needed regenerating after Task 3 changed the source partial — this plan didn't anticipate that build step, and the gap was caught when Task 4's e2e test found the option missing from the served page. And `frontend/help-content.js` — called for by the design spec §6 but omitted from this plan's task list — got a Launch-tab-reference entry and a task-guide scenario, added after final review flagged the gap. See `git log` on this branch for the fix commits.
+
 ---
 
 ### Task 1: `jobModal` state — defaults and edit-load hydration
