@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal
@@ -29,13 +29,13 @@ class ResolvedFileServerProfile:
     port: int
     username: str | None
     auth_method: str | None
-    password: str | None
-    private_key: str | None
-    key_passphrase: str | None
+    password: str | None = field(repr=False)
+    private_key: str | None = field(repr=False)
+    key_passphrase: str | None = field(repr=False)
     host_key_fingerprint: str | None
     aws_access_key_id: str | None
-    aws_secret_access_key: str | None
-    aws_session_token: str | None
+    aws_secret_access_key: str | None = field(repr=False)
+    aws_session_token: str | None = field(repr=False)
     region_name: str | None
     endpoint_url: str | None
 

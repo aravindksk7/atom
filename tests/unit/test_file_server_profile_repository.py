@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from etl_framework.repository.database import Base
 import etl_framework.repository.models  # noqa: F401 -- registers ORM models with Base
+from etl_framework.repository.models import FileServerProfile
 from etl_framework.repository.repository import FileServerProfileRepository
 
 
@@ -46,9 +47,7 @@ def test_create_encrypts_secret_fields_at_rest():
         "username": "svc", "auth_method": "password", "password": "hunter2",
     })
 
-    raw = db.query(
-        __import__("etl_framework.repository.models", fromlist=["FileServerProfile"]).FileServerProfile
-    ).filter_by(name="sftp_inbound").one()
+    raw = db.query(FileServerProfile).filter_by(name="sftp_inbound").one()
     assert raw.password != "hunter2"  # stored encrypted, not plaintext
 
 
