@@ -707,6 +707,23 @@
         params.tolerance = Number(m.cja_tolerance) || 0;
         params.tolerance_type = m.cja_tolerance_type || 'absolute';
       }
+      if (m.job_type === 'file_watcher') {
+        params.location = {
+          kind: m.fw_location_kind || 'local',
+          root: m.fw_location_root,
+          pattern: m.fw_location_pattern,
+        };
+        if (m.fw_location_kind !== 'local' && m.fw_credentials_ref) {
+          params.location.credentials_ref = m.fw_credentials_ref;
+        }
+        if (m.fw_content_match_text) {
+          params.content_match = { text: m.fw_content_match_text, is_regex: Boolean(m.fw_content_is_regex) };
+        }
+        if (m.fw_poll_interval_seconds !== '') params.poll_interval_seconds = Number(m.fw_poll_interval_seconds);
+        if (m.fw_max_tries !== '') params.max_tries = Number(m.fw_max_tries);
+        if (m.fw_window_start) params.window_start = m.fw_window_start;
+        if (m.fw_window_end) params.window_end = m.fw_window_end;
+      }
       const keyColumns = ['reconciliation', 'bo_report', 'api_reconciliation'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
@@ -822,6 +839,11 @@
       if (m.job_type === 'profile') return Boolean(m.source_mode === 'files' ? m.source_file_path : m.query?.trim());
       if (m.job_type === 'schema_snapshot') return Boolean(m.source_mode === 'files' ? m.source_file_path : m.query?.trim());
       if (m.job_type === 'cross_job_assertion') return Boolean(m.cja_source_job && m.cja_target_job);
+      if (m.job_type === 'file_watcher') {
+        const hasBound = Boolean(m.fw_max_tries !== '' || m.fw_window_end);
+        const hasCreds = m.fw_location_kind === 'local' || Boolean(m.fw_credentials_ref);
+        return Boolean(m.fw_location_root && m.fw_location_pattern && hasCreds && hasBound);
+      }
       return true;
     },
 
