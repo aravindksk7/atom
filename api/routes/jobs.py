@@ -191,8 +191,10 @@ def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(
     except HTTPException:
         raise
     except ValueError as exc:
-        # resolve_file_server_profile raises ValueError for a missing/mismatched
-        # credentials_ref -- surface that as a clean 422 rather than a 400/500.
+        # Covers resolve_file_server_profile's missing/mismatched credentials_ref,
+        # but also _group_by_key's match_on-token errors and pandas parsing errors
+        # from session.read_file -- all are "bad input" cases, so 422 fits either
+        # way, but don't assume this message is always about credentials.
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))

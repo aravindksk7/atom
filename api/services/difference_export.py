@@ -771,7 +771,7 @@ def _write_multi_file_reconciliation_job(
     job,
     settings: RunSettings,
     writer: DifferenceWriter,
-    config_snapshot: dict[str, Any] | None = None,
+    config_snapshot: dict[str, Any] | None = None,  # no longer used for RemoteFileSourceSession -- credentials now resolve via `db`; kept for now, cleanup TBD
 ) -> None:
     from api.services.multi_file_remote import RemoteFileSourceSession
 
