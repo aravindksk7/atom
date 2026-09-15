@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Page, TestInfo } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { authedContext, createPassingFileJob, deleteJob } from './api-helpers';
 
@@ -28,7 +28,11 @@ type RecoveryNames = {
 };
 
 class SequenceRecoveryPage {
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly testInfo: TestInfo) {}
+
+  async capture(name: string): Promise<void> {
+    await this.page.screenshot({ path: this.testInfo.outputPath(name), fullPage: true });
+  }
 
   async openSequences() {
     await this.page.getByRole('button', { name: 'Sequences' }).click();
@@ -364,10 +368,11 @@ test('recovers a stopped multi-day sequence without rerunning successful ingesti
     await mock.install();
 
     await page.reload();
-    const recovery = new SequenceRecoveryPage(page);
+    const recovery = new SequenceRecoveryPage(page, test.info());
     await recovery.openSequences();
     sequenceId = await recovery.createOrderedSequence(names.sequence, [names.ingestion, names.processing, names.report]);
     mock.sequenceId = sequenceId;
+    await recovery.capture('01-sequence-created.png');
 
     // Failure
     console.log('Failure: launch three business dates and stop on the controlled Day 2 error');
@@ -403,10 +408,12 @@ test('recovers a stopped multi-day sequence without rerunning successful ingesti
     });
     await expect(blockedReport.locator('tr').first()).toContainText('BLOCKED');
     await expect(page.getByRole('button', { name: 'Restart from failure' })).toBeVisible();
+    await recovery.capture('02-day-2-processing-failed.png');
 
     // Resume
     console.log('Resume: save a visible sequence fix and restart from the failed run');
     await recovery.addAndVerifyProcessingRetry();
+    await recovery.capture('03-processing-fix-saved.png');
     await recovery.openRun(mock.day2FailedRun);
     await page.getByRole('button', { name: 'Restart from failure' }).click();
     await expect(page.getByText('Restarted from')).toBeVisible();
@@ -415,6 +422,7 @@ test('recovers a stopped multi-day sequence without rerunning successful ingesti
       await expect(resultGroup).toContainText('PASSED');
       if (jobName === names.ingestion) await expect(resultGroup).toContainText('carried over');
     }
+    await recovery.capture('04-day-2-resumed.png');
 
     // Verification
     console.log('Verification: confirm recovery completion and execution-event integrity');
@@ -440,6 +448,7 @@ test('recovers a stopped multi-day sequence without rerunning successful ingesti
     expect(restartExecutions.filter((event) => event.businessDate === '2026-09-15').map((event) => event.jobName)).toEqual([names.processing, names.report]);
     expect(restartExecutions.filter((event) => event.businessDate === '2026-09-16').map((event) => event.jobName)).toEqual([names.ingestion, names.processing, names.report]);
     expect(mock.ledger.filter((event) => event.phase === 'initial' && event.businessDate === '2026-09-14' && event.kind === 'executed').map((event) => event.jobName)).toEqual([names.ingestion, names.processing, names.report]);
+    await recovery.capture('05-batch-completed.png');
   } finally {
     if (sequenceId !== undefined) await ctx.delete(`/api/sequences/${sequenceId}`);
     if (variableId !== undefined) await ctx.delete(`/api/variables/${variableId}`);
