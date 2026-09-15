@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+
+import paramiko
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
-from api.schemas import FileServerProfileCreate, FileServerProfileOut, FileServerProfileUpdate
+from api.schemas import FileServerProfileCreate, FileServerProfileOut, FileServerProfileUpdate, FileServerTestResult
 from api.services.audit_service import AuditService
 from etl_framework.repository.repository import FileServerProfileRepository, _FILE_SERVER_SECRET_FIELDS
 from etl_framework.repository.models import ExecutionSequenceVersion, SavedJob, ScheduledRun
@@ -107,3 +111,59 @@ def delete_file_server(profile_id: int, request: Request, db: Session = Depends(
 
     repo.delete(profile_id)
     AuditService(db).log(request, "file_server.deleted", "file_server", profile_id, {"name": profile.name})
+
+
+class TestConnectionRequest(BaseModel):
+    accept_fingerprint: bool = False
+
+
+@router.post("/{profile_id}/test", response_model=FileServerTestResult)
+def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnectionRequest(), db: Session = Depends(get_session)):
+    repo = FileServerProfileRepository(db)
+    existing = repo.get(profile_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="File server profile not found")
+    profile = repo.get_decrypted_by_name(existing.name)
+
+    if profile.kind in ("sftp", "scp"):
+        # Reuse the same working key-loading helper build_sftp_client relies
+        # on, instead of calling paramiko.PKey.from_private_key() directly.
+        # That classmethod only works when called on a concrete subclass
+        # (RSAKey/Ed25519Key/ECDSAKey), not the abstract PKey base -- calling
+        # it directly raises TypeError under the paramiko version this
+        # project pins (see _load_sftp_private_key's docstring in
+        # api/services/multi_file_remote.py for the full explanation).
+        from api.services.multi_file_remote import _load_sftp_private_key
+
+        transport = paramiko.Transport((profile.host, int(profile.port or 22)))
+        try:
+            if profile.auth_method == "private_key":
+                key = _load_sftp_private_key(profile.private_key, profile.key_passphrase or None)
+                transport.connect(username=profile.username, pkey=key)
+            else:
+                transport.connect(username=profile.username, password=profile.password)
+            presented = transport.get_remote_server_key()
+            fingerprint = hashlib.sha256(presented.asbytes()).hexdigest()
+        except Exception as exc:
+            return FileServerTestResult(status="error", message=str(exc))
+        finally:
+            transport.close()
+
+        if body.accept_fingerprint:
+            repo.update(profile_id, {"host_key_fingerprint": fingerprint})
+            return FileServerTestResult(status="ok", presented_fingerprint=fingerprint)
+        if not profile.host_key_fingerprint:
+            return FileServerTestResult(status="unpinned", presented_fingerprint=fingerprint)
+        if fingerprint != profile.host_key_fingerprint:
+            return FileServerTestResult(status="mismatch", presented_fingerprint=fingerprint, pinned_fingerprint=profile.host_key_fingerprint)
+        return FileServerTestResult(status="ok", presented_fingerprint=fingerprint)
+
+    # s3
+    try:
+        from api.services.multi_file_remote import build_s3_client
+        from etl_framework.reconciliation.file_mapping import FileSourceSpec
+        client = build_s3_client(profile, FileSourceSpec(kind="s3", root="", pattern=""))
+        client.list_buckets()
+        return FileServerTestResult(status="ok")
+    except Exception as exc:
+        return FileServerTestResult(status="error", message=str(exc))

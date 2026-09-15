@@ -152,3 +152,77 @@ def test_create_rejects_duplicate_name(client):
 
     resp = client.post("/api/file-servers", json={"name": "s3_prod", "kind": "s3"})
     assert resp.status_code == 409
+
+
+def test_test_connection_sftp_returns_unpinned_fingerprint_on_first_call(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "sftp_inbound", "kind": "sftp", "host": "h", "port": 22,
+        "username": "u", "auth_method": "password", "password": "p",
+    }).json()
+
+    class _FakeKey:
+        def asbytes(self):
+            return b"fake-key-bytes"
+
+    class _FakeTransport:
+        def __init__(self, *a, **k): pass
+        def connect(self, **k): pass
+        def get_remote_server_key(self): return _FakeKey()
+        def close(self): pass
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "unpinned"
+    assert body["presented_fingerprint"]
+
+
+def test_test_connection_sftp_accepts_and_pins_fingerprint(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "sftp_inbound", "kind": "sftp", "host": "h", "port": 22,
+        "username": "u", "auth_method": "password", "password": "p",
+    }).json()
+
+    class _FakeKey:
+        def asbytes(self):
+            return b"fake-key-bytes"
+
+    class _FakeTransport:
+        def __init__(self, *a, **k): pass
+        def connect(self, **k): pass
+        def get_remote_server_key(self): return _FakeKey()
+        def close(self): pass
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+
+    first = client.post(f"/api/file-servers/{created['id']}/test").json()
+    resp = client.post(f"/api/file-servers/{created['id']}/test", json={"accept_fingerprint": True})
+    assert resp.json()["status"] == "ok"
+
+    pinned = client.get(f"/api/file-servers/{created['id']}").json()
+    assert pinned["host_key_fingerprint"] == first["presented_fingerprint"]
+
+
+def test_test_connection_sftp_reports_mismatch_after_pinning(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "sftp_inbound", "kind": "sftp", "host": "h", "port": 22,
+        "username": "u", "auth_method": "password", "password": "p",
+    }).json()
+    client.put(f"/api/file-servers/{created['id']}", json={"host_key_fingerprint": "deadbeef"})
+
+    class _FakeKey:
+        def asbytes(self):
+            return b"different-key-bytes"
+
+    class _FakeTransport:
+        def __init__(self, *a, **k): pass
+        def connect(self, **k): pass
+        def get_remote_server_key(self): return _FakeKey()
+        def close(self): pass
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.json()["status"] == "mismatch"
