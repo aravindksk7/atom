@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
+from api.dependencies import get_session
+from api.schemas import FileServerProfileCreate, FileServerProfileOut, FileServerProfileUpdate
+from api.services.audit_service import AuditService
+from etl_framework.repository.repository import FileServerProfileRepository, _FILE_SERVER_SECRET_FIELDS
+from etl_framework.repository.models import ExecutionSequenceVersion, SavedJob, ScheduledRun
+
+router = APIRouter(tags=["file-servers"])
+
+_MASK = "********"
+_SECRET_FIELDS = _FILE_SERVER_SECRET_FIELDS  # single source of truth, defined alongside FileServerProfileRepository
+
+
+def _mask(profile) -> FileServerProfileOut:
+    out = FileServerProfileOut.model_validate(profile)
+    data = out.model_dump()
+    for field in _SECRET_FIELDS:
+        if data.get(field):
+            data[field] = _MASK
+    return FileServerProfileOut(**data)
+
+
+def _preserve_masked_secrets(incoming: dict, existing) -> dict:
+    """Drop a secret field from the update payload when the client echoes back
+    the display mask, so the stored (already-encrypted) value is left alone.
+    Setting it to `getattr(existing, field)` instead would re-run it through
+    FileServerProfileRepository's `_encrypt_fields`, encrypting an
+    already-encrypted ciphertext and permanently losing the original secret
+    on the next decrypt."""
+    if existing is None:
+        return incoming
+    result = dict(incoming)
+    for field in _SECRET_FIELDS:
+        if result.get(field) == _MASK:
+            del result[field]
+    return result
+
+
+def _references_credentials_ref(value, name: str) -> bool:
+    """Recursively scan a saved job's params / a sequence step / a schedule's
+    job_sequence for a `credentials_ref` key equal to `name`. Generic rather
+    than shape-specific because the three JSON columns that can carry a
+    credentials_ref (SavedJob.params, ExecutionSequenceVersion.steps_json,
+    ScheduledRun.job_sequence) nest it at different depths."""
+    if isinstance(value, dict):
+        if value.get("credentials_ref") == name:
+            return True
+        return any(_references_credentials_ref(v, name) for v in value.values())
+    if isinstance(value, list):
+        return any(_references_credentials_ref(v, name) for v in value)
+    return False
+
+
+@router.get("", response_model=list[FileServerProfileOut])
+def list_file_servers(db: Session = Depends(get_session)):
+    return [_mask(p) for p in FileServerProfileRepository(db).list()]
+
+
+@router.post("", response_model=FileServerProfileOut, status_code=201)
+def create_file_server(body: FileServerProfileCreate, request: Request, db: Session = Depends(get_session)):
+    repo = FileServerProfileRepository(db)
+    profile = repo.create(body.model_dump())
+    AuditService(db).log(request, "file_server.created", "file_server", profile.id, {"name": profile.name, "kind": profile.kind})
+    return _mask(profile)
+
+
+@router.get("/{profile_id}", response_model=FileServerProfileOut)
+def get_file_server(profile_id: int, db: Session = Depends(get_session)):
+    profile = FileServerProfileRepository(db).get(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="File server profile not found")
+    return _mask(profile)
+
+
+@router.put("/{profile_id}", response_model=FileServerProfileOut)
+def update_file_server(profile_id: int, body: FileServerProfileUpdate, request: Request, db: Session = Depends(get_session)):
+    repo = FileServerProfileRepository(db)
+    existing = repo.get(profile_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="File server profile not found")
+    data = _preserve_masked_secrets({k: v for k, v in body.model_dump().items() if v is not None}, existing)
+    profile = repo.update(profile_id, data)
+    AuditService(db).log(request, "file_server.updated", "file_server", profile.id, {"name": profile.name})
+    return _mask(profile)
+
+
+@router.delete("/{profile_id}", status_code=204)
+def delete_file_server(profile_id: int, request: Request, db: Session = Depends(get_session)):
+    repo = FileServerProfileRepository(db)
+    profile = repo.get(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="File server profile not found")
+
+    in_use = (
+        any(_references_credentials_ref(j.params, profile.name) for j in db.query(SavedJob).all())
+        or any(_references_credentials_ref(v.steps_json, profile.name) for v in db.query(ExecutionSequenceVersion).all())
+        or any(_references_credentials_ref(s.job_sequence, profile.name) for s in db.query(ScheduledRun).all())
+    )
+    if in_use:
+        raise HTTPException(status_code=409, detail=f"File server profile '{profile.name}' is still referenced by a saved job, sequence, or schedule")
+
+    repo.delete(profile_id)
+    AuditService(db).log(request, "file_server.deleted", "file_server", profile_id, {"name": profile.name})
