@@ -23,6 +23,7 @@
     contractModalEditing: false,
     contractBumpType: 'minor',
     showContractExamples: false,
+    contractExamplesAutoApplied: false,
     contractExamples: window.CONTRACT_EXAMPLES || [],
     expandedExampleId: null,
     contractBumpNote: '',
@@ -36,6 +37,13 @@
       this.contractsLoading = true;
       try {
         this.contracts = await api('GET', '/api/contracts');
+        // Expand the example library only on the first load of the tab, and only
+        // when there is nothing else to show. After that the toggle is the user's:
+        // creating the first contract or deleting the last must not move it.
+        if (!this.contractExamplesAutoApplied) {
+          this.contractExamplesAutoApplied = true;
+          this.showContractExamples = this.contracts.length === 0;
+        }
         for (const c of this.contracts) {
           try {
             this.contractStatusMap[c.name] = await api('GET', `/api/contracts/${encodeURIComponent(c.name)}/status`);

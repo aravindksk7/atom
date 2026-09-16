@@ -7993,7 +7993,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <!-- Contract list -->
     <div class="card" style="min-width:280px;max-width:320px;flex-shrink:0">
       <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Contracts (<span x-text="contracts.length"></span>)</div>
-      <div x-show="contracts.length === 0" class="text-slate-400 text-sm py-2">No contracts yet.</div>
+      <div x-show="contracts.length === 0" class="empty-state" data-testid="contracts-empty-state">
+        <div class="empty-state-icon">📄</div>
+        <div class="empty-state-title">No contracts yet</div>
+        <div class="empty-state-sub">Use an example below or click "+ New Contract"</div>
+      </div>
       <template x-for="c in contracts" :key="c.name">
         <div :data-testid="'contract-row-' + c.name" tabindex="0" role="button" @click="selectContract(c)" @keydown.enter="selectContract(c)" @keydown.space.prevent="selectContract(c)"
              :class="selectedContract && selectedContract.name === c.name ? 'bg-indigo-50 border-indigo-300' : 'hover:bg-slate-50 border-transparent'"
@@ -8235,7 +8239,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </template>
     </div>
 
-    <div class="flex-1 flex items-center justify-center text-slate-400 text-sm" x-show="!selectedContract">
+    <div class="flex-1 text-slate-400 text-sm py-2" x-show="!selectedContract">
       Select a contract to view details
     </div>
   </div>
