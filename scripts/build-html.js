@@ -48,7 +48,7 @@ function build() {
   const misplaced = [];
   lines.forEach((line, idx) => {
     const m = line.match(INCLUDE_RE);
-    if (m && TAB_PARTIAL_RE.test(m[1]) && (idx < mainOpenIdx || idx > mainCloseIdx)) {
+    if (m && TAB_PARTIAL_RE.test(m[1]) && (idx <= mainOpenIdx || idx >= mainCloseIdx)) {
       misplaced.push(`${m[1]} (template line ${idx + 1})`);
     }
   });
