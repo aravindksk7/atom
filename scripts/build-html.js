@@ -24,6 +24,12 @@ const INCLUDE_RE = /^<!-- INCLUDE: (.+?) -->\r?$/;
 // missing closing "-->") must fail the build loudly rather than pass through
 // as literal HTML content.
 const INCLUDE_SNIFF_RE = /^<!-- INCLUDE:/;
+// Tab partials must render inside <main class="main-content">. That element is
+// the flex:1 child of the .app-content column, so a tab marker placed after
+// </main> renders as a later sibling: pushed to the bottom of the viewport and
+// stripped of the 1280px cap, centering, and padding. Overlays (modals, toasts,
+// drawers) legitimately live outside <main> and are not tab partials.
+const TAB_PARTIAL_RE = /^partials\/tab-.+\.html$/;
 
 function build() {
   const template = fs.readFileSync(TEMPLATE, 'utf8');
@@ -31,6 +37,29 @@ function build() {
   // file matches the committed frontend/index.html byte-for-byte.
   const eol = template.includes('\r\n') ? '\r\n' : '\n';
   const lines = template.split(/\r\n|\n/);
+  const mainOpenIdx = lines.findIndex((l) => l.includes('<main class="main-content">'));
+  const mainCloseIdx = lines.findIndex((l) => l.includes('</main>'));
+  if (mainOpenIdx === -1 || mainCloseIdx === -1 || mainCloseIdx < mainOpenIdx) {
+    throw new Error(
+      'Could not locate a well-formed <main class="main-content"> ... </main> ' +
+      `block in ${TEMPLATE}. Tab partial placement cannot be validated.`
+    );
+  }
+  const misplaced = [];
+  lines.forEach((line, idx) => {
+    const m = line.match(INCLUDE_RE);
+    if (m && TAB_PARTIAL_RE.test(m[1]) && (idx < mainOpenIdx || idx > mainCloseIdx)) {
+      misplaced.push(`${m[1]} (template line ${idx + 1})`);
+    }
+  });
+  if (misplaced.length) {
+    throw new Error(
+      `Tab partial INCLUDE marker(s) outside <main class="main-content"> ` +
+      `(lines ${mainOpenIdx + 1}-${mainCloseIdx + 1}): ${misplaced.join(', ')}. ` +
+      `Tabs placed after </main> render at the bottom of the viewport with no ` +
+      `max-width or padding. Move the marker inside <main>.`
+    );
+  }
   let includeCount = 0;
   const out = lines.map((line) => {
     const match = line.match(INCLUDE_RE);
