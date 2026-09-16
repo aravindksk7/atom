@@ -6308,6 +6308,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <span class="compare-chip chip-unchanged" x-text="(boCompareResult.total_tests || 0) + ' test stored'"></span>
           <span class="compare-chip chip-regressed" x-show="(boCompareResult.failed || 0) > 0" x-text="boCompareResult.failed + ' failed'"></span>
         </div>
+        <template x-if="!boCompareResult.results || !boCompareResult.results.length">
+          <div class="empty-state" data-testid="bo-compare-empty-state">
+            <div class="empty-state-title">No results returned</div>
+            <div class="empty-state-sub">The comparison completed without producing any rows</div>
+          </div>
+        </template>
+
         <template x-if="boCompareResult.results && boCompareResult.results.length">
           <table data-testid="compare-bo-results-table" class="data-table" aria-label="compare table 1">
             <thead><tr><th scope="col">Test</th><th scope="col">Status</th><th scope="col">Mismatches</th><th scope="col">Duration</th><th scope="col"></th></tr></thead>
@@ -6625,6 +6632,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <span class="compare-chip chip-improved" x-text="(fileCompareResult.passed || 0) + ' matched'"></span>
             <span class="compare-chip chip-regressed" x-text="(fileCompareResult.failed || 0) + ' differ'"></span>
           </div>
+          <template x-if="!fileCompareResult.results || !fileCompareResult.results.length">
+            <div class="empty-state" data-testid="file-compare-empty-state">
+              <div class="empty-state-title">No results returned</div>
+              <div class="empty-state-sub">The comparison completed without producing any rows</div>
+            </div>
+          </template>
+
           <template x-if="fileCompareResult.results && fileCompareResult.results.length">
             <div class="space-y-1">
               <template x-for="r in fileCompareResult.results" :key="r.id">
@@ -6923,6 +6937,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <span class="compare-chip chip-improved" x-text="(sqlCompareResult.passed || 0) + ' matched'"></span>
           <span class="compare-chip chip-regressed" x-text="(sqlCompareResult.failed || 0) + ' differ'"></span>
         </div>
+        <template x-if="!sqlCompareResult.results || !sqlCompareResult.results.length">
+          <div class="empty-state" data-testid="sql-compare-empty-state">
+            <div class="empty-state-title">No results returned</div>
+            <div class="empty-state-sub">The comparison completed without producing any rows</div>
+          </div>
+        </template>
+
         <template x-if="sqlCompareResult.results && sqlCompareResult.results.length">
           <div class="space-y-1">
             <template x-for="r in sqlCompareResult.results" :key="r.id">
@@ -7799,6 +7820,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <div data-testid="matrix-mismatched-count" class="text-lg font-bold text-amber-700" x-text="matrixCompareResult.results?.[0]?.value_mismatch_count || 0"></div>
           </div>
         </div>
+
+        <template x-if="!matrixCompareResult.results || !matrixCompareResult.results.length">
+          <div class="empty-state" data-testid="matrix-compare-empty-state">
+            <div class="empty-state-title">No results returned</div>
+            <div class="empty-state-sub">The comparison completed without producing any rows</div>
+          </div>
+        </template>
 
         <template x-if="matrixCompareResult.results && matrixCompareResult.results.length">
           <table data-testid="matrix-compare-results-table" class="data-table mt-2">
