@@ -7912,219 +7912,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 </div></template>
 
-
-</main><!-- end .main-content -->
-
-
-<!-- ====================================================================
-     AUTH SETUP MODAL
-     ==================================================================== -->
-<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()">
-  <div x-ref="authDialog" class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
-    <div class="auth-modal-header">
-      <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
-      <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
-    </div>
-
-    <div class="auth-path" x-show="!authInitialized && !authCreatedToken">
-      <div class="auth-path-label">Create Initial Administrator</div>
-      <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
-      <div class="auth-row">
-        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" aria-label="administrator name" />
-        <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
-      </div>
-    </div>
-
-    <template x-if="authCreatedToken">
-      <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
-        <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
-        <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
-        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" data-testid="auth-created-token-value" x-text="authCreatedToken"></div>
-        <button
-          @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
-          class="btn-primary btn-sm text-xs">
-          Copy to Clipboard
-        </button>
-        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2" data-testid="auth-done-btn">Done — I've saved my token</button>
-      </div>
-    </template>
-
-    <div class="auth-or" x-show="!authInitialized && !authCreatedToken">
-      <span></span>
-      <strong>or</strong>
-      <span></span>
-    </div>
-
-    <div class="auth-path" x-show="!authCreatedToken">
-      <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
-      <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
-      <div class="auth-row">
-        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" aria-label="token" />
-        <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
-      </div>
-    </div>
-
-    <template x-if="authError">
-      <div class="auth-error" data-testid="auth-error-text" x-text="authError"></div>
-    </template>
-  </div>
-</div>
-
-
-<!-- ====================================================================
-     SLIDE-OVER DRAWER – Mismatch details
-     ==================================================================== -->
-<template x-if="drawer.show">
-  <div>
-    <div class="drawer-backdrop" @click="drawer.show = false"></div>
-    <div x-ref="drawerDialog" class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerDialogTitle">
-      <div class="drawer-header">
-        <div id="drawerDialogTitle" class="drawer-title" x-text="'Mismatches · ' + (drawer.result ? drawer.result.query_name : '')"></div>
-        <button class="drawer-close" @click="drawer.show = false" aria-label="Close mismatch details">✕</button>
-      </div>
-      <div class="drawer-body">
-        <div x-show="drawer.result" class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-3">
-          <span x-text="detailRowsLabel(drawer.rows, drawer.result)"></span>
-          <span x-show="totalMismatches(drawer.result) > 0"
-                class="font-medium text-slate-600"
-                x-text="mismatchBreakdownText(drawer.result)"></span>
-        </div>
-        <template x-if="drawer.loading">
-          <div class="text-muted text-sm py-8 text-center">Loading mismatches…</div>
-        </template>
-        <template x-if="!drawer.loading && drawer.rows.length === 0">
-          <div class="empty-state"><div class="empty-state-title">No mismatch details found</div></div>
-        </template>
-
-        <template x-if="drawer.result && drawer.result.column_stats && drawer.result.column_stats.length">
-          <div class="mb-3 border border-slate-100 rounded overflow-hidden">
-            <div class="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50">
-              <div class="text-xs text-muted font-semibold">All columns</div>
-              <input x-model="columnStatFilters[columnStatKey('drawer', drawer.result)]"
-                     class="field-input text-xs py-1 max-w-48"
-                     placeholder="Filter columns" aria-label="filter columns" />
-            </div>
-            <div class="overflow-auto max-h-48">
-              <table class="mismatch-diff-table" aria-label="index template table 1">
-                <thead>
-                  <tr>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
-                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <template x-for="stat in columnStatsFor(drawer.result, 'drawer')" :key="stat.column">
-                    <tr>
-                      <td class="font-mono text-xs" x-text="stat.column"></td>
-                      <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
-                      <td x-text="stat.compared_rows"></td>
-                      <td x-text="matchPctText(stat.match_pct)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </template>
-
-        <template x-if="!drawer.loading && drawer.rows.length > 0">
-          <div class="flex items-center gap-2 mb-3 flex-wrap">
-            <div class="flex gap-1 text-xs">
-              <template x-for="f in ['ALL','PENDING','ACCEPTED','REJECTED']" :key="f">
-                <button @click="mismatchStatusFilter = f"
-                        class="sub-tab text-xs"
-                        :class="mismatchStatusFilter === f ? 'active' : ''"
-                        x-text="f">
-                </button>
-              </template>
-            </div>
-            <div class="ml-auto flex gap-2">
-              <button @click="decideAllPendingDrawerMismatches('accept')"
-                      class="btn-accept-confirm text-xs px-3 py-1.5">
-                Accept All Pending
-              </button>
-              <button @click="decideAllPendingDrawerMismatches('reject')"
-                      class="btn-outline btn-sm text-xs">
-                Reject All Pending
-              </button>
-            </div>
-          </div>
-        </template>
-
-        <div class="space-y-2">
-          <template x-for="m in filteredMismatches" :key="m.id">
-            <div class="border border-slate-100 rounded-lg p-3 text-sm" :class="m.accepted ? 'diff-accepted' : ''">
-              <div class="flex items-center justify-between mb-1">
-                <span class="font-mono font-semibold text-slate-700" x-text="m.column_name || '(row)'"></span>
-                <span class="badge badge-rose" x-text="m.mismatch_type || 'value'"></span>
-              </div>
-              <div class="grid-2 gap-2 text-xs">
-                <div class="bg-rose-50 rounded p-2">
-                  <div class="text-muted mb-0.5">Source</div>
-                  <div class="font-mono" x-text="m.source_value ?? '—'"></div>
-                </div>
-                <div class="bg-sky-50 rounded p-2">
-                  <div class="text-muted mb-0.5">Target</div>
-                  <div class="font-mono" x-text="m.target_value ?? '—'"></div>
-                </div>
-              </div>
-              <template x-if="m.key_values">
-                <div class="mt-1 text-xs text-muted font-mono" x-text="JSON.stringify(m.key_values)"></div>
-              </template>
-              <template x-if="m.delta != null">
-                <div class="mt-1 text-xs font-mono" :class="m.delta > 0 ? 'text-amber-600' : 'text-red-600'"
-                     x-text="'delta: ' + (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) + (m.relative_delta != null ? '  (' + (m.relative_delta * 100).toFixed(2) + '%)' : '')"></div>
-              </template>
-              <div class="mt-2">
-                <template x-if="m.accepted">
-                  <span class="accepted-badge">Accepted</span>
-                </template>
-                <template x-if="!m.accepted">
-                  <div>
-                    <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
-                    <template x-if="acceptForms[m.id]?.open">
-                      <div class="accept-form-inline">
-                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" aria-label="reason" />
-                        <button @click="submitAccept(drawer.runId, drawer.result.id, m.id)" class="btn-accept-confirm">Save</button>
-                        <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </template>
-        </div>
-        <template x-if="drawer.rows.length >= 100">
-          <div class="text-center mt-4 space-y-1">
-            <button @click="loadMoreMismatches()" class="btn-secondary btn-sm">Load more</button>
-            <div class="text-xs text-slate-400" x-text="detailRowsLabel(drawer.rows, drawer.result)"></div>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-</template>
-
-
-<!-- ====================================================================
-     TOAST STACK
-     ==================================================================== -->
-<div class="toast-stack" role="status" aria-live="polite">
-  <template x-for="(t, i) in toasts" :key="t.id">
-    <div class="toast" :role="t.type === 'error' ? 'alert' : null" :class="['toast-'+t.type, t.fading ? 'fade-out' : '']">
-      <span class="toast-icon" x-text="t.type === 'success' ? '✓' : t.type === 'error' ? '✗' : '⚠'"></span>
-      <div class="toast-body">
-        <div class="toast-title" x-text="t.title"></div>
-        <div class="toast-msg" x-show="t.msg" x-text="t.msg"></div>
-      </div>
-    </div>
-  </template>
-</div>
-
-
 <!-- ====================================================================
      TAB 8 - CONTRACTS
      ==================================================================== -->
@@ -8549,66 +8336,6 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 </div></template>
 
-<!-- Contract create/edit modal -->
-<template x-if="showContractModal">
-  <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
-    <div x-ref="contractDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="contractDialogTitle">
-      <h2 id="contractDialogTitle" class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></h2>
-      <div class="space-y-3">
-        <div>
-          <label  class="field-label" for="a11y-index-template-name">Name</label>
-          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" id="a11y-index-template-name" />
-        </div>
-        <div>
-          <label  class="field-label" for="a11y-index-template-source-job">Source Job</label>
-          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" id="a11y-index-template-source-job" />
-        </div>
-        <div>
-          <label  class="field-label" for="a11y-index-template-owner-email">Owner (email)</label>
-          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" id="a11y-index-template-owner-email" />
-        </div>
-        <div>
-          <label  class="field-label" for="a11y-index-template-sla-hours">SLA Hours</label>
-          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" id="a11y-index-template-sla-hours" />
-        </div>
-        <div>
-          <label  class="field-label" for="a11y-index-template-consumers-comma-separated">Consumers (comma-separated)</label>
-          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" id="a11y-index-template-consumers-comma-separated" />
-        </div>
-        <div>
-          <label  class="field-label" for="a11y-index-template-breach-severity">Breach Severity</label>
-          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select" id="a11y-index-template-breach-severity">
-            <option value="error">Error</option>
-            <option value="warn">Warn</option>
-          </select>
-        </div>
-      </div>
-      <div class="flex justify-end gap-2 mt-5">
-        <button data-testid="contract-modal-cancel-btn" @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
-        <button data-testid="contract-modal-save-btn" @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
-      </div>
-    </div>
-  </div>
-</template>
-
-
-<template x-if="showingHelp">
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-       @click.self="showingHelp = false">
-    <div x-ref="helpDialog" class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="helpDialogTitle">
-      <div class="flex justify-between items-start mb-3">
-        <h3 id="helpDialogTitle" class="text-base font-semibold text-slate-900" x-text="helpTitle"></h3>
-        <button @click="showingHelp = false" class="text-slate-400 hover:text-slate-600 ml-4" aria-label="Close help">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <p class="text-sm text-slate-600" x-text="helpContent"></p>
-    </div>
-  </div>
-</template>
-
 <!-- ====================================================================
      HELP CENTER
      ==================================================================== -->
@@ -8779,6 +8506,279 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
   </div>
 </div></template>
+
+
+</main><!-- end .main-content -->
+
+
+<!-- ====================================================================
+     AUTH SETUP MODAL
+     ==================================================================== -->
+<div x-show="showAuthModal" x-cloak class="modal-backdrop auth-modal-backdrop" data-testid="auth-modal" @click.self="closeAuthModal()">
+  <div x-ref="authDialog" class="modal-box auth-modal-box" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="auth-modal-header">
+      <h2 id="authModalTitle" class="auth-modal-title">🔑 API Access Setup</h2>
+      <button class="drawer-close" @click="closeAuthModal()" aria-label="Close API access setup">×</button>
+    </div>
+
+    <div class="auth-path" x-show="!authInitialized && !authCreatedToken">
+      <div class="auth-path-label">Create Initial Administrator</div>
+      <p class="text-muted text-xs mb-2">No users exist yet. This one-time setup creates the first administrator.</p>
+      <div class="auth-row">
+        <input x-model="authTokenName" class="field-input" data-testid="auth-bootstrap-name-input" placeholder="Administrator name" @keydown.enter="createToken('auth')" aria-label="administrator name" />
+        <button @click="createToken('auth')" class="btn-primary auth-row-button" data-testid="auth-bootstrap-submit-btn">Create Admin →</button>
+      </div>
+    </div>
+
+    <template x-if="authCreatedToken">
+      <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-2 text-sm">
+        <div class="font-semibold text-amber-800">Administrator token created — copy it now:</div>
+        <div class="text-xs text-amber-700">This is the only time this token will be shown. Store it securely.</div>
+        <div class="font-mono text-xs break-all bg-white border border-amber-200 rounded px-2 py-1 text-amber-900 select-all cursor-text" data-testid="auth-created-token-value" x-text="authCreatedToken"></div>
+        <button
+          @click="navigator.clipboard.writeText(authCreatedToken).catch(()=>{})"
+          class="btn-primary btn-sm text-xs">
+          Copy to Clipboard
+        </button>
+        <button @click="closeAuthModal()" class="btn-secondary btn-sm text-xs ml-2" data-testid="auth-done-btn">Done — I've saved my token</button>
+      </div>
+    </template>
+
+    <div class="auth-or" x-show="!authInitialized && !authCreatedToken">
+      <span></span>
+      <strong>or</strong>
+      <span></span>
+    </div>
+
+    <div class="auth-path" x-show="!authCreatedToken">
+      <div class="auth-path-label" x-text="authInitialized ? 'Sign in with Your Access Token' : 'Paste Existing Token'"></div>
+      <p x-show="authInitialized" class="text-muted text-xs mb-2">Ask an administrator to create standard-user or administrator access for you.</p>
+      <div class="auth-row">
+        <input x-model="authPasteValue" type="password" class="field-input" data-testid="auth-paste-input" placeholder="Token" @keydown.enter="activateToken()" aria-label="token" />
+        <button @click="activateToken()" class="btn-secondary auth-row-button" data-testid="auth-activate-btn">Activate</button>
+      </div>
+    </div>
+
+    <template x-if="authError">
+      <div class="auth-error" data-testid="auth-error-text" x-text="authError"></div>
+    </template>
+  </div>
+</div>
+
+
+<!-- ====================================================================
+     SLIDE-OVER DRAWER – Mismatch details
+     ==================================================================== -->
+<template x-if="drawer.show">
+  <div>
+    <div class="drawer-backdrop" @click="drawer.show = false"></div>
+    <div x-ref="drawerDialog" class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerDialogTitle">
+      <div class="drawer-header">
+        <div id="drawerDialogTitle" class="drawer-title" x-text="'Mismatches · ' + (drawer.result ? drawer.result.query_name : '')"></div>
+        <button class="drawer-close" @click="drawer.show = false" aria-label="Close mismatch details">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div x-show="drawer.result" class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-3">
+          <span x-text="detailRowsLabel(drawer.rows, drawer.result)"></span>
+          <span x-show="totalMismatches(drawer.result) > 0"
+                class="font-medium text-slate-600"
+                x-text="mismatchBreakdownText(drawer.result)"></span>
+        </div>
+        <template x-if="drawer.loading">
+          <div class="text-muted text-sm py-8 text-center">Loading mismatches…</div>
+        </template>
+        <template x-if="!drawer.loading && drawer.rows.length === 0">
+          <div class="empty-state"><div class="empty-state-title">No mismatch details found</div></div>
+        </template>
+
+        <template x-if="drawer.result && drawer.result.column_stats && drawer.result.column_stats.length">
+          <div class="mb-3 border border-slate-100 rounded overflow-hidden">
+            <div class="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50">
+              <div class="text-xs text-muted font-semibold">All columns</div>
+              <input x-model="columnStatFilters[columnStatKey('drawer', drawer.result)]"
+                     class="field-input text-xs py-1 max-w-48"
+                     placeholder="Filter columns" aria-label="filter columns" />
+            </div>
+            <div class="overflow-auto max-h-48">
+              <table class="mismatch-diff-table" aria-label="index template table 1">
+                <thead>
+                  <tr>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'column')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Column</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'mismatch_count')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Mismatches</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'compared_rows')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Compared</th>
+                    <th @click="setColumnStatSort('drawer', drawer.result, 'match_pct')" class="cursor-pointer" scope="col" tabindex="0" role="button" @keydown.enter="$el.click()" @keydown.space.prevent="$el.click()">Match %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="stat in columnStatsFor(drawer.result, 'drawer')" :key="stat.column">
+                    <tr>
+                      <td class="font-mono text-xs" x-text="stat.column"></td>
+                      <td class="font-semibold text-rose-600" x-text="stat.mismatch_count"></td>
+                      <td x-text="stat.compared_rows"></td>
+                      <td x-text="matchPctText(stat.match_pct)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!drawer.loading && drawer.rows.length > 0">
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <div class="flex gap-1 text-xs">
+              <template x-for="f in ['ALL','PENDING','ACCEPTED','REJECTED']" :key="f">
+                <button @click="mismatchStatusFilter = f"
+                        class="sub-tab text-xs"
+                        :class="mismatchStatusFilter === f ? 'active' : ''"
+                        x-text="f">
+                </button>
+              </template>
+            </div>
+            <div class="ml-auto flex gap-2">
+              <button @click="decideAllPendingDrawerMismatches('accept')"
+                      class="btn-accept-confirm text-xs px-3 py-1.5">
+                Accept All Pending
+              </button>
+              <button @click="decideAllPendingDrawerMismatches('reject')"
+                      class="btn-outline btn-sm text-xs">
+                Reject All Pending
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-2">
+          <template x-for="m in filteredMismatches" :key="m.id">
+            <div class="border border-slate-100 rounded-lg p-3 text-sm" :class="m.accepted ? 'diff-accepted' : ''">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-mono font-semibold text-slate-700" x-text="m.column_name || '(row)'"></span>
+                <span class="badge badge-rose" x-text="m.mismatch_type || 'value'"></span>
+              </div>
+              <div class="grid-2 gap-2 text-xs">
+                <div class="bg-rose-50 rounded p-2">
+                  <div class="text-muted mb-0.5">Source</div>
+                  <div class="font-mono" x-text="m.source_value ?? '—'"></div>
+                </div>
+                <div class="bg-sky-50 rounded p-2">
+                  <div class="text-muted mb-0.5">Target</div>
+                  <div class="font-mono" x-text="m.target_value ?? '—'"></div>
+                </div>
+              </div>
+              <template x-if="m.key_values">
+                <div class="mt-1 text-xs text-muted font-mono" x-text="JSON.stringify(m.key_values)"></div>
+              </template>
+              <template x-if="m.delta != null">
+                <div class="mt-1 text-xs font-mono" :class="m.delta > 0 ? 'text-amber-600' : 'text-red-600'"
+                     x-text="'delta: ' + (m.delta > 0 ? '+' : '') + m.delta.toFixed(4) + (m.relative_delta != null ? '  (' + (m.relative_delta * 100).toFixed(2) + '%)' : '')"></div>
+              </template>
+              <div class="mt-2">
+                <template x-if="m.accepted">
+                  <span class="accepted-badge">Accepted</span>
+                </template>
+                <template x-if="!m.accepted">
+                  <div>
+                    <button @click="toggleAcceptForm(m.id)" class="btn-accept-sm">Accept</button>
+                    <template x-if="acceptForms[m.id]?.open">
+                      <div class="accept-form-inline">
+                        <input x-model="acceptForms[m.id].note" class="accept-note-input" placeholder="Reason" aria-label="reason" />
+                        <button @click="submitAccept(drawer.runId, drawer.result.id, m.id)" class="btn-accept-confirm">Save</button>
+                        <button @click="toggleAcceptForm(m.id)" class="btn-cancel-sm">Cancel</button>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+        <template x-if="drawer.rows.length >= 100">
+          <div class="text-center mt-4 space-y-1">
+            <button @click="loadMoreMismatches()" class="btn-secondary btn-sm">Load more</button>
+            <div class="text-xs text-slate-400" x-text="detailRowsLabel(drawer.rows, drawer.result)"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</template>
+
+
+<!-- ====================================================================
+     TOAST STACK
+     ==================================================================== -->
+<div class="toast-stack" role="status" aria-live="polite">
+  <template x-for="(t, i) in toasts" :key="t.id">
+    <div class="toast" :role="t.type === 'error' ? 'alert' : null" :class="['toast-'+t.type, t.fading ? 'fade-out' : '']">
+      <span class="toast-icon" x-text="t.type === 'success' ? '✓' : t.type === 'error' ? '✗' : '⚠'"></span>
+      <div class="toast-body">
+        <div class="toast-title" x-text="t.title"></div>
+        <div class="toast-msg" x-show="t.msg" x-text="t.msg"></div>
+      </div>
+    </div>
+  </template>
+</div>
+
+
+<!-- Contract create/edit modal -->
+<template x-if="showContractModal">
+  <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
+    <div x-ref="contractDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="contractDialogTitle">
+      <h2 id="contractDialogTitle" class="text-base font-semibold text-slate-900 mb-4" x-text="contractModalEditing ? 'Edit Contract' : 'New Contract'"></h2>
+      <div class="space-y-3">
+        <div>
+          <label  class="field-label" for="a11y-index-template-name">Name</label>
+          <input data-testid="contract-modal-name-input" x-model="contractModal.name" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_v1" id="a11y-index-template-name" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-index-template-source-job">Source Job</label>
+          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" id="a11y-index-template-source-job" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-index-template-owner-email">Owner (email)</label>
+          <input data-testid="contract-modal-owner-input" x-model="contractModal.owner" type="text" class="field-input" placeholder="team@co.com" id="a11y-index-template-owner-email" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-index-template-sla-hours">SLA Hours</label>
+          <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" id="a11y-index-template-sla-hours" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-index-template-consumers-comma-separated">Consumers (comma-separated)</label>
+          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" id="a11y-index-template-consumers-comma-separated" />
+        </div>
+        <div>
+          <label  class="field-label" for="a11y-index-template-breach-severity">Breach Severity</label>
+          <select data-testid="contract-modal-severity-select" x-model="contractModal.breach_severity" class="field-input field-select" id="a11y-index-template-breach-severity">
+            <option value="error">Error</option>
+            <option value="warn">Warn</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button data-testid="contract-modal-cancel-btn" @click="showContractModal = false" class="btn-outline btn-sm">Cancel</button>
+        <button data-testid="contract-modal-save-btn" @click="saveContract()" class="btn-primary btn-sm" x-text="contractModalEditing ? 'Save Changes' : 'Create'"></button>
+      </div>
+    </div>
+  </div>
+</template>
+
+
+<template x-if="showingHelp">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+       @click.self="showingHelp = false">
+    <div x-ref="helpDialog" class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="helpDialogTitle">
+      <div class="flex justify-between items-start mb-3">
+        <h3 id="helpDialogTitle" class="text-base font-semibold text-slate-900" x-text="helpTitle"></h3>
+        <button @click="showingHelp = false" class="text-slate-400 hover:text-slate-600 ml-4" aria-label="Close help">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-sm text-slate-600" x-text="helpContent"></p>
+    </div>
+  </div>
+</template>
 
     <script src="app-config.js"></script>
     <script src="app-help.js"></script>

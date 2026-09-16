@@ -152,6 +152,21 @@
      ==================================================================== -->
 <!-- INCLUDE: partials/tab-logs.html -->
 
+<!-- ====================================================================
+     TAB 8 - CONTRACTS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-contracts.html -->
+
+<!-- ====================================================================
+     TAB 9 - FILE SERVERS
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-file-servers.html -->
+
+<!-- ====================================================================
+     HELP CENTER
+     ==================================================================== -->
+<!-- INCLUDE: partials/tab-help.html -->
+
 
 </main><!-- end .main-content -->
 
@@ -365,16 +380,6 @@
 </div>
 
 
-<!-- ====================================================================
-     TAB 8 - CONTRACTS
-     ==================================================================== -->
-<!-- INCLUDE: partials/tab-contracts.html -->
-
-<!-- ====================================================================
-     TAB 9 - FILE SERVERS
-     ==================================================================== -->
-<!-- INCLUDE: partials/tab-file-servers.html -->
-
 <!-- Contract create/edit modal -->
 <template x-if="showContractModal">
   <div data-testid="contract-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractModal = false">
@@ -434,11 +439,6 @@
     </div>
   </div>
 </template>
-
-<!-- ====================================================================
-     HELP CENTER
-     ==================================================================== -->
-<!-- INCLUDE: partials/tab-help.html -->
 
     <script src="app-config.js"></script>
     <script src="app-help.js"></script>
