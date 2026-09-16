@@ -101,7 +101,8 @@
             <tr>
               <th class="w-10" scope="col">
                 <input type="checkbox" @change="$el.checked ? selectAllResults() : deselectAllResults()"
-                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length  aria-label="input"> 0" />
+                       :checked="selectedResultCount() === selectedRun.results.length && selectedRun.results.length > 0"
+                       aria-label="Select all results" />
               </th>
               <th scope="col">Test Name</th>
               <th scope="col">Status</th>
