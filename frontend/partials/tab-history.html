@@ -1,4 +1,10 @@
 <template x-if="currentView === 'history'"><div>
+  <div class="section-header">
+    <div>
+      <div class="section-title">History</div>
+      <div class="section-sub">Browse past runs, trends, lineage, audit, profiles, schema changes, and coverage</div>
+    </div>
+  </div>
 
   <!-- Detail view -->
   <template x-if="selectedRun">
@@ -713,8 +719,7 @@
       <!-- Runs list (default) -->
       <div x-show="historySubTab==='runs'">
       <div class="section-header mb-4">
-        <div class="section-title">Run History</div>
-        <div class="flex flex-wrap gap-2 items-center">
+        <div class="flex flex-wrap gap-2 items-center ml-auto">
           <select x-model="historyFilterStatus" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-status-filter" aria-label="history status filter">
             <option value="">All statuses</option>
             <option value="PENDING">PENDING</option>
