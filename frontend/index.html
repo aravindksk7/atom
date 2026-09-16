@@ -8616,7 +8616,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="section-header">
     <div>
       <div class="section-title">Help Center</div>
-      <div class="section-sub">End-user guide — detailed steps for every area of the app</div>
+      <div class="section-sub">Comprehensive Web UI guide with native previews and CLI execution reference</div>
     </div>
   </div>
 
@@ -8624,7 +8624,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <aside class="help-sidebar">
       <div class="help-search-wrap">
         <svg class="help-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input data-testid="help-search-input" class="help-search" type="text" placeholder="Search help…" x-model="helpSearch" aria-label="Search help" />
+        <input data-testid="help-search-input" class="help-search" type="search" placeholder="Search help, UI features, CLI flags..." x-model="helpSearch" aria-label="Search help" />
       </div>
       <nav class="help-nav">
         <template x-for="s in helpFilteredSections()" :key="s.id">
@@ -8651,7 +8651,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
           <div class="help-steps">
             <template x-for="(step, si) in s.steps" :key="step.title">
-              <div class="help-step" x-show="helpStepMatches(step, helpSearch.trim())">
+              <div class="help-step" x-show="helpStepMatches(step, helpSearch.trim(), s)">
                 <span class="help-step-num" x-text="String(si + 1).padStart(2, '0')"></span>
                 <div class="help-step-body">
                   <h3 class="help-step-title" x-text="step.title"></h3>
@@ -8662,6 +8662,104 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <template x-if="step.when">
                     <div class="help-where"><span class="help-where-label">When to use</span><span x-text="step.when"></span></div>
                   </template>
+                  <template x-if="step.uiMockup">
+                    <section class="help-mockup" role="region" :aria-label="step.uiMockup.title || 'Web UI preview'">
+                      <header class="help-mockup-header">
+                        <span class="help-mockup-window" aria-hidden="true"><i></i><i></i><i></i></span>
+                        <h4 class="help-mockup-title" x-text="step.uiMockup.title || 'Web UI preview'"></h4>
+                        <template x-if="step.uiMockup.badge">
+                          <span class="help-mockup-badge" x-text="step.uiMockup.badge"></span>
+                        </template>
+                      </header>
+                      <div class="help-mockup-grid">
+                        <template x-for="(element, elementIndex) in (Array.isArray(step.uiMockup.elements) ? step.uiMockup.elements : [])" :key="elementIndex">
+                          <div class="help-mockup-element" :class="'help-mockup-' + (element.type || 'unknown')">
+                            <template x-if="element.type === 'input' || element.type === 'select'">
+                              <div class="help-mockup-field">
+                                <span class="help-mockup-label" x-text="element.label || (element.type === 'select' ? 'Selection' : 'Input')"></span>
+                                <span class="help-mockup-value" :class="element.highlight ? 'is-highlighted' : ''" x-text="element.value ?? ''"></span>
+                              </div>
+                            </template>
+                            <template x-if="element.type === 'button'">
+                              <button type="button" class="help-mockup-button" :class="element.highlight ? 'is-primary' : ''" x-text="element.label || element.value || 'Action'" disabled></button>
+                            </template>
+                            <template x-if="element.type === 'badge' || element.type === 'status'">
+                              <span role="status" class="help-mockup-status" :class="'is-' + (element.status || 'info')" :aria-label="element.value || element.label || 'Status'" x-text="element.value || element.label || 'Status'"></span>
+                            </template>
+                            <template x-if="element.type === 'dag'">
+                              <div class="help-mockup-dag" role="img" :aria-label="'Workflow from ' + (element.label || 'start') + ' to ' + (element.value || 'finish')">
+                                <span class="help-mockup-dag-node" x-text="element.label || 'Start'"></span>
+                                <svg class="help-mockup-dag-arrow" aria-hidden="true" viewBox="0 0 28 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 6h24M20 1l5 5-5 5"></path></svg>
+                                <span class="help-mockup-dag-node is-active" x-text="element.value || 'Finish'"></span>
+                              </div>
+                            </template>
+                            <template x-if="element.type === 'table'">
+                              <div class="help-mockup-table-wrap">
+                                <table class="help-mockup-table" :aria-label="element.label || 'Preview data'">
+                                  <thead><tr><template x-for="(column, columnIndex) in (Array.isArray(element.columns) ? element.columns : [])" :key="columnIndex"><th scope="col" x-text="column"></th></template></tr></thead>
+                                  <tbody><template x-for="(row, rowIndex) in (Array.isArray(element.rows) ? element.rows : [])" :key="rowIndex"><tr><template x-for="(cell, cellIndex) in (Array.isArray(row) ? row : [])" :key="cellIndex"><td x-text="cell"></td></template></tr></template></tbody>
+                                </table>
+                              </div>
+                            </template>
+                            <template x-if="element.type === 'code'">
+                              <div class="help-mockup-field">
+                                <span class="help-mockup-label" x-text="element.label || 'Code' "></span>
+                                <code class="help-mockup-code" x-text="element.value ?? ''"></code>
+                              </div>
+                            </template>
+                            <template x-if="element.type === 'metric'">
+                              <div class="help-mockup-metric">
+                                <span class="help-mockup-label" x-text="element.label || 'Metric'"></span>
+                                <strong x-text="element.value ?? ''"></strong>
+                              </div>
+                            </template>
+                            <template x-if="!['input', 'select', 'button', 'badge', 'status', 'dag', 'table', 'code', 'metric'].includes(element.type)">
+                              <div class="help-mockup-field">
+                                <span class="help-mockup-label" x-text="element.label || 'Preview item'"></span>
+                                <span class="help-mockup-value" x-text="element.value ?? ''"></span>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </section>
+                  </template>
+
+                  <template x-if="step.cli">
+                    <section class="help-cli" role="region" :aria-label="step.title + ' CLI execution equivalent'">
+                      <header class="help-cli-header">
+                        <h4 class="help-cli-title">
+                          <svg class="help-cli-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                          <span>CLI execution equivalent</span>
+                        </h4>
+                        <button type="button" class="help-cli-copy" :aria-label="'Copy ' + step.title + ' command'" :data-copy-label="step.title" @click="copyCliCommand(step.cli.command, $event)">
+                          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          <span role="status" aria-live="polite">Copy</span>
+                        </button>
+                      </header>
+                      <template x-if="step.cli.description"><p class="help-cli-description" x-text="step.cli.description"></p></template>
+                      <pre class="help-cli-command"><code x-text="step.cli.command || ''"></code></pre>
+                      <template x-if="Array.isArray(step.cli.params) && step.cli.params.length">
+                        <div class="help-cli-params">
+                          <h5 class="help-cli-subtitle">Flags and arguments</h5>
+                          <dl><template x-for="(param, paramIndex) in step.cli.params" :key="param.flag || paramIndex"><div class="help-cli-param"><dt><code x-text="param.flag || ''"></code></dt><dd x-text="param.desc || ''"></dd></div></template></dl>
+                        </div>
+                      </template>
+                      <template x-if="step.cli.sampleOutput">
+                        <div class="help-cli-output-wrap">
+                          <h5 class="help-cli-subtitle">Sample output</h5>
+                          <pre class="help-cli-output"><code x-text="step.cli.sampleOutput"></code></pre>
+                        </div>
+                      </template>
+                      <template x-if="Array.isArray(step.cli.exitCodes) && step.cli.exitCodes.length">
+                        <div class="help-cli-exit-codes">
+                          <h5 class="help-cli-subtitle">Exit codes</h5>
+                          <dl><template x-for="(exitCode, exitIndex) in step.cli.exitCodes" :key="exitCode.code ?? exitIndex"><div class="help-cli-exit-code"><dt><code x-text="exitCode.code ?? ''"></code></dt><dd x-text="exitCode.meaning || ''"></dd></div></template></dl>
+                        </div>
+                      </template>
+                    </section>
+                  </template>
+
                   <template x-if="step.tip">
                     <div class="help-callout tip"><span class="help-callout-label">Tip</span><span x-text="step.tip"></span></div>
                   </template>

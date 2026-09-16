@@ -38,6 +38,8 @@
     },
   };
 
+  const COPY_STATES = new WeakMap();
+
   global.ETL_HELP_METHODS = {
     showHelp(topic) {
       const entry = HELP_TOPICS[topic];
@@ -45,6 +47,79 @@
       this.helpTitle = entry.title;
       this.helpContent = entry.content;
       this.showingHelp = true;
+    },
+
+    helpNormalize(value) {
+      return (value || '').toString().toLowerCase();
+    },
+
+    helpSectionMatches(section, query) {
+      const q = this.helpNormalize(query);
+      if (!q) return true;
+      if ([section.title, section.intro, section.category]
+        .some((value) => this.helpNormalize(value).includes(q))) return true;
+      return (section.steps || []).some((step) => this.helpStepMatches(step, q));
+    },
+
+    helpFilteredSections() {
+      const q = this.helpNormalize((this.helpSearch || '').trim());
+      if (!q) return this.helpSections;
+      return this.helpSections.filter((section) => this.helpSectionMatches(section, q));
+    },
+
+    helpStepMatches(step, query, section) {
+      const q = this.helpNormalize(query);
+      if (!q) return true;
+      if (section && [section.title, section.intro, section.category]
+        .some((value) => this.helpNormalize(value).includes(q))) return true;
+      const fields = [step.title, step.text, step.where, step.when, step.tip, step.warn];
+      if (step.cli) {
+        fields.push(step.cli.command, step.cli.description, step.cli.sampleOutput);
+        if (Array.isArray(step.cli.params)) {
+          step.cli.params.forEach((param) => fields.push(param.flag, param.desc));
+        }
+      }
+      if (step.uiMockup) {
+        fields.push(step.uiMockup.title, step.uiMockup.badge);
+        if (Array.isArray(step.uiMockup.elements)) {
+          step.uiMockup.elements.forEach((element) => fields.push(element.label, element.value));
+        }
+      }
+      return fields.some((value) => this.helpNormalize(value).includes(q));
+    },
+
+    scrollToHelp(id) {
+      this.helpActiveId = id;
+      const element = document.getElementById('help-' + id);
+      if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+
+    async copyCliCommand(command, event) {
+      if (!command || !navigator.clipboard || !navigator.clipboard.writeText) return;
+      try {
+        await navigator.clipboard.writeText(command);
+        const button = event && event.currentTarget;
+        if (!button) return;
+        const label = button.querySelector('span');
+        if (!label) return;
+        const previous = COPY_STATES.get(button);
+        if (previous) clearTimeout(previous.timeoutId);
+        const originalText = previous ? previous.originalText : label.textContent;
+        const originalAriaLabel = previous ? previous.originalAriaLabel : button.getAttribute('aria-label');
+        label.textContent = 'Copied!';
+        button.setAttribute('aria-label', (button.dataset.copyLabel ? button.dataset.copyLabel + ' command copied' : 'Command copied'));
+        button.dataset.copyState = 'copied';
+        const timeoutId = setTimeout(() => {
+          label.textContent = originalText;
+          if (originalAriaLabel === null) button.removeAttribute('aria-label');
+          else button.setAttribute('aria-label', originalAriaLabel);
+          delete button.dataset.copyState;
+          COPY_STATES.delete(button);
+        }, 1800);
+        COPY_STATES.set(button, { originalText, originalAriaLabel, timeoutId });
+      } catch (error) {
+        console.warn('Failed to copy CLI command:', error);
+      }
     },
 
     initKeyboardShortcuts() {

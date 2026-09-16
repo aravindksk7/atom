@@ -1484,37 +1484,6 @@ function _appRaw() {
 
     ...HELP_METHODS,
 
-    // -----------------------------------------------------------
-    // Help center
-    // -----------------------------------------------------------
-    helpNormalize(s) {
-      return (s || '').toString().toLowerCase();
-    },
-    helpSectionMatches(section, q) {
-      if (!q) return true;
-      const hay = [section.title, section.intro,
-        ...(section.steps || []).flatMap((s) => [s.title, s.text, s.where, s.tip, s.warn])]
-        .map((v) => this.helpNormalize(v)).join(' ');
-      return hay.includes(q);
-    },
-    helpFilteredSections() {
-      const q = this.helpNormalize(this.helpSearch.trim());
-      if (!q) return this.helpSections;
-      return this.helpSections.filter((s) => this.helpSectionMatches(s, q));
-    },
-    helpStepMatches(step, q) {
-      q = this.helpNormalize(q);
-      if (!q) return true;
-      const hay = [step.title, step.text, step.where, step.tip, step.warn]
-        .map((v) => this.helpNormalize(v)).join(' ');
-      return hay.includes(q);
-    },
-    scrollToHelp(id) {
-      this.helpActiveId = id;
-      const el = document.getElementById('help-' + id);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    },
-
   };
   // Several feature slices (e.g. ETL_FEATURE_LAUNCH(), and `core` itself)
   // define real `get` accessors (filteredJobList, jobCatalogCountLabel,
