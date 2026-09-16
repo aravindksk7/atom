@@ -8257,6 +8257,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <button @click="openFileServerModal(null)" class="btn-primary" data-testid="file-server-add-btn">Add File Server</button>
   </div>
 
+  <div x-show="fileServers.length === 0" class="card empty-state" data-testid="file-servers-empty-state">
+    <div class="empty-state-icon">🗄️</div>
+    <div class="empty-state-title">No file servers yet</div>
+    <div class="empty-state-sub">Add an SFTP, SCP, or S3 profile to use with file_watcher and multi-file jobs</div>
+  </div>
+
   <div class="space-y-3">
     <template x-for="fs in fileServers" :key="fs.id">
       <div class="card" :data-testid="'file-server-' + fs.id">
