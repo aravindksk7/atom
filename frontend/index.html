@@ -5723,7 +5723,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <div class="card mb-4">
     <div class="font-semibold mb-3">Live Status Grid</div>
-    <div class="table-scroll">
+    <div x-show="!schedulerReportLoading && schedulerReportGrid.length === 0" class="empty-state" data-testid="scheduler-grid-empty-state">
+      <div class="empty-state-title">No schedules found</div>
+      <div class="empty-state-sub">Create a schedule from the Launch tab, or widen the filters above</div>
+    </div>
+    <div class="table-scroll" x-show="schedulerReportGrid.length > 0">
       <table class="data-table" aria-label="scheduler reports table 1">
         <thead><tr><th scope="col">Schedule</th><th scope="col">Status</th><th scope="col">Enabled</th><th scope="col">Cron</th><th scope="col">Next Run</th><th scope="col">Duration</th><th scope="col">Exit</th><th scope="col">Actions</th></tr></thead>
         <tbody>
@@ -5753,6 +5757,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <div class="card">
       <div class="font-semibold mb-3">Execution Timeline</div>
       <div class="scheduler-timeline">
+        <div x-show="!schedulerReportLoading && schedulerReportTimeline.length === 0" class="empty-state" data-testid="scheduler-timeline-empty-state">
+          <div class="empty-state-title">No executions in this period</div>
+        </div>
         <template x-for="segment in schedulerReportTimeline" :key="segment.schedule_name + '-' + segment.started_at + '-' + segment.status">
           <div class="scheduler-timeline-row">
             <div class="scheduler-timeline-label" x-text="segment.schedule_name"></div>
