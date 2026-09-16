@@ -123,6 +123,11 @@
           <template x-for="r in selectedRun.results" :key="r.id">
             <tbody>
               <tr>
+                  <td>
+                    <input type="checkbox" @click.stop="toggleResultSelection(r.id)"
+                           :checked="isResultSelected(r.id)"
+                           aria-label="Select result" />
+                  </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td>
                     <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
@@ -161,7 +166,7 @@
                   </td>
                 </tr>
                 <tr x-show="outcomeOverrideForms[r.id]?.open || r.override_reason">
-                  <td colspan="8" class="px-4 py-3 bg-amber-50">
+                  <td colspan="9" class="px-4 py-3 bg-amber-50">
                     <template x-if="r.override_reason">
                       <div class="text-xs">
                         <strong>Agreed actions:</strong> <span x-text="r.override_reason"></span>
@@ -182,12 +187,12 @@
                 </tr>
                 <!-- Error row -->
                 <tr x-show="r.error_message">
-                  <td colspan="8" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                  <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
                 </tr>
                 <!-- Inline mismatch diff rows -->
                 <template x-if="expandedMismatches[r.id] !== undefined">
                   <tr>
-                    <td colspan="8" class="p-0">
+                    <td colspan="9" class="p-0">
                       <div class="mismatch-expand-panel">
                         <div class="mismatch-expand-header">
                           <span x-text="'Mismatch details - ' + detailRowsLabel(expandedMismatches[r.id], r)"></span>
@@ -209,7 +214,7 @@
                           </thead>
                           <tbody>
                             <template x-if="expandedMismatches[r.id].length === 0">
-                              <tr><td colspan="8" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
+                              <tr><td colspan="7" class="text-muted text-center py-3">No mismatch rows stored</td></tr>
                             </template>
                             <!-- Rendering matches the HTML report, the Compare tab and the
                                  Differences Explorer: red marks the side that is wrong, not
@@ -342,7 +347,7 @@
                 <!-- Sample of rows actually read from the source -->
                 <template x-if="expandedSampleRows[r.id]">
                   <tr>
-                    <td colspan="8" class="p-0">
+                    <td colspan="9" class="p-0">
                       <div class="mismatch-expand-panel">
                         <div class="mismatch-expand-header">
                           <span x-text="'Rows read from source — showing ' + (r.sample_rows || []).length + ' of ' + (r.source_row_count ?? (r.sample_rows || []).length)"></span>
