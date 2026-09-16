@@ -46,18 +46,22 @@
       </div>
 
       <!-- Document tree -->
-      <div class="card" x-show="boDocs.length > 0">
+      <div class="card">
         <div class="flex items-center justify-between mb-3">
           <div class="font-semibold text-slate-700">
             Documents (<span x-text="filteredBODocs.length"></span><template x-if="filteredBODocs.length !== boDocs.length"><span> of <span x-text="boDocs.length"></span></span></template>)
           </div>
         </div>
-        <div class="mb-3">
+        <div x-show="boDocs.length === 0" class="empty-state" data-testid="bo-docs-empty-state">
+          <div class="empty-state-title">No documents loaded</div>
+          <div class="empty-state-sub">Select a config above and click "Browse Documents"</div>
+        </div>
+        <div class="mb-3" x-show="boDocs.length > 0">
           <input x-model="boFilterQuery" class="field-input" placeholder="Search documents and reports…"
                  data-testid="bo-doc-search-input" aria-label="search documents and reports" />
           <p class="text-xs text-muted mt-1">Matches document name/folder/id, and report names once a document has been expanded.</p>
         </div>
-        <div class="mb-3">
+        <div class="mb-3" x-show="boDocs.length > 0">
           <label  class="field-label" for="a11y-adapters-ran-on-date">Ran on date</label>
           <input type="date" x-model="boRanOnDate" @change="loadBORanOnDocIds()" class="field-input"
                  data-testid="bo-doc-ran-on-input" id="a11y-adapters-ran-on-date" />
@@ -71,7 +75,7 @@
             <span x-show="!boFilterQuery.trim() && boRanOnDocIds">No documents ran on <span x-text="boRanOnDate"></span></span>
           </div>
         </template>
-        <div class="space-y-1">
+        <div class="space-y-1" x-show="boDocs.length > 0">
           <template x-for="(doc, boDocIdx) in filteredBODocs" :key="doc.id ? 'doc-' + doc.id : 'doc-idx-' + boDocIdx">
             <div>
               <div class="bo-doc-item flex items-center justify-between px-3 py-2"
@@ -261,8 +265,11 @@
       </div>
 
       <!-- Automic lookup history (sessionStorage) -->
-      <div class="card" x-show="automicHistory.length > 0">
+      <div class="card">
         <div class="font-semibold text-slate-700 mb-2">Recent Lookups</div>
+        <div x-show="automicHistory.length === 0" class="empty-state" data-testid="automic-history-empty-state">
+          <div class="empty-state-title">No lookups yet</div>
+        </div>
         <div class="space-y-1">
           <template x-for="h in automicHistory" :key="h.identifier + h.checked_at">
             <div class="flex items-center justify-between text-sm px-2 py-1.5 rounded hover:bg-slate-50">
@@ -276,7 +283,7 @@
   </div>
 
   <!-- Import Jobs from File panel -->
-  <div x-show="currentView === 'adapters'" class="card mt-4">
+  <div class="card mt-4">
     <button type="button" class="card-toggle" @click="fileImportOpen = !fileImportOpen" :aria-expanded="fileImportOpen.toString()">
       <div class="font-semibold text-slate-700">📂 Import Jobs from File</div>
       <span class="text-muted text-sm" x-text="fileImportOpen ? '▲ collapse' : '▼ expand'"></span>
@@ -327,7 +334,7 @@
   </div>
 
   <!-- Browse & Import from Automic panel -->
-  <div x-show="currentView === 'adapters'" class="card mt-4">
+  <div class="card mt-4">
     <button type="button" class="card-toggle" @click="browseAutomicOpen = !browseAutomicOpen" :aria-expanded="browseAutomicOpen.toString()">
       <div class="font-semibold text-slate-700">🔍 Browse &amp; Import from Automic</div>
       <span class="text-muted text-sm" x-text="browseAutomicOpen ? '▲ collapse' : '▼ expand'"></span>
