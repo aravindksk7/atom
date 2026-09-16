@@ -66,6 +66,12 @@
           </template>
         </tbody>
       </table>
+      <template x-if="selectedSequence && !selectedSequence.versions[selectedSequence.versions.length - 1].steps.length">
+        <div class="empty-state" data-testid="sequence-steps-empty-state">
+          <div class="empty-state-title">This version has no steps</div>
+          <div class="empty-state-sub">Use "Edit as new version" to add jobs to the sequence</div>
+        </div>
+      </template>
 
       <div class="mt-4 text-sm" data-testid="sequence-usage">
         <div class="font-medium">Used by</div>
