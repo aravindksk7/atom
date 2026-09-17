@@ -212,17 +212,21 @@ def _apply_jobs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
     repo = JobRepository(db)
     out: list[BundleItemResult] = []
     for entry in entries:
-        name = entry["name"]
-        if repo.get(name) is not None:
-            out.append(BundleItemResult("jobs", name, "skipped", "already exists"))
-            continue
         try:
-            definition = JobDefinition(**entry)
+            name = entry["name"]
+            if repo.get(name) is not None:
+                out.append(BundleItemResult("jobs", name, "skipped", "already exists"))
+                continue
+            try:
+                definition = JobDefinition(**entry)
+            except Exception as exc:
+                out.append(BundleItemResult("jobs", name, "error", str(exc)))
+                continue
+            repo.create(_job_to_data(definition))
+            out.append(BundleItemResult("jobs", name, "created"))
         except Exception as exc:
-            out.append(BundleItemResult("jobs", name, "error", str(exc)))
-            continue
-        repo.create(_job_to_data(definition))
-        out.append(BundleItemResult("jobs", name, "created"))
+            db.rollback()
+            out.append(BundleItemResult("jobs", entry.get("name", "<unknown>"), "error", str(exc)))
     return out
 
 

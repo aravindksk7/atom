@@ -165,6 +165,17 @@ def test_apply_bundle_reports_error_for_job_that_fails_schema_validation():
     assert JobRepository(db).get("bad_job") is None
 
 
+def test_apply_bundle_reports_error_for_malformed_job_entry_instead_of_raising():
+    db = _db()
+    bundle = {
+        "bundle_version": BUNDLE_VERSION, "file_servers": [], "configs": [], "sequences": [], "selections": [],
+        "jobs": [{"description": "no name key at all"}],  # missing required "name"
+    }
+    results = apply_bundle(db, bundle)  # must not raise
+    assert results[0].status == "error"
+    assert results[0].name == "<unknown>"
+
+
 def test_apply_bundle_resolves_sequence_config_name_and_errors_if_missing():
     db = _db()
     ConfigRepository(db).create(name="dev", env_name="dev", config_data={})
