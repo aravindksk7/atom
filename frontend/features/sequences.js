@@ -19,6 +19,7 @@
       sequenceIssues: [],              // [{step_id, field, message}]
       sequenceOrder: [],               // topological step_id order when valid
       sequenceSaving: false,
+      _sequenceValidateToken: 0,       // guards against out-of-order validate responses
 
       // Preconditions are edited as a flat form and converted on save, because
       // the API wants absent gates to be null rather than empty objects.
@@ -222,13 +223,24 @@
       },
 
       async validateSequenceSteps() {
+        // Every step/dependency edit fires a new validate call without
+        // waiting for the previous one. With many steps, a user wiring up
+        // dependencies can have several in flight at once, and network
+        // responses are not guaranteed to resolve in request order. A
+        // token guard drops any response that isn't from the most recent
+        // call, so a slow, stale response can never clobber the result of
+        // a later edit (which would otherwise leave sequenceIssues stuck
+        // non-empty and silently block Save).
+        const token = ++this._sequenceValidateToken;
         try {
           const result = await api('POST', '/api/sequences/validate', {
             steps: this.sequenceSteps,
           });
+          if (token !== this._sequenceValidateToken) return;
           this.sequenceIssues = result.errors || [];
           this.sequenceOrder = result.order || [];
         } catch {
+          if (token !== this._sequenceValidateToken) return;
           this.sequenceIssues = [];
           this.sequenceOrder = [];
         }
