@@ -1184,6 +1184,14 @@
         name: m.name,
         description: m.description || '',
         tags: (m.tags || '').split(',').map(s => s.trim()).filter(Boolean),
+        // Live Connections + Saved Config apply no matter where the job
+        // list comes from -- the modal shows both fields regardless of
+        // selectionSourceMode, so both must always be sent. Scoping these
+        // to the inline branch used to mean editing a sequence-sourced
+        // selection, flipping Live Connections on, and saving silently
+        // reverted to whatever the previous version had.
+        run_settings: { use_live_connections: Boolean(m.use_live_connections) },
+        config_id: m.config_id || null,
       };
       if (this.selectionSourceMode === 'sequence') {
         body.sequence_ref = {
@@ -1194,8 +1202,6 @@
         };
       } else {
         body.job_sequence = this.selectedSelectionJobNames;
-        body.run_settings = { use_live_connections: Boolean(m.use_live_connections) };
-        body.config_id = m.config_id || null;
       }
       try {
         if (this.selectionModalEditing) {

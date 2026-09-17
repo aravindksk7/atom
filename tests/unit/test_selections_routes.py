@@ -121,6 +121,46 @@ def test_update_can_clear_config_id_explicitly(client):
     assert resp.json()["versions"][-1]["config_id"] is None
 
 
+def test_update_sequence_sourced_selection_can_set_run_settings_and_config(client):
+    """Regression test: the edit modal shows Live Connections + Saved Config
+    for a sequence-sourced selection exactly like an inline one, but
+    saveSelection() used to only put run_settings/config_id on the PUT body
+    for the inline branch. Editing a sequence-sourced selection, enabling
+    Live Connections, and picking a config looked saved (200, modal closed)
+    but silently reverted to the previous version's values. The API side of
+    that contract -- run_settings/config_id landing on a version alongside a
+    sequence_ref -- must work for the frontend fix to mean anything."""
+    from etl_framework.repository.repository import ConfigRepository
+    from etl_framework.repository.database import SessionLocal
+
+    with SessionLocal() as db:
+        cfg_id = ConfigRepository(db).create("bo-prod", "prod", {"bo_url": "x"}).id
+
+    seq_resp = client.post("/api/sequences", json={
+        "name": "seq-for-selection",
+        "steps": [{"step_id": "a", "job_name": "orders_recon"}],
+    })
+    assert seq_resp.status_code == 201, seq_resp.text
+    sequence_id = seq_resp.json()["id"]
+
+    created = client.post("/api/selections", json={
+        "name": "seq-sourced", "sequence_ref": {"sequence_id": sequence_id},
+    })
+    assert created.status_code == 201, created.text
+    selection_id = created.json()["id"]
+
+    resp = client.put(f"/api/selections/{selection_id}", json={
+        "sequence_ref": {"sequence_id": sequence_id},
+        "run_settings": {"use_live_connections": True},
+        "config_id": cfg_id,
+    })
+    assert resp.status_code == 200, resp.text
+    latest = resp.json()["versions"][-1]
+    assert latest["run_settings"]["use_live_connections"] is True
+    assert latest["config_id"] == cfg_id
+    assert latest["sequence_ref"]["sequence_id"] == sequence_id
+
+
 def test_duplicate_name_rejected(client):
     _create_selection(client)
     resp = client.post("/api/selections", json={"name": "nightly-set", "job_sequence": ["orders_recon"]})
