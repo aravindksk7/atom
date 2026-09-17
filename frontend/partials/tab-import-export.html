@@ -17,7 +17,7 @@
         <template x-for="item in bundleItemsByType(type)" :key="item.type + item.name">
           <label class="flex items-center gap-2 text-sm mb-1">
             <input type="checkbox"
-                   :checked="bundleSelected[bundleSelectionKey(item.type, item.name)]"
+                   :checked="bundleSelected[item.type]?.[item.name]"
                    @change="toggleBundleItem(item.type, item.name)"
                    :data-testid="'import-export-check-' + item.type + '-' + item.name">
             <span x-text="item.name"></span>
@@ -33,7 +33,7 @@
 
   <div class="card">
     <div class="section-title" style="font-size: 1rem;">Import</div>
-    <input type="file" accept="application/json" @change="importBundleFile($event)" data-testid="import-export-file-input">
+    <input type="file" accept="application/json" class="field-input" aria-label="Import bundle file" @change="importBundleFile($event)" data-testid="import-export-file-input">
     <template x-if="bundleImportResult.length">
       <div class="table-scroll mt-4">
         <table class="data-table" aria-label="Import result">

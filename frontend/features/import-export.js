@@ -20,21 +20,18 @@
         return this.bundleItems.filter((i) => i.type === type);
       },
 
-      bundleSelectionKey(type, name) {
-        return `${type}::${name}`;
-      },
-
       toggleBundleItem(type, name) {
-        const key = this.bundleSelectionKey(type, name);
-        this.bundleSelected = { ...this.bundleSelected, [key]: !this.bundleSelected[key] };
+        const forType = { ...(this.bundleSelected[type] || {}) };
+        forType[name] = !forType[name];
+        this.bundleSelected = { ...this.bundleSelected, [type]: forType };
       },
 
       async exportBundle() {
         const selection = {};
-        for (const key of Object.keys(this.bundleSelected)) {
-          if (!this.bundleSelected[key]) continue;
-          const [type, name] = key.split('::');
-          (selection[type] = selection[type] || []).push(name);
+        for (const type of Object.keys(this.bundleSelected)) {
+          const names = Object.keys(this.bundleSelected[type] || {})
+            .filter((n) => this.bundleSelected[type][n]);
+          if (names.length) selection[type] = names;
         }
         if (!Object.keys(selection).length) {
           this.toast('error', 'Nothing selected', 'Select at least one item to export');
