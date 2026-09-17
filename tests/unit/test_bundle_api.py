@@ -12,7 +12,14 @@ from sqlalchemy.pool import StaticPool
 from etl_framework.repository.database import Base, get_db
 from etl_framework.repository import database as _db_module
 import etl_framework.repository.models  # noqa: F401
-from etl_framework.repository.repository import ConfigRepository, TokenRepository
+from etl_framework.repository.repository import (
+    ConfigRepository,
+    FileServerProfileRepository,
+    JobRepository,
+    JobSelectionRepository,
+    TokenRepository,
+)
+from etl_framework.repository.sequence_repository import ExecutionSequenceRepository
 from api.main import app
 
 
@@ -52,6 +59,47 @@ def test_list_bundle_items_returns_configs(client):
     resp = client.get("/api/bundle/list")
     assert resp.status_code == 200
     assert {"type": "configs", "name": "dev"} in resp.json()
+
+
+def test_list_bundle_items_returns_all_entity_types(client):
+    with Session(client.engine) as db:
+        FileServerProfileRepository(db).create({"name": "fs1", "kind": "sftp"})
+        ConfigRepository(db).create(name="dev", env_name="dev", config_data={})
+        JobRepository(db).create({"name": "job1"})
+        ExecutionSequenceRepository(db).create(name="seq1", description="", tags=[], steps=[])
+        JobSelectionRepository(db).create(
+            name="sel1", description="", tags=[], job_sequence=[], run_settings={},
+        )
+
+    resp = client.get("/api/bundle/list")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert {"type": "file_servers", "name": "fs1"} in items
+    assert {"type": "configs", "name": "dev"} in items
+    assert {"type": "jobs", "name": "job1"} in items
+    assert {"type": "sequences", "name": "seq1"} in items
+    assert {"type": "selections", "name": "sel1"} in items
+
+
+def test_import_into_clean_db_creates_records(client):
+    with Session(client.engine) as db:
+        ConfigRepository(db).create(name="dev", env_name="dev", config_data={"db_host": "localhost"})
+
+    export_resp = client.post("/api/bundle/export", json={"selection": {"configs": ["dev"]}})
+    assert export_resp.status_code == 200
+    bundle = export_resp.json()
+
+    with Session(client.engine) as db:
+        repo = ConfigRepository(db)
+        existing = repo.get_by_name("dev")
+        repo.delete(existing.id)
+
+    import_resp = client.post("/api/bundle/import", json=bundle)
+    assert import_resp.status_code == 200
+    assert import_resp.json() == [{"type": "configs", "name": "dev", "status": "created", "reason": None}]
+
+    with Session(client.engine) as db:
+        assert ConfigRepository(db).get_by_name("dev") is not None
 
 
 def test_export_then_import_round_trip_skips_everything(client):
