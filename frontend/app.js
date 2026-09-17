@@ -213,6 +213,8 @@ function _appRaw() {
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 5h18"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 19H3"></path></svg>' },
       { id: 'logs', label: 'Logs', group: 'system',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>' },
+      { id: 'import-export', label: 'Import/Export', group: 'system',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>' },
       { id: 'help', label: 'Help', group: 'system',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>' },
     ],
@@ -375,6 +377,7 @@ function _appRaw() {
       else this.stopSchedulerReportPolling();
       if (id === 'logs') this.startGlobalLogsPolling();
       else this.stopGlobalLogsPolling();
+      if (id === 'import-export') this.loadBundleList();
       if (id === 'help') this.loadHelpContent();
     },
 
@@ -1496,7 +1499,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_CI_RUNS(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES(), ETL_FEATURE_FILE_SERVERS()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_CI_RUNS(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES(), ETL_FEATURE_FILE_SERVERS(), ETL_FEATURE_IMPORT_EXPORT()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}

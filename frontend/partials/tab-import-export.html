@@ -1,0 +1,55 @@
+<template x-if="currentView === 'import-export'"><div data-testid="import-export-tab">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Import / Export</div>
+      <div class="section-sub">Move configs, file servers, jobs, sequences, and job selections between environments.</div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="section-title" style="font-size: 1rem;">Export</div>
+    <template x-for="type in ['file_servers', 'configs', 'jobs', 'sequences', 'selections']" :key="type">
+      <div class="mb-4">
+        <div class="text-sm font-semibold mb-2" x-text="type.replace('_', ' ')"></div>
+        <template x-if="!bundleItemsByType(type).length">
+          <div class="text-muted text-sm" :data-testid="'import-export-empty-' + type">None saved</div>
+        </template>
+        <template x-for="item in bundleItemsByType(type)" :key="item.type + item.name">
+          <label class="flex items-center gap-2 text-sm mb-1">
+            <input type="checkbox"
+                   :checked="bundleSelected[bundleSelectionKey(item.type, item.name)]"
+                   @change="toggleBundleItem(item.type, item.name)"
+                   :data-testid="'import-export-check-' + item.type + '-' + item.name">
+            <span x-text="item.name"></span>
+          </label>
+        </template>
+      </div>
+    </template>
+    <button class="btn-primary" @click="exportBundle()" :disabled="bundleExporting" data-testid="import-export-export-btn">
+      <span x-show="!bundleExporting">Export Selected</span>
+      <span x-show="bundleExporting">Exporting...</span>
+    </button>
+  </div>
+
+  <div class="card">
+    <div class="section-title" style="font-size: 1rem;">Import</div>
+    <input type="file" accept="application/json" @change="importBundleFile($event)" data-testid="import-export-file-input">
+    <template x-if="bundleImportResult.length">
+      <div class="table-scroll mt-4">
+        <table class="data-table" aria-label="Import result">
+          <thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Reason</th></tr></thead>
+          <tbody>
+            <template x-for="row in bundleImportResult" :key="row.type + row.name">
+              <tr :data-testid="'import-export-result-' + row.type + '-' + row.name">
+                <td x-text="row.type"></td>
+                <td x-text="row.name"></td>
+                <td x-text="row.status"></td>
+                <td x-text="row.reason || ''"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+  </div>
+</div></template>
