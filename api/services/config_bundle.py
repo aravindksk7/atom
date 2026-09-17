@@ -169,3 +169,129 @@ def build_bundle(db: Session, selection: dict[str, list[str]]) -> dict:
     ]
 
     return bundle
+
+
+def _apply_file_servers(db: Session, entries: list[dict]) -> list[BundleItemResult]:
+    repo = FileServerProfileRepository(db)
+    out: list[BundleItemResult] = []
+    for entry in entries:
+        name = entry["name"]
+        if repo.get_by_name(name) is not None:
+            out.append(BundleItemResult("file_servers", name, "skipped", "already exists"))
+            continue
+        repo.create(dict(entry))
+        out.append(BundleItemResult("file_servers", name, "created"))
+    return out
+
+
+def _apply_configs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
+    repo = ConfigRepository(db)
+    out: list[BundleItemResult] = []
+    for entry in entries:
+        name = entry["name"]
+        if repo.get_by_name(name) is not None:
+            out.append(BundleItemResult("configs", name, "skipped", "already exists"))
+            continue
+        repo.create(name=name, env_name=entry["env_name"], config_data=entry.get("config_data") or {})
+        out.append(BundleItemResult("configs", name, "created"))
+    return out
+
+
+def _apply_jobs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
+    from api.routes.jobs import _job_to_data
+    from api.schemas import JobDefinition
+
+    repo = JobRepository(db)
+    out: list[BundleItemResult] = []
+    for entry in entries:
+        name = entry["name"]
+        if repo.get(name) is not None:
+            out.append(BundleItemResult("jobs", name, "skipped", "already exists"))
+            continue
+        try:
+            definition = JobDefinition(**entry)
+        except Exception as exc:
+            out.append(BundleItemResult("jobs", name, "error", str(exc)))
+            continue
+        repo.create(_job_to_data(definition))
+        out.append(BundleItemResult("jobs", name, "created"))
+    return out
+
+
+def _apply_sequences(db: Session, entries: list[dict]) -> list[BundleItemResult]:
+    sequence_repo = ExecutionSequenceRepository(db)
+    config_repo = ConfigRepository(db)
+    out: list[BundleItemResult] = []
+    for entry in entries:
+        name = entry["name"]
+        if sequence_repo.get_by_name(name) is not None:
+            out.append(BundleItemResult("sequences", name, "skipped", "already exists"))
+            continue
+        defaults = dict(entry.get("defaults") or {})
+        config_name = defaults.pop("config_name", None)
+        if config_name is not None:
+            cfg = config_repo.get_by_name(config_name)
+            if cfg is None:
+                out.append(BundleItemResult(
+                    "sequences", name, "error", f"referenced config '{config_name}' was not found",
+                ))
+                continue
+            defaults["config_id"] = cfg.id
+        sequence_repo.create(
+            name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
+            steps=entry.get("steps") or [], preconditions=entry.get("preconditions"), defaults=defaults,
+        )
+        out.append(BundleItemResult("sequences", name, "created"))
+    return out
+
+
+def _apply_selections(db: Session, entries: list[dict]) -> list[BundleItemResult]:
+    selection_repo = JobSelectionRepository(db)
+    config_repo = ConfigRepository(db)
+    sequence_repo = ExecutionSequenceRepository(db)
+    out: list[BundleItemResult] = []
+    for entry in entries:
+        name = entry["name"]
+        if selection_repo.get_by_name(name) is not None:
+            out.append(BundleItemResult("selections", name, "skipped", "already exists"))
+            continue
+        config_id = None
+        config_name = entry.get("config_name")
+        if config_name is not None:
+            cfg = config_repo.get_by_name(config_name)
+            if cfg is None:
+                out.append(BundleItemResult(
+                    "selections", name, "error", f"referenced config '{config_name}' was not found",
+                ))
+                continue
+            config_id = cfg.id
+        sequence_ref = None
+        ref = entry.get("sequence_ref")
+        if ref is not None:
+            seq = sequence_repo.get_by_name(ref["sequence_name"])
+            if seq is None:
+                out.append(BundleItemResult(
+                    "selections", name, "error",
+                    f"referenced sequence '{ref['sequence_name']}' was not found",
+                ))
+                continue
+            sequence_ref = {"sequence_id": seq.id, "sequence_version": None}
+        selection_repo.create(
+            name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
+            job_sequence=entry.get("job_sequence") or [], run_settings=entry.get("run_settings") or {},
+            config_id=config_id, sequence_ref=sequence_ref,
+        )
+        out.append(BundleItemResult("selections", name, "created"))
+    return out
+
+
+def apply_bundle(db: Session, bundle: dict) -> list[BundleItemResult]:
+    if bundle.get("bundle_version") != BUNDLE_VERSION:
+        raise ValueError(f"Unsupported bundle_version: {bundle.get('bundle_version')!r}")
+    results: list[BundleItemResult] = []
+    results += _apply_file_servers(db, bundle.get("file_servers") or [])
+    results += _apply_configs(db, bundle.get("configs") or [])
+    results += _apply_jobs(db, bundle.get("jobs") or [])
+    results += _apply_sequences(db, bundle.get("sequences") or [])
+    results += _apply_selections(db, bundle.get("selections") or [])
+    return results
