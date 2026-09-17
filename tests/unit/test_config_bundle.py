@@ -123,6 +123,18 @@ def test_apply_bundle_skips_existing_by_name():
     assert results[0].reason == "already exists"
 
 
+def test_apply_bundle_reports_error_for_malformed_config_entry_instead_of_raising():
+    db = _db()
+    bundle = {
+        "bundle_version": BUNDLE_VERSION, "file_servers": [], "jobs": [], "sequences": [], "selections": [],
+        "configs": [{"name": "x"}],  # missing required env_name
+    }
+    results = apply_bundle(db, bundle)  # must not raise
+    assert results[0].status == "error"
+    assert results[0].name == "x"
+    assert ConfigRepository(db).get_by_name("x") is None
+
+
 def test_apply_bundle_creates_job():
     db = _db()
     bundle = {
@@ -136,6 +148,21 @@ def test_apply_bundle_creates_job():
     results = apply_bundle(db, bundle)
     assert results[0].status == "created"
     assert JobRepository(db).get("orders_check") is not None
+
+
+def test_apply_bundle_reports_error_for_job_that_fails_schema_validation():
+    db = _db()
+    bundle = {
+        "bundle_version": BUNDLE_VERSION, "file_servers": [], "configs": [], "sequences": [], "selections": [],
+        "jobs": [{
+            "name": "bad_job", "description": "", "tags": [], "job_type": "not_a_real_job_type",
+            "query": "SELECT 1", "key_columns": [], "exclude_columns": [], "source_env": None,
+            "target_env": None, "params": {}, "enabled": True, "rules": [], "depends_on": [], "pass_condition": None,
+        }],
+    }
+    results = apply_bundle(db, bundle)
+    assert results[0].status == "error"
+    assert JobRepository(db).get("bad_job") is None
 
 
 def test_apply_bundle_resolves_sequence_config_name_and_errors_if_missing():
@@ -158,6 +185,7 @@ def test_apply_bundle_resolves_sequence_config_name_and_errors_if_missing():
     version = ExecutionSequenceRepository(db).latest_version(seq.id)
     assert version.defaults_json["config_id"] == dev_id
     assert by_name["seq_missing_config"].status == "error"
+    assert ExecutionSequenceRepository(db).get_by_name("seq_missing_config") is None
 
 
 def test_apply_bundle_resolves_selection_sequence_ref_by_name():
@@ -176,3 +204,43 @@ def test_apply_bundle_resolves_selection_sequence_ref_by_name():
     sel = JobSelectionRepository(db).get_by_name("sel1")
     version = JobSelectionRepository(db).latest_version(sel.id)
     assert version.sequence_ref == {"sequence_id": seq1_id, "sequence_version": None}
+
+
+def test_apply_bundle_reports_error_for_selection_with_missing_refs():
+    db = _db()
+    bundle = {
+        "bundle_version": BUNDLE_VERSION, "file_servers": [], "configs": [], "jobs": [], "sequences": [],
+        "selections": [
+            {"name": "sel_missing_config", "description": "", "tags": [], "job_sequence": [],
+             "run_settings": {}, "config_name": "nope", "sequence_ref": None},
+            {"name": "sel_missing_sequence", "description": "", "tags": [], "job_sequence": [],
+             "run_settings": {}, "config_name": None, "sequence_ref": {"sequence_name": "nope"}},
+        ],
+    }
+    results = apply_bundle(db, bundle)
+    by_name = {r.name: r for r in results}
+    assert by_name["sel_missing_config"].status == "error"
+    assert by_name["sel_missing_sequence"].status == "error"
+    assert JobSelectionRepository(db).get_by_name("sel_missing_config") is None
+    assert JobSelectionRepository(db).get_by_name("sel_missing_sequence") is None
+
+
+def test_apply_bundle_skips_existing_file_server_by_name():
+    db = _db()
+    FileServerProfileRepository(db).create({
+        "name": "sftp_inbound", "kind": "sftp", "host": "sftp.internal", "port": 22,
+        "username": "svc", "auth_method": "password", "password": None,
+    })
+    bundle = {
+        "bundle_version": BUNDLE_VERSION, "configs": [], "jobs": [], "sequences": [], "selections": [],
+        "file_servers": [{
+            "name": "sftp_inbound", "kind": "sftp", "description": "", "host": "sftp.internal",
+            "port": 22, "username": "svc", "auth_method": "password", "password": None,
+            "private_key": None, "key_passphrase": None, "host_key_fingerprint": None,
+            "aws_access_key_id": None, "aws_secret_access_key": None, "aws_session_token": None,
+            "region_name": None, "endpoint_url": None,
+        }],
+    }
+    results = apply_bundle(db, bundle)
+    assert results[0].status == "skipped"
+    assert results[0].reason == "already exists"

@@ -175,12 +175,16 @@ def _apply_file_servers(db: Session, entries: list[dict]) -> list[BundleItemResu
     repo = FileServerProfileRepository(db)
     out: list[BundleItemResult] = []
     for entry in entries:
-        name = entry["name"]
-        if repo.get_by_name(name) is not None:
-            out.append(BundleItemResult("file_servers", name, "skipped", "already exists"))
-            continue
-        repo.create(dict(entry))
-        out.append(BundleItemResult("file_servers", name, "created"))
+        try:
+            name = entry["name"]
+            if repo.get_by_name(name) is not None:
+                out.append(BundleItemResult("file_servers", name, "skipped", "already exists"))
+                continue
+            repo.create(dict(entry))
+            out.append(BundleItemResult("file_servers", name, "created"))
+        except Exception as exc:
+            db.rollback()
+            out.append(BundleItemResult("file_servers", entry.get("name", "<unknown>"), "error", str(exc)))
     return out
 
 
@@ -188,12 +192,16 @@ def _apply_configs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
     repo = ConfigRepository(db)
     out: list[BundleItemResult] = []
     for entry in entries:
-        name = entry["name"]
-        if repo.get_by_name(name) is not None:
-            out.append(BundleItemResult("configs", name, "skipped", "already exists"))
-            continue
-        repo.create(name=name, env_name=entry["env_name"], config_data=entry.get("config_data") or {})
-        out.append(BundleItemResult("configs", name, "created"))
+        try:
+            name = entry["name"]
+            if repo.get_by_name(name) is not None:
+                out.append(BundleItemResult("configs", name, "skipped", "already exists"))
+                continue
+            repo.create(name=name, env_name=entry["env_name"], config_data=entry.get("config_data") or {})
+            out.append(BundleItemResult("configs", name, "created"))
+        except Exception as exc:
+            db.rollback()
+            out.append(BundleItemResult("configs", entry.get("name", "<unknown>"), "error", str(exc)))
     return out
 
 
@@ -223,25 +231,29 @@ def _apply_sequences(db: Session, entries: list[dict]) -> list[BundleItemResult]
     config_repo = ConfigRepository(db)
     out: list[BundleItemResult] = []
     for entry in entries:
-        name = entry["name"]
-        if sequence_repo.get_by_name(name) is not None:
-            out.append(BundleItemResult("sequences", name, "skipped", "already exists"))
-            continue
-        defaults = dict(entry.get("defaults") or {})
-        config_name = defaults.pop("config_name", None)
-        if config_name is not None:
-            cfg = config_repo.get_by_name(config_name)
-            if cfg is None:
-                out.append(BundleItemResult(
-                    "sequences", name, "error", f"referenced config '{config_name}' was not found",
-                ))
+        try:
+            name = entry["name"]
+            if sequence_repo.get_by_name(name) is not None:
+                out.append(BundleItemResult("sequences", name, "skipped", "already exists"))
                 continue
-            defaults["config_id"] = cfg.id
-        sequence_repo.create(
-            name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
-            steps=entry.get("steps") or [], preconditions=entry.get("preconditions"), defaults=defaults,
-        )
-        out.append(BundleItemResult("sequences", name, "created"))
+            defaults = dict(entry.get("defaults") or {})
+            config_name = defaults.pop("config_name", None)
+            if config_name is not None:
+                cfg = config_repo.get_by_name(config_name)
+                if cfg is None:
+                    out.append(BundleItemResult(
+                        "sequences", name, "error", f"referenced config '{config_name}' was not found",
+                    ))
+                    continue
+                defaults["config_id"] = cfg.id
+            sequence_repo.create(
+                name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
+                steps=entry.get("steps") or [], preconditions=entry.get("preconditions"), defaults=defaults,
+            )
+            out.append(BundleItemResult("sequences", name, "created"))
+        except Exception as exc:
+            db.rollback()
+            out.append(BundleItemResult("sequences", entry.get("name", "<unknown>"), "error", str(exc)))
     return out
 
 
@@ -251,37 +263,41 @@ def _apply_selections(db: Session, entries: list[dict]) -> list[BundleItemResult
     sequence_repo = ExecutionSequenceRepository(db)
     out: list[BundleItemResult] = []
     for entry in entries:
-        name = entry["name"]
-        if selection_repo.get_by_name(name) is not None:
-            out.append(BundleItemResult("selections", name, "skipped", "already exists"))
-            continue
-        config_id = None
-        config_name = entry.get("config_name")
-        if config_name is not None:
-            cfg = config_repo.get_by_name(config_name)
-            if cfg is None:
-                out.append(BundleItemResult(
-                    "selections", name, "error", f"referenced config '{config_name}' was not found",
-                ))
+        try:
+            name = entry["name"]
+            if selection_repo.get_by_name(name) is not None:
+                out.append(BundleItemResult("selections", name, "skipped", "already exists"))
                 continue
-            config_id = cfg.id
-        sequence_ref = None
-        ref = entry.get("sequence_ref")
-        if ref is not None:
-            seq = sequence_repo.get_by_name(ref["sequence_name"])
-            if seq is None:
-                out.append(BundleItemResult(
-                    "selections", name, "error",
-                    f"referenced sequence '{ref['sequence_name']}' was not found",
-                ))
-                continue
-            sequence_ref = {"sequence_id": seq.id, "sequence_version": None}
-        selection_repo.create(
-            name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
-            job_sequence=entry.get("job_sequence") or [], run_settings=entry.get("run_settings") or {},
-            config_id=config_id, sequence_ref=sequence_ref,
-        )
-        out.append(BundleItemResult("selections", name, "created"))
+            config_id = None
+            config_name = entry.get("config_name")
+            if config_name is not None:
+                cfg = config_repo.get_by_name(config_name)
+                if cfg is None:
+                    out.append(BundleItemResult(
+                        "selections", name, "error", f"referenced config '{config_name}' was not found",
+                    ))
+                    continue
+                config_id = cfg.id
+            sequence_ref = None
+            ref = entry.get("sequence_ref")
+            if ref is not None:
+                seq = sequence_repo.get_by_name(ref["sequence_name"])
+                if seq is None:
+                    out.append(BundleItemResult(
+                        "selections", name, "error",
+                        f"referenced sequence '{ref['sequence_name']}' was not found",
+                    ))
+                    continue
+                sequence_ref = {"sequence_id": seq.id, "sequence_version": None}
+            selection_repo.create(
+                name=name, description=entry.get("description", ""), tags=entry.get("tags") or [],
+                job_sequence=entry.get("job_sequence") or [], run_settings=entry.get("run_settings") or {},
+                config_id=config_id, sequence_ref=sequence_ref,
+            )
+            out.append(BundleItemResult("selections", name, "created"))
+        except Exception as exc:
+            db.rollback()
+            out.append(BundleItemResult("selections", entry.get("name", "<unknown>"), "error", str(exc)))
     return out
 
 
