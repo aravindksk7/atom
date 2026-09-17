@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { Page } from '@playwright/test';
 import { authedContext, createFileJob } from './api-helpers';
 
 // Regression coverage for the sequences.js validateSequenceSteps() race:
@@ -11,8 +12,8 @@ import { authedContext, createFileJob } from './api-helpers';
 // forever with no error shown.
 //
 // Real network timing won't reliably reproduce an inversion on a fast
-// local API, so this test forces one deterministically: it intercepts
-// /api/sequences/validate and delays EARLIER requests longer than LATER
+// local API, so both tests below force one deterministically: intercept
+// /api/sequences/validate and delay EARLIER requests longer than LATER
 // ones, guaranteeing the first call's response arrives last.
 
 const JOB_COUNT = 11; // "more than 10 different jobs"
@@ -31,21 +32,21 @@ test.beforeAll(async ({ adminToken }) => {
   }
 });
 
+/** Arms the inverted-delay interception described above on `page`. */
+async function armOutOfOrderValidateResponses(page: Page): Promise<void> {
+  let validateCalls = 0;
+  await page.route('**/api/sequences/validate', async (route) => {
+    const callIndex = validateCalls++;
+    const delayMs = Math.max(0, 400 - callIndex * 60);
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await route.fulfill({ response });
+  });
+}
+
 test.describe('Execution sequences — validate race', () => {
   test('save is not blocked when validate responses resolve out of order', async ({ authedPage: page }) => {
-    let validateCalls = 0;
-
-    // Invert resolution order: the Nth request fired is delayed
-    // (totalSoFar - N) steps, so whichever request goes out first takes
-    // the longest to come back -- the exact "stale response wins" shape
-    // that broke Save before the fix.
-    await page.route('**/api/sequences/validate', async (route) => {
-      const callIndex = validateCalls++;
-      const delayMs = Math.max(0, 400 - callIndex * 60);
-      const response = await route.fetch();
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      await route.fulfill({ response });
-    });
+    await armOutOfOrderValidateResponses(page);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Sequences' }).click();
@@ -93,5 +94,38 @@ test.describe('Execution sequences — validate race', () => {
     await expect(detail.locator('tbody tr')).toHaveCount(JOB_COUNT);
     await expect(detail.locator('tbody tr').last()).toContainText(`step-${JOB_COUNT - 1}`);
     await expect(detail.locator('tbody tr').last()).toContainText(`step-${JOB_COUNT - 2}`);
+  });
+
+  // Negative counterpart: the token guard must only drop STALE responses,
+  // never mask a genuinely invalid graph. A real cycle among the same 11
+  // jobs, under the same out-of-order response injection, must still show
+  // the cycle error and keep Save disabled -- proving the fix doesn't
+  // achieve "never blocked" by ignoring real validation failures too.
+  test('a real cycle still blocks save under the same out-of-order responses', async ({ authedPage: page }) => {
+    await armOutOfOrderValidateResponses(page);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sequences' }).click();
+    await page.getByTestId('sequence-new-btn').click();
+    await page.getByTestId('sequence-name-input').fill('e2e-race-cycle');
+
+    await page.getByTestId('sequence-step-job-0').selectOption(jobNames[0]);
+
+    for (let i = 1; i < JOB_COUNT; i++) {
+      await page.getByTestId('sequence-add-step').click();
+      await page.getByTestId(`sequence-step-job-${i}`).selectOption(jobNames[i]);
+      await page.getByTestId(`sequence-step-id-${i}`).fill(`step-${i}`);
+      await page.getByTestId(`sequence-step-deps-${i}`).getByRole('checkbox').last().check();
+    }
+
+    // Close the loop: step 0 depends on the last step, turning the linear
+    // chain into a cycle. Step 0's "runs after" list is every other step in
+    // index order, so the last checkbox is the last step added.
+    await page.getByTestId('sequence-step-deps-0').getByRole('checkbox').last().check();
+
+    await page.waitForTimeout(600);
+
+    await expect(page.getByTestId('sequence-global-error')).toContainText(/cycle/i);
+    await expect(page.getByTestId('sequence-save-btn')).toBeDisabled();
   });
 });
