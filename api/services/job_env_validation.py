@@ -8,11 +8,19 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-# Job types whose execution only touches one environment (per the approved
-# design spec); everything else needs a target_env to compare against.
+# Job types whose execution reads or writes a single environment, or no
+# environment at all -- the AWS, Airflow and file job types reach their systems
+# through a stored connection config or credentials_ref in params, and
+# cross_job_assertion only compares results other jobs in the same run already
+# produced. Everything else compares a source against a target at run time and
+# so needs a target_env.
 SINGLE_ENV_JOB_TYPES = {
     "bo_report", "freshness", "profile", "automic_job",
     "dbt_artifact", "schema_snapshot", "bo_job", "ds_job", "file_transfer",
+    "file_watcher", "cross_job_assertion",
+    "s3_row_count", "s3_format_validation", "s3_partition_check",
+    "aws_glue_catalog_compare", "aws_glue_job_run", "aws_athena_query",
+    "airflow_dag_run",
 }
 
 
