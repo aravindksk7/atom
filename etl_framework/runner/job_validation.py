@@ -254,6 +254,13 @@ def _validate_file_watcher(params: dict[str, Any], issues: list[ValidationIssue]
         issues.append(ValidationIssue("params.content_match", "file_watcher content_match, if given, requires a 'text' field"))
 
 
+def _validate_file_transfer(params: dict[str, Any], issues: list[ValidationIssue]) -> None:
+    from etl_framework.reconciliation.file_transfer_spec import file_transfer_param_errors
+
+    for field, message in file_transfer_param_errors(params):
+        issues.append(ValidationIssue(field, message))
+
+
 def validate_job_definition(job: Any) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     job_type = _job_type(job)
@@ -274,7 +281,9 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_airflow_dag_run(params, issues)
     elif job_type == "file_watcher":
         _validate_file_watcher(params, issues)
-    query = str(_get(job, "query", "") or "")
+    elif job_type == "file_transfer":
+        _validate_file_transfer(params, issues)
+    query =str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 
     if not str(_get(job, "name", "") or "").strip():

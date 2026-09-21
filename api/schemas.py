@@ -779,7 +779,7 @@ class JobDefinition(BaseModel):
         "freshness", "cross_job_assertion", "schema_snapshot", "profile", "api_reconciliation",
         "bo_job", "ds_job", "s3_row_count", "s3_format_validation", "s3_partition_check",
         "aws_glue_catalog_compare", "aws_glue_job_run", "aws_athena_query", "airflow_dag_run", "compare",
-        "file_watcher",
+        "file_watcher", "file_transfer",
     ] = "reconciliation"
     query: str = ""
     key_columns: list[str] = Field(default_factory=list)
@@ -972,6 +972,12 @@ class JobDefinition(BaseModel):
                 not isinstance(content_match, dict) or not content_match.get("text")
             ):
                 raise ValueError("file_watcher content_match, if given, requires a 'text' field")
+        elif self.job_type == "file_transfer":
+            from etl_framework.reconciliation.file_transfer_spec import file_transfer_param_errors
+
+            errors = file_transfer_param_errors(self.params)
+            if errors:
+                raise ValueError(errors[0][1])
         if self.job_type == "compare":
             request = self.params.get("request") or {}
             self.key_columns = list(request.get("key_columns") or [])
