@@ -441,3 +441,103 @@ def test_sftp_endpoint_destination_for_rejects_escape(relative):
 def test_sftp_endpoint_destination_for_with_slash_root():
     endpoint = ft.SftpEndpoint("/", FakeSFTP(), "vendor")
     assert endpoint.destination_for("a/b.csv") == "/a/b.csv"
+
+
+# -- plan_transfer -----------------------------------------------------------
+
+def _make_files(root: Path, *relatives: str) -> list[DiscoveredFile]:
+    files = []
+    for relative in relatives:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"data-" + relative.encode())
+        files.append(DiscoveredFile(path=str(path), file_name=path.name, tokens={}))
+    return files
+
+
+def _local_pair(allowed_dir: Path):
+    return ft.LocalEndpoint(str(allowed_dir / "src")), ft.LocalEndpoint(str(allowed_dir / "dst"))
+
+
+def _relative_destinations(entries, dst_root: Path) -> list[str]:
+    return [Path(entry.destination).relative_to(dst_root).as_posix() for entry in entries]
+
+
+def test_plan_flattens_into_destination_root_by_default(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "sub/b.csv")
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "b.csv"]
+    assert plan.skipped == []
+
+
+def test_plan_preserves_relative_structure_when_asked(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "sub/b.csv")
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=True)
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "sub/b.csv"]
+
+
+def test_plan_rejects_duplicate_destination_when_flattening(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "x/a.csv", "y/a.csv")
+
+    with pytest.raises(ft.TransferError, match="duplicate destination"):
+        ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+
+
+def test_plan_rejects_source_and_destination_being_the_same_object(allowed_dir):
+    source = ft.LocalEndpoint(str(allowed_dir / "src"))
+    files = _make_files(allowed_dir / "src", "a.csv")
+
+    with pytest.raises(ft.TransferError, match="same object"):
+        ft.plan_transfer(files, source, source, on_exists="overwrite", preserve_structure=False)
+
+
+@pytest.mark.parametrize("bad_name", ["..", ".", "a\\b.csv"])
+def test_plan_rejects_unsafe_relative_paths(allowed_dir, bad_name):
+    source, destination = _local_pair(allowed_dir)
+    files = [DiscoveredFile(path=str(allowed_dir / "src" / "x.csv"), file_name=bad_name, tokens={})]
+
+    with pytest.raises(ft.TransferError, match="unsafe"):
+        ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
+
+
+def test_plan_on_exists_fail_aborts_before_anything_is_planned_for_writing(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
+
+    with pytest.raises(ft.TransferError, match=r"already contains 1 file\(s\)"):
+        ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
+
+    assert not (allowed_dir / "dst" / "a.csv").exists()
+
+
+def test_plan_on_exists_skip_drops_existing_files(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="skip", preserve_structure=False)
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv"]
+    assert _relative_destinations(plan.skipped, allowed_dir / "dst") == ["b.csv"]
+
+
+def test_plan_on_exists_overwrite_keeps_every_file(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "b.csv"]
+    assert plan.skipped == []

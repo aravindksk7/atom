@@ -267,3 +267,76 @@ class SftpEndpoint:
             self.client.remove(path)
         except FileNotFoundError:
             pass
+
+
+# -- Planning ----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PlannedCopy:
+    source: DiscoveredFile
+    destination: str
+    relative: str
+
+
+@dataclass
+class TransferPlan:
+    to_copy: list[PlannedCopy] = field(default_factory=list)
+    skipped: list[PlannedCopy] = field(default_factory=list)
+
+
+def _validate_relative(relative: str) -> str:
+    unsafe = (
+        not relative
+        or relative.startswith("/")
+        or "\\" in relative
+        or any(part in ("", ".", "..") for part in relative.split("/"))
+    )
+    if unsafe:
+        raise TransferError(f"unsafe destination path '{relative}' -- refusing to write outside the destination root")
+    return relative
+
+
+def plan_transfer(
+    files: list[DiscoveredFile],
+    source: Any,
+    destination: Any,
+    *,
+    on_exists: str,
+    preserve_structure: bool,
+) -> TransferPlan:
+    """Decide what to copy without writing anything. Raises ``TransferError``
+    when the plan is unsafe or (``on_exists="fail"``) would collide with
+    existing destination files."""
+    entries: list[PlannedCopy] = []
+    seen: dict[tuple, str] = {}
+    for file in files:
+        relative = source.relative_of(file) if preserve_structure else file.file_name
+        _validate_relative(relative)
+        target = destination.destination_for(relative)
+        target_identity = destination.identity(target)
+        if source.identity(file.path) == target_identity:
+            raise TransferError(f"source and destination are the same object: {file.path}")
+        if target_identity in seen:
+            raise TransferError(
+                f"duplicate destination '{target}' for '{seen[target_identity]}' and '{file.path}' -- "
+                "enable preserve_structure or narrow the pattern"
+            )
+        seen[target_identity] = file.path
+        entries.append(PlannedCopy(source=file, destination=target, relative=relative))
+
+    plan = TransferPlan()
+    existing: list[PlannedCopy] = []
+    for entry in entries:
+        if on_exists == "overwrite" or not destination.exists(entry.destination):
+            plan.to_copy.append(entry)
+        elif on_exists == "skip":
+            plan.skipped.append(entry)
+        else:
+            existing.append(entry)
+    if existing:
+        shown = ", ".join(entry.destination for entry in existing[:5])
+        more = f" and {len(existing) - 5} more" if len(existing) > 5 else ""
+        raise TransferError(
+            f"destination already contains {len(existing)} file(s) (on_exists=fail): {shown}{more}"
+        )
+    return plan
