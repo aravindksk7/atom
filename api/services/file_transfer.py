@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -380,10 +381,19 @@ def plan_transfer(
     *,
     on_exists: str,
     preserve_structure: bool,
+    resume_existing: Collection[str] = (),
 ) -> TransferPlan:
     """Decide what to copy without writing anything. Raises ``TransferError``
     when the plan is unsafe or (``on_exists="fail"``) would collide with
-    existing destination files."""
+    existing destination files.
+
+    ``resume_existing`` holds destination strings an earlier attempt of this
+    same job in this same run already wrote (see
+    ``RunExecutor._file_transfer_resume``). Under ``on_exists="fail"`` those
+    are work already done rather than a collision, so a retry after a partial
+    transfer re-plans cleanly instead of failing on its own output. A
+    pre-existing file this job did not write itself still collides, and
+    ``skip`` and ``overwrite`` are unaffected."""
     entries: list[PlannedCopy] = []
     seen: dict[tuple, str] = {}
     for file in files:
@@ -413,10 +423,11 @@ def plan_transfer(
             present = set(exists_many(paths))
         else:
             present = {path for path in paths if destination.exists(path)}
+    resumed = set(resume_existing)
     for entry in entries:
         if entry.destination not in present:
             plan.to_copy.append(entry)
-        elif on_exists == "skip":
+        elif on_exists == "skip" or entry.destination in resumed:
             plan.skipped.append(entry)
         else:
             existing.append(entry)

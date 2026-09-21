@@ -114,7 +114,7 @@ Onto `ReconciliationResult` (`etl_framework/reconciliation/models.py`), no schem
 - `on_exists=fail` collision, size-verify mismatch, per-file copy failure, no files matched, plan rejection (duplicate key, path escape, same object): `FAILED`. `mismatch_summary` adds `{failed_file, error}` where applicable.
 - Connection, credential, host-key, or missing-bucket problems: `ERROR`, via the existing `build_*_client` messages. Secrets are never logged.
 
-Restart note: restarting a failed sequence with `on_exists=fail` fails in the plan phase on files already copied by the earlier attempt. Users pick `skip` for an idempotent resume, and also when the step is configured with retries (`max_retries` above 0): a transport failure mid-copy is reported as ERROR, which is retryable by default, and a retry re-plans and (with `fail`) trips over the files already copied, hiding the original cause. The help text says so.
+Restart note: retries within a run resume automatically -- `RunExecutor` remembers the destinations each transfer job wrote during the run, and `plan_transfer` treats those as already done rather than as an `on_exists=fail` collision, so a step with `max_retries` above 0 re-plans cleanly after a transport failure mid-copy instead of masking it with "destination already contains N file(s)". Restarting as a *new* run starts from an empty resume set (a new run gets a new `RunExecutor`), so an `on_exists=fail` restart still fails in the plan phase on the files the previous run copied; pick `skip` for that.
 
 ## 8. Frontend
 

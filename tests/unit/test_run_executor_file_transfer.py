@@ -47,18 +47,19 @@ def executor(db_session):
     )
 
 
-def transfer_job(source, destination, **params):
+def transfer_job(source, destination, name: str = "stage_sales", **params):
     return JobDefinition(
-        name="stage_sales",
+        name=name,
         job_type="file_transfer",
         params={"source": source, "destination": destination, **params},
     )
 
 
-def local_job(allowed_dir: Path, **params):
+def local_job(allowed_dir: Path, name: str = "stage_sales", **params):
     return transfer_job(
         {"kind": "local", "root": str(allowed_dir / "src"), "pattern": "sales_{region}.csv"},
         {"kind": "local", "root": str(allowed_dir / "dst")},
+        name=name,
         **params,
     )
 
@@ -344,6 +345,125 @@ def test_missing_profile_reference_is_an_error(db_session, allowed_dir):
 
     assert result.status == TestStatus.ERROR
     assert "No file server profile named 'does-not-exist'" in result.mismatch_summary["error"]
+
+
+# -- retry inside one run ----------------------------------------------------
+#
+# A transport failure mid-copy is ERROR, which the DAG executor retries when the
+# step sets max_retries. The retry re-plans, so the files the earlier attempt
+# already wrote must not trip the on_exists="fail" collision check.
+
+def _fail_second_copy_with(monkeypatch, exc):
+    """Patch _copy_one so the n-th copy across the whole test raises. Returns
+    the list of source paths it was asked to copy, in order."""
+    from api.services import file_transfer
+
+    real_copy_one = file_transfer._copy_one
+    calls: list[str] = []
+
+    def flaky_copy_one(entry, source, destination):
+        calls.append(entry.source.path)
+        if len(calls) == 2:
+            raise exc
+        return real_copy_one(entry, source, destination)
+
+    monkeypatch.setattr(file_transfer, "_copy_one", flaky_copy_one)
+    return calls, real_copy_one
+
+
+def test_retry_after_a_partial_transfer_resumes_instead_of_colliding(db_session, allowed_dir, monkeypatch):
+    import paramiko
+    from api.services import file_transfer
+
+    seed_sources(allowed_dir)
+    run_executor = executor(db_session)
+    calls, real_copy_one = _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
+
+    first = run_executor._execute_file_transfer(local_job(allowed_dir))
+    assert first.status == TestStatus.ERROR
+    assert first.mismatch_summary["copied"] == 1
+
+    monkeypatch.setattr(file_transfer, "_copy_one", real_copy_one)
+    second = run_executor._execute_file_transfer(local_job(allowed_dir))
+
+    assert second.status == TestStatus.PASSED
+    assert "already contains" not in str(second.mismatch_summary.get("error", ""))
+    assert second.mismatch_summary["copied"] == 1
+    assert second.mismatch_summary["skipped"] == 1
+    assert sorted(p.name for p in (allowed_dir / "dst").iterdir()) == [
+        "sales_east.csv", "sales_west.csv",
+    ]
+
+
+def test_resume_set_is_not_shared_between_jobs(db_session, allowed_dir, monkeypatch):
+    import paramiko
+    from api.services import file_transfer
+
+    seed_sources(allowed_dir)
+    run_executor = executor(db_session)
+    _, real_copy_one = _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
+
+    assert run_executor._execute_file_transfer(local_job(allowed_dir)).status == TestStatus.ERROR
+
+    monkeypatch.setattr(file_transfer, "_copy_one", real_copy_one)
+    other = run_executor._execute_file_transfer(local_job(allowed_dir, name="stage_sales_copy"))
+
+    # A different job did not write that file, so it is still a real collision.
+    assert other.status == TestStatus.FAILED
+    assert "already contains 1 file(s)" in other.mismatch_summary["error"]
+
+
+def test_a_new_run_does_not_inherit_the_resume_set(db_session, allowed_dir, monkeypatch):
+    import paramiko
+    from api.services import file_transfer
+
+    seed_sources(allowed_dir)
+    _, real_copy_one = _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
+
+    assert executor(db_session)._execute_file_transfer(local_job(allowed_dir)).status == TestStatus.ERROR
+
+    monkeypatch.setattr(file_transfer, "_copy_one", real_copy_one)
+    # A fresh RunExecutor is what a brand-new run gets: nothing to resume from.
+    result = executor(db_session)._execute_file_transfer(local_job(allowed_dir))
+
+    assert result.status == TestStatus.FAILED
+    assert "already contains 1 file(s)" in result.mismatch_summary["error"]
+
+
+def test_dag_retry_of_a_file_transfer_step_ends_passed(db_session, allowed_dir, monkeypatch):
+    """The real retry path: DagExecutor re-invokes the step, which builds a new
+    worker RunExecutor each attempt, so the resume state has to live on the
+    run-level executor that survives both attempts."""
+    import paramiko
+    from api.routes.jobs import _job_to_data
+    from api.schemas import SequenceStepRef
+    from api.services import file_transfer
+    from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
+
+    seed_sources(allowed_dir)
+    JobRepository(db_session).create(_job_to_data(local_job(allowed_dir)))
+    RunRepository(db_session).create_run("run-retry", "qa", "", {})
+    _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
+    # The patch fires on the second copy overall, so attempt 1 copies one file
+    # and errors, and attempt 2 copies the rest.
+    assert file_transfer._copy_one is not None
+
+    RunExecutor(
+        db=db_session,
+        run_id="run-retry",
+        source_env="qa",
+        target_env="",
+        job_sequence=[SequenceStepRef(step_id="s1", job_name="stage_sales", max_retries=1)],
+        run_settings=RunSettings(use_live_connections=True, retry_delay_seconds=0),
+        config_snapshot={},
+    ).execute()
+
+    row = RunStepRepository(db_session).get_step_by_step_id("run-retry", "s1")
+    assert row.status == "PASSED"
+    assert row.attempt == 2
+    assert sorted(p.name for p in (allowed_dir / "dst").iterdir()) == [
+        "sales_east.csv", "sales_west.csv",
+    ]
 
 
 def test_summary_caps_file_list_but_reports_true_counts(db_session, allowed_dir):

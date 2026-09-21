@@ -261,6 +261,13 @@ class RunExecutor:
         self._legacy_chain = True
         self._db_lock = threading.Lock()
         self._worker_session_factory = None
+        # Destination paths each file_transfer job has already written during
+        # this run, keyed by job name. A retry re-plans, and with the default
+        # on_exists="fail" its own earlier output would otherwise read as a
+        # collision and hide the transport error that caused the retry. Shared
+        # with the per-step worker executors in _run_dag_step, since those are
+        # rebuilt on every attempt while this one survives the whole run.
+        self._file_transfer_resume: dict[str, set[str]] = {}
         self._run_repo = RunRepository(db)
 
         self._job_repo = JobRepository(db)
@@ -398,6 +405,9 @@ class RunExecutor:
             run_settings=self._settings,
             config_snapshot=self._config_snapshot,
         )
+        # One worker per attempt, so the resume state has to be the run-level
+        # dict, not the worker's own.
+        worker._file_transfer_resume = self._file_transfer_resume
         try:
             case_fn = worker._build_case(job_def)
             state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]
@@ -1729,11 +1739,16 @@ class RunExecutor:
                 total = len(files)
                 source = build_endpoint(session, spec.source)
                 destination = build_endpoint(session, spec.destination)
+                resume = self._file_transfer_resume.setdefault(job.name, set())
                 plan = plan_transfer(
                     files, source, destination,
                     on_exists=spec.on_exists, preserve_structure=spec.preserve_structure,
+                    resume_existing=resume,
                 )
                 outcome = run_transfer(plan, source, destination)
+                # Recorded whatever the outcome: a retry after a partial copy
+                # is exactly the case this exists for.
+                resume.update(copied["destination"] for copied in outcome.copied)
         except TransferError as exc:
             return self._file_transfer_result(
                 job, TestStatus.FAILED, executed_at, time.monotonic() - t0, total=total,

@@ -716,6 +716,85 @@ def test_plan_on_exists_overwrite_keeps_every_file(allowed_dir):
     assert plan.skipped == []
 
 
+# -- plan_transfer: resume_existing -------------------------------------------
+#
+# The destinations an earlier attempt of the same job in the same run already
+# wrote. Under on_exists="fail" they are work already done, not a collision.
+
+def test_plan_on_exists_fail_treats_a_resumed_destination_as_already_done(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"written by the earlier attempt")
+
+    plan = ft.plan_transfer(
+        files, source, destination, on_exists="fail", preserve_structure=False,
+        resume_existing=[destination.destination_for("b.csv")],
+    )
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv"]
+    assert _relative_destinations(plan.skipped, allowed_dir / "dst") == ["b.csv"]
+
+
+def test_plan_on_exists_fail_still_collides_on_a_destination_outside_the_resume_set(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "a.csv").write_bytes(b"someone else put this here")
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"written by the earlier attempt")
+
+    with pytest.raises(ft.TransferError, match=r"already contains 1 file\(s\)") as excinfo:
+        ft.plan_transfer(
+            files, source, destination, on_exists="fail", preserve_structure=False,
+            resume_existing=[destination.destination_for("b.csv")],
+        )
+
+    assert "a.csv" in str(excinfo.value)
+
+
+def test_plan_resume_existing_does_not_skip_a_destination_that_is_absent(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv")
+
+    plan = ft.plan_transfer(
+        files, source, destination, on_exists="fail", preserve_structure=False,
+        resume_existing=[destination.destination_for("a.csv")],
+    )
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv"]
+    assert plan.skipped == []
+
+
+def test_plan_on_exists_skip_is_unchanged_by_a_resume_set(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
+
+    plan = ft.plan_transfer(
+        files, source, destination, on_exists="skip", preserve_structure=False,
+        resume_existing=[destination.destination_for("a.csv")],
+    )
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv"]
+    assert _relative_destinations(plan.skipped, allowed_dir / "dst") == ["b.csv"]
+
+
+def test_plan_on_exists_overwrite_is_unchanged_by_a_resume_set(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    (allowed_dir / "dst").mkdir()
+    (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
+
+    plan = ft.plan_transfer(
+        files, source, destination, on_exists="overwrite", preserve_structure=False,
+        resume_existing=[destination.destination_for("b.csv")],
+    )
+
+    assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "b.csv"]
+    assert plan.skipped == []
+
+
 class _ExistsManyOnlyDestination:
     """Destination that only offers the batched check; a per-path ``exists``
     call would raise AttributeError."""
