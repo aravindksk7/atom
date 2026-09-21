@@ -482,12 +482,13 @@ def test_plan_preserves_relative_structure_when_asked(allowed_dir):
     assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "sub/b.csv"]
 
 
-def test_plan_rejects_duplicate_destination_when_flattening(allowed_dir):
+@pytest.mark.parametrize("on_exists", ["fail", "skip", "overwrite"])
+def test_plan_rejects_duplicate_destination_when_flattening(allowed_dir, on_exists):
     source, destination = _local_pair(allowed_dir)
     files = _make_files(allowed_dir / "src", "x/a.csv", "y/a.csv")
 
     with pytest.raises(ft.TransferError, match="duplicate destination"):
-        ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+        ft.plan_transfer(files, source, destination, on_exists=on_exists, preserve_structure=False)
 
 
 def test_plan_rejects_source_and_destination_being_the_same_object(allowed_dir):
@@ -498,7 +499,7 @@ def test_plan_rejects_source_and_destination_being_the_same_object(allowed_dir):
         ft.plan_transfer(files, source, source, on_exists="overwrite", preserve_structure=False)
 
 
-@pytest.mark.parametrize("bad_name", ["..", ".", "a\\b.csv"])
+@pytest.mark.parametrize("bad_name", ["..", ".", "a\\b.csv", "/abs.csv", ""])
 def test_plan_rejects_unsafe_relative_paths(allowed_dir, bad_name):
     source, destination = _local_pair(allowed_dir)
     files = [DiscoveredFile(path=str(allowed_dir / "src" / "x.csv"), file_name=bad_name, tokens={})]
@@ -513,10 +514,11 @@ def test_plan_on_exists_fail_aborts_before_anything_is_planned_for_writing(allow
     (allowed_dir / "dst").mkdir()
     (allowed_dir / "dst" / "b.csv").write_bytes(b"already here")
 
-    with pytest.raises(ft.TransferError, match=r"already contains 1 file\(s\)"):
+    with pytest.raises(ft.TransferError, match=r"already contains 1 file\(s\)") as excinfo:
         ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
 
-    assert not (allowed_dir / "dst" / "a.csv").exists()
+    assert "b.csv" in str(excinfo.value)
+    assert "a.csv" not in str(excinfo.value)
 
 
 def test_plan_on_exists_skip_drops_existing_files(allowed_dir):
@@ -541,3 +543,61 @@ def test_plan_on_exists_overwrite_keeps_every_file(allowed_dir):
 
     assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "b.csv"]
     assert plan.skipped == []
+
+
+def test_plan_on_exists_fail_truncates_the_collision_list(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    names = [f"f{i}.csv" for i in range(7)]
+    files = _make_files(allowed_dir / "src", *names)
+    (allowed_dir / "dst").mkdir()
+    for name in names:
+        (allowed_dir / "dst" / name).write_bytes(b"already here")
+
+    with pytest.raises(ft.TransferError) as excinfo:
+        ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
+
+    assert "already contains 7 file(s)" in str(excinfo.value)
+    assert "and 2 more" in str(excinfo.value)
+
+
+# -- Windows-illegal destination names ---------------------------------------
+
+@pytest.mark.parametrize("name", [
+    "data.csv:hidden",
+    "a<b.csv",
+    "x\x00.csv",
+    "rep.csv.",
+    "rep.csv ",
+    "nul",
+    "CON.txt",
+    "com1",
+])
+def test_windows_illegal_name_flags_unsafe_components(name):
+    assert ft._windows_illegal_name(name) is not None
+
+
+@pytest.mark.parametrize("name", ["report.csv", "a b.csv", "x-1_2.csv", "console.csv", ".hidden"])
+def test_windows_illegal_name_accepts_normal_components(name):
+    assert ft._windows_illegal_name(name) is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only destination name rules")
+def test_local_endpoint_destination_for_rejects_windows_illegal_names(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir / "dst"))
+
+    with pytest.raises(ft.TransferError, match="destination name"):
+        endpoint.destination_for("data.csv:hidden")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only destination name rules")
+def test_plan_rejects_names_that_collapse_on_windows(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    src = allowed_dir / "src"
+    src.mkdir()
+    files = [
+        DiscoveredFile(path=str(src / "rep.csv"), file_name="rep.csv", tokens={}),
+        DiscoveredFile(path=str(src / "rep.csv."), file_name="rep.csv.", tokens={}),
+    ]
+
+    with pytest.raises(ft.TransferError):
+        ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)

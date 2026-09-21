@@ -51,6 +51,20 @@ def _copy_stream(stream: Any, sink: Any) -> None:
 
 # -- Local -------------------------------------------------------------------
 
+_WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _windows_illegal_name(component: str) -> str | None:
+    """Reason a single path component cannot be created on Windows, or None."""
+    if any(ord(ch) < 32 or ch in '<>:"|?*' for ch in component):
+        return "contains a character Windows does not allow"
+    if component != component.rstrip(" ."):
+        return "ends with a space or dot"
+    if component.split(".")[0].upper() in _WINDOWS_RESERVED_NAMES:
+        return "is a reserved Windows device name"
+    return None
+
+
 class LocalEndpoint:
     kind = "local"
 
@@ -73,6 +87,13 @@ class LocalEndpoint:
             raise TransferError(
                 f"destination path for '{relative}' escapes destination root '{self.root}'"
             ) from None
+        if os.name == "nt":
+            # After the escape check so traversal/absolute inputs keep their
+            # more specific "escapes destination root" error.
+            for component in relative.split("/"):
+                reason = _windows_illegal_name(component)
+                if reason:
+                    raise TransferError(f"destination name '{component}' in '{relative}' {reason}")
         return str(target)
 
     def identity(self, path: str) -> tuple:
