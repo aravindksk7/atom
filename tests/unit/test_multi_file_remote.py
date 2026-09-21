@@ -663,3 +663,26 @@ def test_remote_file_source_session_client_for_is_public_and_cached(db, monkeypa
     assert session.discover(spec) == []
     assert session.client_for(spec) is session.client_for(spec)
     assert built == ["prof"]
+
+
+def test_remote_file_source_session_close_survives_a_failing_client(db) -> None:
+    class _Client:
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+            self.close_attempted = False
+
+        def close(self) -> None:
+            self.close_attempted = True
+            if self.fail:
+                raise RuntimeError("close failed")
+
+    failing, healthy = _Client(fail=True), _Client(fail=False)
+    session = RemoteFileSourceSession(db)
+    session._clients[("sftp", "a")] = failing
+    session._clients[("sftp", "b")] = healthy
+
+    session.close()  # must not raise
+
+    assert failing.close_attempted is True
+    assert healthy.close_attempted is True
+    assert session._clients == {}

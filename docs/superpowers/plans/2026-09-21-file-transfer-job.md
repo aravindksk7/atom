@@ -1891,7 +1891,8 @@ def test_local_to_local_copies_matching_files_and_reports_summary(db_session, al
     assert result.mismatch_summary["bytes"] == 13
     assert result.mismatch_summary["files_truncated"] is False
     assert result.source_row_count == 2 and result.matched_count == 2
-    assert result.data_artifact_path == str(allowed_dir / "dst")
+    assert result.data_artifact_path is None  # run-level row-diff counts these paths
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
     assert result.mismatches == []
 
 
@@ -2159,6 +2160,8 @@ In `api/services/run_executor.py`, insert this block immediately before the `# -
             "files": listed[:limit],
             "files_truncated": len(listed) > limit,
         }
+        if destination_root is not None:
+            mismatch_summary["destination_root"] = destination_root
         mismatches: list[MismatchRecord] = []
         if error is not None:
             mismatch_summary["error"] = error
@@ -2180,7 +2183,6 @@ In `api/services/run_executor.py`, insert this block immediately before the `# -
             status=status,
             executed_at=executed_at,
             duration_seconds=duration_seconds,
-            data_artifact_path=destination_root if status == TestStatus.PASSED else None,
             mismatch_summary=mismatch_summary,
         )
 
@@ -2696,7 +2698,7 @@ Expected: empty output.
 - §4 architecture (endpoint adapters, planner, executor, `_build_case` dispatch, `resolve_allowed_path` on local sides, reuse of `RemoteFileSourceSession`) -> Tasks 4-9.
 - §5 plan phase (relative path normalization, duplicate keys, same-object, `on_exists`, zero matches) -> Tasks 7, 9 (zero matches lives in the executor because it needs the source pattern for the message).
 - §6 execute phase (streaming, `.part` atomic writes, mkdir, counting wrapper, size verify + cleanup, stop on first failure) -> Tasks 4-6, 8.
-- §7 result mapping (`PASSED`/`FAILED`/`ERROR`, `mismatch_summary`, `data_artifact_path`) -> Task 9. The spec's `files: [...]` is capped at 100 entries with a `files_truncated` flag so a large transfer cannot bloat the stored result; this is an addition not spelled out in the spec.
+- §7 result mapping (`PASSED`/`FAILED`/`ERROR`, `mismatch_summary`; `data_artifact_path` is left unset and the destination root is `mismatch_summary.destination_root`) -> Task 9. The spec's `files: [...]` is capped at 100 entries with a `files_truncated` flag so a large transfer cannot bloat the stored result; this is an addition not spelled out in the spec.
 - §8 frontend (job option, two location panels, profile dropdowns filtered by kind, `on_exists`, both checkboxes with preserve disabled until recursive, help text, run detail via the existing panel) -> Tasks 10, 11.
 - §9 testing (unit for transfer/discovery/validation/executor, e2e) -> Tasks 1-9 and 12. The spec described the e2e as a watcher -> transfer -> reconciliation sequence. The plan covers transfer -> reconciliation with two API-launched jobs rather than a three-step sequence, because a real `file_watcher` step needs polling and adds no coverage of the new code. The live docker SFTP/MinIO run stays the optional follow-up the spec names.
 - §10 out of scope: nothing planned for it.

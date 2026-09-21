@@ -110,7 +110,7 @@ Files are copied one at a time (sequential in v1), streaming in chunks with no w
 
 Onto `ReconciliationResult` (`etl_framework/reconciliation/models.py`), no schema change:
 
-- All planned files copied: `PASSED`. `mismatch_summary = {copied, skipped, bytes, files: [...]}` and `data_artifact_path` is the destination root.
+- All planned files copied: `PASSED`. `mismatch_summary = {copied, skipped, bytes, files: [...]}` and `data_artifact_path` is left unset (the run-level Compare row-diff counts these paths, so a directory or URI here would disable it); the destination root is reported as `mismatch_summary.destination_root` instead.
 - `on_exists=fail` collision, size-verify mismatch, per-file copy failure, no files matched, plan rejection (duplicate key, path escape, same object): `FAILED`. `mismatch_summary` adds `{failed_file, error}` where applicable.
 - Connection, credential, host-key, or missing-bucket problems: `ERROR`, via the existing `build_*_client` messages. Secrets are never logged.
 

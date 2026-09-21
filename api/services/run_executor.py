@@ -1680,6 +1680,8 @@ class RunExecutor:
             "files": listed[:limit],
             "files_truncated": len(listed) > limit,
         }
+        if destination_root is not None:
+            mismatch_summary["destination_root"] = destination_root
         mismatches: list[MismatchRecord] = []
         if error is not None:
             mismatch_summary["error"] = error
@@ -1701,7 +1703,6 @@ class RunExecutor:
             status=status,
             executed_at=executed_at,
             duration_seconds=duration_seconds,
-            data_artifact_path=destination_root if status == TestStatus.PASSED else None,
             mismatch_summary=mismatch_summary,
         )
 

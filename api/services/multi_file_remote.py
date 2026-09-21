@@ -266,9 +266,14 @@ class RemoteFileSourceSession:
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 
     def close(self) -> None:
-        for client in self._clients.values():
-            close_remote_client(client)
-        self._clients.clear()
+        try:
+            for client in self._clients.values():
+                try:
+                    close_remote_client(client)
+                except Exception:
+                    pass  # one bad client must not leave the others unclosed
+        finally:
+            self._clients.clear()
 
     def __enter__(self) -> "RemoteFileSourceSession":
         return self

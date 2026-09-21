@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import boto3
@@ -74,6 +75,8 @@ def test_build_case_dispatches_file_transfer_job_type(db_session, allowed_dir):
     seed_sources(allowed_dir)
     result = executor(db_session)._build_case(local_job(allowed_dir))()
     assert result.status == TestStatus.PASSED
+    assert result.mismatch_summary["copied"] == 2
+    assert sorted(p.name for p in (allowed_dir / "dst").iterdir()) == ["sales_east.csv", "sales_west.csv"]
 
 
 def test_local_to_local_copies_matching_files_and_reports_summary(db_session, allowed_dir):
@@ -89,7 +92,12 @@ def test_local_to_local_copies_matching_files_and_reports_summary(db_session, al
     assert result.mismatch_summary["bytes"] == 13
     assert result.mismatch_summary["files_truncated"] is False
     assert result.source_row_count == 2 and result.matched_count == 2
-    assert result.data_artifact_path == str(allowed_dir / "dst")
+    # Run-level Compare row-diff counts data_artifact_path values, so a
+    # transfer must leave it unset and report the destination in the summary.
+    assert result.data_artifact_path is None
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
+    assert set(result.mismatch_summary["files"][0]) == {"source", "destination", "bytes", "action"}
+    json.dumps(result.mismatch_summary)
     assert result.mismatches == []
 
 
@@ -102,6 +110,32 @@ def test_second_run_with_default_on_exists_fails_and_reports_collision(db_sessio
     assert result.status == TestStatus.FAILED
     assert "already contains 2 file(s)" in result.mismatch_summary["error"]
     assert result.data_artifact_path is None
+    assert len(result.mismatches) == 1
+
+
+def test_mid_transfer_failure_reports_failed_file_and_partial_counts(db_session, allowed_dir, monkeypatch):
+    from api.services import file_transfer
+
+    seed_sources(allowed_dir)
+    real_copy_one = file_transfer._copy_one
+    calls = []
+
+    def flaky_copy_one(entry, source, destination):
+        calls.append(entry.source.path)
+        if len(calls) == 2:
+            raise OSError("boom")
+        return real_copy_one(entry, source, destination)
+
+    monkeypatch.setattr(file_transfer, "_copy_one", flaky_copy_one)
+
+    result = executor(db_session)._execute_file_transfer(local_job(allowed_dir))
+
+    assert result.status == TestStatus.FAILED
+    assert result.data_artifact_path is None
+    assert result.mismatch_summary["failed_file"] == calls[1]
+    assert result.mismatch_summary["copied"] == 1
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
+    assert "boom" in result.mismatch_summary["error"]
     assert len(result.mismatches) == 1
 
 
