@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 from pathlib import Path
 
 import boto3
@@ -79,7 +81,7 @@ def test_local_endpoint_write_read_exists_size_delete(allowed_dir):
     assert endpoint.size(dest) == 5
     with endpoint.open_read(dest) as fh:
         assert fh.read() == b"id\n1\n"
-    assert not Path(dest + ".part").exists()
+    assert not any(Path(dest).parent.glob(Path(dest).name + ".*" + ft.PART_SUFFIX))
 
     endpoint.delete(dest)
     assert not endpoint.exists(dest)
@@ -102,7 +104,7 @@ def test_local_endpoint_failed_write_keeps_existing_and_leaves_no_part_file(allo
         endpoint.write(dest, _Boom())
 
     assert Path(dest).read_bytes() == b"old"
-    assert not Path(dest + ".part").exists()
+    assert not any(Path(dest).parent.glob(Path(dest).name + ".*" + ft.PART_SUFFIX))
 
 
 def test_local_endpoint_identity_is_stable_for_same_file(allowed_dir):
@@ -110,3 +112,66 @@ def test_local_endpoint_identity_is_stable_for_same_file(allowed_dir):
     a = endpoint.identity(str(allowed_dir / "x.csv"))
     b = endpoint.identity(str(allowed_dir / "sub" / ".." / "x.csv"))
     assert a == b
+
+
+def test_local_endpoint_real_part_named_file_is_not_clobbered_by_temp_files(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir))
+    part_dest = endpoint.destination_for("x.csv.part")
+    dest = endpoint.destination_for("x.csv")
+
+    endpoint.write(part_dest, io.BytesIO(b"i am a real part-named file"))
+    endpoint.write(dest, io.BytesIO(b"data"))
+
+    assert Path(part_dest).read_bytes() == b"i am a real part-named file"
+    assert Path(dest).read_bytes() == b"data"
+
+
+def test_local_endpoint_failed_write_leaves_preexisting_part_named_file_untouched(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir))
+    part_file = allowed_dir / "y.csv.part"
+    part_file.write_bytes(b"unrelated")
+    dest = endpoint.destination_for("y.csv")
+
+    with pytest.raises(OSError, match="connection reset"):
+        endpoint.write(dest, _Boom())
+
+    assert part_file.read_bytes() == b"unrelated"
+    assert not Path(dest).exists()
+
+
+@pytest.mark.parametrize("relative", ["../x.csv", "sub/../../x.csv"])
+def test_local_endpoint_destination_for_rejects_parent_traversal(allowed_dir, relative):
+    endpoint = ft.LocalEndpoint(str(allowed_dir / "out"))
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for(relative)
+
+
+def test_local_endpoint_destination_for_rejects_absolute_path(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir / "out"))
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for(str(allowed_dir.parent / "evil.csv"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS junctions are Windows-only")
+def test_local_endpoint_destination_for_rejects_junction_escaping_root(allowed_dir, tmp_path):
+    outside = tmp_path / "outside_target"
+    outside.mkdir()
+    out_root = allowed_dir / "out"
+    out_root.mkdir()
+    junction = out_root / "junc"
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"could not create junction: {result.stderr!r}")
+
+    endpoint = ft.LocalEndpoint(str(out_root))
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for("junc/pwned.csv")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="case-insensitive filesystem semantics")
+def test_local_endpoint_identity_ignores_case_on_windows(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir))
+    assert endpoint.identity(str(allowed_dir / "X.CSV")) == endpoint.identity(str(allowed_dir / "x.csv"))

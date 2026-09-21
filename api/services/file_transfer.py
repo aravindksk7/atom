@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
+from uuid import uuid4
 
 from api.services.file_source import resolve_allowed_path
 from etl_framework.reconciliation.file_mapping import DiscoveredFile
@@ -60,7 +61,7 @@ class LocalEndpoint:
 
     def relative_of(self, file: DiscoveredFile) -> str:
         try:
-            return Path(file.path).relative_to(self.root).as_posix()
+            return Path(file.path).resolve().relative_to(self.root).as_posix()
         except ValueError:
             raise TransferError(f"'{file.path}' is not under source root '{self.root}'") from None
 
@@ -89,7 +90,7 @@ class LocalEndpoint:
     def write(self, path: str, stream: Any) -> None:
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        part = dest.with_name(dest.name + PART_SUFFIX)
+        part = dest.with_name(f"{dest.name}.{uuid4().hex}{PART_SUFFIX}")
         try:
             with open(part, "wb") as fh:
                 _copy_stream(stream, fh)

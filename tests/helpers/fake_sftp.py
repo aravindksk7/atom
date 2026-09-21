@@ -2,6 +2,7 @@
 ``api.services.file_transfer`` and ``discover_sftp_files`` make."""
 from __future__ import annotations
 
+import errno
 import io
 import posixpath
 import stat as stat_module
@@ -17,6 +18,8 @@ class FakeSFTP:
 
     # -- discovery ----------------------------------------------------------
     def listdir_attr(self, path: str):
+        if path != "/" and path not in self.dirs:
+            raise IOError(errno.ENOENT, path)
         prefix = path.rstrip("/") + "/"
         entries = []
         for file_path in sorted(self.files):
@@ -32,7 +35,7 @@ class FakeSFTP:
     # -- reads --------------------------------------------------------------
     def open(self, path: str, mode: str = "rb"):
         if path not in self.files:
-            raise FileNotFoundError(path)
+            raise IOError(errno.ENOENT, path)
         return io.BytesIO(self.files[path])
 
     def stat(self, path: str):
@@ -40,14 +43,17 @@ class FakeSFTP:
             return SimpleNamespace(st_size=len(self.files[path]))
         if path in self.dirs:
             return SimpleNamespace(st_size=0)
-        raise FileNotFoundError(path)
+        raise IOError(errno.ENOENT, path)
 
     # -- writes -------------------------------------------------------------
     def mkdir(self, path: str) -> None:
+        if path in self.dirs:
+            raise IOError("Failure")
         self.dirs.add(path)
 
     def putfo(self, fl, remotepath: str, callback=None, confirm: bool = True):
-        assert posixpath.dirname(remotepath) in self.dirs, f"parent directory missing for {remotepath}"
+        if posixpath.dirname(remotepath) not in self.dirs:
+            raise IOError(errno.ENOENT, remotepath)
         data = b""
         while True:
             chunk = fl.read(32768)
@@ -72,7 +78,7 @@ class FakeSFTP:
 
     def remove(self, path: str) -> None:
         if path not in self.files:
-            raise FileNotFoundError(path)
+            raise IOError(errno.ENOENT, path)
         del self.files[path]
 
     def close(self) -> None:
