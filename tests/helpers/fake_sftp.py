@@ -21,6 +21,7 @@ class FakeSFTP:
 
     # -- discovery ----------------------------------------------------------
     def listdir_attr(self, path: str):
+        self.calls.append("listdir_attr")
         if path != "/" and path not in self.dirs:
             raise IOError(errno.ENOENT, path)
         prefix = path.rstrip("/") + "/"
@@ -42,6 +43,7 @@ class FakeSFTP:
         return io.BytesIO(self.files[path])
 
     def stat(self, path: str):
+        self.calls.append("stat")
         if path in self.files:
             return SimpleNamespace(st_size=len(self.files[path]))
         if path in self.dirs:

@@ -142,6 +142,19 @@ def test_local_endpoint_failed_write_leaves_preexisting_part_named_file_untouche
     assert not Path(dest).exists()
 
 
+def test_local_endpoint_exists_many_returns_the_subset_that_exists(allowed_dir):
+    endpoint = ft.LocalEndpoint(str(allowed_dir))
+    present = endpoint.destination_for("a.csv")
+    also_present = endpoint.destination_for("sub/b.csv")
+    absent = endpoint.destination_for("c.csv")
+    endpoint.write(present, io.BytesIO(b"1"))
+    endpoint.write(also_present, io.BytesIO(b"2"))
+
+    assert endpoint.exists_many([present, absent, also_present]) == {present, also_present}
+    assert endpoint.exists_many([absent]) == set()
+    assert endpoint.exists_many([]) == set()
+
+
 @pytest.mark.parametrize("relative", ["../x.csv", "sub/../../x.csv"])
 def test_local_endpoint_destination_for_rejects_parent_traversal(allowed_dir, relative):
     endpoint = ft.LocalEndpoint(str(allowed_dir / "out"))
@@ -276,6 +289,50 @@ def test_s3_endpoint_relative_of_rejects_key_outside_prefix(s3_raw):
         endpoint.relative_of(file)
 
 
+def test_s3_endpoint_exists_many_returns_the_subset_that_exists(s3_raw):
+    endpoint = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof")
+    present = [endpoint.destination_for(name) for name in ("a.csv", "sub/b c.csv", "d.csv")]
+    absent = [endpoint.destination_for(name) for name in ("x.csv", "sub/y.csv")]
+    for path in present:
+        endpoint.write(path, io.BytesIO(b"data"))
+
+    found = endpoint.exists_many([absent[0], *present, absent[1]])
+
+    assert found == set(present)
+    assert endpoint.exists_many(absent) == set()
+    assert endpoint.exists_many([present[0]]) == {present[0]}
+    assert endpoint.exists_many([]) == set()
+
+
+class _HeadFailsFor:
+    """Client whose head_object 404s for every key except ``bad_key``, which
+    fails with ``code``."""
+
+    def __init__(self, bad_key: str, code: str) -> None:
+        self.bad_key = bad_key
+        self.code = code
+
+    def head_object(self, **kwargs):
+        code = self.code if kwargs["Key"] == self.bad_key else "404"
+        raise botocore.exceptions.ClientError({"Error": {"Code": code}}, "HeadObject")
+
+
+def test_s3_endpoint_exists_many_propagates_non_404_errors():
+    endpoint = ft.S3Endpoint("s3://bkt/out", _HeadFailsFor("out/c.csv", "403"), "p")
+    paths = [endpoint.destination_for(name) for name in ("a.csv", "b.csv", "c.csv", "d.csv")]
+
+    with pytest.raises(botocore.exceptions.ClientError) as excinfo:
+        endpoint.exists_many(paths)
+
+    assert excinfo.value.response["Error"]["Code"] == "403"
+
+
+def test_s3_endpoint_exists_many_treats_404_as_absent():
+    endpoint = ft.S3Endpoint("s3://bkt/out", _HeadFailsFor("out/none", "403"), "p")
+    paths = [endpoint.destination_for(name) for name in ("a.csv", "b.csv")]
+    assert endpoint.exists_many(paths) == set()
+
+
 class _HeadFails:
     def __init__(self, code: str) -> None:
         self.code = code
@@ -392,6 +449,71 @@ def test_sftp_endpoint_identity_normalizes_path_and_keys_on_credentials_ref():
     b = ft.SftpEndpoint("/out", FakeSFTP(), "other")
     assert a.identity("/out/sub/../x.csv") == a.identity("/out/x.csv")
     assert a.identity("/out/x.csv") != b.identity("/out/x.csv")
+
+
+def _seeded_sftp(*names: str, directory: str = "/out") -> FakeSFTP:
+    fake = FakeSFTP()
+    fake.dirs.add(directory)
+    for name in names:
+        fake.files[f"{directory}/{name}"] = b"x"
+    fake.calls.clear()
+    return fake
+
+
+def test_sftp_endpoint_exists_many_stats_each_path_when_there_are_few():
+    fake = _seeded_sftp("a.csv", "c.csv")
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    paths = [f"/out/{name}" for name in ("a.csv", "b.csv", "c.csv", "d.csv", "e.csv")]
+
+    assert endpoint.exists_many(paths) == {"/out/a.csv", "/out/c.csv"}
+    assert fake.calls.count("stat") == 5
+    assert "listdir_attr" not in fake.calls
+
+
+def test_sftp_endpoint_exists_many_lists_each_directory_once_for_many_paths():
+    present = [f"f{i:02d}.csv" for i in range(0, 25, 2)]
+    fake = _seeded_sftp(*present)
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    paths = [f"/out/f{i:02d}.csv" for i in range(25)]
+
+    found = endpoint.exists_many(paths)
+
+    assert found == {f"/out/{name}" for name in present}
+    assert fake.calls.count("listdir_attr") == 1
+    assert "stat" not in fake.calls
+
+
+def test_sftp_endpoint_exists_many_lists_once_per_directory():
+    fake = _seeded_sftp("a0.csv", "a5.csv")
+    fake.dirs.add("/out/sub")
+    fake.files["/out/sub/b3.csv"] = b"x"
+    fake.calls.clear()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    paths = [f"/out/a{i}.csv" for i in range(12)] + [f"/out/sub/b{i}.csv" for i in range(12)]
+
+    assert endpoint.exists_many(paths) == {"/out/a0.csv", "/out/a5.csv", "/out/sub/b3.csv"}
+    assert fake.calls.count("listdir_attr") == 2
+    assert "stat" not in fake.calls
+
+
+def test_sftp_endpoint_exists_many_counts_an_existing_subdirectory_like_stat_does():
+    fake = _seeded_sftp()
+    fake.dirs.add("/out/report.csv")
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    paths = ["/out/report.csv"] + [f"/out/n{i}.csv" for i in range(25)]
+
+    assert endpoint.exists_many(paths) == {"/out/report.csv"}
+    assert endpoint.exists_many(["/out/report.csv"]) == {"/out/report.csv"}
+
+
+def test_sftp_endpoint_exists_many_missing_directory_means_none_exist():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+
+    assert endpoint.exists_many([f"/out/missing/f{i}.csv" for i in range(25)]) == set()
+    assert fake.calls.count("listdir_attr") == 1
+    assert endpoint.exists_many(["/out/missing/f.csv"]) == set()
+    assert endpoint.exists_many([]) == set()
 
 
 def test_sftp_endpoint_identity_uses_location_key_over_credentials_ref():
@@ -592,6 +714,91 @@ def test_plan_on_exists_overwrite_keeps_every_file(allowed_dir):
 
     assert _relative_destinations(plan.to_copy, allowed_dir / "dst") == ["a.csv", "b.csv"]
     assert plan.skipped == []
+
+
+class _ExistsManyOnlyDestination:
+    """Destination that only offers the batched check; a per-path ``exists``
+    call would raise AttributeError."""
+
+    def __init__(self, present: set[str] | None = None) -> None:
+        self.present = present or set()
+        self.exists_many_calls: list[list[str]] = []
+
+    def destination_for(self, relative: str) -> str:
+        return f"/dst/{relative}"
+
+    def identity(self, path: str) -> tuple:
+        return ("fake", None, path)
+
+    def exists_many(self, paths) -> set[str]:
+        self.exists_many_calls.append(list(paths))
+        return {path for path in paths if path in self.present}
+
+
+class _ExistsOnlyDestination:
+    """Destination without ``exists_many`` (like the in-memory test fakes)."""
+
+    def __init__(self, present: set[str]) -> None:
+        self.present = present
+        self.exists_calls: list[str] = []
+
+    def destination_for(self, relative: str) -> str:
+        return f"/dst/{relative}"
+
+    def identity(self, path: str) -> tuple:
+        return ("fake", None, path)
+
+    def exists(self, path: str) -> bool:
+        self.exists_calls.append(path)
+        return path in self.present
+
+
+@pytest.mark.parametrize("on_exists", ["fail", "skip"])
+def test_plan_checks_destination_existence_with_one_batched_call(allowed_dir, on_exists):
+    source = ft.LocalEndpoint(str(allowed_dir / "src"))
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv", "c.csv")
+    destination = _ExistsManyOnlyDestination(present={"/dst/b.csv"} if on_exists == "skip" else set())
+
+    plan = ft.plan_transfer(files, source, destination, on_exists=on_exists, preserve_structure=False)
+
+    assert destination.exists_many_calls == [["/dst/a.csv", "/dst/b.csv", "/dst/c.csv"]]
+    if on_exists == "skip":
+        assert [entry.destination for entry in plan.to_copy] == ["/dst/a.csv", "/dst/c.csv"]
+        assert [entry.destination for entry in plan.skipped] == ["/dst/b.csv"]
+    else:
+        assert [entry.destination for entry in plan.to_copy] == ["/dst/a.csv", "/dst/b.csv", "/dst/c.csv"]
+
+
+def test_plan_on_exists_fail_reports_collisions_found_by_the_batched_check(allowed_dir):
+    source = ft.LocalEndpoint(str(allowed_dir / "src"))
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    destination = _ExistsManyOnlyDestination(present={"/dst/b.csv"})
+
+    with pytest.raises(ft.TransferError, match=r"already contains 1 file\(s\).*/dst/b.csv"):
+        ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=False)
+
+
+def test_plan_overwrite_performs_no_existence_checks(allowed_dir):
+    source = ft.LocalEndpoint(str(allowed_dir / "src"))
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    destination = _ExistsManyOnlyDestination(present={"/dst/a.csv"})
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+
+    assert destination.exists_many_calls == []
+    assert len(plan.to_copy) == 2
+
+
+def test_plan_falls_back_to_per_path_exists_without_exists_many(allowed_dir):
+    source = ft.LocalEndpoint(str(allowed_dir / "src"))
+    files = _make_files(allowed_dir / "src", "a.csv", "b.csv")
+    destination = _ExistsOnlyDestination(present={"/dst/b.csv"})
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="skip", preserve_structure=False)
+
+    assert destination.exists_calls == ["/dst/a.csv", "/dst/b.csv"]
+    assert [entry.destination for entry in plan.to_copy] == ["/dst/a.csv"]
+    assert [entry.destination for entry in plan.skipped] == ["/dst/b.csv"]
 
 
 def test_plan_on_exists_fail_truncates_the_collision_list(allowed_dir):

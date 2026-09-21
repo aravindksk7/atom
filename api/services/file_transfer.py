@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -32,6 +33,8 @@ from etl_framework.reconciliation.file_mapping import DiscoveredFile
 
 CHUNK_SIZE = 1024 * 1024
 PART_SUFFIX = ".part"
+_S3_EXISTS_WORKERS = 8
+_SFTP_LISTING_THRESHOLD = 20
 
 
 class TransferError(Exception):
@@ -101,6 +104,9 @@ class LocalEndpoint:
 
     def exists(self, path: str) -> bool:
         return Path(path).exists()
+
+    def exists_many(self, paths: list[str]) -> set[str]:
+        return {path for path in paths if Path(path).exists()}
 
     def size(self, path: str) -> int:
         return Path(path).stat().st_size
@@ -182,6 +188,18 @@ class S3Endpoint:
             raise
         return True
 
+    def exists_many(self, paths: list[str]) -> set[str]:
+        """Subset of ``paths`` that exist. One HEAD per path, run concurrently
+        (boto3 clients are thread safe); the destination prefix is never
+        listed since it may hold millions of objects. A non-404 error from any
+        path propagates."""
+        paths = list(paths)
+        if len(paths) < 2:
+            return {path for path in paths if self.exists(path)}
+        with ThreadPoolExecutor(max_workers=_S3_EXISTS_WORKERS) as pool:
+            flags = list(pool.map(self.exists, paths))
+        return {path for path, present in zip(paths, flags) if present}
+
     def size(self, path: str) -> int:
         bucket, key = self._split(path)
         return int(self.client.head_object(Bucket=bucket, Key=key)["ContentLength"])
@@ -241,6 +259,26 @@ class SftpEndpoint:
         except FileNotFoundError:
             return False
         return True
+
+    def exists_many(self, paths: list[str]) -> set[str]:
+        """Subset of ``paths`` that exist. Few paths are stat'ed one by one;
+        from ``_SFTP_LISTING_THRESHOLD`` paths up, each parent directory is
+        listed once instead (an existing sub-directory of the same name counts
+        as existing, like ``stat``)."""
+        paths = list(paths)
+        if len(paths) < _SFTP_LISTING_THRESHOLD:
+            return {path for path in paths if self.exists(path)}
+        by_directory: dict[str, list[str]] = {}
+        for path in paths:
+            by_directory.setdefault(posixpath.dirname(path), []).append(path)
+        found: set[str] = set()
+        for directory, members in by_directory.items():
+            try:
+                names = {attr.filename for attr in self.client.listdir_attr(directory)}
+            except FileNotFoundError:
+                continue
+            found.update(path for path in members if posixpath.basename(path) in names)
+        return found
 
     def size(self, path: str) -> int:
         return int(self.client.stat(path).st_size)
@@ -359,8 +397,18 @@ def plan_transfer(
 
     plan = TransferPlan()
     existing: list[PlannedCopy] = []
+    present: set[str] = set()
+    if on_exists != "overwrite" and entries:
+        # One batched check (endpoints without exists_many, such as simple
+        # in-memory fakes, fall back to a per-path exists).
+        exists_many = getattr(destination, "exists_many", None)
+        paths = [entry.destination for entry in entries]
+        if exists_many is not None:
+            present = set(exists_many(paths))
+        else:
+            present = {path for path in paths if destination.exists(path)}
     for entry in entries:
-        if on_exists == "overwrite" or not destination.exists(entry.destination):
+        if entry.destination not in present:
             plan.to_copy.append(entry)
         elif on_exists == "skip":
             plan.skipped.append(entry)
