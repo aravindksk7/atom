@@ -601,3 +601,104 @@ def test_plan_rejects_names_that_collapse_on_windows(allowed_dir):
 
     with pytest.raises(ft.TransferError):
         ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+
+
+# -- run_transfer ------------------------------------------------------------
+
+class _MemorySource:
+    def __init__(self, contents: dict[str, bytes], fail_on: str | None = None) -> None:
+        self.contents = contents
+        self.fail_on = fail_on
+        self.opened: list[str] = []
+
+    def open_read(self, path: str):
+        self.opened.append(path)
+        if path == self.fail_on:
+            raise OSError(f"cannot read {path}")
+        return io.BytesIO(self.contents[path])
+
+
+class _MemoryDestination:
+    def __init__(self, size_override: int | None = None) -> None:
+        self.files: dict[str, bytes] = {}
+        self.deleted: list[str] = []
+        self.size_override = size_override
+
+    def write(self, path: str, stream) -> None:
+        data = b""
+        while True:
+            chunk = stream.read(4)
+            if not chunk:
+                break
+            data += chunk
+        self.files[path] = data
+
+    def size(self, path: str) -> int:
+        return self.size_override if self.size_override is not None else len(self.files[path])
+
+    def delete(self, path: str) -> None:
+        self.deleted.append(path)
+        self.files.pop(path, None)
+
+
+def _entry(name: str) -> ft.PlannedCopy:
+    return ft.PlannedCopy(
+        source=DiscoveredFile(path=f"/src/{name}", file_name=name, tokens={}),
+        destination=f"/dst/{name}",
+        relative=name,
+    )
+
+
+def test_run_transfer_copies_every_planned_file_and_counts_bytes():
+    source = _MemorySource({"/src/a.csv": b"aaaa", "/src/b.csv": b"bb"})
+    destination = _MemoryDestination()
+    plan = ft.TransferPlan(to_copy=[_entry("a.csv"), _entry("b.csv")], skipped=[_entry("c.csv")])
+
+    outcome = ft.run_transfer(plan, source, destination)
+
+    assert outcome.error is None and outcome.failed_file is None
+    assert destination.files == {"/dst/a.csv": b"aaaa", "/dst/b.csv": b"bb"}
+    assert outcome.bytes_copied == 6
+    assert [item["action"] for item in outcome.copied] == ["copied", "copied"]
+    assert outcome.copied[0] == {"source": "/src/a.csv", "destination": "/dst/a.csv", "bytes": 4, "action": "copied"}
+    assert outcome.skipped == [{"source": "/src/c.csv", "destination": "/dst/c.csv", "bytes": 0, "action": "skipped"}]
+
+
+def test_run_transfer_stops_at_first_failure_and_keeps_earlier_copies():
+    source = _MemorySource({"/src/a.csv": b"a", "/src/b.csv": b"b", "/src/c.csv": b"c"}, fail_on="/src/b.csv")
+    destination = _MemoryDestination()
+    plan = ft.TransferPlan(to_copy=[_entry("a.csv"), _entry("b.csv"), _entry("c.csv")])
+
+    outcome = ft.run_transfer(plan, source, destination)
+
+    assert outcome.failed_file == "/src/b.csv"
+    assert "cannot read /src/b.csv" in outcome.error
+    assert [item["source"] for item in outcome.copied] == ["/src/a.csv"]
+    assert "/dst/c.csv" not in destination.files
+    assert "/src/c.csv" not in source.opened
+
+
+def test_run_transfer_deletes_destination_and_fails_on_size_mismatch():
+    source = _MemorySource({"/src/a.csv": b"aaaa"})
+    destination = _MemoryDestination(size_override=3)
+    plan = ft.TransferPlan(to_copy=[_entry("a.csv")])
+
+    outcome = ft.run_transfer(plan, source, destination)
+
+    assert outcome.failed_file == "/src/a.csv"
+    assert "size mismatch" in outcome.error and "4 bytes" in outcome.error
+    assert destination.deleted == ["/dst/a.csv"]
+    assert outcome.copied == []
+
+
+def test_run_transfer_end_to_end_local_to_local(allowed_dir):
+    source, destination = _local_pair(allowed_dir)
+    files = _make_files(allowed_dir / "src", "a.csv", "sub/b.csv")
+    plan = ft.plan_transfer(files, source, destination, on_exists="fail", preserve_structure=True)
+
+    outcome = ft.run_transfer(plan, source, destination)
+
+    assert outcome.error is None
+    assert (allowed_dir / "dst" / "a.csv").read_bytes() == b"data-a.csv"
+    assert (allowed_dir / "dst" / "sub" / "b.csv").read_bytes() == b"data-sub/b.csv"
+    assert list((allowed_dir / "dst").rglob("*.part")) == []

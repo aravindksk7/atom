@@ -361,3 +361,72 @@ def plan_transfer(
             f"destination already contains {len(existing)} file(s) (on_exists=fail): {shown}{more}"
         )
     return plan
+
+
+# -- Execution ---------------------------------------------------------------
+
+class _CountingReader:
+    """Wraps a readable stream and counts the bytes read through it."""
+
+    def __init__(self, raw: Any) -> None:
+        self._raw = raw
+        self.count = 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._raw.read(size)
+        self.count += len(data)
+        return data
+
+
+@dataclass
+class TransferOutcome:
+    copied: list[dict[str, Any]] = field(default_factory=list)
+    skipped: list[dict[str, Any]] = field(default_factory=list)
+    bytes_copied: int = 0
+    failed_file: str | None = None
+    error: str | None = None
+
+
+def _copy_one(entry: PlannedCopy, source: Any, destination: Any) -> int:
+    reader = source.open_read(entry.source.path)
+    try:
+        counting = _CountingReader(reader)
+        destination.write(entry.destination, counting)
+    finally:
+        close = getattr(reader, "close", None)
+        if callable(close):
+            close()
+    actual = destination.size(entry.destination)
+    if actual != counting.count:
+        try:
+            destination.delete(entry.destination)
+        except Exception:
+            pass
+        raise TransferError(
+            f"size mismatch after copy: streamed {counting.count} bytes but destination holds {actual}"
+        )
+    return counting.count
+
+
+def run_transfer(plan: TransferPlan, source: Any, destination: Any) -> TransferOutcome:
+    """Copy every planned file, one at a time. Stops at the first failure;
+    files copied before it stay in place (no rollback)."""
+    outcome = TransferOutcome(skipped=[
+        {"source": entry.source.path, "destination": entry.destination, "bytes": 0, "action": "skipped"}
+        for entry in plan.skipped
+    ])
+    for entry in plan.to_copy:
+        try:
+            copied_bytes = _copy_one(entry, source, destination)
+        except Exception as exc:
+            outcome.failed_file = entry.source.path
+            outcome.error = f"{entry.source.path}: {exc}"
+            return outcome
+        outcome.copied.append({
+            "source": entry.source.path,
+            "destination": entry.destination,
+            "bytes": copied_bytes,
+            "action": "copied",
+        })
+        outcome.bytes_copied += copied_bytes
+    return outcome
