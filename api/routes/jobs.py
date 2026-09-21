@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_session
+from api.dependencies import get_session, is_admin_request
 from api.schemas import JobDefinition, JobRunSummaryOut, PreviewFileMappingRequest
 from etl_framework.repository.models import SavedJob
 from etl_framework.repository.repository import JobRepository, RunRepository
@@ -10,6 +10,30 @@ from api.services.audit_service import AuditService
 from etl_framework.runner.job_validation import validate_job_definition
 
 router = APIRouter(tags=["jobs"])
+
+# Every other saved job type only reads. A file_transfer job writes: to an SFTP
+# or S3 destination with the profile's credentials, and to any folder inside
+# SERVER_FILE_ALLOWED_DIRS. Authoring one is therefore an admin action, while
+# reading, launching and deleting an existing one is not.
+WRITE_CAPABLE_JOB_TYPES = frozenset({"file_transfer"})
+
+WRITE_CAPABLE_JOB_DENIAL = (
+    "file_transfer jobs write to servers and local folders; "
+    "creating or editing them requires the admin role"
+)
+
+
+def _write_capable(*job_types: str | None) -> bool:
+    return any(job_type in WRITE_CAPABLE_JOB_TYPES for job_type in job_types)
+
+
+def require_admin_for_write_capable_job(request: Request, *job_types: str | None) -> None:
+    """Refuse a non-admin caller who is creating, importing or editing a job of
+    a write-capable type. ``job_types`` takes both the incoming type and the
+    stored one, so turning an existing job into a file_transfer job -- and
+    editing one that already is -- are both covered."""
+    if _write_capable(*job_types) and not is_admin_request(request):
+        raise HTTPException(status_code=403, detail=WRITE_CAPABLE_JOB_DENIAL)
 
 _SEED_JOBS: list[JobDefinition] = [
     JobDefinition(
@@ -134,6 +158,7 @@ def list_job_runs(name: str, limit: int = 20, db: Session = Depends(get_session)
 @router.post("", response_model=JobDefinition, status_code=201)
 def create_job(body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
+    require_admin_for_write_capable_job(request, body.job_type)
     _raise_validation_errors(body)
     if repo.get(body.name) is not None:
         raise HTTPException(status_code=409, detail="Job already exists")
@@ -230,6 +255,14 @@ def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(
 def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
     imported = []
+    # Checked for the whole payload first: this route already fails the entire
+    # request on the first invalid item, so a partial import is not a shape
+    # callers can depend on.
+    for job_def in body:
+        existing = repo.get(job_def.name)
+        require_admin_for_write_capable_job(
+            request, job_def.job_type, existing.job_type if existing else None,
+        )
     for job_def in body:
         _raise_validation_errors(job_def)
         existed = repo.get(job_def.name) is not None
@@ -249,6 +282,9 @@ def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depen
 def update_job(name: str, body: JobDefinition, request: Request, db: Session = Depends(get_session)):
     repo = JobRepository(db)
     before = repo.get(name)
+    require_admin_for_write_capable_job(
+        request, body.job_type, before.job_type if before else None,
+    )
     _raise_validation_errors(body)
     data = _job_to_data(body)
     data["name"] = name

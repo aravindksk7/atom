@@ -205,8 +205,8 @@ def _apply_configs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
     return out
 
 
-def _apply_jobs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
-    from api.routes.jobs import _job_to_data
+def _apply_jobs(db: Session, entries: list[dict], *, is_admin: bool = True) -> list[BundleItemResult]:
+    from api.routes.jobs import WRITE_CAPABLE_JOB_DENIAL, WRITE_CAPABLE_JOB_TYPES, _job_to_data
     from api.schemas import JobDefinition
 
     repo = JobRepository(db)
@@ -216,6 +216,11 @@ def _apply_jobs(db: Session, entries: list[dict]) -> list[BundleItemResult]:
             name = entry["name"]
             if repo.get(name) is not None:
                 out.append(BundleItemResult("jobs", name, "skipped", "already exists"))
+                continue
+            # The bundle route is open to any token, so this is one failed item
+            # rather than a refusal of the whole import.
+            if not is_admin and entry.get("job_type") in WRITE_CAPABLE_JOB_TYPES:
+                out.append(BundleItemResult("jobs", name, "error", WRITE_CAPABLE_JOB_DENIAL))
                 continue
             try:
                 definition = JobDefinition(**entry)
@@ -305,13 +310,16 @@ def _apply_selections(db: Session, entries: list[dict]) -> list[BundleItemResult
     return out
 
 
-def apply_bundle(db: Session, bundle: dict) -> list[BundleItemResult]:
+def apply_bundle(db: Session, bundle: dict, *, is_admin: bool = True) -> list[BundleItemResult]:
+    """``is_admin`` says whether the caller may create write-capable job types
+    (see api/routes/jobs.py). The route passes the caller's real role; the
+    default is permissive because direct callers are already trusted code."""
     if bundle.get("bundle_version") != BUNDLE_VERSION:
         raise ValueError(f"Unsupported bundle_version: {bundle.get('bundle_version')!r}")
     results: list[BundleItemResult] = []
     results += _apply_file_servers(db, bundle.get("file_servers") or [])
     results += _apply_configs(db, bundle.get("configs") or [])
-    results += _apply_jobs(db, bundle.get("jobs") or [])
+    results += _apply_jobs(db, bundle.get("jobs") or [], is_admin=is_admin)
     results += _apply_sequences(db, bundle.get("sequences") or [])
     results += _apply_selections(db, bundle.get("selections") or [])
     return results

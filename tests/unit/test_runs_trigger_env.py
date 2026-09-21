@@ -38,7 +38,9 @@ def client(monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
 
     with Session(engine) as db:
-        raw, _ = TokenRepository(db).create("test")
+        # Admin because these tests save a file_transfer job, which only an
+        # admin token may author (see tests/unit/test_jobs_admin_gate.py).
+        raw, _ = TokenRepository(db).create("test", is_admin=True)
 
     with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as c:
         yield c

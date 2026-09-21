@@ -20,6 +20,7 @@ Decisions made while scoping:
 | Destination collision | `on_exists` = `fail` \| `overwrite` \| `skip`, default `fail`. |
 | Extras in v1 | Preserve subfolder structure (with opt-in recursion, see §3). Size verification after copy is always on. No checksum, move, or dry run. |
 | SCP | Stays an SFTP alias. Hosts with no SFTP subsystem are out of scope. |
+| Who may author one? | Admin tokens only. Every other saved job type reads; this one writes, to a file server with the profile's credentials and to any folder inside `SERVER_FILE_ALLOWED_DIRS`. `create_job`, `update_job` (including an edit that turns an existing job into one) and `POST /api/jobs/import` return 403 for a non-admin token; a `file_transfer` entry in a config bundle fails as one item while the rest of the bundle applies. Reading, launching and deleting an existing `file_transfer` job are unchanged. Set `SERVER_FILE_ALLOWED_DIRS` explicitly on-prem: the default allowlist includes the reports and uploads directories, and `C:\temp` on Windows. |
 
 ## 2. Params and schema
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_session
+from api.dependencies import get_session, is_admin_request
 from api.services.audit_service import AuditService
 from api.services.config_bundle import ENTITY_TYPES, apply_bundle, build_bundle
 from etl_framework.repository.repository import (
@@ -56,7 +56,7 @@ def export_bundle(body: BundleExportRequest, db: Session = Depends(get_session))
 @router.post("/import", response_model=list[BundleItemOut])
 def import_bundle(body: dict, request: Request, db: Session = Depends(get_session)):
     try:
-        results = apply_bundle(db, body)
+        results = apply_bundle(db, body, is_admin=is_admin_request(request))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     counts: dict[str, int] = {}
