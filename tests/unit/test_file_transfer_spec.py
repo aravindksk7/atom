@@ -87,3 +87,40 @@ def test_parse_normalizes_scp_to_sftp_and_applies_defaults():
 def test_parse_raises_value_error_with_first_message():
     with pytest.raises(ValueError, match="'source' object"):
         parse_file_transfer_params({})
+
+
+@pytest.mark.parametrize("field", ["root", "pattern", "credentials_ref"])
+@pytest.mark.parametrize("bad_value", [5, ["/a"], {"path": "/a"}])
+def test_source_location_fields_must_be_strings(field, bad_value):
+    source = {"kind": "sftp", "root": "/in", "pattern": "*.csv", "credentials_ref": "vendor"}
+    source[field] = bad_value
+    errors = file_transfer_param_errors(_params(
+        source=source,
+        destination={"kind": "s3", "root": "s3://bkt/out", "credentials_ref": "aws"},
+    ))
+    assert f"params.source.{field}" in _fields(errors)
+
+
+def test_destination_root_must_be_a_string():
+    errors = file_transfer_param_errors(_params(destination={"kind": "local", "root": 5}))
+    assert "params.destination.root" in _fields(errors)
+
+
+def test_destination_pattern_must_be_a_string_when_present():
+    errors = file_transfer_param_errors(_params(destination={"kind": "local", "root": "/out", "pattern": 123}))
+    assert "params.destination.pattern" in _fields(errors)
+
+
+def test_invalid_regex_token_pattern_is_reported_on_source_pattern():
+    errors = file_transfer_param_errors(_params(
+        source={"kind": "local", "root": "/in", "pattern": "{a:regex(}"},
+    ))
+    assert "params.source.pattern" in _fields(errors)
+
+
+def test_parse_normalizes_scp_destination_to_sftp():
+    spec = parse_file_transfer_params(_params(
+        destination={"kind": "scp", "root": "/out", "credentials_ref": "vendor"},
+    ))
+    assert spec.destination.kind == "sftp"
+    assert spec.destination.credentials_ref == "vendor"

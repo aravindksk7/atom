@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from etl_framework.reconciliation.file_mapping import FileSourceSpec
+from etl_framework.reconciliation.file_mapping import FileSourceSpec, compile_token_pattern
 
 LOCATION_KINDS = ("local", "s3", "sftp", "scp")
 REMOTE_KINDS = ("s3", "sftp", "scp")
@@ -41,11 +41,22 @@ def file_transfer_param_errors(params: dict[str, Any]) -> list[tuple[str, str]]:
         kind = location.get("kind")
         if kind not in LOCATION_KINDS:
             errors.append((f"params.{key}.kind", f"file_transfer {key}.kind must be 'local', 's3', 'sftp', or 'scp'"))
-        if not location.get("root"):
+        root = location.get("root")
+        if not isinstance(root, str) or not root.strip():
             errors.append((f"params.{key}.root", f"file_transfer {key} requires 'root'"))
-        if needs_pattern and not location.get("pattern"):
-            errors.append((f"params.{key}.pattern", f"file_transfer {key} requires 'pattern'"))
-        if kind in REMOTE_KINDS and not location.get("credentials_ref"):
+        pattern = location.get("pattern")
+        if needs_pattern:
+            if not isinstance(pattern, str) or not pattern:
+                errors.append((f"params.{key}.pattern", f"file_transfer {key} requires 'pattern'"))
+            else:
+                try:
+                    compile_token_pattern(pattern)
+                except ValueError as exc:
+                    errors.append((f"params.{key}.pattern", str(exc)))
+        elif pattern is not None and not isinstance(pattern, str):
+            errors.append((f"params.{key}.pattern", f"file_transfer {key} pattern must be a string"))
+        credentials_ref = location.get("credentials_ref")
+        if kind in REMOTE_KINDS and (not isinstance(credentials_ref, str) or not credentials_ref):
             errors.append((
                 f"params.{key}.credentials_ref",
                 f"file_transfer {key}.kind '{kind}' requires 'credentials_ref'",
@@ -75,7 +86,7 @@ def _location_spec(location: dict[str, Any]) -> FileSourceSpec:
         kind="sftp" if kind == "scp" else kind,
         root=location["root"],
         pattern=location.get("pattern") or "*",
-        credentials_ref=location.get("credentials_ref"),
+        credentials_ref=str(location["credentials_ref"]) if location.get("credentials_ref") else None,
     )
 
 
