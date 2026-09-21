@@ -175,3 +175,57 @@ def test_local_endpoint_destination_for_rejects_junction_escaping_root(allowed_d
 def test_local_endpoint_identity_ignores_case_on_windows(allowed_dir):
     endpoint = ft.LocalEndpoint(str(allowed_dir))
     assert endpoint.identity(str(allowed_dir / "X.CSV")) == endpoint.identity(str(allowed_dir / "x.csv"))
+
+
+# -- S3Endpoint --------------------------------------------------------------
+
+@pytest.fixture
+def s3_raw():
+    with mock_aws():
+        raw = boto3.client("s3", region_name="us-east-1")
+        raw.create_bucket(Bucket="bkt")
+        yield raw
+
+
+def test_s3_endpoint_rejects_non_s3_root(s3_raw):
+    with pytest.raises(ValueError, match="s3://bucket/prefix"):
+        ft.S3Endpoint("/not/s3", s3_raw, "prof")
+
+
+def test_s3_endpoint_relative_of_strips_prefix_and_unquotes(s3_raw):
+    endpoint = ft.S3Endpoint("s3://bkt/in", s3_raw, "prof")
+    file = DiscoveredFile(path="s3://bkt/in/sub/a%20b.csv", file_name="a b.csv", tokens={})
+    assert endpoint.relative_of(file) == "sub/a b.csv"
+
+
+def test_s3_endpoint_destination_for_quotes_key(s3_raw):
+    endpoint = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof")
+    assert endpoint.destination_for("sub/a b#1.csv") == "s3://bkt/out/sub/a%20b%231.csv"
+
+
+def test_s3_endpoint_write_read_exists_size_delete(s3_raw):
+    endpoint = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof")
+    dest = endpoint.destination_for("sub/a b.csv")
+
+    assert not endpoint.exists(dest)
+    endpoint.write(dest, io.BytesIO(b"id\n1\n"))
+
+    assert endpoint.exists(dest)
+    assert endpoint.size(dest) == 5
+    assert s3_raw.get_object(Bucket="bkt", Key="out/sub/a b.csv")["Body"].read() == b"id\n1\n"
+    body = endpoint.open_read(dest)
+    try:
+        assert body.read() == b"id\n1\n"
+    finally:
+        body.close()
+
+    endpoint.delete(dest)
+    assert not endpoint.exists(dest)
+
+
+def test_s3_endpoint_identity_includes_credentials_ref(s3_raw):
+    a = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-a")
+    b = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-b")
+    path = "s3://bkt/out/x.csv"
+    assert a.identity(path) != b.identity(path)
+    assert a.identity(path) == a.identity("s3://bkt/out/x.csv")

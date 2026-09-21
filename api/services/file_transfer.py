@@ -101,3 +101,68 @@ class LocalEndpoint:
 
     def delete(self, path: str) -> None:
         Path(path).unlink(missing_ok=True)
+
+
+# -- S3 ----------------------------------------------------------------------
+
+class S3Endpoint:
+    """Paths are ``s3://bucket/key`` URIs with the key percent-quoted, the
+    same shape ``discover_s3_files`` puts in ``DiscoveredFile.path``."""
+
+    kind = "s3"
+
+    def __init__(self, root: str, client: Any, credentials_ref: str | None) -> None:
+        parsed = urlparse(root)
+        if parsed.scheme != "s3" or not parsed.netloc:
+            raise ValueError("S3 root must be s3://bucket/prefix")
+        self.client = client
+        self.credentials_ref = credentials_ref
+        self.bucket = parsed.netloc
+        prefix = unquote(parsed.path.lstrip("/"))
+        self.prefix = prefix if not prefix or prefix.endswith("/") else prefix + "/"
+
+    @staticmethod
+    def _split(uri: str) -> tuple[str, str]:
+        parsed = urlparse(uri)
+        return parsed.netloc, unquote(parsed.path.lstrip("/"))
+
+    def relative_of(self, file: DiscoveredFile) -> str:
+        _, key = self._split(file.path)
+        if self.prefix and key.startswith(self.prefix):
+            return key[len(self.prefix):]
+        return key
+
+    def destination_for(self, relative: str) -> str:
+        return f"s3://{self.bucket}/{quote(self.prefix + relative, safe='/')}"
+
+    def identity(self, path: str) -> tuple:
+        bucket, key = self._split(path)
+        return ("s3", self.credentials_ref, f"{bucket}/{key}")
+
+    def exists(self, path: str) -> bool:
+        import botocore.exceptions
+
+        bucket, key = self._split(path)
+        try:
+            self.client.head_object(Bucket=bucket, Key=key)
+        except botocore.exceptions.ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return False
+            raise
+        return True
+
+    def size(self, path: str) -> int:
+        bucket, key = self._split(path)
+        return int(self.client.head_object(Bucket=bucket, Key=key)["ContentLength"])
+
+    def open_read(self, path: str):
+        bucket, key = self._split(path)
+        return self.client.get_object(Bucket=bucket, Key=key)["Body"]
+
+    def write(self, path: str, stream: Any) -> None:
+        bucket, key = self._split(path)
+        self.client.upload_fileobj(stream, bucket, key)
+
+    def delete(self, path: str) -> None:
+        bucket, key = self._split(path)
+        self.client.delete_object(Bucket=bucket, Key=key)
