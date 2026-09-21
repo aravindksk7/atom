@@ -15,6 +15,9 @@ class FakeSFTP:
         self.dirs: set[str] = {"/"}
         self.posix_rename_supported = True
         self.fail_putfo_after_partial = False
+        self.calls: list[str] = []
+        self.posix_rename_error: Exception | None = None
+        self.rename_error: Exception | None = None
 
     # -- discovery ----------------------------------------------------------
     def listdir_attr(self, path: str):
@@ -51,7 +54,7 @@ class FakeSFTP:
             raise IOError("Failure")
         self.dirs.add(path)
 
-    def putfo(self, fl, remotepath: str, callback=None, confirm: bool = True):
+    def putfo(self, fl, remotepath: str, file_size: int = 0, callback=None, confirm: bool = True):
         if posixpath.dirname(remotepath) not in self.dirs:
             raise IOError(errno.ENOENT, remotepath)
         data = b""
@@ -67,16 +70,23 @@ class FakeSFTP:
         return SimpleNamespace(st_size=len(data))
 
     def posix_rename(self, old: str, new: str) -> None:
+        self.calls.append("posix_rename")
+        if self.posix_rename_error is not None:
+            raise self.posix_rename_error
         if not self.posix_rename_supported:
             raise IOError("Operation unsupported")
         self.files[new] = self.files.pop(old)
 
     def rename(self, old: str, new: str) -> None:
+        self.calls.append("rename")
+        if self.rename_error is not None:
+            raise self.rename_error
         if new in self.files:
             raise IOError("Failure")
         self.files[new] = self.files.pop(old)
 
     def remove(self, path: str) -> None:
+        self.calls.append("remove")
         if path not in self.files:
             raise IOError(errno.ENOENT, path)
         del self.files[path]

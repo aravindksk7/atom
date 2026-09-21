@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import subprocess
 import sys
@@ -302,8 +303,11 @@ def test_sftp_endpoint_write_overwrites_via_posix_rename():
     endpoint = ft.SftpEndpoint("/out", fake, "vendor")
     dest = endpoint.destination_for("x.csv")
     endpoint.write(dest, io.BytesIO(b"old"))
+    fake.calls.clear()
     endpoint.write(dest, io.BytesIO(b"newer"))
     assert fake.files == {"/out/x.csv": b"newer"}
+    assert "posix_rename" in fake.calls
+    assert "remove" not in fake.calls
 
 
 def test_sftp_endpoint_write_falls_back_when_posix_rename_unsupported():
@@ -356,3 +360,84 @@ def test_sftp_endpoint_identity_normalizes_path_and_keys_on_credentials_ref():
     b = ft.SftpEndpoint("/out", FakeSFTP(), "other")
     assert a.identity("/out/sub/../x.csv") == a.identity("/out/x.csv")
     assert a.identity("/out/x.csv") != b.identity("/out/x.csv")
+
+
+def test_sftp_endpoint_typed_posix_rename_error_propagates_and_keeps_destination():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    endpoint.write(dest, io.BytesIO(b"old"))
+
+    fake.posix_rename_error = IOError(errno.ENOENT, "gone")
+    fake.calls.clear()
+    with pytest.raises(FileNotFoundError):
+        endpoint.write(dest, io.BytesIO(b"newer"))
+
+    assert fake.files == {"/out/x.csv": b"old"}
+    assert not any(name.endswith(".part") for name in fake.files)
+    assert "rename" not in fake.calls
+
+
+def test_sftp_endpoint_fallback_rename_failure_restores_old_destination():
+    class FailingPartRename(FakeSFTP):
+        def rename(self, old: str, new: str) -> None:
+            if old.endswith(".part"):
+                raise IOError("Failure")
+            super().rename(old, new)
+
+    fake = FailingPartRename()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    endpoint.write(dest, io.BytesIO(b"old"))
+
+    fake.posix_rename_supported = False
+    with pytest.raises(IOError, match="Failure"):
+        endpoint.write(dest, io.BytesIO(b"newer"))
+
+    assert fake.files == {"/out/x.csv": b"old"}
+    assert not any(name.endswith((".part", ".bak")) for name in fake.files)
+
+
+def test_sftp_endpoint_fallback_rename_onto_absent_destination_needs_no_backup():
+    fake = FakeSFTP()
+    fake.posix_rename_supported = False
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    endpoint.write("/out/x.csv", io.BytesIO(b"first"))
+    assert fake.files == {"/out/x.csv": b"first"}
+    assert "remove" not in fake.calls
+
+
+def test_sftp_endpoint_delete_of_missing_file_is_idempotent():
+    endpoint = ft.SftpEndpoint("/out", FakeSFTP(), "vendor")
+    endpoint.delete("/out/missing.csv")
+
+
+def test_sftp_endpoint_relative_of_rejects_file_outside_root():
+    endpoint = ft.SftpEndpoint("/in", FakeSFTP(), "vendor")
+    file = DiscoveredFile(path="/elsewhere/a.csv", file_name="a.csv", tokens={})
+    with pytest.raises(ft.TransferError, match="not under source root"):
+        endpoint.relative_of(file)
+
+
+def test_sftp_endpoint_write_tolerates_mkdir_race():
+    class RacyMkdir(FakeSFTP):
+        def mkdir(self, path: str) -> None:
+            self.dirs.add(path)
+            raise IOError("Failure")
+
+    fake = RacyMkdir()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    endpoint.write(endpoint.destination_for("sub/x.csv"), io.BytesIO(b"hi"))
+    assert fake.files == {"/out/sub/x.csv": b"hi"}
+
+
+@pytest.mark.parametrize("relative", ["../x.csv", "a/../../x.csv", "/etc/passwd"])
+def test_sftp_endpoint_destination_for_rejects_escape(relative):
+    endpoint = ft.SftpEndpoint("/out", FakeSFTP(), "vendor")
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for(relative)
+
+
+def test_sftp_endpoint_destination_for_with_slash_root():
+    endpoint = ft.SftpEndpoint("/", FakeSFTP(), "vendor")
+    assert endpoint.destination_for("a/b.csv") == "/a/b.csv"

@@ -187,12 +187,17 @@ class SftpEndpoint:
 
     def relative_of(self, file: DiscoveredFile) -> str:
         prefix = self.root.rstrip("/") + "/"
-        if file.path.startswith(prefix):
-            return file.path[len(prefix):]
-        return PurePosixPath(file.path).name
+        if not file.path.startswith(prefix):
+            raise TransferError(f"'{file.path}' is not under source root '{self.root}'")
+        return file.path[len(prefix):]
 
     def destination_for(self, relative: str) -> str:
-        return posixpath.join(self.root, relative)
+        target = posixpath.normpath(posixpath.join(self.root, relative))
+        if target != self.root and not target.startswith(self.root.rstrip("/") + "/"):
+            raise TransferError(
+                f"destination path for '{relative}' escapes destination root '{self.root}'"
+            )
+        return target
 
     def identity(self, path: str) -> tuple:
         return ("sftp", self.credentials_ref, posixpath.normpath(path))
@@ -217,27 +222,48 @@ class SftpEndpoint:
             try:
                 self.client.stat(current)
             except FileNotFoundError:
-                self.client.mkdir(current)
+                try:
+                    self.client.mkdir(current)
+                except OSError:
+                    self.client.stat(current)  # lost a race: fine if it exists now, re-raises otherwise
+
+    def _discard(self, path: str) -> None:
+        try:
+            self.client.remove(path)
+        except Exception:
+            pass
 
     def write(self, path: str, stream: Any) -> None:
         self._make_dirs(posixpath.dirname(path))
         part = f"{path}.{uuid4().hex}{PART_SUFFIX}"
         try:
             self.client.putfo(stream, part)
-        except BaseException:
             try:
-                self.client.remove(part)
-            except Exception:
-                pass
+                self.client.posix_rename(part, path)
+            except OSError as exc:
+                if exc.errno is not None:
+                    raise
+                # Server has no posix-rename extension (paramiko raises a plain
+                # IOError with no errno). Plain rename refuses to replace an
+                # existing file, so move the old one aside and restore it if the
+                # swap fails: the destination is never left missing.
+                try:
+                    self.client.rename(part, path)  # works when the destination is absent
+                except OSError:
+                    backup = f"{path}.{uuid4().hex}.bak"
+                    self.client.rename(path, backup)
+                    try:
+                        self.client.rename(part, path)
+                    except BaseException:
+                        self.client.rename(backup, path)
+                        raise
+                    self._discard(backup)
+        except BaseException:
+            self._discard(part)
             raise
-        try:
-            self.client.posix_rename(part, path)
-        except IOError:
-            # Server has no posix-rename extension: plain rename refuses to
-            # replace an existing file, so remove it first.
-            if self.exists(path):
-                self.client.remove(path)
-            self.client.rename(part, path)
 
     def delete(self, path: str) -> None:
-        self.client.remove(path)
+        try:
+            self.client.remove(path)
+        except FileNotFoundError:
+            pass
