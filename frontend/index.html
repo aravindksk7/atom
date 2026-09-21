@@ -3792,6 +3792,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <tr x-show="r.error_message">
                   <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
                 </tr>
+                <!-- File transfer summary row (only when the result carries a destination_root) -->
+                <template x-if="r.mismatch_summary?.destination_root">
+                  <tr>
+                    <td colspan="9" class="text-xs text-slate-600 px-4 py-2" data-testid="run-result-file-transfer-summary"
+                        x-text="'Copied ' + (r.mismatch_summary.copied ?? 0) + ' · Skipped ' + (r.mismatch_summary.skipped ?? 0) + ' · ' + (r.mismatch_summary.bytes ?? 0) + ' bytes → ' + r.mismatch_summary.destination_root + (r.mismatch_summary.failed_file ? ' · Failed on ' + r.mismatch_summary.failed_file : '') + (r.mismatch_summary.files_truncated ? ' (first 100 files listed)' : '')"></td>
+                  </tr>
+                </template>
                 <!-- Inline mismatch diff rows -->
                 <template x-if="expandedMismatches[r.id] !== undefined">
                   <tr>
@@ -8403,7 +8410,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="section-header">
     <div>
       <div class="section-title">File Servers</div>
-      <div class="section-sub">SFTP / SCP / S3 authentication profiles for file_watcher and multi-file jobs</div>
+      <div class="section-sub">SFTP / SCP / S3 authentication profiles for file_watcher, file_transfer and multi-file jobs</div>
     </div>
     <button @click="openFileServerModal(null)" class="btn-primary" data-testid="file-server-add-btn">Add File Server</button>
   </div>
@@ -8411,7 +8418,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div x-show="fileServers.length === 0" class="card empty-state" data-testid="file-servers-empty-state">
     <div class="empty-state-icon">🗄️</div>
     <div class="empty-state-title">No file servers yet</div>
-    <div class="empty-state-sub">Add an SFTP, SCP, or S3 profile to use with file_watcher and multi-file jobs</div>
+    <div class="empty-state-sub">Add an SFTP, SCP, or S3 profile to use with file_watcher, file_transfer and multi-file jobs (file_transfer destinations need write access)</div>
   </div>
 
   <div class="space-y-3">

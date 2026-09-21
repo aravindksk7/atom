@@ -81,7 +81,7 @@ test.describe('55 file_transfer job', () => {
     await authedPage.locator('[data-testid="job-modal-cancel-btn"]').click();
   });
 
-  test('runs local to local, refuses to overwrite by default, and the copies reconcile clean', async ({ adminToken }) => {
+  test('runs local to local, refuses to overwrite by default, and the copies reconcile clean', async ({ authedPage, adminToken }) => {
     const stamp = Date.now();
     const outDir = path.join(FIXTURE_DIR, `transfer_out_${stamp}`);
     createdDirs.push(outDir);
@@ -103,9 +103,19 @@ test.describe('55 file_transfer job', () => {
       });
       expect(created.ok()).toBeTruthy();
 
-      const first = await waitForTerminal(ctx, (await triggerRun(ctx, [transferName])).run_id);
+      const firstRunId = (await triggerRun(ctx, [transferName])).run_id as string;
+      const first = await waitForTerminal(ctx, firstRunId);
       expect(String(first.status).toUpperCase()).toBe('PASSED');
       expect(fs.readdirSync(outDir).sort()).toEqual(['sales_east.csv', 'sales_west.csv']);
+
+      // Run detail surfaces the transfer summary: copied count and the destination path.
+      await authedPage.goto('/');
+      await authedPage.locator('[data-testid="nav-tab-history"]').click();
+      await authedPage.locator('[data-testid="history-subtab-runs"]').click();
+      await authedPage.locator(`[data-testid="history-run-row-${firstRunId}"]`).click();
+      const summary = authedPage.locator('[data-testid="run-result-file-transfer-summary"]');
+      await expect(summary).toContainText('Copied 2');
+      await expect(summary).toContainText(path.basename(outDir));
 
       // Default on_exists=fail: a second run must not silently replace staged inputs.
       const second = await waitForTerminal(ctx, (await triggerRun(ctx, [transferName])).run_id);

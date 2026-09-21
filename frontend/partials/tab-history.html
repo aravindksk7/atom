@@ -189,6 +189,13 @@
                 <tr x-show="r.error_message">
                   <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
                 </tr>
+                <!-- File transfer summary row (only when the result carries a destination_root) -->
+                <template x-if="r.mismatch_summary?.destination_root">
+                  <tr>
+                    <td colspan="9" class="text-xs text-slate-600 px-4 py-2" data-testid="run-result-file-transfer-summary"
+                        x-text="'Copied ' + (r.mismatch_summary.copied ?? 0) + ' · Skipped ' + (r.mismatch_summary.skipped ?? 0) + ' · ' + (r.mismatch_summary.bytes ?? 0) + ' bytes → ' + r.mismatch_summary.destination_root + (r.mismatch_summary.failed_file ? ' · Failed on ' + r.mismatch_summary.failed_file : '') + (r.mismatch_summary.files_truncated ? ' (first 100 files listed)' : '')"></td>
+                  </tr>
+                </template>
                 <!-- Inline mismatch diff rows -->
                 <template x-if="expandedMismatches[r.id] !== undefined">
                   <tr>
