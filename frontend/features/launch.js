@@ -833,9 +833,9 @@
         return Boolean(m.fw_location_root && m.fw_location_pattern && hasCreds && hasBound);
       }
       if (m.job_type === 'file_transfer') {
-        const sourceOk = Boolean(m.ft_source_root && m.ft_source_pattern)
+        const sourceOk = Boolean(m.ft_source_root?.trim() && m.ft_source_pattern?.trim())
           && (m.ft_source_kind === 'local' || Boolean(m.ft_source_credentials_ref));
-        const destOk = Boolean(m.ft_dest_root)
+        const destOk = Boolean(m.ft_dest_root?.trim())
           && (m.ft_dest_kind === 'local' || Boolean(m.ft_dest_credentials_ref));
         return sourceOk && destOk;
       }

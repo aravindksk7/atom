@@ -801,7 +801,7 @@
           <div class="grid-2">
             <div>
               <label class="field-label" for="a11y-launch-ft-source-kind">Location Kind</label>
-              <select x-model="jobModal.ft_source_kind" class="field-input field-select" data-testid="job-modal-ft-source-kind-select" id="a11y-launch-ft-source-kind">
+              <select x-model="jobModal.ft_source_kind" @change="jobModal.ft_source_credentials_ref = ''" class="field-input field-select" data-testid="job-modal-ft-source-kind-select" id="a11y-launch-ft-source-kind">
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
@@ -834,7 +834,7 @@
             <div class="grid-2">
               <div>
                 <label class="field-label" for="a11y-launch-ft-dest-kind">Location Kind</label>
-                <select x-model="jobModal.ft_dest_kind" class="field-input field-select" data-testid="job-modal-ft-dest-kind-select" id="a11y-launch-ft-dest-kind">
+                <select x-model="jobModal.ft_dest_kind" @change="jobModal.ft_dest_credentials_ref = ''" class="field-input field-select" data-testid="job-modal-ft-dest-kind-select" id="a11y-launch-ft-dest-kind">
                   <option value="local">local</option>
                   <option value="s3">s3</option>
                   <option value="sftp">sftp</option>
@@ -869,7 +869,7 @@
             </div>
             <div class="space-y-1">
               <label class="flex items-center gap-1 text-xs">
-                <input type="checkbox" x-model="jobModal.ft_recursive" class="rounded" data-testid="job-modal-ft-recursive-checkbox" aria-label="include subfolders" /> Include subfolders
+                <input type="checkbox" x-model="jobModal.ft_recursive" @change="if (!jobModal.ft_recursive) jobModal.ft_preserve_structure = false" class="rounded" data-testid="job-modal-ft-recursive-checkbox" aria-label="include subfolders" /> Include subfolders
               </label>
               <label class="flex items-center gap-1 text-xs">
                 <input type="checkbox" x-model="jobModal.ft_preserve_structure" :disabled="!jobModal.ft_recursive" class="rounded" data-testid="job-modal-ft-preserve-structure-checkbox" aria-label="preserve subfolder structure" /> Preserve subfolder structure
