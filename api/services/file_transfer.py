@@ -264,7 +264,13 @@ class SftpEndpoint:
         """Subset of ``paths`` that exist. Few paths are stat'ed one by one;
         from ``_SFTP_LISTING_THRESHOLD`` paths up, each parent directory is
         listed once instead (an existing sub-directory of the same name counts
-        as existing, like ``stat``)."""
+        as existing, like ``stat``).
+
+        Below the threshold existence follows ``stat`` (which follows
+        symlinks); at or above it a directory listing is used, so a broken
+        symlink at a destination path counts as existing only on the listing
+        branch. Both directions err toward NOT overwriting under
+        ``on_exists=fail``/``skip``."""
         paths = list(paths)
         if len(paths) < _SFTP_LISTING_THRESHOLD:
             return {path for path in paths if self.exists(path)}

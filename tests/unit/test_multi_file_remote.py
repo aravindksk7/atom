@@ -692,10 +692,10 @@ def _create_profile(db, **fields):
     FileServerProfileRepository(db).create(fields)
 
 
-def _sftp_profile(db, name, host, port=22):
+def _sftp_profile(db, name, host, port=22, username="svc"):
     _create_profile(
         db, name=name, kind="sftp", host=host, port=port,
-        username="svc", auth_method="password", password="pw",
+        username=username, auth_method="password", password="pw",
     )
 
 
@@ -727,10 +727,29 @@ def test_location_key_for_sftp_profiles_keys_on_host_and_port_not_profile_name(d
         key_other_host = session.location_key_for(_sftp_spec("other_host"))
         key_other_port = session.location_key_for(_sftp_spec("other_port"))
 
-    assert key_a == ("sftp", "sftp.internal", 22)
+    assert key_a == ("sftp", "sftp.internal", 22, "svc")
     assert key_a == key_b
     assert key_a != key_other_host
     assert key_a != key_other_port
+
+
+def test_location_key_for_sftp_profiles_distinguishes_accounts_on_the_same_host(db, monkeypatch) -> None:
+    """Relative roots resolve against each account's own home and chrooted
+    accounts can both use /upload, so the same host+port with a different SSH
+    username is a different location; the profile name is irrelevant."""
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda profile, spec: object())
+    _sftp_profile(db, "alice_a", "sftp.internal", username="alice")
+    _sftp_profile(db, "alice_b", "sftp.internal", username="alice")
+    _sftp_profile(db, "bob", "sftp.internal", username="bob")
+
+    with RemoteFileSourceSession(db) as session:
+        alice_a = session.location_key_for(_sftp_spec("alice_a"))
+        alice_b = session.location_key_for(_sftp_spec("alice_b"))
+        bob = session.location_key_for(_sftp_spec("bob"))
+
+    assert alice_a == alice_b
+    assert alice_a != bob
+    assert bob == ("sftp", "sftp.internal", 22, "bob")
 
 
 def test_location_key_for_s3_profiles_keys_on_normalized_endpoint_url(db, monkeypatch) -> None:
@@ -778,7 +797,7 @@ def test_location_key_for_reuses_the_cached_client_and_close_clears_profiles(db,
 
     session = RemoteFileSourceSession(db)
     session.client_for(spec)
-    assert session.location_key_for(spec) == ("sftp", "sftp.internal", 22)
+    assert session.location_key_for(spec) == ("sftp", "sftp.internal", 22, "svc")
     assert built == ["vendor_a"]
 
     session.close()

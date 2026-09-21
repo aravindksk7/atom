@@ -210,7 +210,7 @@ class RemoteFileSourceSession:
         """Where ``spec`` really points, independent of the profile's name, so
         two differently named profiles for the same server compare equal:
         ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there) or
-        ``("sftp", host, port)``. None for local specs or a spec with no
+        ``("sftp", host, port, username)``. None for local specs or a spec with no
         resolved profile."""
         if spec.kind not in ("s3", "sftp"):
             return None
@@ -219,8 +219,14 @@ class RemoteFileSourceSession:
         if profile is None:
             return None
         if spec.kind == "s3":
+            # Bucket names are treated as global per endpoint (true for AWS and
+            # MinIO); tenant-scoped gateways such as Ceph RGW would need the
+            # tenant in this key.
             return ("s3", (profile.endpoint_url or "").rstrip("/").lower())
-        return ("sftp", (profile.host or "").lower(), int(profile.port or 22))
+        # The SSH username is part of the location: relative roots resolve
+        # against each account's own home and chrooted accounts can both use
+        # the same absolute path.
+        return ("sftp", (profile.host or "").lower(), int(profile.port or 22), profile.username or "")
 
     def discover(self, spec: FileSourceSpec, *, recursive: bool = False) -> list[DiscoveredFile]:
         if spec.kind == "local":

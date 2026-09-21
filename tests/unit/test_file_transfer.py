@@ -842,6 +842,18 @@ def test_plan_allows_same_paths_on_different_locations():
     assert [entry.destination for entry in plan.to_copy] == ["/data/a.csv"]
 
 
+def test_plan_allows_same_relative_path_for_different_accounts_on_one_host():
+    """Accounts on one host resolve a relative root against their own home, so
+    the location keys differ only in the username element."""
+    source = ft.SftpEndpoint("incoming", FakeSFTP(), "alice", location_key=("sftp", "h", 22, "alice"))
+    destination = ft.SftpEndpoint("incoming", FakeSFTP(), "bob", location_key=("sftp", "h", 22, "bob"))
+    files = [DiscoveredFile(path="incoming/a.csv", file_name="a.csv", tokens={})]
+
+    plan = ft.plan_transfer(files, source, destination, on_exists="overwrite", preserve_structure=False)
+
+    assert [entry.destination for entry in plan.to_copy] == ["incoming/a.csv"]
+
+
 def test_build_endpoint_passes_the_session_location_key_to_remote_endpoints():
     from etl_framework.reconciliation.file_mapping import FileSourceSpec
 
