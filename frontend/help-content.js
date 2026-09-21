@@ -316,12 +316,35 @@
           },
         },
         {
+          title: 'Scenario 7: Staging Files with File Transfer Before a Reconciliation',
+          text: 'Create a file_transfer job with a source (local, S3, SFTP, or SCP folder plus a file-name pattern) and a destination (local, S3, SFTP, or SCP folder). Files stream from source to destination and are size-checked; a .part temp name means watchers never see half-written files. Point a multi_file reconciliation at the same destination. on_exists controls collisions: fail (default) stops before writing anything, skip resumes idempotently after a restart, overwrite replaces. Include subfolders walks nested folders; Preserve subfolder structure keeps their relative paths. SCP is really SFTP, and the destination file server needs write permission.',
+          where: 'Launch -> Job Editor -> file_transfer, then Sequences -> dependencies',
+          when: 'Reconciliation or another job needs files copied from one server or bucket to another first.',
+          uiMockup: { title: 'Stage vendor files to S3', elements: [
+            { type: 'select', label: 'Source', value: 'SFTP: vendor-sftp' },
+            { type: 'input', label: 'Pattern', value: 'SALES_*.csv' },
+            { type: 'select', label: 'Destination', value: 'S3: s3://recon-staging/sales' },
+            { type: 'select', label: 'If a file exists', value: 'skip' },
+            { type: 'dag', label: 'wait-for-sales', value: 'stage-sales' },
+            { type: 'button', label: 'Save transfer', highlight: true },
+          ] },
+          cli: {
+            command: 'atom run "Stage Sales Files" --target-type sequence --source-env prod',
+            description: 'Runs the saved sequence containing the file_transfer step. Prerequisites: ATOM_API_URL, launch-capable ATOM_API_TOKEN, file server profiles with read access to the source and write access to the destination, and the sequence.',
+            params: [
+              { flag: '--target-type sequence', desc: 'Launches the dependency DAG (watcher, transfer, reconciliation).' },
+              { flag: '--source-env prod', desc: 'Environment for any downstream reconciliation step.' },
+            ],
+            sampleOutput: 'PASSED run=run-xfer7 passed=3 failed=0 error=0 exit=0',
+          },
+        },
+        {
           title: 'Which Job Type When?',
-          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; and AWS or enterprise adapter types when execution belongs to those systems.',
+          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; file_transfer to copy files between local, S3, and SFTP/SCP locations; and AWS or enterprise adapter types when execution belongs to those systems.',
           where: 'Launch -> Job Editor -> Job Type',
           when: 'Choosing the execution engine and required fields for a new job.',
           uiMockup: { title: 'Job type decision matrix', elements: [
-            { type: 'table', label: 'Choose by workload', columns: ['Need', 'Job type'], rows: [['Row comparison', 'reconciliation'], ['REST data', 'api_reconciliation'], ['Batch files', 'multi_file_reconciliation'], ['Arrival gate', 'file_watcher']] },
+            { type: 'table', label: 'Choose by workload', columns: ['Need', 'Job type'], rows: [['Row comparison', 'reconciliation'], ['REST data', 'api_reconciliation'], ['Batch files', 'multi_file_reconciliation'], ['Arrival gate', 'file_watcher'], ['Copy files', 'file_transfer']] },
             { type: 'button', label: 'Use selected type', highlight: true },
           ] },
           cli: {
