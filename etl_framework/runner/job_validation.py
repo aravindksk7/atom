@@ -283,7 +283,7 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
         _validate_file_watcher(params, issues)
     elif job_type == "file_transfer":
         _validate_file_transfer(params, issues)
-    query =str(_get(job, "query", "") or "")
+    query = str(_get(job, "query", "") or "")
     key_columns = list(_get(job, "key_columns", []) or [])
 
     if not str(_get(job, "name", "") or "").strip():

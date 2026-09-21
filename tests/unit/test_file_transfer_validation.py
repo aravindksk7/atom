@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from api.schemas import JobDefinition
+from api.services.job_env_validation import validate_env_requirements
 from etl_framework.runner.job_validation import validate_job_definition
 
 
@@ -51,3 +53,15 @@ def test_validate_job_definition_reports_field_level_issues():
     issues = validate_job_definition(payload)
     fields = {issue.field for issue in issues}
     assert {"params.source.root", "params.source.pattern", "params.on_exists"} <= fields
+
+
+def test_file_transfer_job_does_not_require_a_target_env():
+    job = JobDefinition(**_job())
+    validate_env_requirements([{"job_name": "stage_sales"}], {"stage_sales": job}, "")
+
+
+def test_reconciliation_job_still_requires_a_target_env():
+    job = JobDefinition(name="orders", query="SELECT 1", key_columns=["id"])
+    with pytest.raises(HTTPException) as exc_info:
+        validate_env_requirements([{"job_name": "orders"}], {"orders": job}, "")
+    assert exc_info.value.status_code == 422

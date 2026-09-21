@@ -12,7 +12,7 @@ from fastapi import HTTPException
 # design spec); everything else needs a target_env to compare against.
 SINGLE_ENV_JOB_TYPES = {
     "bo_report", "freshness", "profile", "automic_job",
-    "dbt_artifact", "schema_snapshot", "bo_job", "ds_job",
+    "dbt_artifact", "schema_snapshot", "bo_job", "ds_job", "file_transfer",
 }
 
 
