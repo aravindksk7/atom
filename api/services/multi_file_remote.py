@@ -170,6 +170,9 @@ class RemoteFileSourceSession:
         # Kept for API stability / potential future use by other methods.
         self._db = db
         self._clients: dict[tuple[str, str | None], Any] = {}
+        # Resolved profile per client key (None when the spec has no profile);
+        # feeds location_key_for.
+        self._profiles: dict[tuple[str, str | None], ResolvedFileServerProfile | None] = {}
 
     def _client_for(self, spec: FileSourceSpec):
         key = (spec.kind, spec.credentials_ref)
@@ -194,6 +197,7 @@ class RemoteFileSourceSession:
                 self._clients[key] = build_sftp_client(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
+            self._profiles[key] = profile
         return self._clients[key]
 
     def client_for(self, spec: FileSourceSpec):
@@ -201,6 +205,22 @@ class RemoteFileSourceSession:
         ``api.services.file_transfer``). Same one-client-per-(kind,
         credentials_ref) caching as every other call on this session."""
         return self._client_for(spec)
+
+    def location_key_for(self, spec: FileSourceSpec) -> tuple | None:
+        """Where ``spec`` really points, independent of the profile's name, so
+        two differently named profiles for the same server compare equal:
+        ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there) or
+        ``("sftp", host, port)``. None for local specs or a spec with no
+        resolved profile."""
+        if spec.kind not in ("s3", "sftp"):
+            return None
+        self._client_for(spec)
+        profile = self._profiles.get((spec.kind, spec.credentials_ref))
+        if profile is None:
+            return None
+        if spec.kind == "s3":
+            return ("s3", (profile.endpoint_url or "").rstrip("/").lower())
+        return ("sftp", (profile.host or "").lower(), int(profile.port or 22))
 
     def discover(self, spec: FileSourceSpec, *, recursive: bool = False) -> list[DiscoveredFile]:
         if spec.kind == "local":
@@ -274,6 +294,7 @@ class RemoteFileSourceSession:
                     pass  # one bad client must not leave the others unclosed
         finally:
             self._clients.clear()
+            self._profiles.clear()
 
     def __enter__(self) -> "RemoteFileSourceSession":
         return self

@@ -132,12 +132,17 @@ class S3Endpoint:
 
     kind = "s3"
 
-    def __init__(self, root: str, client: Any, credentials_ref: str | None) -> None:
+    def __init__(
+        self, root: str, client: Any, credentials_ref: str | None, *, location_key: tuple | None = None,
+    ) -> None:
         parsed = urlparse(root)
         if parsed.scheme != "s3" or not parsed.netloc:
             raise ValueError("S3 root must be s3://bucket/prefix")
         self.client = client
         self.credentials_ref = credentials_ref
+        # Where the profile really points (see RemoteFileSourceSession.location_key_for);
+        # identity() prefers it so two profiles for one bucket compare equal.
+        self.location_key = location_key
         self.bucket = parsed.netloc
         prefix = parsed.path.lstrip("/")
         self.prefix = prefix if not prefix or prefix.endswith("/") else prefix + "/"
@@ -162,7 +167,8 @@ class S3Endpoint:
 
     def identity(self, path: str) -> tuple:
         bucket, key = self._split(path)
-        return ("s3", self.credentials_ref, f"{bucket}/{key}")
+        location = self.location_key if self.location_key is not None else self.credentials_ref
+        return ("s3", location, f"{bucket}/{key}")
 
     def exists(self, path: str) -> bool:
         import botocore.exceptions
@@ -201,9 +207,14 @@ class SftpEndpoint:
 
     kind = "sftp"
 
-    def __init__(self, root: str, client: Any, credentials_ref: str | None) -> None:
+    def __init__(
+        self, root: str, client: Any, credentials_ref: str | None, *, location_key: tuple | None = None,
+    ) -> None:
         self.client = client
         self.credentials_ref = credentials_ref
+        # Where the profile really points (see RemoteFileSourceSession.location_key_for);
+        # identity() prefers it so two profiles for one host compare equal.
+        self.location_key = location_key
         self.root = root.rstrip("/") or "/"
 
     def relative_of(self, file: DiscoveredFile) -> str:
@@ -221,7 +232,8 @@ class SftpEndpoint:
         return target
 
     def identity(self, path: str) -> tuple:
-        return ("sftp", self.credentials_ref, posixpath.normpath(path))
+        location = self.location_key if self.location_key is not None else self.credentials_ref
+        return ("sftp", location, posixpath.normpath(path))
 
     def exists(self, path: str) -> bool:
         try:
@@ -482,8 +494,9 @@ def build_endpoint(session: Any, spec: Any):
     if spec.kind == "local":
         return LocalEndpoint(spec.root)
     client = session.client_for(spec)
+    location_key = session.location_key_for(spec)
     if spec.kind == "s3":
-        return S3Endpoint(spec.root, client, spec.credentials_ref)
+        return S3Endpoint(spec.root, client, spec.credentials_ref, location_key=location_key)
     if spec.kind == "sftp":
-        return SftpEndpoint(spec.root, client, spec.credentials_ref)
+        return SftpEndpoint(spec.root, client, spec.credentials_ref, location_key=location_key)
     raise ValueError(f"Unsupported file_transfer location kind: {spec.kind}")

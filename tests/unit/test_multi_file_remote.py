@@ -686,3 +686,100 @@ def test_remote_file_source_session_close_survives_a_failing_client(db) -> None:
     assert failing.close_attempted is True
     assert healthy.close_attempted is True
     assert session._clients == {}
+
+
+def _create_profile(db, **fields):
+    FileServerProfileRepository(db).create(fields)
+
+
+def _sftp_profile(db, name, host, port=22):
+    _create_profile(
+        db, name=name, kind="sftp", host=host, port=port,
+        username="svc", auth_method="password", password="pw",
+    )
+
+
+def _s3_profile(db, name, endpoint_url=None):
+    fields = {"name": name, "kind": "s3", "aws_access_key_id": f"AKIA_{name}"}
+    if endpoint_url is not None:
+        fields["endpoint_url"] = endpoint_url
+    _create_profile(db, **fields)
+
+
+def _sftp_spec(ref):
+    return FileSourceSpec(kind="sftp", root="/data", pattern="*.csv", credentials_ref=ref)
+
+
+def _s3_spec(ref):
+    return FileSourceSpec(kind="s3", root="s3://bkt/x", pattern="*.csv", credentials_ref=ref)
+
+
+def test_location_key_for_sftp_profiles_keys_on_host_and_port_not_profile_name(db, monkeypatch) -> None:
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", lambda profile, spec: object())
+    _sftp_profile(db, "vendor_a", "sftp.internal")
+    _sftp_profile(db, "vendor_b", "SFTP.Internal")
+    _sftp_profile(db, "other_host", "sftp.other")
+    _sftp_profile(db, "other_port", "sftp.internal", port=2222)
+
+    with RemoteFileSourceSession(db) as session:
+        key_a = session.location_key_for(_sftp_spec("vendor_a"))
+        key_b = session.location_key_for(_sftp_spec("vendor_b"))
+        key_other_host = session.location_key_for(_sftp_spec("other_host"))
+        key_other_port = session.location_key_for(_sftp_spec("other_port"))
+
+    assert key_a == ("sftp", "sftp.internal", 22)
+    assert key_a == key_b
+    assert key_a != key_other_host
+    assert key_a != key_other_port
+
+
+def test_location_key_for_s3_profiles_keys_on_normalized_endpoint_url(db, monkeypatch) -> None:
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda profile, spec: object())
+    _s3_profile(db, "aws_a")
+    _s3_profile(db, "aws_b")
+    _s3_profile(db, "minio_a", "http://minio:9000")
+    _s3_profile(db, "minio_b", "HTTP://MINIO:9000/")
+    _s3_profile(db, "minio_other", "http://minio:9100")
+
+    with RemoteFileSourceSession(db) as session:
+        aws_a = session.location_key_for(_s3_spec("aws_a"))
+        aws_b = session.location_key_for(_s3_spec("aws_b"))
+        minio_a = session.location_key_for(_s3_spec("minio_a"))
+        minio_b = session.location_key_for(_s3_spec("minio_b"))
+        minio_other = session.location_key_for(_s3_spec("minio_other"))
+
+    assert aws_a == ("s3", "")
+    assert aws_a == aws_b
+    assert minio_a == ("s3", "http://minio:9000")
+    assert minio_a == minio_b
+    assert aws_a != minio_a
+    assert minio_a != minio_other
+
+
+def test_location_key_for_is_none_for_local_specs_and_missing_profiles(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("api.services.multi_file_remote.resolve_file_server_profile", lambda db_, spec: None)
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", lambda profile, spec: object())
+
+    with RemoteFileSourceSession(db) as session:
+        assert session.location_key_for(FileSourceSpec(kind="local", root=str(tmp_path), pattern="*")) is None
+        assert session.location_key_for(_s3_spec("ref_without_profile")) is None
+
+
+def test_location_key_for_reuses_the_cached_client_and_close_clears_profiles(db, monkeypatch) -> None:
+    built: list[str] = []
+
+    def _build(profile, spec):
+        built.append(profile.name)
+        return object()
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_sftp_client", _build)
+    _sftp_profile(db, "vendor_a", "sftp.internal")
+    spec = _sftp_spec("vendor_a")
+
+    session = RemoteFileSourceSession(db)
+    session.client_for(spec)
+    assert session.location_key_for(spec) == ("sftp", "sftp.internal", 22)
+    assert built == ["vendor_a"]
+
+    session.close()
+    assert session._clients == {} and session._profiles == {}

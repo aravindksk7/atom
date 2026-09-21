@@ -234,6 +234,26 @@ def test_s3_endpoint_identity_includes_credentials_ref(s3_raw):
     assert a.identity("s3://bkt/out/x%20y.csv") == a.identity("s3://bkt/out/x y.csv")
 
 
+def test_s3_endpoint_identity_uses_location_key_over_credentials_ref(s3_raw):
+    path = "s3://bkt/out/x.csv"
+    same_a = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-a", location_key=("s3", ""))
+    same_b = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-b", location_key=("s3", ""))
+    other = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-a", location_key=("s3", "http://minio:9000"))
+
+    assert same_a.identity(path) == same_b.identity(path)
+    assert same_a.identity(path) != other.identity(path)
+
+
+def test_s3_endpoint_identity_falls_back_to_credentials_ref_without_location_key(s3_raw):
+    path = "s3://bkt/out/x.csv"
+    a = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-a")
+    b = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-b")
+    a_again = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-a", location_key=None)
+
+    assert a.identity(path) != b.identity(path)
+    assert a.identity(path) == a_again.identity(path)
+
+
 def test_s3_endpoint_root_with_literal_percent_round_trips(s3_raw):
     from etl_framework.reconciliation.file_mapping import discover_s3_files
 
@@ -372,6 +392,23 @@ def test_sftp_endpoint_identity_normalizes_path_and_keys_on_credentials_ref():
     b = ft.SftpEndpoint("/out", FakeSFTP(), "other")
     assert a.identity("/out/sub/../x.csv") == a.identity("/out/x.csv")
     assert a.identity("/out/x.csv") != b.identity("/out/x.csv")
+
+
+def test_sftp_endpoint_identity_uses_location_key_over_credentials_ref():
+    path = "/out/x.csv"
+    same_a = ft.SftpEndpoint("/out", FakeSFTP(), "vendor-a", location_key=("sftp", "h", 22))
+    same_b = ft.SftpEndpoint("/out", FakeSFTP(), "vendor-b", location_key=("sftp", "h", 22))
+    other = ft.SftpEndpoint("/out", FakeSFTP(), "vendor-a", location_key=("sftp", "h", 2222))
+
+    assert same_a.identity(path) == same_b.identity(path)
+    assert same_a.identity(path) != other.identity(path)
+
+
+def test_sftp_endpoint_identity_falls_back_to_credentials_ref_without_location_key():
+    a = ft.SftpEndpoint("/out", FakeSFTP(), "vendor-a", location_key=None)
+    b = ft.SftpEndpoint("/out", FakeSFTP(), "vendor-b", location_key=None)
+    assert a.identity("/out/x.csv") != b.identity("/out/x.csv")
+    assert a.identity("/out/x.csv") == ft.SftpEndpoint("/out", FakeSFTP(), "vendor-a").identity("/out/x.csv")
 
 
 def test_sftp_endpoint_typed_posix_rename_error_propagates_and_keeps_destination():
@@ -570,6 +607,53 @@ def test_plan_on_exists_fail_truncates_the_collision_list(allowed_dir):
 
     assert "already contains 7 file(s)" in str(excinfo.value)
     assert "and 2 more" in str(excinfo.value)
+
+
+def _sftp_listing(*names: str) -> list[DiscoveredFile]:
+    return [DiscoveredFile(path=f"/data/{name}", file_name=name, tokens={}) for name in names]
+
+
+def test_plan_rejects_same_object_reached_through_differently_named_profiles():
+    key = ("sftp", "sftp.internal", 22)
+    source = ft.SftpEndpoint("/data", FakeSFTP(), "vendor-a", location_key=key)
+    destination = ft.SftpEndpoint("/data", FakeSFTP(), "vendor-b", location_key=key)
+
+    with pytest.raises(ft.TransferError, match="same object"):
+        ft.plan_transfer(
+            _sftp_listing("a.csv"), source, destination, on_exists="overwrite", preserve_structure=False,
+        )
+
+
+def test_plan_allows_same_paths_on_different_locations():
+    source = ft.SftpEndpoint("/data", FakeSFTP(), "vendor-a", location_key=("sftp", "host-1", 22))
+    destination = ft.SftpEndpoint("/data", FakeSFTP(), "vendor-b", location_key=("sftp", "host-2", 22))
+
+    plan = ft.plan_transfer(
+        _sftp_listing("a.csv"), source, destination, on_exists="overwrite", preserve_structure=False,
+    )
+
+    assert [entry.destination for entry in plan.to_copy] == ["/data/a.csv"]
+
+
+def test_build_endpoint_passes_the_session_location_key_to_remote_endpoints():
+    from etl_framework.reconciliation.file_mapping import FileSourceSpec
+
+    class _Session:
+        def client_for(self, spec):
+            return FakeSFTP() if spec.kind == "sftp" else object()
+
+        def location_key_for(self, spec):
+            return (spec.kind, "loc")
+
+    sftp = ft.build_endpoint(
+        _Session(), FileSourceSpec(kind="sftp", root="/data", pattern="*", credentials_ref="vendor"),
+    )
+    s3 = ft.build_endpoint(
+        _Session(), FileSourceSpec(kind="s3", root="s3://bkt/x", pattern="*", credentials_ref="aws"),
+    )
+
+    assert sftp.location_key == ("sftp", "loc") and sftp.credentials_ref == "vendor"
+    assert s3.location_key == ("s3", "loc") and s3.credentials_ref == "aws"
 
 
 # -- Windows-illegal destination names ---------------------------------------
