@@ -1572,6 +1572,7 @@
             <option value="cross_job_assertion">cross_job_assertion</option>
             <option value="api_reconciliation">api_reconciliation</option>
             <option value="file_watcher">file_watcher</option>
+            <option value="file_transfer">file_transfer</option>
           </select>
         </div>
         <div x-show="['reconciliation','freshness','schema_snapshot','profile'].includes(jobModal.job_type)">
@@ -2011,6 +2012,91 @@
           </div>
           <p class="text-xs text-slate-400">
             At least one of Max Tries or Window End is required — an unbounded watch is not allowed. "scp" targets are treated as SFTP under the hood (same credentials shape).
+          </p>
+        </div>
+        <!-- File Transfer params -->
+        <div x-show="jobModal.job_type === 'file_transfer'" class="space-y-3">
+          <p class="text-xs font-medium text-slate-500">Source</p>
+          <div class="grid-2">
+            <div>
+              <label class="field-label" for="a11y-launch-ft-source-kind">Location Kind</label>
+              <select x-model="jobModal.ft_source_kind" class="field-input field-select" data-testid="job-modal-ft-source-kind-select" id="a11y-launch-ft-source-kind">
+                <option value="local">local</option>
+                <option value="s3">s3</option>
+                <option value="sftp">sftp</option>
+                <option value="scp">scp</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="a11y-launch-ft-source-root">Folder / Bucket Path</label>
+              <input x-model="jobModal.ft_source_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix"
+                     data-testid="job-modal-ft-source-root-input" id="a11y-launch-ft-source-root" />
+            </div>
+            <div>
+              <label class="field-label" for="a11y-launch-ft-source-pattern">File Name Pattern</label>
+              <input x-model="jobModal.ft_source_pattern" class="field-input" placeholder="SALES_*.csv"
+                     data-testid="job-modal-ft-source-pattern-input" id="a11y-launch-ft-source-pattern" />
+            </div>
+            <div x-show="jobModal.ft_source_kind !== 'local'">
+              <label class="field-label" for="a11y-launch-ft-source-credentials-ref">File Server</label>
+              <select x-model="jobModal.ft_source_credentials_ref" class="field-input field-select"
+                      data-testid="job-modal-ft-source-credentials-ref-select" id="a11y-launch-ft-source-credentials-ref">
+                <option value="">— select a file server —</option>
+                <template x-for="fs in fileServers.filter(f => jobModal.ft_source_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <option :value="fs.name" x-text="fs.name"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <p class="text-xs font-medium text-slate-500 mb-2">Destination</p>
+            <div class="grid-2">
+              <div>
+                <label class="field-label" for="a11y-launch-ft-dest-kind">Location Kind</label>
+                <select x-model="jobModal.ft_dest_kind" class="field-input field-select" data-testid="job-modal-ft-dest-kind-select" id="a11y-launch-ft-dest-kind">
+                  <option value="local">local</option>
+                  <option value="s3">s3</option>
+                  <option value="sftp">sftp</option>
+                  <option value="scp">scp</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label" for="a11y-launch-ft-dest-root">Folder / Bucket Path</label>
+                <input x-model="jobModal.ft_dest_root" class="field-input" placeholder="/data/staged or s3://bucket/prefix"
+                       data-testid="job-modal-ft-dest-root-input" id="a11y-launch-ft-dest-root" />
+              </div>
+              <div x-show="jobModal.ft_dest_kind !== 'local'">
+                <label class="field-label" for="a11y-launch-ft-dest-credentials-ref">File Server</label>
+                <select x-model="jobModal.ft_dest_credentials_ref" class="field-input field-select"
+                        data-testid="job-modal-ft-dest-credentials-ref-select" id="a11y-launch-ft-dest-credentials-ref">
+                  <option value="">— select a file server —</option>
+                  <template x-for="fs in fileServers.filter(f => jobModal.ft_dest_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                    <option :value="fs.name" x-text="fs.name"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="grid-2 border-t border-slate-200 pt-3">
+            <div>
+              <label class="field-label" for="a11y-launch-ft-on-exists">If a file already exists at the destination</label>
+              <select x-model="jobModal.ft_on_exists" class="field-input field-select" data-testid="job-modal-ft-on-exists-select" id="a11y-launch-ft-on-exists">
+                <option value="fail">fail (default)</option>
+                <option value="skip">skip</option>
+                <option value="overwrite">overwrite</option>
+              </select>
+            </div>
+            <div class="space-y-1">
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.ft_recursive" class="rounded" data-testid="job-modal-ft-recursive-checkbox" aria-label="include subfolders" /> Include subfolders
+              </label>
+              <label class="flex items-center gap-1 text-xs">
+                <input type="checkbox" x-model="jobModal.ft_preserve_structure" :disabled="!jobModal.ft_recursive" class="rounded" data-testid="job-modal-ft-preserve-structure-checkbox" aria-label="preserve subfolder structure" /> Preserve subfolder structure
+              </label>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400">
+            Copies every file under the source that matches the pattern. The destination file server needs write permission. "scp" targets are treated as SFTP under the hood. Use "skip" to make a restarted sequence resume without failing on files already copied. Point a downstream reconciliation job at the same destination.
           </p>
         </div>
         <!-- Freshness params -->

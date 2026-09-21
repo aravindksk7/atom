@@ -200,6 +200,9 @@
         fw_location_kind: 'local', fw_location_root: '', fw_location_pattern: '', fw_credentials_ref: '',
         fw_content_match_text: '', fw_content_is_regex: false,
         fw_poll_interval_seconds: 30, fw_max_tries: '', fw_window_start: '', fw_window_end: '',
+        ft_source_kind: 'local', ft_source_root: '', ft_source_pattern: '', ft_source_credentials_ref: '',
+        ft_dest_kind: 'local', ft_dest_root: '', ft_dest_credentials_ref: '',
+        ft_on_exists: 'fail', ft_recursive: false, ft_preserve_structure: false,
       };
       this.showJobModalCompare = false;
       // Prior Test Compare results belong to whichever job produced them --
@@ -373,6 +376,16 @@
         fw_max_tries: job.params?.max_tries ?? '',
         fw_window_start: job.params?.window_start || '',
         fw_window_end: job.params?.window_end || '',
+        ft_source_kind: job.params?.source?.kind || 'local',
+        ft_source_root: job.params?.source?.root || '',
+        ft_source_pattern: job.params?.source?.pattern || '',
+        ft_source_credentials_ref: job.params?.source?.credentials_ref || '',
+        ft_dest_kind: job.params?.destination?.kind || 'local',
+        ft_dest_root: job.params?.destination?.root || '',
+        ft_dest_credentials_ref: job.params?.destination?.credentials_ref || '',
+        ft_on_exists: job.params?.on_exists || 'fail',
+        ft_recursive: job.params?.recursive || false,
+        ft_preserve_structure: job.params?.preserve_structure || false,
         mfPreviewLoading: false,
         mfPreviewResult: null,
         mfPreviewError: '',
@@ -682,6 +695,23 @@
         if (m.fw_window_start) params.window_start = m.fw_window_start;
         if (m.fw_window_end) params.window_end = m.fw_window_end;
       }
+      if (m.job_type === 'file_transfer') {
+        params.source = {
+          kind: m.ft_source_kind || 'local',
+          root: m.ft_source_root,
+          pattern: m.ft_source_pattern,
+        };
+        if (m.ft_source_kind !== 'local' && m.ft_source_credentials_ref) {
+          params.source.credentials_ref = m.ft_source_credentials_ref;
+        }
+        params.destination = { kind: m.ft_dest_kind || 'local', root: m.ft_dest_root };
+        if (m.ft_dest_kind !== 'local' && m.ft_dest_credentials_ref) {
+          params.destination.credentials_ref = m.ft_dest_credentials_ref;
+        }
+        params.on_exists = m.ft_on_exists || 'fail';
+        params.recursive = Boolean(m.ft_recursive);
+        params.preserve_structure = Boolean(m.ft_recursive && m.ft_preserve_structure);
+      }
       const keyColumns = ['reconciliation', 'bo_report', 'api_reconciliation'].includes(m.job_type)
         ? m.key_columns_raw.split(',').map(s => s.trim()).filter(Boolean)
         : [];
@@ -801,6 +831,13 @@
         const hasBound = Boolean(m.fw_max_tries !== '' || m.fw_window_end);
         const hasCreds = m.fw_location_kind === 'local' || Boolean(m.fw_credentials_ref);
         return Boolean(m.fw_location_root && m.fw_location_pattern && hasCreds && hasBound);
+      }
+      if (m.job_type === 'file_transfer') {
+        const sourceOk = Boolean(m.ft_source_root && m.ft_source_pattern)
+          && (m.ft_source_kind === 'local' || Boolean(m.ft_source_credentials_ref));
+        const destOk = Boolean(m.ft_dest_root)
+          && (m.ft_dest_kind === 'local' || Boolean(m.ft_dest_credentials_ref));
+        return sourceOk && destOk;
       }
       return true;
     },
