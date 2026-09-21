@@ -846,3 +846,71 @@ def test_discover_sftp_files_recursive_stops_at_depth_cap() -> None:
 
     assert discover_sftp_files(EndlessSFTPClient(), "/x", "*.csv", recursive=True) == []
     assert len(calls) == _MAX_RECURSION_DEPTH + 1
+
+
+def test_discover_local_files_recursive_does_not_follow_links_out_of_root(tmp_path) -> None:
+    import os
+    import subprocess
+    import sys
+
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "inside.csv").write_text("x", encoding="utf-8")
+    (outside / "secret.csv").write_text("x", encoding="utf-8")
+    link = root / "link"
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip("cannot create a directory junction here")
+        else:
+            os.symlink(outside, link, target_is_directory=True)
+    except OSError:
+        pytest.skip("cannot create a directory link here")
+
+    deep = discover_local_files(root, "*.csv", recursive=True)
+
+    assert [f.file_name for f in deep] == ["inside.csv"]
+
+
+def test_discover_local_files_recursive_raises_for_missing_root(tmp_path) -> None:
+    with pytest.raises(OSError):
+        discover_local_files(tmp_path / "missing", "*.csv", recursive=True)
+
+
+def test_discover_local_files_recursive_stops_at_depth_cap(tmp_path) -> None:
+    from etl_framework.reconciliation.file_mapping import _MAX_RECURSION_DEPTH
+
+    deepest = tmp_path.joinpath(*["d"] * _MAX_RECURSION_DEPTH)
+    too_deep = deepest / "d"
+    too_deep.mkdir(parents=True)
+    (deepest / "keep.csv").write_text("x", encoding="utf-8")
+    (too_deep / "drop.csv").write_text("x", encoding="utf-8")
+
+    found = discover_local_files(tmp_path, "*.csv", recursive=True)
+
+    assert [f.file_name for f in found] == ["keep.csv"]
+
+
+def test_discover_s3_files_recursive_stops_at_depth_cap() -> None:
+    from etl_framework.reconciliation.file_mapping import _MAX_RECURSION_DEPTH, discover_s3_files
+
+    keep_key = "daily/" + "/".join(["d"] * _MAX_RECURSION_DEPTH + ["keep.csv"])
+    drop_key = "daily/" + "/".join(["d"] * (_MAX_RECURSION_DEPTH + 1) + ["drop.csv"])
+
+    class FakeS3Client:
+        def get_paginator(self, name):
+            return self
+
+        def paginate(self, **kwargs):
+            return [{"Contents": [{"Key": keep_key}, {"Key": drop_key}]}]
+
+    found = discover_s3_files(FakeS3Client(), "s3://bkt/daily", "*.csv", recursive=True)
+
+    assert [f.file_name for f in found] == ["keep.csv"]

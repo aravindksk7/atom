@@ -642,7 +642,7 @@ def test_remote_file_source_session_discover_recursive_local(db, tmp_path, monke
     spec = FileSourceSpec(kind="local", root=str(tmp_path), pattern="*.csv")
 
     assert [f.file_name for f in session.discover(spec)] == ["top.csv"]
-    # Discovery sorts by full path, so the "sub/" folder sorts before "top.csv".
+    # Local recursive discovery sorts by path string, so "sub/nested.csv" comes before "top.csv".
     assert [f.file_name for f in session.discover(spec, recursive=True)] == ["nested.csv", "top.csv"]
 
 
@@ -655,9 +655,11 @@ def test_remote_file_source_session_client_for_is_public_and_cached(db, monkeypa
 
     monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _fake_build_s3_client)
     monkeypatch.setattr("api.services.multi_file_remote.resolve_file_server_profile", lambda db_, spec: None)
+    monkeypatch.setattr("api.services.multi_file_remote.discover_s3_files", lambda client, root, pattern, **kwargs: [])
 
     session = RemoteFileSourceSession(db)
     spec = FileSourceSpec(kind="s3", root="s3://bkt/x", pattern="*", credentials_ref="prof")
 
+    assert session.discover(spec) == []
     assert session.client_for(spec) is session.client_for(spec)
     assert built == ["prof"]

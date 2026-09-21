@@ -183,11 +183,17 @@ class DiscoveredFile:
 _MAX_RECURSION_DEPTH = 20
 
 
+def _raise_walk_error(exc: OSError) -> None:
+    raise exc
+
+
 def discover_local_files(root: Path, pattern: str, *, recursive: bool = False) -> list[DiscoveredFile]:
     """Match files under ``root`` against ``pattern``. By default only files
     directly under ``root`` are considered; ``recursive=True`` also walks
-    subfolders (up to ``_MAX_RECURSION_DEPTH`` levels, symlinks not followed).
-    ``pattern`` always matches the basename.
+    subfolders (up to ``_MAX_RECURSION_DEPTH`` levels). Subdirectories that
+    resolve outside ``root`` (symlinks, Windows junctions) are not entered.
+    An unreadable or missing ``root`` raises ``OSError``, as in the
+    non-recursive case. ``pattern`` always matches the basename.
 
     ``root`` must already be a trusted, resolved directory -- callers outside
     this module (e.g. ``RunExecutor``) are responsible for allow-listing it
@@ -197,14 +203,23 @@ def discover_local_files(root: Path, pattern: str, *, recursive: bool = False) -
     regex = compile_token_pattern(pattern)
     root = Path(root)
     if recursive:
+        root_resolved = root.resolve()
         candidates: list[Path] = []
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames.sort()
+        for dirpath, dirnames, filenames in os.walk(root, onerror=_raise_walk_error):
+            dirnames[:] = [
+                d for d in dirnames
+                if (Path(dirpath) / d).resolve().is_relative_to(root_resolved)
+            ]
             depth = len(Path(dirpath).relative_to(root).parts)
-            if depth >= _MAX_RECURSION_DEPTH:
+            if depth >= _MAX_RECURSION_DEPTH and dirnames:
+                logger.warning(
+                    "Recursive discovery under %s stopped at the %d-level depth cap; deeper folders were skipped",
+                    root,
+                    _MAX_RECURSION_DEPTH,
+                )
                 dirnames[:] = []
             candidates.extend(Path(dirpath) / name for name in filenames)
-        candidates.sort()
+        candidates.sort(key=str)
     else:
         candidates = sorted(root.iterdir())
     discovered: list[DiscoveredFile] = []
@@ -239,6 +254,7 @@ def discover_s3_files(client: Any, root: str, pattern: str, *, recursive: bool =
         prefix += "/"
     regex = compile_token_pattern(pattern)
     discovered: list[DiscoveredFile] = []
+    depth_cap_hit = False
     paginator = client.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for item in page.get("Contents", []) or []:
@@ -249,6 +265,13 @@ def discover_s3_files(client: Any, root: str, pattern: str, *, recursive: bool =
             if "/" in relative and not recursive:
                 continue
             if relative.count("/") > _MAX_RECURSION_DEPTH:
+                if not depth_cap_hit:
+                    depth_cap_hit = True
+                    logger.warning(
+                        "Recursive discovery under %s stopped at the %d-level depth cap; deeper keys were skipped",
+                        root,
+                        _MAX_RECURSION_DEPTH,
+                    )
                 continue
             file_name = Path(relative).name
             match = regex.match(file_name)
@@ -281,6 +304,13 @@ def discover_sftp_files(client: Any, root: str, pattern: str, *, recursive: bool
             if recursive and mode and stat.S_ISDIR(mode):
                 if depth < _MAX_RECURSION_DEPTH:
                     _walk(path, depth + 1)
+                else:
+                    logger.warning(
+                        "Recursive discovery under %s stopped at the %d-level depth cap; %s was not entered",
+                        root,
+                        _MAX_RECURSION_DEPTH,
+                        path,
+                    )
                 continue
             if mode and not stat.S_ISREG(mode):
                 continue
