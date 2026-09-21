@@ -271,3 +271,88 @@ def test_s3_endpoint_exists_reraises_non_404_client_errors():
 def test_s3_endpoint_exists_returns_false_on_404():
     endpoint = ft.S3Endpoint("s3://bkt/out", _HeadFails("404"), "p")
     assert endpoint.exists("s3://bkt/out/x.csv") is False
+
+
+# -- SftpEndpoint ------------------------------------------------------------
+
+def test_sftp_endpoint_relative_of_and_destination_for():
+    endpoint = ft.SftpEndpoint("/in/", FakeSFTP(), "vendor")
+    file = DiscoveredFile(path="/in/sub/a.csv", file_name="a.csv", tokens={})
+    assert endpoint.relative_of(file) == "sub/a.csv"
+    assert ft.SftpEndpoint("/out", FakeSFTP(), "vendor").destination_for("a/b.csv") == "/out/a/b.csv"
+
+
+def test_sftp_endpoint_write_creates_parent_dirs_and_renames_part_file():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("a/b/x.csv")
+
+    endpoint.write(dest, io.BytesIO(b"hello"))
+
+    assert fake.files == {"/out/a/b/x.csv": b"hello"}
+    assert {"/out", "/out/a", "/out/a/b"} <= fake.dirs
+    assert endpoint.exists(dest)
+    assert endpoint.size(dest) == 5
+    with endpoint.open_read(dest) as fh:
+        assert fh.read() == b"hello"
+
+
+def test_sftp_endpoint_write_overwrites_via_posix_rename():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    endpoint.write(dest, io.BytesIO(b"old"))
+    endpoint.write(dest, io.BytesIO(b"newer"))
+    assert fake.files == {"/out/x.csv": b"newer"}
+
+
+def test_sftp_endpoint_write_falls_back_when_posix_rename_unsupported():
+    fake = FakeSFTP()
+    fake.posix_rename_supported = False
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    endpoint.write(dest, io.BytesIO(b"old"))
+    endpoint.write(dest, io.BytesIO(b"newer"))
+    assert fake.files == {"/out/x.csv": b"newer"}
+
+
+def test_sftp_endpoint_failed_write_removes_part_file_and_keeps_existing():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    endpoint.write(dest, io.BytesIO(b"old"))
+
+    fake.fail_putfo_after_partial = True
+    with pytest.raises(IOError, match="connection reset"):
+        endpoint.write(dest, io.BytesIO(b"newer"))
+
+    assert fake.files == {"/out/x.csv": b"old"}
+
+
+def test_sftp_endpoint_write_does_not_clobber_real_dot_part_file():
+    fake = FakeSFTP()
+    fake.mkdir("/out")
+    fake.files["/out/x.csv.part"] = b"keep"
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+
+    endpoint.write("/out/x.csv", io.BytesIO(b"new"))
+
+    assert fake.files["/out/x.csv.part"] == b"keep"
+    assert fake.files["/out/x.csv"] == b"new"
+
+
+def test_sftp_endpoint_exists_false_for_missing_and_delete_removes():
+    fake = FakeSFTP()
+    endpoint = ft.SftpEndpoint("/out", fake, "vendor")
+    dest = endpoint.destination_for("x.csv")
+    assert not endpoint.exists(dest)
+    endpoint.write(dest, io.BytesIO(b"x"))
+    endpoint.delete(dest)
+    assert not endpoint.exists(dest)
+
+
+def test_sftp_endpoint_identity_normalizes_path_and_keys_on_credentials_ref():
+    a = ft.SftpEndpoint("/out", FakeSFTP(), "vendor")
+    b = ft.SftpEndpoint("/out", FakeSFTP(), "other")
+    assert a.identity("/out/sub/../x.csv") == a.identity("/out/x.csv")
+    assert a.identity("/out/x.csv") != b.identity("/out/x.csv")

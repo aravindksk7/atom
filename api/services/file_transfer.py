@@ -170,3 +170,74 @@ class S3Endpoint:
     def delete(self, path: str) -> None:
         bucket, key = self._split(path)
         self.client.delete_object(Bucket=bucket, Key=key)
+
+
+# -- SFTP / SCP --------------------------------------------------------------
+
+class SftpEndpoint:
+    """``scp`` locations are normalized to ``sftp`` before reaching here (see
+    ``file_transfer_spec.parse_file_transfer_params``)."""
+
+    kind = "sftp"
+
+    def __init__(self, root: str, client: Any, credentials_ref: str | None) -> None:
+        self.client = client
+        self.credentials_ref = credentials_ref
+        self.root = root.rstrip("/") or "/"
+
+    def relative_of(self, file: DiscoveredFile) -> str:
+        prefix = self.root.rstrip("/") + "/"
+        if file.path.startswith(prefix):
+            return file.path[len(prefix):]
+        return PurePosixPath(file.path).name
+
+    def destination_for(self, relative: str) -> str:
+        return posixpath.join(self.root, relative)
+
+    def identity(self, path: str) -> tuple:
+        return ("sftp", self.credentials_ref, posixpath.normpath(path))
+
+    def exists(self, path: str) -> bool:
+        try:
+            self.client.stat(path)
+        except FileNotFoundError:
+            return False
+        return True
+
+    def size(self, path: str) -> int:
+        return int(self.client.stat(path).st_size)
+
+    def open_read(self, path: str):
+        return self.client.open(path, "rb")
+
+    def _make_dirs(self, directory: str) -> None:
+        current = ""
+        for part in PurePosixPath(directory).parts:
+            current = posixpath.join(current, part) if current else part
+            try:
+                self.client.stat(current)
+            except FileNotFoundError:
+                self.client.mkdir(current)
+
+    def write(self, path: str, stream: Any) -> None:
+        self._make_dirs(posixpath.dirname(path))
+        part = f"{path}.{uuid4().hex}{PART_SUFFIX}"
+        try:
+            self.client.putfo(stream, part)
+        except BaseException:
+            try:
+                self.client.remove(part)
+            except Exception:
+                pass
+            raise
+        try:
+            self.client.posix_rename(part, path)
+        except IOError:
+            # Server has no posix-rename extension: plain rename refuses to
+            # replace an existing file, so remove it first.
+            if self.exists(path):
+                self.client.remove(path)
+            self.client.rename(part, path)
+
+    def delete(self, path: str) -> None:
+        self.client.remove(path)
