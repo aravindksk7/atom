@@ -437,16 +437,14 @@ def test_dag_retry_of_a_file_transfer_step_ends_passed(db_session, allowed_dir, 
     import paramiko
     from api.routes.jobs import _job_to_data
     from api.schemas import SequenceStepRef
-    from api.services import file_transfer
     from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
 
     seed_sources(allowed_dir)
     JobRepository(db_session).create(_job_to_data(local_job(allowed_dir)))
     RunRepository(db_session).create_run("run-retry", "qa", "", {})
-    _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
     # The patch fires on the second copy overall, so attempt 1 copies one file
     # and errors, and attempt 2 copies the rest.
-    assert file_transfer._copy_one is not None
+    _fail_second_copy_with(monkeypatch, paramiko.SSHException("dropped"))
 
     RunExecutor(
         db=db_session,
@@ -464,6 +462,42 @@ def test_dag_retry_of_a_file_transfer_step_ends_passed(db_session, allowed_dir, 
     assert sorted(p.name for p in (allowed_dir / "dst").iterdir()) == [
         "sales_east.csv", "sales_west.csv",
     ]
+
+
+def test_the_same_job_twice_in_one_run_still_collides_on_the_second_step(db_session, allowed_dir):
+    """Resume state belongs to the step, not the job: a DAG may legitimately
+    run one job twice (see SequenceStepRef), and the second occurrence must
+    still see the first occurrence's output as an on_exists="fail" collision."""
+    from api.routes.jobs import _job_to_data
+    from etl_framework.repository.models import TestResult
+    from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
+
+    seed_sources(allowed_dir)
+    JobRepository(db_session).create(_job_to_data(local_job(allowed_dir)))
+    RunRepository(db_session).create_run("run-twice", "qa", "", {})
+
+    RunExecutor(
+        db=db_session,
+        run_id="run-twice",
+        source_env="qa",
+        target_env="",
+        job_sequence=["stage_sales", "stage_sales"],
+        run_settings=RunSettings(use_live_connections=True),
+        config_snapshot={},
+    ).execute()
+
+    rows = RunStepRepository(db_session).list_steps("run-twice")
+    assert [(row.step_id, row.status) for row in rows] == [
+        ("step_0", "PASSED"), ("step_1", "FAILED"),
+    ]
+    second = (
+        db_session.query(TestResult)
+        .filter_by(run_id="run-twice").order_by(TestResult.id).all()[1]
+    )
+    assert "already contains 2 file(s)" in second.mismatch_summary["error"]
+    assert second.mismatch_summary["copied"] == 0
+    # Nothing new was written, and the first step's copies are untouched.
+    assert (allowed_dir / "dst" / "sales_east.csv").read_bytes() == b"id\n1\n"
 
 
 def test_summary_caps_file_list_but_reports_true_counts(db_session, allowed_dir):

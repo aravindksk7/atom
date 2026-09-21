@@ -261,13 +261,22 @@ class RunExecutor:
         self._legacy_chain = True
         self._db_lock = threading.Lock()
         self._worker_session_factory = None
-        # Destination paths each file_transfer job has already written during
-        # this run, keyed by job name. A retry re-plans, and with the default
-        # on_exists="fail" its own earlier output would otherwise read as a
-        # collision and hide the transport error that caused the retry. Shared
-        # with the per-step worker executors in _run_dag_step, since those are
-        # rebuilt on every attempt while this one survives the whole run.
-        self._file_transfer_resume: dict[str, set[str]] = {}
+        # Destination paths file_transfer jobs have already written. A retry
+        # re-plans, and with the default on_exists="fail" its own earlier
+        # output would otherwise read as a collision and hide the transport
+        # error that caused the retry.
+        #
+        # On a run-level executor this is keyed by step_id, and each value is
+        # the per-step dict handed to that step's worker executors in
+        # _run_dag_step (those are rebuilt on every attempt, while this one
+        # survives the whole run). The step, not the job, is the retry unit: a
+        # DAG may run the same job as two steps, and the second must still see
+        # the first's output as a real collision. On a worker executor -- and
+        # on any executor whose _execute_file_transfer is called directly --
+        # the dict is instead keyed by job name, which is all a single step
+        # ever needs. Scoping by step_id also means two concurrent branches
+        # never share one mutable set.
+        self._file_transfer_resume: dict[str, dict[str, set[str]]] | dict[str, set[str]] = {}
         self._run_repo = RunRepository(db)
 
         self._job_repo = JobRepository(db)
@@ -405,9 +414,10 @@ class RunExecutor:
             run_settings=self._settings,
             config_snapshot=self._config_snapshot,
         )
-        # One worker per attempt, so the resume state has to be the run-level
-        # dict, not the worker's own.
-        worker._file_transfer_resume = self._file_transfer_resume
+        # One worker per attempt, so the resume state has to outlive the
+        # worker -- but it is scoped to this step, so a second step running the
+        # same job resumes nothing from this one.
+        worker._file_transfer_resume = self._file_transfer_resume.setdefault(step.step_id, {})
         try:
             case_fn = worker._build_case(job_def)
             state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]

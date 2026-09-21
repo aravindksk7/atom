@@ -131,8 +131,8 @@ curl http://localhost:8000/api/auth/verify \
 
 | Role | `is_admin` | `role` | Permitted operations |
 |---|---|---|---|
-| Admin | `true` | `full` | All endpoints + token management (`POST/GET/PATCH/DELETE/rotate /api/tokens`) |
-| Standard | `false` | `full` | All read + write endpoints except token management |
+| Admin | `true` | `full` | All endpoints + token management (`POST/GET/PATCH/DELETE/rotate /api/tokens`) + authoring `file_transfer` jobs (create, update, or import one — it is the only job type that writes to file servers and local folders) |
+| Standard | `false` | `full` | All read + write endpoints except token management and authoring `file_transfer` jobs (creating, updating or importing one returns `403`; reading, launching and deleting existing ones is allowed) |
 | CI Trigger | `false` | `ci_trigger` | Only: list/read Job Selections and Execution Sequences, launch either, and read/export a run's result (status, JUnit, markdown summary, HTML report, CSV export). Everything else — configs, jobs, other tokens, settings, schedules, the audit log — returns `403`, even though the token is otherwise valid. Enforced centrally in `BearerTokenMiddleware`, not per-route, so it can't be bypassed by a new endpoint someone forgets to lock down. |
 
 A `ci_trigger` token is a drop-in replacement for a `full` (`is_admin: false`) token in any
