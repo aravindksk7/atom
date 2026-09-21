@@ -178,8 +178,16 @@ class DiscoveredFile:
     tokens: dict[str, str]
 
 
-def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
-    """Match every file directly under ``root`` against ``pattern``.
+# Deepest directory level a recursive discovery will descend to. Guards against
+# pathological or cyclic trees (e.g. an SFTP server exposing a directory loop).
+_MAX_RECURSION_DEPTH = 20
+
+
+def discover_local_files(root: Path, pattern: str, *, recursive: bool = False) -> list[DiscoveredFile]:
+    """Match files under ``root`` against ``pattern``. By default only files
+    directly under ``root`` are considered; ``recursive=True`` also walks
+    subfolders (up to ``_MAX_RECURSION_DEPTH`` levels, symlinks not followed).
+    ``pattern`` always matches the basename.
 
     ``root`` must already be a trusted, resolved directory -- callers outside
     this module (e.g. ``RunExecutor``) are responsible for allow-listing it
@@ -187,8 +195,20 @@ def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
     way every other file-backed job resolves paths today.
     """
     regex = compile_token_pattern(pattern)
+    root = Path(root)
+    if recursive:
+        candidates: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            depth = len(Path(dirpath).relative_to(root).parts)
+            if depth >= _MAX_RECURSION_DEPTH:
+                dirnames[:] = []
+            candidates.extend(Path(dirpath) / name for name in filenames)
+        candidates.sort()
+    else:
+        candidates = sorted(root.iterdir())
     discovered: list[DiscoveredFile] = []
-    for candidate in sorted(Path(root).iterdir()):
+    for candidate in candidates:
         if not candidate.is_file():
             continue
         match = regex.match(candidate.name)
@@ -202,9 +222,11 @@ def discover_local_files(root: Path, pattern: str) -> list[DiscoveredFile]:
     return discovered
 
 
-def discover_s3_files(client: Any, root: str, pattern: str) -> list[DiscoveredFile]:
-    """Discover S3 objects directly under ``root`` whose basename matches
-    ``pattern``. ``root`` must be ``s3://bucket/prefix``; callers own client
+def discover_s3_files(client: Any, root: str, pattern: str, *, recursive: bool = False) -> list[DiscoveredFile]:
+    """Discover S3 objects under ``root`` whose basename matches ``pattern``.
+    By default only objects directly under the prefix are considered;
+    ``recursive=True`` also includes nested keys (up to ``_MAX_RECURSION_DEPTH``
+    levels). ``root`` must be ``s3://bucket/prefix``; callers own client
     construction and credentials so tests can inject a fake client without
     requiring boto3.
     """
@@ -224,7 +246,9 @@ def discover_s3_files(client: Any, root: str, pattern: str) -> list[DiscoveredFi
             if not key or key.endswith("/"):
                 continue
             relative = key[len(prefix):] if prefix and key.startswith(prefix) else key
-            if "/" in relative:
+            if "/" in relative and not recursive:
+                continue
+            if relative.count("/") > _MAX_RECURSION_DEPTH:
                 continue
             file_name = Path(relative).name
             match = regex.match(file_name)
@@ -238,24 +262,34 @@ def discover_s3_files(client: Any, root: str, pattern: str) -> list[DiscoveredFi
     return sorted(discovered, key=lambda f: f.path)
 
 
-def discover_sftp_files(client: Any, root: str, pattern: str) -> list[DiscoveredFile]:
-    """Discover regular files directly under an SFTP directory. Callers own
-    client construction and credentials so tests can inject a fake client
-    without requiring paramiko.
+def discover_sftp_files(client: Any, root: str, pattern: str, *, recursive: bool = False) -> list[DiscoveredFile]:
+    """Discover regular files under an SFTP directory. By default only files
+    directly under ``root`` are considered; ``recursive=True`` also walks
+    subdirectories (up to ``_MAX_RECURSION_DEPTH`` levels). Callers own client
+    construction and credentials so tests can inject a fake client without
+    requiring paramiko.
     """
     regex = compile_token_pattern(pattern)
     root_path = root.rstrip("/") or "/"
     discovered: list[DiscoveredFile] = []
-    for item in client.listdir_attr(root_path):
-        file_name = str(getattr(item, "filename", ""))
-        mode = getattr(item, "st_mode", 0)
-        if mode and not stat.S_ISREG(mode):
-            continue
-        match = regex.match(file_name)
-        if match is None:
-            continue
-        path = f"{root_path}/{file_name}" if root_path != "/" else f"/{file_name}"
-        discovered.append(DiscoveredFile(path=path, file_name=file_name, tokens=match.groupdict()))
+
+    def _walk(directory: str, depth: int) -> None:
+        for item in client.listdir_attr(directory):
+            file_name = str(getattr(item, "filename", ""))
+            mode = getattr(item, "st_mode", 0)
+            path = f"{directory}/{file_name}" if directory != "/" else f"/{file_name}"
+            if recursive and mode and stat.S_ISDIR(mode):
+                if depth < _MAX_RECURSION_DEPTH:
+                    _walk(path, depth + 1)
+                continue
+            if mode and not stat.S_ISREG(mode):
+                continue
+            match = regex.match(file_name)
+            if match is None:
+                continue
+            discovered.append(DiscoveredFile(path=path, file_name=file_name, tokens=match.groupdict()))
+
+    _walk(root_path, 0)
     return sorted(discovered, key=lambda f: f.path)
 
 

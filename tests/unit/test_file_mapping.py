@@ -766,3 +766,83 @@ def test_file_mapping_spec_allows_empty_match_on_for_automated_strategy() -> Non
     })
 
     assert spec.match_on == ()
+
+
+def test_discover_local_files_recursive_walks_subfolders(tmp_path) -> None:
+    from pathlib import Path
+
+    (tmp_path / "a.csv").write_text("x", encoding="utf-8")
+    (tmp_path / "sub" / "deeper").mkdir(parents=True)
+    (tmp_path / "sub" / "b.csv").write_text("x", encoding="utf-8")
+    (tmp_path / "sub" / "deeper" / "c.csv").write_text("x", encoding="utf-8")
+    (tmp_path / "sub" / "skip.txt").write_text("x", encoding="utf-8")
+
+    flat = discover_local_files(tmp_path, "*.csv")
+    deep = discover_local_files(tmp_path, "*.csv", recursive=True)
+
+    assert [f.file_name for f in flat] == ["a.csv"]
+    assert [Path(f.path).relative_to(tmp_path).as_posix() for f in deep] == [
+        "a.csv",
+        "sub/b.csv",
+        "sub/deeper/c.csv",
+    ]
+
+
+def test_discover_s3_files_recursive_includes_nested_keys() -> None:
+    from etl_framework.reconciliation.file_mapping import discover_s3_files
+
+    class FakeS3Client:
+        def get_paginator(self, name):
+            return self
+
+        def paginate(self, **kwargs):
+            return [{"Contents": [
+                {"Key": "daily/a.csv"},
+                {"Key": "daily/sub/b.csv"},
+                {"Key": "daily/sub/c.txt"},
+            ]}]
+
+    flat = discover_s3_files(FakeS3Client(), "s3://bkt/daily", "*.csv")
+    deep = discover_s3_files(FakeS3Client(), "s3://bkt/daily", "*.csv", recursive=True)
+
+    assert [f.path for f in flat] == ["s3://bkt/daily/a.csv"]
+    assert [f.path for f in deep] == ["s3://bkt/daily/a.csv", "s3://bkt/daily/sub/b.csv"]
+    assert [f.file_name for f in deep] == ["a.csv", "b.csv"]
+
+
+def _sftp_attr(name: str, mode: int):
+    return type("Attr", (), {"filename": name, "st_mode": mode})()
+
+
+def test_discover_sftp_files_recursive_walks_directories() -> None:
+    from etl_framework.reconciliation.file_mapping import discover_sftp_files
+
+    tree = {
+        "/x": [_sftp_attr("a.csv", 0o100644), _sftp_attr("sub", 0o040755)],
+        "/x/sub": [_sftp_attr("b.csv", 0o100644), _sftp_attr("deeper", 0o040755)],
+        "/x/sub/deeper": [_sftp_attr("c.csv", 0o100644), _sftp_attr("n.txt", 0o100644)],
+    }
+
+    class FakeSFTPClient:
+        def listdir_attr(self, path):
+            return tree[path]
+
+    flat = discover_sftp_files(FakeSFTPClient(), "/x", "*.csv")
+    deep = discover_sftp_files(FakeSFTPClient(), "/x", "*.csv", recursive=True)
+
+    assert [f.path for f in flat] == ["/x/a.csv"]
+    assert [f.path for f in deep] == ["/x/a.csv", "/x/sub/b.csv", "/x/sub/deeper/c.csv"]
+
+
+def test_discover_sftp_files_recursive_stops_at_depth_cap() -> None:
+    from etl_framework.reconciliation.file_mapping import _MAX_RECURSION_DEPTH, discover_sftp_files
+
+    calls: list[str] = []
+
+    class EndlessSFTPClient:
+        def listdir_attr(self, path):
+            calls.append(path)
+            return [_sftp_attr("d", 0o040755)]
+
+    assert discover_sftp_files(EndlessSFTPClient(), "/x", "*.csv", recursive=True) == []
+    assert len(calls) == _MAX_RECURSION_DEPTH + 1

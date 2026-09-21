@@ -196,14 +196,20 @@ class RemoteFileSourceSession:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
         return self._clients[key]
 
-    def discover(self, spec: FileSourceSpec) -> list[DiscoveredFile]:
+    def client_for(self, spec: FileSourceSpec):
+        """Public accessor for the cached S3/SFTP client of ``spec`` (used by
+        ``api.services.file_transfer``). Same one-client-per-(kind,
+        credentials_ref) caching as every other call on this session."""
+        return self._client_for(spec)
+
+    def discover(self, spec: FileSourceSpec, *, recursive: bool = False) -> list[DiscoveredFile]:
         if spec.kind == "local":
             root = resolve_allowed_path(spec.root)
-            return discover_local_files(root, spec.pattern)
+            return discover_local_files(root, spec.pattern, recursive=recursive)
         if spec.kind == "s3":
-            return discover_s3_files(self._client_for(spec), spec.root, spec.pattern)
+            return discover_s3_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
         if spec.kind == "sftp":
-            return discover_sftp_files(self._client_for(spec), spec.root, spec.pattern)
+            return discover_sftp_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 
     def read_file(self, file: DiscoveredFile, spec: FileSourceSpec) -> pd.DataFrame:

@@ -627,3 +627,37 @@ def test_build_s3_client_does_not_force_path_style_without_custom_endpoint(db, m
 
     assert captured_kwargs.get("endpoint_url") is None
     assert "config" not in captured_kwargs
+
+
+def test_remote_file_source_session_discover_recursive_local(db, tmp_path, monkeypatch) -> None:
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", tmp_path.resolve())
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", (tmp_path.resolve(),))
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "top.csv").write_text("id\n1\n", encoding="utf-8")
+    (tmp_path / "sub" / "nested.csv").write_text("id\n2\n", encoding="utf-8")
+
+    session = RemoteFileSourceSession(db)
+    spec = FileSourceSpec(kind="local", root=str(tmp_path), pattern="*.csv")
+
+    assert [f.file_name for f in session.discover(spec)] == ["top.csv"]
+    # Discovery sorts by full path, so the "sub/" folder sorts before "top.csv".
+    assert [f.file_name for f in session.discover(spec, recursive=True)] == ["nested.csv", "top.csv"]
+
+
+def test_remote_file_source_session_client_for_is_public_and_cached(db, monkeypatch) -> None:
+    built: list[str] = []
+
+    def _fake_build_s3_client(profile, spec):
+        built.append(spec.credentials_ref)
+        return object()
+
+    monkeypatch.setattr("api.services.multi_file_remote.build_s3_client", _fake_build_s3_client)
+    monkeypatch.setattr("api.services.multi_file_remote.resolve_file_server_profile", lambda db_, spec: None)
+
+    session = RemoteFileSourceSession(db)
+    spec = FileSourceSpec(kind="s3", root="s3://bkt/x", pattern="*", credentials_ref="prof")
+
+    assert session.client_for(spec) is session.client_for(spec)
+    assert built == ["prof"]
