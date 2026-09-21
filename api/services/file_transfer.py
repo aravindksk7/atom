@@ -388,6 +388,7 @@ class TransferOutcome:
 
 
 def _copy_one(entry: PlannedCopy, source: Any, destination: Any) -> int:
+    expected = source.size(entry.source.path)
     reader = source.open_read(entry.source.path)
     try:
         counting = _CountingReader(reader)
@@ -395,7 +396,18 @@ def _copy_one(entry: PlannedCopy, source: Any, destination: Any) -> int:
     finally:
         close = getattr(reader, "close", None)
         if callable(close):
-            close()
+            try:
+                close()
+            except Exception:
+                pass
+    if counting.count < expected:
+        try:
+            destination.delete(entry.destination)
+        except Exception:
+            pass
+        raise TransferError(
+            f"source truncated: read {counting.count} of {expected} bytes from {entry.source.path}"
+        )
     actual = destination.size(entry.destination)
     if actual != counting.count:
         try:
@@ -403,7 +415,8 @@ def _copy_one(entry: PlannedCopy, source: Any, destination: Any) -> int:
         except Exception:
             pass
         raise TransferError(
-            f"size mismatch after copy: streamed {counting.count} bytes but destination holds {actual}"
+            f"size mismatch after copy: streamed {counting.count} bytes "
+            f"but destination '{entry.destination}' holds {actual}"
         )
     return counting.count
 
@@ -420,7 +433,7 @@ def run_transfer(plan: TransferPlan, source: Any, destination: Any) -> TransferO
             copied_bytes = _copy_one(entry, source, destination)
         except Exception as exc:
             outcome.failed_file = entry.source.path
-            outcome.error = f"{entry.source.path}: {exc}"
+            outcome.error = f"{entry.source.path}: {type(exc).__name__}: {exc}"
             return outcome
         outcome.copied.append({
             "source": entry.source.path,

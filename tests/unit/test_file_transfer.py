@@ -605,17 +605,44 @@ def test_plan_rejects_names_that_collapse_on_windows(allowed_dir):
 
 # -- run_transfer ------------------------------------------------------------
 
+class _TrackedStream(io.BytesIO):
+    def __init__(self, data: bytes, close_raises: bool = False) -> None:
+        super().__init__(data)
+        self.close_raises = close_raises
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        super().close()
+        if self.close_raises:
+            raise OSError("close failed")
+
+
 class _MemorySource:
-    def __init__(self, contents: dict[str, bytes], fail_on: str | None = None) -> None:
+    def __init__(
+        self,
+        contents: dict[str, bytes],
+        fail_on: str | None = None,
+        claimed_size: dict[str, int] | None = None,
+        close_raises: bool = False,
+    ) -> None:
         self.contents = contents
         self.fail_on = fail_on
+        self.claimed_size = claimed_size or {}
+        self.close_raises = close_raises
         self.opened: list[str] = []
+        self.streams: list[_TrackedStream] = []
+
+    def size(self, path: str) -> int:
+        return self.claimed_size.get(path, len(self.contents[path]))
 
     def open_read(self, path: str):
         self.opened.append(path)
         if path == self.fail_on:
             raise OSError(f"cannot read {path}")
-        return io.BytesIO(self.contents[path])
+        stream = _TrackedStream(self.contents[path], close_raises=self.close_raises)
+        self.streams.append(stream)
+        return stream
 
 
 class _MemoryDestination:
@@ -639,6 +666,11 @@ class _MemoryDestination:
     def delete(self, path: str) -> None:
         self.deleted.append(path)
         self.files.pop(path, None)
+
+
+class _FailingWriteDestination(_MemoryDestination):
+    def write(self, path: str, stream) -> None:
+        raise OSError("disk full")
 
 
 def _entry(name: str) -> ft.PlannedCopy:
@@ -673,6 +705,9 @@ def test_run_transfer_stops_at_first_failure_and_keeps_earlier_copies():
 
     assert outcome.failed_file == "/src/b.csv"
     assert "cannot read /src/b.csv" in outcome.error
+    assert "OSError" in outcome.error
+    assert outcome.error.startswith("/src/b.csv: OSError: ")
+    assert destination.files["/dst/a.csv"] == b"a"
     assert [item["source"] for item in outcome.copied] == ["/src/a.csv"]
     assert "/dst/c.csv" not in destination.files
     assert "/src/c.csv" not in source.opened
@@ -687,8 +722,68 @@ def test_run_transfer_deletes_destination_and_fails_on_size_mismatch():
 
     assert outcome.failed_file == "/src/a.csv"
     assert "size mismatch" in outcome.error and "4 bytes" in outcome.error
+    assert "'/dst/a.csv'" in outcome.error and "TransferError" in outcome.error
     assert destination.deleted == ["/dst/a.csv"]
     assert outcome.copied == []
+
+
+def test_run_transfer_closes_source_reader_after_successful_copy():
+    source = _MemorySource({"/src/a.csv": b"aaaa"})
+    destination = _MemoryDestination()
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert outcome.error is None
+    assert len(source.streams) == 1 and source.streams[0].closed
+
+
+def test_run_transfer_closes_source_reader_when_destination_write_raises():
+    source = _MemorySource({"/src/a.csv": b"aaaa"})
+    destination = _FailingWriteDestination()
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert outcome.failed_file == "/src/a.csv"
+    assert "disk full" in outcome.error
+    assert outcome.copied == []
+    assert len(source.streams) == 1 and source.streams[0].closed
+
+
+def test_run_transfer_ignores_reader_close_errors_on_a_good_copy():
+    source = _MemorySource({"/src/a.csv": b"aaaa"}, close_raises=True)
+    destination = _MemoryDestination()
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert source.streams[0].close_calls == 1
+    assert outcome.error is None and outcome.failed_file is None
+    assert [item["source"] for item in outcome.copied] == ["/src/a.csv"]
+    assert destination.files == {"/dst/a.csv": b"aaaa"}
+
+
+def test_run_transfer_fails_and_deletes_destination_when_source_is_truncated():
+    source = _MemorySource({"/src/a.csv": b"12345"}, claimed_size={"/src/a.csv": 1000})
+    destination = _MemoryDestination()
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert outcome.failed_file == "/src/a.csv"
+    assert "source truncated" in outcome.error
+    assert "read 5 of 1000 bytes" in outcome.error
+    assert "/dst/a.csv" in destination.deleted
+    assert "/dst/a.csv" not in destination.files
+    assert outcome.copied == []
+
+
+def test_run_transfer_tolerates_a_source_that_grew_during_the_copy():
+    source = _MemorySource({"/src/a.csv": b"12345678"}, claimed_size={"/src/a.csv": 5})
+    destination = _MemoryDestination()
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert outcome.error is None
+    assert outcome.bytes_copied == 8
+    assert destination.files == {"/dst/a.csv": b"12345678"}
 
 
 def test_run_transfer_end_to_end_local_to_local(allowed_dir):
