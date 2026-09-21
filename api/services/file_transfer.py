@@ -118,7 +118,7 @@ class S3Endpoint:
         self.client = client
         self.credentials_ref = credentials_ref
         self.bucket = parsed.netloc
-        prefix = unquote(parsed.path.lstrip("/"))
+        prefix = parsed.path.lstrip("/")
         self.prefix = prefix if not prefix or prefix.endswith("/") else prefix + "/"
 
     @staticmethod
@@ -128,9 +128,13 @@ class S3Endpoint:
 
     def relative_of(self, file: DiscoveredFile) -> str:
         _, key = self._split(file.path)
-        if self.prefix and key.startswith(self.prefix):
-            return key[len(self.prefix):]
-        return key
+        if not self.prefix:
+            return key
+        if not key.startswith(self.prefix):
+            raise TransferError(
+                f"'{file.path}' is not under source root 's3://{self.bucket}/{self.prefix}'"
+            )
+        return key[len(self.prefix):]
 
     def destination_for(self, relative: str) -> str:
         return f"s3://{self.bucket}/{quote(self.prefix + relative, safe='/')}"

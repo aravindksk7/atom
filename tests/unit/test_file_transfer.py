@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import boto3
+import botocore.exceptions
 import pytest
 from fastapi import HTTPException
 from moto import mock_aws
@@ -228,4 +229,45 @@ def test_s3_endpoint_identity_includes_credentials_ref(s3_raw):
     b = ft.S3Endpoint("s3://bkt/out", s3_raw, "prof-b")
     path = "s3://bkt/out/x.csv"
     assert a.identity(path) != b.identity(path)
-    assert a.identity(path) == a.identity("s3://bkt/out/x.csv")
+    assert a.identity("s3://bkt/out/x%20y.csv") == a.identity("s3://bkt/out/x y.csv")
+
+
+def test_s3_endpoint_root_with_literal_percent_round_trips(s3_raw):
+    from etl_framework.reconciliation.file_mapping import discover_s3_files
+
+    s3_raw.put_object(Bucket="bkt", Key="a%20b/f.csv", Body=b"id\n1\n")
+    root = "s3://bkt/a%20b"
+
+    discovered = discover_s3_files(s3_raw, root, "*.csv")
+    assert len(discovered) == 1
+    endpoint = ft.S3Endpoint(root, s3_raw, "p")
+
+    assert endpoint.relative_of(discovered[0]) == "f.csv"
+    assert endpoint._split(endpoint.destination_for("f.csv")) == endpoint._split(discovered[0].path)
+    assert endpoint._split(discovered[0].path) == ("bkt", "a%20b/f.csv")
+
+
+def test_s3_endpoint_relative_of_rejects_key_outside_prefix(s3_raw):
+    endpoint = ft.S3Endpoint("s3://bkt/in", s3_raw, "prof")
+    file = DiscoveredFile(path="s3://bkt/other/a.csv", file_name="a.csv", tokens={})
+    with pytest.raises(ft.TransferError, match="not under source root"):
+        endpoint.relative_of(file)
+
+
+class _HeadFails:
+    def __init__(self, code: str) -> None:
+        self.code = code
+
+    def head_object(self, **kwargs):
+        raise botocore.exceptions.ClientError({"Error": {"Code": self.code}}, "HeadObject")
+
+
+def test_s3_endpoint_exists_reraises_non_404_client_errors():
+    endpoint = ft.S3Endpoint("s3://bkt/out", _HeadFails("403"), "p")
+    with pytest.raises(botocore.exceptions.ClientError):
+        endpoint.exists("s3://bkt/out/x.csv")
+
+
+def test_s3_endpoint_exists_returns_false_on_404():
+    endpoint = ft.S3Endpoint("s3://bkt/out", _HeadFails("404"), "p")
+    assert endpoint.exists("s3://bkt/out/x.csv") is False
