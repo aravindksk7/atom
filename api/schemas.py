@@ -501,7 +501,10 @@ class RunStepReleaseRequest(BaseModel):
 
 class RunTrigger(BaseModel):
     source_env: str
-    target_env: str
+    # Optional: single-environment job types (file_transfer, file_watcher, ...)
+    # run without one. trigger_run calls validate_env_requirements, which
+    # rejects a blank target_env for job types that compare two environments.
+    target_env: str = ""
     source_connection: str | None = None
     target_connection: str | None = None
     job_names: list[str] = Field(default_factory=list)

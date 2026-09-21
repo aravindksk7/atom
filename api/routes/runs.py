@@ -55,6 +55,7 @@ from api.schemas import (
     TestSuiteTrigger,
 )
 from api.services.ci_runs_reporting import CiRunsFilters, CiRunsReportingService
+from api.services.job_env_validation import validate_env_requirements
 from api.services.run_executor import RunExecutor
 from api.services.pytest_runner import PytestRunExecutor
 from etl_framework.repository.repository import (
@@ -470,6 +471,11 @@ def trigger_run(
     repo = RunRepository(db)
     ordered_jobs = body.job_sequence or body.job_names
     _validate_saved_jobs_for_launch(db, ordered_jobs)
+    # Same single-vs-dual environment gate the sequences, selections and
+    # schedules launch routes apply, so an omitted target_env is accepted only
+    # for job types that never compare two environments.
+    jobs_by_name = {j.name: j for j in JobRepository(db).list()}
+    validate_env_requirements(ordered_jobs, jobs_by_name, body.target_env)
     run_settings = body.run_settings.model_dump()
     config_snapshot = _snapshot_from_trigger(body, db)
     if ordered_jobs:
