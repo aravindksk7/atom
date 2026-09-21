@@ -553,6 +553,8 @@ class RunExecutor:
             return self._build_case_compare(job)
         if job.job_type == "file_watcher":
             return self._build_case_file_watcher(job)
+        if job.job_type == "file_transfer":
+            return self._build_case_file_transfer(job)
         if job.job_type == "bo_report":
             if not self._settings.use_live_connections:
                 def run_job() -> ReconciliationResult:
@@ -1645,6 +1647,108 @@ class RunExecutor:
             job, TestStatus.PASSED, tries=watch_result.tries, elapsed_seconds=watch_result.elapsed_seconds,
             executed_at=executed_at, duration_seconds=time.monotonic() - t0,
             matched_file=watch_result.file, matched_text=watch_result.matched_snippet,
+        )
+
+    # -- File Transfer ----------------------------------------------------------
+
+    _FILE_TRANSFER_SUMMARY_FILE_LIMIT = 100
+
+    def _build_case_file_transfer(self, job: JobDefinition):
+        def run_file_transfer() -> ReconciliationResult:
+            return self._execute_file_transfer(job)
+        return run_file_transfer
+
+    def _file_transfer_result(
+        self,
+        job: JobDefinition,
+        status: TestStatus,
+        executed_at: datetime,
+        duration_seconds: float,
+        total: int = 0,
+        destination_root: str | None = None,
+        outcome: Any = None,
+        error: str | None = None,
+    ) -> ReconciliationResult:
+        copied = outcome.copied if outcome else []
+        skipped = outcome.skipped if outcome else []
+        listed = copied + skipped
+        limit = self._FILE_TRANSFER_SUMMARY_FILE_LIMIT
+        mismatch_summary: dict[str, Any] = {
+            "copied": len(copied),
+            "skipped": len(skipped),
+            "bytes": outcome.bytes_copied if outcome else 0,
+            "files": listed[:limit],
+            "files_truncated": len(listed) > limit,
+        }
+        mismatches: list[MismatchRecord] = []
+        if error is not None:
+            mismatch_summary["error"] = error
+            if outcome is not None and outcome.failed_file:
+                mismatch_summary["failed_file"] = outcome.failed_file
+            mismatches.append(MismatchRecord({"job": job.name}, "file_transfer", "ok", error, "file_transfer_error"))
+        done = len(listed)
+        return ReconciliationResult(
+            query_name=job.name,
+            source_env=self._source_env,
+            target_env=self._target_env,
+            source_row_count=total,
+            target_row_count=done,
+            matched_count=done,
+            missing_in_target_count=0,
+            missing_in_source_count=0,
+            value_mismatch_count=len(mismatches),
+            mismatches=mismatches,
+            status=status,
+            executed_at=executed_at,
+            duration_seconds=duration_seconds,
+            data_artifact_path=destination_root if status == TestStatus.PASSED else None,
+            mismatch_summary=mismatch_summary,
+        )
+
+    def _execute_file_transfer(self, job: JobDefinition) -> ReconciliationResult:
+        t0 = time.monotonic()
+        executed_at = datetime.now(timezone.utc)
+        from api.services.file_transfer import (
+            TransferError, build_endpoint, plan_transfer, run_transfer,
+        )
+        from api.services.multi_file_remote import RemoteFileSourceSession
+        from etl_framework.reconciliation.file_transfer_spec import parse_file_transfer_params
+
+        total = 0
+        try:
+            spec = parse_file_transfer_params(job.params)
+            with RemoteFileSourceSession(self._db) as session:
+                files = session.discover(spec.source, recursive=spec.recursive)
+                if not files:
+                    raise TransferError(
+                        f"no files matching '{spec.source.pattern}' under '{spec.source.root}'"
+                    )
+                total = len(files)
+                source = build_endpoint(session, spec.source)
+                destination = build_endpoint(session, spec.destination)
+                plan = plan_transfer(
+                    files, source, destination,
+                    on_exists=spec.on_exists, preserve_structure=spec.preserve_structure,
+                )
+                outcome = run_transfer(plan, source, destination)
+        except TransferError as exc:
+            return self._file_transfer_result(
+                job, TestStatus.FAILED, executed_at, time.monotonic() - t0, total=total, error=str(exc),
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None) or str(exc)
+            return self._file_transfer_result(
+                job, TestStatus.ERROR, executed_at, time.monotonic() - t0, total=total, error=str(detail),
+            )
+        return self._file_transfer_result(
+            job,
+            TestStatus.FAILED if outcome.error else TestStatus.PASSED,
+            executed_at,
+            time.monotonic() - t0,
+            total=total,
+            destination_root=spec.destination.root,
+            outcome=outcome,
+            error=outcome.error,
         )
 
     # -- Freshness -----------------------------------------------------------

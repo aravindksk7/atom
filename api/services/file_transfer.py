@@ -443,3 +443,18 @@ def run_transfer(plan: TransferPlan, source: Any, destination: Any) -> TransferO
         })
         outcome.bytes_copied += copied_bytes
     return outcome
+
+
+# -- Wiring ------------------------------------------------------------------
+
+def build_endpoint(session: Any, spec: Any):
+    """Endpoint for a ``FileSourceSpec``. ``session`` is a
+    ``RemoteFileSourceSession`` (supplies cached, credential-resolved clients)."""
+    if spec.kind == "local":
+        return LocalEndpoint(spec.root)
+    client = session.client_for(spec)
+    if spec.kind == "s3":
+        return S3Endpoint(spec.root, client, spec.credentials_ref)
+    if spec.kind == "sftp":
+        return SftpEndpoint(spec.root, client, spec.credentials_ref)
+    raise ValueError(f"Unsupported file_transfer location kind: {spec.kind}")
