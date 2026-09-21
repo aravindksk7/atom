@@ -8,6 +8,7 @@ from pathlib import Path
 
 import boto3
 import botocore.exceptions
+import paramiko
 import pytest
 from fastapi import HTTPException
 from moto import mock_aws
@@ -795,6 +796,65 @@ def test_run_transfer_tolerates_a_source_that_grew_during_the_copy():
     assert outcome.error is None
     assert outcome.bytes_copied == 8
     assert destination.files == {"/dst/a.csv": b"12345678"}
+
+
+def test_run_transfer_records_the_original_exception_as_failed_exc():
+    source = _MemorySource({"/src/a.csv": b"a", "/src/b.csv": b"b"}, fail_on="/src/b.csv")
+    destination = _MemoryDestination()
+    plan = ft.TransferPlan(to_copy=[_entry("a.csv"), _entry("b.csv")])
+
+    outcome = ft.run_transfer(plan, source, destination)
+
+    assert isinstance(outcome.failed_exc, OSError)
+    assert "cannot read /src/b.csv" in str(outcome.failed_exc)
+
+
+def test_run_transfer_failed_exc_is_a_transfer_error_for_data_problems():
+    source = _MemorySource({"/src/a.csv": b"aaaa"})
+    destination = _MemoryDestination(size_override=3)
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, destination)
+
+    assert isinstance(outcome.failed_exc, ft.TransferError)
+
+
+def test_run_transfer_failed_exc_is_none_on_success():
+    source = _MemorySource({"/src/a.csv": b"aaaa"})
+
+    outcome = ft.run_transfer(ft.TransferPlan(to_copy=[_entry("a.csv")]), source, _MemoryDestination())
+
+    assert outcome.error is None and outcome.failed_exc is None
+
+
+# -- is_transport_error ------------------------------------------------------
+
+def _client_error(code: str) -> botocore.exceptions.ClientError:
+    return botocore.exceptions.ClientError({"Error": {"Code": code, "Message": "nope"}}, "PutObject")
+
+
+@pytest.mark.parametrize("exc", [
+    _client_error("403"),
+    _client_error("NoSuchBucket"),
+    botocore.exceptions.EndpointConnectionError(endpoint_url="http://minio:9000"),
+    paramiko.SSHException("dropped"),
+    EOFError(),
+    ConnectionResetError("reset by peer"),
+    TimeoutError("timed out"),
+], ids=lambda exc: type(exc).__name__)
+def test_is_transport_error_true_for_connection_and_credential_problems(exc):
+    assert ft.is_transport_error(exc) is True
+
+
+@pytest.mark.parametrize("exc", [
+    ft.TransferError("size mismatch"),
+    OSError("disk full"),
+    PermissionError("denied"),
+    FileNotFoundError("gone"),
+    ValueError("bad"),
+    None,
+], ids=lambda exc: type(exc).__name__)
+def test_is_transport_error_false_for_data_and_local_problems(exc):
+    assert ft.is_transport_error(exc) is False
 
 
 def test_run_transfer_end_to_end_local_to_local(allowed_dir):

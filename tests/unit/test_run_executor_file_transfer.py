@@ -140,6 +140,51 @@ def test_mid_transfer_failure_reports_failed_file_and_partial_counts(db_session,
     assert len(result.mismatches) == 1
 
 
+def _run_with_second_copy_raising(db_session, allowed_dir, monkeypatch, exc):
+    from api.services import file_transfer
+
+    seed_sources(allowed_dir)
+    real_copy_one = file_transfer._copy_one
+    calls = []
+
+    def flaky_copy_one(entry, source, destination):
+        calls.append(entry.source.path)
+        if len(calls) == 2:
+            raise exc
+        return real_copy_one(entry, source, destination)
+
+    monkeypatch.setattr(file_transfer, "_copy_one", flaky_copy_one)
+    result = executor(db_session)._execute_file_transfer(local_job(allowed_dir))
+    return result, calls
+
+
+def test_transport_failure_mid_transfer_is_an_error_with_partial_summary(db_session, allowed_dir, monkeypatch):
+    import paramiko
+
+    result, calls = _run_with_second_copy_raising(
+        db_session, allowed_dir, monkeypatch, paramiko.SSHException("dropped"),
+    )
+
+    assert result.status == TestStatus.ERROR
+    assert result.data_artifact_path is None
+    assert result.mismatch_summary["copied"] == 1
+    assert result.mismatch_summary["failed_file"] == calls[1]
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
+    assert "dropped" in result.mismatch_summary["error"]
+    assert len(result.mismatches) == 1
+
+
+def test_credential_failure_mid_transfer_is_an_error(db_session, allowed_dir, monkeypatch):
+    import botocore.exceptions
+
+    forbidden = botocore.exceptions.ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "PutObject")
+    result, calls = _run_with_second_copy_raising(db_session, allowed_dir, monkeypatch, forbidden)
+
+    assert result.status == TestStatus.ERROR
+    assert result.mismatch_summary["copied"] == 1
+    assert result.mismatch_summary["failed_file"] == calls[1]
+
+
 def test_second_run_with_skip_is_idempotent(db_session, allowed_dir):
     seed_sources(allowed_dir)
     executor(db_session)._execute_file_transfer(local_job(allowed_dir, on_exists="skip"))

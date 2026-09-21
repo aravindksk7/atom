@@ -385,6 +385,34 @@ class TransferOutcome:
     bytes_copied: int = 0
     failed_file: str | None = None
     error: str | None = None
+    failed_exc: BaseException | None = None
+
+
+def is_transport_error(exc: BaseException | None) -> bool:
+    """True when ``exc`` is a connection/credential/host-key/missing-bucket
+    problem (the executor reports these as ERROR) rather than a data problem
+    or a local disk/permission error (reported as FAILED). ``TransferError``
+    and plain ``OSError`` (disk full, permission, ENOENT) are never transport
+    errors; the connection-flavoured ``OSError`` subclasses are."""
+    if exc is None:
+        return False
+    if isinstance(exc, (EOFError, ConnectionError, TimeoutError)):
+        return True
+    try:
+        import botocore.exceptions
+
+        if isinstance(exc, (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError)):
+            return True
+    except ImportError:
+        pass
+    try:
+        import paramiko
+
+        if isinstance(exc, paramiko.SSHException):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 def _copy_one(entry: PlannedCopy, source: Any, destination: Any) -> int:
@@ -433,6 +461,7 @@ def run_transfer(plan: TransferPlan, source: Any, destination: Any) -> TransferO
             copied_bytes = _copy_one(entry, source, destination)
         except Exception as exc:
             outcome.failed_file = entry.source.path
+            outcome.failed_exc = exc
             outcome.error = f"{entry.source.path}: {type(exc).__name__}: {exc}"
             return outcome
         outcome.copied.append({

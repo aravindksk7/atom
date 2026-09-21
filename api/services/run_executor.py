@@ -1710,7 +1710,7 @@ class RunExecutor:
         t0 = time.monotonic()
         executed_at = datetime.now(timezone.utc)
         from api.services.file_transfer import (
-            TransferError, build_endpoint, plan_transfer, run_transfer,
+            TransferError, build_endpoint, is_transport_error, plan_transfer, run_transfer,
         )
         from api.services.multi_file_remote import RemoteFileSourceSession
         from etl_framework.reconciliation.file_transfer_spec import parse_file_transfer_params
@@ -1745,9 +1745,17 @@ class RunExecutor:
                 job, TestStatus.ERROR, executed_at, time.monotonic() - t0, total=total,
                 destination_root=destination_root, error=str(detail),
             )
+        if not outcome.error:
+            status = TestStatus.PASSED
+        elif is_transport_error(outcome.failed_exc):
+            # Connection/credential/host-key problems mid-copy are ERROR (spec
+            # section 7); data problems and local disk errors stay FAILED.
+            status = TestStatus.ERROR
+        else:
+            status = TestStatus.FAILED
         return self._file_transfer_result(
             job,
-            TestStatus.FAILED if outcome.error else TestStatus.PASSED,
+            status,
             executed_at,
             time.monotonic() - t0,
             total=total,
