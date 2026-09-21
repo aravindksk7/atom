@@ -283,6 +283,17 @@ def test_sftp_endpoint_relative_of_and_destination_for():
     assert ft.SftpEndpoint("/out", FakeSFTP(), "vendor").destination_for("a/b.csv") == "/out/a/b.csv"
 
 
+@pytest.mark.parametrize("relative", [".", "a/.."])
+def test_sftp_endpoint_destination_for_rejects_paths_resolving_onto_the_root(relative):
+    endpoint = ft.SftpEndpoint("/out", FakeSFTP(), "p")
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for(relative)
+
+
+def test_sftp_endpoint_destination_for_works_under_a_slash_root():
+    assert ft.SftpEndpoint("/", FakeSFTP(), "p").destination_for("a/b.csv") == "/a/b.csv"
+
+
 def test_sftp_endpoint_write_creates_parent_dirs_and_renames_part_file():
     fake = FakeSFTP()
     endpoint = ft.SftpEndpoint("/out", fake, "vendor")

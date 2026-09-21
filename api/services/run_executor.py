@@ -1716,8 +1716,10 @@ class RunExecutor:
         from etl_framework.reconciliation.file_transfer_spec import parse_file_transfer_params
 
         total = 0
+        destination_root: str | None = None
         try:
             spec = parse_file_transfer_params(job.params)
+            destination_root = spec.destination.root
             with RemoteFileSourceSession(self._db) as session:
                 files = session.discover(spec.source, recursive=spec.recursive)
                 if not files:
@@ -1734,12 +1736,14 @@ class RunExecutor:
                 outcome = run_transfer(plan, source, destination)
         except TransferError as exc:
             return self._file_transfer_result(
-                job, TestStatus.FAILED, executed_at, time.monotonic() - t0, total=total, error=str(exc),
+                job, TestStatus.FAILED, executed_at, time.monotonic() - t0, total=total,
+                destination_root=destination_root, error=str(exc),
             )
         except Exception as exc:
             detail = getattr(exc, "detail", None) or str(exc)
             return self._file_transfer_result(
-                job, TestStatus.ERROR, executed_at, time.monotonic() - t0, total=total, error=str(detail),
+                job, TestStatus.ERROR, executed_at, time.monotonic() - t0, total=total,
+                destination_root=destination_root, error=str(detail),
             )
         return self._file_transfer_result(
             job,

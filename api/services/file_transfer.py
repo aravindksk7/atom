@@ -214,7 +214,7 @@ class SftpEndpoint:
 
     def destination_for(self, relative: str) -> str:
         target = posixpath.normpath(posixpath.join(self.root, relative))
-        if target != self.root and not target.startswith(self.root.rstrip("/") + "/"):
+        if not target.startswith(self.root.rstrip("/") + "/"):
             raise TransferError(
                 f"destination path for '{relative}' escapes destination root '{self.root}'"
             )

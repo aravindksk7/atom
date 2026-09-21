@@ -109,6 +109,7 @@ def test_second_run_with_default_on_exists_fails_and_reports_collision(db_sessio
 
     assert result.status == TestStatus.FAILED
     assert "already contains 2 file(s)" in result.mismatch_summary["error"]
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
     assert result.data_artifact_path is None
     assert len(result.mismatches) == 1
 
@@ -168,6 +169,8 @@ def test_no_matching_files_fails_with_clear_message(db_session, allowed_dir):
 
     assert result.status == TestStatus.FAILED
     assert "no files matching 'sales_{region}.csv'" in result.mismatch_summary["error"]
+    assert result.mismatch_summary["destination_root"] == str(allowed_dir / "dst")
+    assert result.data_artifact_path is None
 
 
 def test_recursive_with_preserve_structure_keeps_subfolders(db_session, allowed_dir):
@@ -201,6 +204,8 @@ def test_destination_outside_allowlist_is_an_error_not_a_failure(db_session, all
 
     assert result.status == TestStatus.ERROR
     assert "Invalid file path" in result.mismatch_summary["error"]
+    assert result.mismatch_summary["destination_root"] == str(outside)
+    assert result.data_artifact_path is None
     assert list(outside.iterdir()) == []
 
 
