@@ -188,10 +188,18 @@ def validate_job_definition_body(body: dict):
     return {"ok": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
 
 
+# This is an interactive preview click on a request thread, not a real job
+# run -- it must not queue behind (or make a real job queue behind it for)
+# the full _SMB_LOCK_TIMEOUT_SECONDS default (5 minutes). Mirrors the Test
+# Connection route's own 30s bound on the same host lock, just shorter since
+# a preview has even less reason to wait.
+_PREVIEW_SMB_LOCK_TIMEOUT_SECONDS = 15
+
+
 @router.post("/preview-file-mapping")
 def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(get_session)):
     from etl_framework.reconciliation.file_mapping import FileMappingSpec, pair_files, pair_files_automated
-    from api.services.multi_file_remote import RemoteFileSourceSession
+    from api.services.multi_file_remote import RemoteFileSourceSession, SmbConnectError
 
     try:
         spec = FileMappingSpec.from_params({"file_mapping": body.file_mapping})
@@ -200,8 +208,8 @@ def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(
 
     try:
         with RemoteFileSourceSession(db) as session:
-            source_files = session.discover(spec.source)
-            target_files = session.discover(spec.target)
+            source_files = session.discover(spec.source, lock_timeout_seconds=_PREVIEW_SMB_LOCK_TIMEOUT_SECONDS)
+            target_files = session.discover(spec.target, lock_timeout_seconds=_PREVIEW_SMB_LOCK_TIMEOUT_SECONDS)
 
             if spec.strategy == "automated":
                 source_frames = {f.path: session.read_file(f, spec.source) for f in source_files}
@@ -215,6 +223,15 @@ def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(
                 scores_by_pair = {}
     except HTTPException:
         raise
+    except SmbConnectError as exc:
+        # Mirrors the Test Connection route's wording for the same
+        # contended-lock situation; other smb failures (bad credentials, a
+        # missing share) also land here rather than the generic 400 below,
+        # so the underlying message is included too.
+        raise HTTPException(
+            status_code=409,
+            detail=f"Another SMB operation is in progress for this host -- try again shortly ({exc})",
+        )
     except ValueError as exc:
         # Covers resolve_file_server_profile's missing/mismatched credentials_ref,
         # but also _group_by_key's match_on-token errors and pandas parsing errors

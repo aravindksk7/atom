@@ -186,7 +186,8 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         # _net_use/_net_use_delete/_smb_host_lock are module-private helpers
         # shared between this route and multi_file_remote's real connect path
         # (same convention as _load_sftp_private_key above).
-        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock, valid_smb_host
+        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock
+        from etl_framework.reconciliation.file_mapping import valid_smb_host
 
         if not valid_smb_host(profile.host):
             return FileServerTestResult(status="error", message="SMB host must be a server name or IP address")

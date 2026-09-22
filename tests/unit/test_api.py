@@ -860,6 +860,43 @@ def test_preview_file_mapping_surfaces_remote_connection_error_as_400(client, mo
     assert "could not connect" in resp.json()["detail"]
 
 
+def test_preview_file_mapping_returns_409_quickly_when_smb_host_lock_is_contended(client, monkeypatch):
+    """An interactive preview click must not queue behind (or make a real
+    job queue behind it for) the module's long default smb lock wait --
+    it uses its own short lock_timeout_seconds instead, mirrored here down
+    to 0.2s so this test itself stays fast rather than genuinely waiting out
+    the route's real (short but still multi-second) bound."""
+    import api.routes.jobs as jobs_module
+    from api.services.multi_file_remote import _smb_host_lock
+
+    monkeypatch.setattr(jobs_module, "_PREVIEW_SMB_LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+
+    with Session(client.engine) as db:
+        FileServerProfileRepository(db).create({
+            "name": "smb_source", "kind": "smb", "host": "fileserver01", "port": 22,
+            "username": "svc", "password": "s3cret",
+        })
+
+    # Simulate another in-flight SMB operation already holding this host's
+    # lock -- the preview route must fail fast with 409, not queue behind it.
+    lock = _smb_host_lock("fileserver01")
+    lock.acquire()
+    try:
+        resp = client.post("/api/jobs/preview-file-mapping", json={
+            "file_mapping": {
+                "match_on": ["region"],
+                "source": {"kind": "smb", "root": r"\\fileserver01\share\sub", "pattern": "sales_{region}.csv", "credentials_ref": "smb_source"},
+                "target": {"kind": "local", "root": "/baseline", "pattern": "fin_{region}.csv"},
+            },
+        })
+    finally:
+        lock.release()
+
+    assert resp.status_code == 409
+    assert "try again shortly" in resp.json()["detail"]
+
+
 def test_import_jobs_upserts_definitions(client):
     payload = [
         {

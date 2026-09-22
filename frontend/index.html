@@ -1800,7 +1800,7 @@
                 <option value="sftp">sftp</option>
                 <option value="smb">smb</option>
               </select>
-              <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix"
+              <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-mf-source-root-input" aria-label="spool exports or s3 bucket prefix" />
               <input x-model="jobModal.mf_source_pattern" class="field-input" placeholder="sales_{region}_{date:%Y%m%d}.csv"
                      data-testid="job-modal-mf-source-pattern-input" aria-label="sales region date y m d csv" />
@@ -1824,7 +1824,7 @@
                 <option value="sftp">sftp</option>
                 <option value="smb">smb</option>
               </select>
-              <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix"
+              <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-mf-target-root-input" aria-label="exports finance or s3 bucket prefix" />
               <input x-model="jobModal.mf_target_pattern" class="field-input" placeholder="financials_{region}_{date:%Y%m%d}.dat"
                      data-testid="job-modal-mf-target-pattern-input" aria-label="financials region date y m d dat" />
@@ -1964,7 +1964,7 @@
             </div>
             <div>
               <label  class="field-label" for="a11y-launch-fw-root">Folder / Bucket Path</label>
-              <input x-model="jobModal.fw_location_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix"
+              <input x-model="jobModal.fw_location_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-fw-root-input" id="a11y-launch-fw-root" />
             </div>
             <div>
@@ -2033,7 +2033,7 @@
             </div>
             <div>
               <label class="field-label" for="a11y-launch-ft-source-root">Folder / Bucket Path</label>
-              <input x-model="jobModal.ft_source_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix"
+              <input x-model="jobModal.ft_source_root" class="field-input" placeholder="/data/inbound or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-ft-source-root-input" id="a11y-launch-ft-source-root" />
             </div>
             <div>
@@ -2067,7 +2067,7 @@
               </div>
               <div>
                 <label class="field-label" for="a11y-launch-ft-dest-root">Folder / Bucket Path</label>
-                <input x-model="jobModal.ft_dest_root" class="field-input" placeholder="/data/staged or s3://bucket/prefix"
+                <input x-model="jobModal.ft_dest_root" class="field-input" placeholder="/data/staged or s3://bucket/prefix or \\server\share\path"
                        data-testid="job-modal-ft-dest-root-input" id="a11y-launch-ft-dest-root" />
               </div>
               <div x-show="jobModal.ft_dest_kind !== 'local'">

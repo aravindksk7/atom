@@ -40,7 +40,6 @@ from etl_framework.reconciliation.file_mapping import (
     discover_s3_files,
     discover_sftp_files,
     parse_unc_root,
-    valid_smb_host,
 )
 from etl_framework.repository.repository import FileServerProfileRepository, ResolvedFileServerProfile
 
@@ -69,7 +68,15 @@ def _net_use(resource: str, username: str | None, password: str | None) -> None:
     if username:
         args.append("/user:" + username)
     try:
-        result = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=30)
+        # stdin=DEVNULL: net use prompts interactively on several failure
+        # modes (bad password, "continue connection? Y/N") -- under a
+        # console-launched uvicorn that inherits the server's real stdin,
+        # that would stall the whole 30s timeout waiting on a prompt no one
+        # can answer instead of failing fast with the real error. Matches
+        # _net_use_delete below, which already does this.
+        result = subprocess.run(
+            args, capture_output=True, text=True, errors="replace", timeout=30, stdin=subprocess.DEVNULL,
+        )
     except Exception as exc:
         # `from None` deliberately drops __cause__ -- the raw exception (e.g.
         # subprocess.TimeoutExpired) embeds the full argv, password included,
@@ -122,12 +129,27 @@ def _smb_host_lock(host: str) -> threading.Lock:
 # connection (a killed net.exe, a hung server), not a concurrency fix, so it
 # defaults high enough to give real concurrent work room to finish; override
 # with the SMB_LOCK_TIMEOUT_SECONDS env var if a deployment needs it tighter.
-try:
-    _SMB_LOCK_TIMEOUT_SECONDS = int(os.environ.get("SMB_LOCK_TIMEOUT_SECONDS", "300"))
-except ValueError:
-    # A malformed env var must not take the whole module (and everything
-    # that imports it) down at import time -- fall back to the default.
-    _SMB_LOCK_TIMEOUT_SECONDS = 300
+_SMB_LOCK_TIMEOUT_SECONDS_DEFAULT = 300
+
+
+def _parse_smb_lock_timeout_seconds(raw: str | None) -> int:
+    """Parse the ``SMB_LOCK_TIMEOUT_SECONDS`` env var, falling back to the
+    default for anything that isn't a genuinely usable positive timeout: a
+    non-integer value would otherwise raise at import time and take the
+    whole module down; ``0`` would make ``Lock.acquire(timeout=0)`` fail
+    instantly on any contention -- the opposite of "no timeout" someone
+    setting ``0`` would likely intend; and a negative value would make
+    ``acquire()`` itself raise a bare ``ValueError`` outside this module's
+    own error handling, landing as an uncategorized error instead of a
+    clean ``SmbConnectError``."""
+    try:
+        value = int(raw) if raw is not None else _SMB_LOCK_TIMEOUT_SECONDS_DEFAULT
+    except ValueError:
+        return _SMB_LOCK_TIMEOUT_SECONDS_DEFAULT
+    return value if value > 0 else _SMB_LOCK_TIMEOUT_SECONDS_DEFAULT
+
+
+_SMB_LOCK_TIMEOUT_SECONDS = _parse_smb_lock_timeout_seconds(os.environ.get("SMB_LOCK_TIMEOUT_SECONDS"))
 
 
 class SmbSession:
@@ -165,7 +187,13 @@ class SmbSession:
             self._lock.release()
 
 
-def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourceSpec) -> SmbSession:
+def connect_smb_share(
+    profile: ResolvedFileServerProfile | None, spec: FileSourceSpec, lock_timeout_seconds: float | None = None,
+) -> SmbSession:
+    """``lock_timeout_seconds`` overrides ``_SMB_LOCK_TIMEOUT_SECONDS`` for
+    just this call when given -- used by callers (like a preview route) that
+    need to fail fast on a contended host lock rather than wait for a real
+    job's much longer default."""
     if profile is None:
         raise ValueError(f"'{spec.kind}' source requires credentials_ref, but none was set")
     if os.name != "nt":
@@ -181,7 +209,8 @@ def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourc
         )
     resource = f"\\\\{server}\\{share}"
     lock = _smb_host_lock(server)
-    if not lock.acquire(timeout=_SMB_LOCK_TIMEOUT_SECONDS):
+    timeout = _SMB_LOCK_TIMEOUT_SECONDS if lock_timeout_seconds is None else lock_timeout_seconds
+    if not lock.acquire(timeout=timeout):
         raise SmbConnectError(f"Timed out waiting for another SMB operation on host '{server}' to finish")
     try:
         _net_use(resource, profile.username, profile.password)
@@ -332,7 +361,7 @@ class RemoteFileSourceSession:
         # feeds location_key_for.
         self._profiles: dict[tuple[str, str | None], ResolvedFileServerProfile | None] = {}
 
-    def _client_for(self, spec: FileSourceSpec):
+    def _client_for(self, spec: FileSourceSpec, *, lock_timeout_seconds: float | None = None):
         key = (spec.kind, spec.credentials_ref)
         if key not in self._clients:
             # Resolve credentials on a fresh, thread-local Session rather than
@@ -417,7 +446,7 @@ class RemoteFileSourceSession:
                     reused_client.ensure_resource(resource, profile.username, profile.password)
                     self._clients[key] = reused_client
                 else:
-                    self._clients[key] = connect_smb_share(profile, spec)
+                    self._clients[key] = connect_smb_share(profile, spec, lock_timeout_seconds)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
             self._profiles[key] = profile
@@ -507,7 +536,14 @@ class RemoteFileSourceSession:
         # the same absolute path.
         return ("sftp", (profile.host or "").lower(), int(profile.port or 22), profile.username or "")
 
-    def discover(self, spec: FileSourceSpec, *, recursive: bool = False) -> list[DiscoveredFile]:
+    def discover(
+        self, spec: FileSourceSpec, *, recursive: bool = False, lock_timeout_seconds: float | None = None,
+    ) -> list[DiscoveredFile]:
+        """``lock_timeout_seconds`` (smb only) overrides the default smb
+        host-lock wait for just this call -- None uses the module default
+        (a real job's long, patient wait); pass a short value for a
+        request-thread caller like a preview route that must fail fast
+        instead of blocking behind a real running job on the same host."""
         if spec.kind == "local":
             root = resolve_allowed_path(spec.root)
             return discover_local_files(root, spec.pattern, recursive=recursive)
@@ -516,7 +552,8 @@ class RemoteFileSourceSession:
         if spec.kind == "sftp":
             return discover_sftp_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
         if spec.kind == "smb":
-            self._client_for(spec)  # connects (net use); the UNC path is then a normal filesystem path
+            # connects (net use); the UNC path is then a normal filesystem path
+            self._client_for(spec, lock_timeout_seconds=lock_timeout_seconds)
             return discover_local_files(Path(spec.root), spec.pattern, recursive=recursive)
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 

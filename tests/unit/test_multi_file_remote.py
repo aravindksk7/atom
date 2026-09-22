@@ -1190,3 +1190,73 @@ def test_net_use_does_not_leak_password_via_chained_timeout_exception(db, monkey
     assert password not in str(exc_info.value)
     rendered = "".join(traceback.format_exception(exc_info.value))
     assert password not in rendered
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "-300"])
+def test_parse_smb_lock_timeout_seconds_falls_back_to_default_for_non_positive_values(raw):
+    from api.services.multi_file_remote import _parse_smb_lock_timeout_seconds
+
+    # 0 would make Lock.acquire(timeout=0) fail instantly on any contention
+    # (the opposite of "no timeout" someone setting 0 would likely intend),
+    # and a negative value would make acquire() itself raise a bare
+    # ValueError outside this module's own error handling -- both must fall
+    # back to the same default a missing/malformed env var already uses.
+    assert _parse_smb_lock_timeout_seconds(raw) == 300
+
+
+def test_parse_smb_lock_timeout_seconds_falls_back_to_default_for_malformed_value():
+    from api.services.multi_file_remote import _parse_smb_lock_timeout_seconds
+
+    assert _parse_smb_lock_timeout_seconds("not-a-number") == 300
+
+
+def test_parse_smb_lock_timeout_seconds_falls_back_to_default_when_unset():
+    from api.services.multi_file_remote import _parse_smb_lock_timeout_seconds
+
+    assert _parse_smb_lock_timeout_seconds(None) == 300
+
+
+def test_parse_smb_lock_timeout_seconds_honours_a_valid_positive_value():
+    from api.services.multi_file_remote import _parse_smb_lock_timeout_seconds
+
+    assert _parse_smb_lock_timeout_seconds("120") == 120
+
+
+def test_connect_smb_share_raises_on_non_windows_platform(db, monkeypatch):
+    """The `os.name != "nt"` guard in connect_smb_share -- the one that
+    fires for real job execution, not the separate copy in the Test
+    Connection route (already covered elsewhere) -- has no dedicated
+    coverage, and can't get any under this file's autouse fixture, which
+    always patches `os` to report "nt" for every test here. Re-patch it
+    locally, after the autouse fixture has already run, so this test's own
+    override wins."""
+    from api.services.multi_file_remote import SmbConnectError, connect_smb_share
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    monkeypatch.setattr("api.services.multi_file_remote.os", types.SimpleNamespace(name="posix"))
+    FileServerProfileRepository(db).create(_smb_profile())
+    profile = FileServerProfileRepository(db).get_decrypted_by_name("vendor-share")
+    spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
+
+    with pytest.raises(SmbConnectError, match="run on Windows"):
+        connect_smb_share(profile, spec)
+
+
+def test_connect_smb_share_lock_timeout_seconds_overrides_the_module_default(db, monkeypatch):
+    from api.services.multi_file_remote import SmbConnectError, _smb_host_lock, connect_smb_share
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    FileServerProfileRepository(db).create(_smb_profile(host="fileserver09"))
+    profile = FileServerProfileRepository(db).get_decrypted_by_name("vendor-share")
+    spec = FileSourceSpec(kind="smb", root=r"\\fileserver09\share\sub", pattern="*.csv", credentials_ref="vendor-share")
+
+    # Deliberately leave the module default at its normal (large) value --
+    # only the per-call override below should determine how long this
+    # particular connect attempt waits.
+    lock = _smb_host_lock("fileserver09")
+    lock.acquire()
+    try:
+        with pytest.raises(SmbConnectError, match="Timed out waiting"):
+            connect_smb_share(profile, spec, lock_timeout_seconds=0.2)
+    finally:
+        lock.release()
