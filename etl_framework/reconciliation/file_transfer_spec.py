@@ -13,8 +13,8 @@ from typing import Any
 
 from etl_framework.reconciliation.file_mapping import FileSourceSpec, compile_token_pattern
 
-LOCATION_KINDS = ("local", "s3", "sftp", "scp")
-REMOTE_KINDS = ("s3", "sftp", "scp")
+LOCATION_KINDS = ("local", "s3", "sftp", "scp", "smb")
+REMOTE_KINDS = ("s3", "sftp", "scp", "smb")
 ON_EXISTS_VALUES = ("fail", "overwrite", "skip")
 
 
@@ -40,7 +40,7 @@ def file_transfer_param_errors(params: dict[str, Any]) -> list[tuple[str, str]]:
             return
         kind = location.get("kind")
         if kind not in LOCATION_KINDS:
-            errors.append((f"params.{key}.kind", f"file_transfer {key}.kind must be 'local', 's3', 'sftp', or 'scp'"))
+            errors.append((f"params.{key}.kind", f"file_transfer {key}.kind must be 'local', 's3', 'sftp', 'scp', or 'smb'"))
         root = location.get("root")
         if not isinstance(root, str) or not root.strip():
             errors.append((f"params.{key}.root", f"file_transfer {key} requires 'root'"))

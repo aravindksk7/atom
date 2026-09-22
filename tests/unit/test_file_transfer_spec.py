@@ -124,3 +124,23 @@ def test_parse_normalizes_scp_destination_to_sftp():
     ))
     assert spec.destination.kind == "sftp"
     assert spec.destination.credentials_ref == "vendor"
+
+
+def test_smb_source_and_destination_are_valid_with_credentials_ref():
+    params = {
+        "source": {"kind": "smb", "root": r"\\fileserver01\vendor\inbound", "pattern": "sales_{region}.csv", "credentials_ref": "vendor-share"},
+        "destination": {"kind": "smb", "root": r"\\fileserver01\staging\sales", "credentials_ref": "vendor-share"},
+    }
+    assert file_transfer_param_errors(params) == []
+    spec = parse_file_transfer_params(params)
+    assert spec.source.kind == "smb"
+    assert spec.destination.kind == "smb"
+
+
+def test_smb_requires_credentials_ref():
+    params = {
+        "source": {"kind": "smb", "root": r"\\fileserver01\vendor\inbound", "pattern": "*.csv"},
+        "destination": {"kind": "local", "root": "/tmp/out"},
+    }
+    errors = file_transfer_param_errors(params)
+    assert any(field == "params.source.credentials_ref" for field, _ in errors)
