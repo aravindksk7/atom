@@ -1095,6 +1095,30 @@ def test_client_for_smb_reuse_path_still_validates_profile_host_matches_root(db,
         session_local.client_for(spec_b)
 
 
+def test_client_for_smb_cache_hit_path_validates_host_against_existing_connection(db, monkeypatch):
+    from api.services.multi_file_remote import SmbConnectError, _smb_host_lock
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    # profile.host left blank so the profile-vs-root check the miss/reuse
+    # paths already do can't catch this on its own -- only the cache-hit
+    # path's own check against the cached session's actual connected host
+    # (client.host) can catch a second spec reusing the same credentials_ref
+    # but pointing at a completely different server.
+    FileServerProfileRepository(db).create(_smb_profile(host=""))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    session_local = RemoteFileSourceSession(db)
+    spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
+    spec_b = FileSourceSpec(kind="smb", root=r"\\OTHERHOST\out", pattern="*.csv", credentials_ref="vendor-share")
+
+    session_local.client_for(spec_a)
+    with pytest.raises(SmbConnectError, match="different host"):
+        session_local.client_for(spec_b)
+
+    # OTHERHOST's lock was never taken -- proves the mismatched host's net
+    # use never happened, invisibly to the same-host conflict check.
+    assert _smb_host_lock("OTHERHOST").acquire(blocking=False)
+
+
 def test_connect_smb_share_lock_acquire_times_out_instead_of_hanging(db, monkeypatch):
     from api.services.multi_file_remote import SmbConnectError, _smb_host_lock, connect_smb_share
     from etl_framework.repository.repository import FileServerProfileRepository

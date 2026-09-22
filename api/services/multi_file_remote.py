@@ -435,6 +435,23 @@ class RemoteFileSourceSession:
                     server, share = parse_unc_root(spec.root)
                 except ValueError as exc:
                     raise SmbConnectError(str(exc)) from None
+                # Same consistency check the miss/reuse paths above already
+                # do -- without it, a spec whose UNC root points at a totally
+                # different server than the cached profile would silently
+                # net use that other server here, never taking its host
+                # lock (invisible to the same-host conflict check above) and
+                # leaving client.host inaccurate relative to what it's
+                # actually connected to.
+                if profile.host and profile.host.lower() != server.lower():
+                    raise SmbConnectError(
+                        f"file_transfer source/destination root '\\\\{server}\\{share}' does not match "
+                        f"file server profile '{profile.name}''s host '{profile.host}'"
+                    )
+                if client.host.casefold() != server.casefold():
+                    raise SmbConnectError(
+                        f"file_transfer source/destination root '\\\\{server}\\{share}' targets a different host "
+                        f"than the existing SMB connection for this credentials_ref ('{client.host}')"
+                    )
                 client.ensure_resource(f"\\\\{server}\\{share}", profile.username, profile.password)
         return self._clients[key]
 
