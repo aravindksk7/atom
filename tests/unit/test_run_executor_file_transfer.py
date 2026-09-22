@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import types
 
 import boto3
 import pytest
@@ -529,7 +530,14 @@ def test_smb_to_local_copies_files_end_to_end(db_session, allowed_dir, tmp_path,
         "name": "vendor-share", "kind": "smb", "host": "fileserver01",
         "username": "svc", "password": "s3cret",
     })
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    net_use_calls = []
+    monkeypatch.setattr("api.services.multi_file_remote.os", types.SimpleNamespace(name="nt"))
+    monkeypatch.setattr("api.services.multi_file_remote._smb_host_locks", {})
+    monkeypatch.setattr(
+        "api.services.multi_file_remote._net_use",
+        lambda resource, u, p: net_use_calls.append((resource, u, p)),
+    )
+    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
     monkeypatch.setattr("api.services.file_transfer.parse_unc_root", lambda root: ("fileserver01", "share"))
 
@@ -543,3 +551,4 @@ def test_smb_to_local_copies_files_end_to_end(db_session, allowed_dir, tmp_path,
     assert result.status == TestStatus.PASSED
     assert (allowed_dir / "dst" / "sales_east.csv").read_bytes() == b"id\n1\n"
     assert result.mismatch_summary["copied"] == 1
+    assert net_use_calls == [(r"\\fileserver01\share", "svc", "s3cret")]
