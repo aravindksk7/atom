@@ -65,3 +65,26 @@ def test_reconciliation_job_still_requires_a_target_env():
     with pytest.raises(HTTPException) as exc_info:
         validate_env_requirements([{"job_name": "orders"}], {"orders": job}, "")
     assert exc_info.value.status_code == 422
+
+
+def test_file_watcher_accepts_smb_location():
+    job = JobDefinition(
+        name="watch_vendor_share", job_type="file_watcher",
+        params={
+            "location": {"kind": "smb", "root": r"\\fileserver01\vendor\inbound", "pattern": "SALES_*.csv", "credentials_ref": "vendor-share"},
+            "max_tries": 5,
+        },
+    )
+    assert job.job_type == "file_watcher"
+    assert validate_job_definition(job) == []
+
+
+def test_file_watcher_smb_requires_credentials_ref():
+    with pytest.raises(ValueError, match="credentials_ref"):
+        JobDefinition(
+            name="watch_vendor_share_2", job_type="file_watcher",
+            params={
+                "location": {"kind": "smb", "root": r"\\fileserver01\vendor\inbound", "pattern": "SALES_*.csv"},
+                "max_tries": 5,
+            },
+        )

@@ -945,11 +945,11 @@ class JobDefinition(BaseModel):
             if not isinstance(location, dict):
                 raise ValueError("file_watcher jobs require a 'location' object in params")
             kind = location.get("kind")
-            if kind not in ("local", "s3", "sftp", "scp"):
-                raise ValueError("file_watcher location.kind must be 'local', 's3', 'sftp', or 'scp'")
+            if kind not in ("local", "s3", "sftp", "scp", "smb"):
+                raise ValueError("file_watcher location.kind must be 'local', 's3', 'sftp', 'scp', or 'smb'")
             if not location.get("root") or not location.get("pattern"):
                 raise ValueError("file_watcher location requires 'root' and 'pattern'")
-            if kind in ("s3", "sftp", "scp") and not location.get("credentials_ref"):
+            if kind in ("s3", "sftp", "scp", "smb") and not location.get("credentials_ref"):
                 raise ValueError(f"file_watcher location.kind '{kind}' requires 'credentials_ref'")
             max_tries = self.params.get("max_tries")
             window_end = self.params.get("window_end")
