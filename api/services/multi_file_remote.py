@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,7 @@ from etl_framework.reconciliation.file_mapping import (
     discover_local_files,
     discover_s3_files,
     discover_sftp_files,
+    parse_unc_root,
     valid_smb_host,
 )
 from etl_framework.repository.repository import FileServerProfileRepository, ResolvedFileServerProfile
@@ -47,17 +50,36 @@ class SmbConnectError(RuntimeError):
     platform itself. Recognised by ``file_transfer.is_transport_error``."""
 
 
+def _scrub_smb_error(text: str, password: str | None) -> str:
+    if password:
+        text = text.replace(password, "***")
+    return text
+
+
 def _net_use(resource: str, username: str | None, password: str | None) -> None:
     """Authenticate to a UNC resource (``\\\\server\\share``) via Windows'
     built-in ``net use``. Raises ``SmbConnectError`` on any failure, its
-    message scrubbed of ``password``. Implemented fully in Task 5; this
-    placeholder lets Task 1's Test Connection route and tests exist first."""
-    raise NotImplementedError
+    message scrubbed of ``password``."""
+    if not password:
+        raise SmbConnectError("SMB profile requires a password")
+    args = ["net", "use", resource, password]
+    if username:
+        args.append("/user:" + username)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+    except Exception as exc:
+        raise SmbConnectError(_scrub_smb_error(str(exc), password)) from exc
+    if result.returncode != 0:
+        message = _scrub_smb_error((result.stderr or result.stdout or "").strip(), password)
+        raise SmbConnectError(f"net use {resource} failed: {message}")
 
 
 def _net_use_delete(resource: str) -> None:
     """Best-effort ``net use ... /delete`` -- never raises."""
-    raise NotImplementedError
+    try:
+        subprocess.run(["net", "use", resource, "/delete"], capture_output=True, text=True, timeout=30)
+    except Exception:
+        pass
 
 
 _smb_host_locks: dict[str, threading.Lock] = {}
@@ -76,6 +98,48 @@ def _smb_host_lock(host: str) -> threading.Lock:
         if key not in _smb_host_locks:
             _smb_host_locks[key] = threading.Lock()
         return _smb_host_locks[key]
+
+
+class SmbSession:
+    """A connected UNC resource, held for the lifetime of one
+    ``RemoteFileSourceSession``. ``close()`` runs ``net use ... /delete`` and
+    releases the per-host lock -- picked up automatically by
+    ``close_remote_client``'s generic ``getattr(client, "close", None)``."""
+
+    def __init__(self, resource: str, lock: "threading.Lock") -> None:
+        self.resource = resource
+        self._lock = lock
+
+    def close(self) -> None:
+        try:
+            _net_use_delete(self.resource)
+        finally:
+            self._lock.release()
+
+
+def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourceSpec) -> SmbSession:
+    if profile is None:
+        raise ValueError(f"'{spec.kind}' source requires credentials_ref, but none was set")
+    if os.name != "nt":
+        raise SmbConnectError("SMB transfers require the atom server to run on Windows")
+    try:
+        server, share = parse_unc_root(spec.root)
+    except ValueError as exc:
+        raise SmbConnectError(str(exc)) from exc
+    if profile.host and profile.host.lower() != server.lower():
+        raise SmbConnectError(
+            f"file_transfer source/destination root '\\\\{server}\\{share}' does not match "
+            f"file server profile '{profile.name}''s host '{profile.host}'"
+        )
+    resource = f"\\\\{server}\\{share}"
+    lock = _smb_host_lock(server)
+    lock.acquire()
+    try:
+        _net_use(resource, profile.username, profile.password)
+    except Exception:
+        lock.release()
+        raise
+    return SmbSession(resource, lock)
 
 
 _CONTENT_MATCH_READ_LIMIT = 65536
@@ -235,6 +299,8 @@ class RemoteFileSourceSession:
                 self._clients[key] = build_s3_client(profile, spec)
             elif spec.kind == "sftp":
                 self._clients[key] = build_sftp_client(profile, spec)
+            elif spec.kind == "smb":
+                self._clients[key] = connect_smb_share(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
             self._profiles[key] = profile
@@ -252,8 +318,29 @@ class RemoteFileSourceSession:
         ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there) or
         ``("sftp", host, port, username)``. None for local specs or a spec with no
         resolved profile."""
-        if spec.kind not in ("s3", "sftp"):
+        if spec.kind not in ("s3", "sftp", "smb"):
             return None
+        if spec.kind == "smb":
+            # Computing the smb location key only needs the resolved profile
+            # and the UNC root, not a live connection -- unlike s3/sftp,
+            # calling self._client_for(spec) here would open a real net use
+            # connection that holds a process-wide per-host lock for the
+            # rest of this session's life (Windows allows only one net use
+            # identity per server at a time), so comparing two different
+            # profiles on the same host would self-deadlock on the second
+            # spec's lock acquisition.
+            from etl_framework.repository.database import SessionLocal
+
+            with SessionLocal() as resolve_db:
+                profile = resolve_file_server_profile(resolve_db, spec)
+            if profile is None:
+                return None
+            # A UNC root is always fully qualified (never account-relative
+            # the way an SFTP root can be), so the account isn't part of the
+            # location -- two profiles for the same server+share are the
+            # same object regardless of which account each uses.
+            server, share = parse_unc_root(spec.root)
+            return ("smb", server.lower(), share.lower())
         self._client_for(spec)
         profile = self._profiles.get((spec.kind, spec.credentials_ref))
         if profile is None:
@@ -276,6 +363,9 @@ class RemoteFileSourceSession:
             return discover_s3_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
         if spec.kind == "sftp":
             return discover_sftp_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
+        if spec.kind == "smb":
+            self._client_for(spec)  # connects (net use); the UNC path is then a normal filesystem path
+            return discover_local_files(Path(spec.root), spec.pattern, recursive=recursive)
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 
     def read_file(self, file: DiscoveredFile, spec: FileSourceSpec) -> pd.DataFrame:
@@ -288,6 +378,11 @@ class RemoteFileSourceSession:
         if spec.kind == "sftp":
             client = self._client_for(spec)
             with client.open(file.path, "rb") as fh:
+                raw = fh.read()
+            return _read_tabular_bytes(raw, Path(file.file_name).suffix.lower())
+        if spec.kind == "smb":
+            self._client_for(spec)
+            with open(file.path, "rb") as fh:
                 raw = fh.read()
             return _read_tabular_bytes(raw, Path(file.file_name).suffix.lower())
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
@@ -328,6 +423,10 @@ class RemoteFileSourceSession:
         if spec.kind == "sftp":
             client = self._client_for(spec)
             with client.open(file.path, "rb") as fh:
+                return fh.read(_CONTENT_MATCH_READ_LIMIT)
+        if spec.kind == "smb":
+            self._client_for(spec)
+            with open(file.path, "rb") as fh:
                 return fh.read(_CONTENT_MATCH_READ_LIMIT)
         raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
 
