@@ -33,7 +33,7 @@ class ConfigOut(BaseModel):
 
 class FileServerProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    kind: Literal["sftp", "scp", "s3"]
+    kind: Literal["sftp", "scp", "s3", "smb"]
     description: str = ""
     host: str | None = None
     port: int = 22
@@ -52,7 +52,7 @@ class FileServerProfileCreate(BaseModel):
 
 class FileServerProfileUpdate(BaseModel):
     name: str | None = None
-    kind: Literal["sftp", "scp", "s3"] | None = None
+    kind: Literal["sftp", "scp", "s3", "smb"] | None = None
     description: str | None = None
     host: str | None = None
     port: int | None = None

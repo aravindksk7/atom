@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -37,6 +38,40 @@ from etl_framework.reconciliation.file_mapping import (
     discover_sftp_files,
 )
 from etl_framework.repository.repository import FileServerProfileRepository, ResolvedFileServerProfile
+
+
+class SmbConnectError(RuntimeError):
+    """Raised when connecting to a UNC share fails: bad credentials, an
+    unreachable host, a missing share, or (on a non-Windows atom server) the
+    platform itself. Recognised by ``file_transfer.is_transport_error``."""
+
+
+def _net_use(resource: str, username: str | None, password: str | None) -> None:
+    """Authenticate to a UNC resource (``\\\\server\\share``) via Windows'
+    built-in ``net use``. Raises ``SmbConnectError`` on any failure, its
+    message scrubbed of ``password``. Implemented fully in Task 5; this
+    placeholder lets Task 1's Test Connection route and tests exist first."""
+    raise NotImplementedError
+
+
+def _net_use_delete(resource: str) -> None:
+    """Best-effort ``net use ... /delete`` -- never raises."""
+    raise NotImplementedError
+
+
+_smb_host_locks: dict[str, threading.Lock] = {}
+_smb_host_locks_guard = threading.Lock()
+
+
+def _smb_host_lock(host: str) -> threading.Lock:
+    """Return the process-wide lock serializing ``net use`` connections to
+    ``host`` (Windows allows only one credential per server at a time),
+    creating it on first use."""
+    with _smb_host_locks_guard:
+        if host not in _smb_host_locks:
+            _smb_host_locks[host] = threading.Lock()
+        return _smb_host_locks[host]
+
 
 _CONTENT_MATCH_READ_LIMIT = 65536
 

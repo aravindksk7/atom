@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -176,6 +177,28 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         if fingerprint != profile.host_key_fingerprint:
             return FileServerTestResult(status="mismatch", presented_fingerprint=fingerprint, pinned_fingerprint=profile.host_key_fingerprint)
         return FileServerTestResult(status="ok", presented_fingerprint=fingerprint)
+
+    if profile.kind == "smb":
+        if os.name != "nt":
+            return FileServerTestResult(status="error", message="SMB transfers require the atom server to run on Windows")
+        if not profile.host:
+            return FileServerTestResult(status="error", message="SMB profile requires a host")
+        # _net_use/_net_use_delete/_smb_host_lock are module-private helpers
+        # shared between this route and multi_file_remote's real connect path
+        # (same convention as _load_sftp_private_key above).
+        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock
+
+        resource = f"\\\\{profile.host}\\IPC$"
+        lock = _smb_host_lock(profile.host)
+        lock.acquire()
+        try:
+            _net_use(resource, profile.username, profile.password)
+        except SmbConnectError as exc:
+            return FileServerTestResult(status="error", message=str(exc))
+        finally:
+            _net_use_delete(resource)
+            lock.release()
+        return FileServerTestResult(status="ok")
 
     # s3
     try:

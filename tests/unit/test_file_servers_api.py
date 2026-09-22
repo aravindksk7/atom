@@ -302,6 +302,53 @@ def test_test_connection_sftp_unresolvable_host_returns_clean_error(client, monk
     assert "Name or service not known" in body["message"]
 
 
+def test_create_smb_file_server(client):
+    resp = client.post("/api/file-servers", json={
+        "name": "vendor-share", "kind": "smb", "host": "fileserver01",
+        "username": "CORP\\svc-atom", "password": "s3cret",
+    })
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["kind"] == "smb"
+    assert body["password"] == "********"
+
+
+def test_test_connection_smb_reports_clear_error_without_real_windows_net_use(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "vendor-share-2", "kind": "smb", "host": "fileserver02",
+        "username": "svc", "password": "s3cret",
+    }).json()
+
+    def _raise(*args, **kwargs):
+        from api.services.multi_file_remote import SmbConnectError
+        raise SmbConnectError("net use \\\\fileserver02\\IPC$ failed: System error 53 has occurred.")
+
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", _raise)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda *a, **k: None)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert "System error 53" in body["message"]
+
+
+def test_test_connection_smb_succeeds_and_always_disconnects(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "vendor-share-3", "kind": "smb", "host": "fileserver03",
+        "username": "svc", "password": "s3cret",
+    }).json()
+
+    calls = []
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: calls.append(("use", resource)))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: calls.append(("delete", resource)))
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "presented_fingerprint": None, "pinned_fingerprint": None, "message": None}
+    assert calls == [("use", "\\\\fileserver03\\IPC$"), ("delete", "\\\\fileserver03\\IPC$")]
+
+
 def test_file_servers_module_imports_without_paramiko_installed(monkeypatch):
     """api/routes/file_servers.py must not hard-crash app startup just because
     paramiko isn't installed -- SFTP/SCP is one optional feature among several
