@@ -8490,7 +8490,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <template x-if="fileServerModal.data.kind === 'smb'">
           <div class="space-y-3">
             <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" placeholder="fileserver01" data-testid="file-server-smb-host-input" /></div>
-            <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" placeholder="DOMAIN\\user or user@domain.com" data-testid="file-server-smb-username-input" /></div>
+            <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" placeholder="DOMAIN\user or user@domain.com" data-testid="file-server-smb-username-input" /></div>
             <div><label class="field-label">Password</label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-smb-password-input" /></div>
           </div>
         </template>
