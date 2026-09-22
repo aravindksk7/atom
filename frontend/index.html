@@ -8410,7 +8410,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="section-header">
     <div>
       <div class="section-title">File Servers</div>
-      <div class="section-sub">SFTP / SCP / S3 authentication profiles for file_watcher, file_transfer and multi-file jobs</div>
+      <div class="section-sub">SFTP / SCP / S3 / SMB authentication profiles for file_watcher, file_transfer and multi-file jobs</div>
     </div>
     <button @click="openFileServerModal(null)" class="btn-primary" data-testid="file-server-add-btn">Add File Server</button>
   </div>
@@ -8418,7 +8418,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div x-show="fileServers.length === 0" class="card empty-state" data-testid="file-servers-empty-state">
     <div class="empty-state-icon">🗄️</div>
     <div class="empty-state-title">No file servers yet</div>
-    <div class="empty-state-sub">Add an SFTP, SCP, or S3 profile to use with file_watcher, file_transfer and multi-file jobs (file_transfer destinations need write access)</div>
+    <div class="empty-state-sub">Add an SFTP, SCP, S3, or SMB profile to use with file_watcher, file_transfer and multi-file jobs (file_transfer destinations need write access)</div>
   </div>
 
   <div class="space-y-3">
@@ -8465,7 +8465,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div><label class="field-label">Name</label><input x-model="fileServerModal.data.name" class="field-input" data-testid="file-server-name-input" /></div>
         <div><label class="field-label">Kind</label>
           <select x-model="fileServerModal.data.kind" class="field-input field-select" data-testid="file-server-kind-select">
-            <option value="sftp">SFTP</option><option value="scp">SCP</option><option value="s3">S3</option>
+            <option value="sftp">SFTP</option><option value="scp">SCP</option><option value="s3">S3</option><option value="smb">SMB / UNC Share</option>
           </select>
         </div>
         <template x-if="fileServerModal.data.kind === 'sftp' || fileServerModal.data.kind === 'scp'">
@@ -8485,6 +8485,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <div><label class="field-label">Key Passphrase (optional)</label><input type="password" x-model="fileServerModal.data.key_passphrase" class="field-input" /></div>
               </div>
             </template>
+          </div>
+        </template>
+        <template x-if="fileServerModal.data.kind === 'smb'">
+          <div class="space-y-3">
+            <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" placeholder="fileserver01" data-testid="file-server-smb-host-input" /></div>
+            <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" placeholder="DOMAIN\\user or user@domain.com" data-testid="file-server-smb-username-input" /></div>
+            <div><label class="field-label">Password</label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-smb-password-input" /></div>
           </div>
         </template>
         <template x-if="fileServerModal.data.kind === 's3'">
