@@ -914,3 +914,37 @@ def test_discover_s3_files_recursive_stops_at_depth_cap() -> None:
     found = discover_s3_files(FakeS3Client(), "s3://bkt/daily", "*.csv", recursive=True)
 
     assert [f.file_name for f in found] == ["keep.csv"]
+
+
+def test_parse_unc_root_splits_server_and_share() -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    assert parse_unc_root(r"\\fileserver01\vendor") == ("fileserver01", "vendor")
+    assert parse_unc_root(r"\\fileserver01\vendor\inbound\daily") == ("fileserver01", "vendor")
+
+
+@pytest.mark.parametrize("bad_root", ["", "/vendor/inbound", r"\\fileserver01", r"\\", "C:\\local\\path"])
+def test_parse_unc_root_rejects_non_unc_paths(bad_root: str) -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    with pytest.raises(ValueError, match="UNC path"):
+        parse_unc_root(bad_root)
+
+
+def test_parse_file_source_accepts_smb_kind() -> None:
+    from etl_framework.reconciliation.file_mapping import _parse_file_source
+
+    spec = _parse_file_source(
+        {"kind": "smb", "root": r"\\fileserver01\vendor\inbound", "pattern": "sales_{region}.csv", "credentials_ref": "vendor-share"},
+        "source",
+    )
+    assert spec.kind == "smb"
+    assert spec.root == r"\\fileserver01\vendor\inbound"
+    assert spec.credentials_ref == "vendor-share"
+
+
+def test_parse_file_source_rejects_unknown_kind_lists_smb_in_message() -> None:
+    from etl_framework.reconciliation.file_mapping import _parse_file_source
+
+    with pytest.raises(ValueError, match="smb"):
+        _parse_file_source({"kind": "ftp", "root": "x", "pattern": "*"}, "source")

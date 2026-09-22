@@ -478,16 +478,30 @@ class FileMappingSpec:
         )
 
 
+def parse_unc_root(root: str) -> tuple[str, str]:
+    """Split a UNC path (``\\\\server\\share`` or ``\\\\server\\share\\sub\\path``)
+    into its server and share segments. Raises ``ValueError`` for anything
+    that isn't a well-formed UNC path with at least a server and a share --
+    used both to validate an ``smb`` location's root and to build the
+    ``net use \\\\server\\share`` resource for it."""
+    if not root.startswith("\\\\"):
+        raise ValueError(f"SMB root must be a UNC path (\\\\server\\share\\...): {root!r}")
+    parts = [part for part in root[2:].split("\\") if part]
+    if len(parts) < 2:
+        raise ValueError(f"SMB root must be a UNC path with both a server and a share: {root!r}")
+    return parts[0], parts[1]
+
+
 def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
     if not isinstance(raw, dict):
         raise ValueError(
             f"file_mapping.{side} requires an object with 'kind', 'root', and 'pattern'"
         )
     kind = raw.get("kind", "local")
-    if kind not in {"local", "s3", "sftp"}:
+    if kind not in {"local", "s3", "sftp", "smb"}:
         raise ValueError(
             f"file_mapping.{side}.kind '{kind}' is not supported yet; "
-            "supported kinds are 'local', 's3', and 'sftp'"
+            "supported kinds are 'local', 's3', 'sftp', and 'smb'"
         )
     root = raw.get("root")
     pattern = raw.get("pattern")
