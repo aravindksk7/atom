@@ -16,7 +16,7 @@ credentials path any more.
 
 ``RemoteFileSourceSession`` also caches one client per ``(kind,
 credentials_ref)`` for the caller's lifetime -- a source with N files opens
-one S3/SFTP connection total, not one per file read.
+one S3/SFTP/SMB connection total, not one per file read.
 """
 from __future__ import annotations
 
@@ -122,23 +122,45 @@ def _smb_host_lock(host: str) -> threading.Lock:
 # connection (a killed net.exe, a hung server), not a concurrency fix, so it
 # defaults high enough to give real concurrent work room to finish; override
 # with the SMB_LOCK_TIMEOUT_SECONDS env var if a deployment needs it tighter.
-_SMB_LOCK_TIMEOUT_SECONDS = int(os.environ.get("SMB_LOCK_TIMEOUT_SECONDS", "300"))
+try:
+    _SMB_LOCK_TIMEOUT_SECONDS = int(os.environ.get("SMB_LOCK_TIMEOUT_SECONDS", "300"))
+except ValueError:
+    # A malformed env var must not take the whole module (and everything
+    # that imports it) down at import time -- fall back to the default.
+    _SMB_LOCK_TIMEOUT_SECONDS = 300
 
 
 class SmbSession:
-    """A connected UNC resource, held for the lifetime of one
-    ``RemoteFileSourceSession``. ``close()`` runs ``net use ... /delete`` and
-    releases the per-host lock -- picked up automatically by
+    """A connected host, held for the lifetime of one
+    ``RemoteFileSourceSession``. A single session can end up authenticated to
+    more than one share on its host -- ``RemoteFileSourceSession`` reuses one
+    ``SmbSession`` per (host, identity) rather than per share, since Windows
+    allows only one identity per server, not per share -- so it tracks every
+    ``\\\\server\\share`` resource it has ``net use``'d via ``ensure_resource``
+    and ``close()`` tears all of them down, not just the first. ``close()``
+    also releases the per-host lock -- picked up automatically by
     ``close_remote_client``'s generic ``getattr(client, "close", None)``."""
 
     def __init__(self, resource: str, lock: "threading.Lock", host: str) -> None:
         self.resource = resource
-        self._lock = lock
+        self.resources = {resource}
         self.host = host
+        self._lock = lock
+
+    def ensure_resource(self, resource: str, username: str | None, password: str | None) -> None:
+        """``net use`` an additional share on this session's already-locked
+        host, if not already connected. Safe without acquiring the host lock
+        again here -- this session already holds it for its whole life, and
+        that's what makes it exclusive to connect an additional share on the
+        same host while nothing else can race it."""
+        if resource not in self.resources:
+            _net_use(resource, username, password)
+            self.resources.add(resource)
 
     def close(self) -> None:
         try:
-            _net_use_delete(self.resource)
+            for resource in self.resources:
+                _net_use_delete(resource)
         finally:
             self._lock.release()
 
@@ -151,7 +173,7 @@ def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourc
     try:
         server, share = parse_unc_root(spec.root)
     except ValueError as exc:
-        raise SmbConnectError(str(exc)) from exc
+        raise SmbConnectError(str(exc)) from None
     if profile.host and profile.host.lower() != server.lower():
         raise SmbConnectError(
             f"file_transfer source/destination root '\\\\{server}\\{share}' does not match "
@@ -289,11 +311,12 @@ def close_remote_client(client) -> None:
 
 
 class RemoteFileSourceSession:
-    """Discovers and reads files for a ``local``/``s3``/``sftp`` source spec,
-    reusing one client per ``(kind, credentials_ref)`` across every call for
-    the lifetime of this session -- construct one per job execution, use it
-    for both sides' discovery and every subsequent file read, then ``close()``
-    it (or use as a context manager) once the job is done with it.
+    """Discovers and reads files for a ``local``/``s3``/``sftp``/``smb``
+    source spec, reusing one client per ``(kind, credentials_ref)`` across
+    every call for the lifetime of this session -- construct one per job
+    execution, use it for both sides' discovery and every subsequent file
+    read, then ``close()`` it (or use as a context manager) once the job is
+    done with it.
     """
 
     def __init__(self, db: Session) -> None:
@@ -331,10 +354,24 @@ class RemoteFileSourceSession:
             elif spec.kind == "sftp":
                 self._clients[key] = build_sftp_client(profile, spec)
             elif spec.kind == "smb":
+                if profile is None:
+                    raise ValueError(f"'{spec.kind}' source requires credentials_ref, but none was set")
                 try:
-                    server, _ = parse_unc_root(spec.root)
+                    server, share = parse_unc_root(spec.root)
                 except ValueError as exc:
                     raise SmbConnectError(str(exc)) from None
+                # Same consistency check connect_smb_share does -- run here
+                # too because the identity-match reuse branch below skips
+                # connect_smb_share entirely, and without this a profile
+                # whose host field doesn't actually match this spec's UNC
+                # root would silently reuse another share's connection
+                # instead of being rejected.
+                if profile.host and profile.host.lower() != server.lower():
+                    raise SmbConnectError(
+                        f"file_transfer source/destination root '\\\\{server}\\{share}' does not match "
+                        f"file server profile '{profile.name}''s host '{profile.host}'"
+                    )
+                resource = f"\\\\{server}\\{share}"
                 reused_client = None
                 for (other_kind, other_ref), other_client in self._clients.items():
                     if not (
@@ -355,13 +392,12 @@ class RemoteFileSourceSession:
                     # otherwise contend forever on the host's lock, which the
                     # first, still-open connection holds for its whole life.
                     other_profile = self._profiles.get((other_kind, other_ref))
-                    same_identity = (
-                        other_profile is not None
-                        and profile is not None
-                        and (
-                            other_profile.id == profile.id
-                            or (other_profile.username, other_profile.password) == (profile.username, profile.password)
-                        )
+                    same_identity = other_profile is not None and (
+                        # profile names are unique, so two different refs are
+                        # always two different rows -- kept for clarity/
+                        # future-proofing in case that constraint ever loosens.
+                        other_profile.id == profile.id
+                        or (other_profile.username, other_profile.password) == (profile.username, profile.password)
                     )
                     if not same_identity:
                         raise SmbConnectError(
@@ -372,15 +408,39 @@ class RemoteFileSourceSession:
                         )
                     reused_client = other_client
                     break
-                self._clients[key] = reused_client if reused_client is not None else connect_smb_share(profile, spec)
+                if reused_client is not None:
+                    # The identity matches, but this spec's own share might
+                    # still be a different one on that host (e.g. two specs
+                    # sharing a profile but pointing at \\host\in and
+                    # \\host\out) -- make sure it's net use'd too before
+                    # handing the session back.
+                    reused_client.ensure_resource(resource, profile.username, profile.password)
+                    self._clients[key] = reused_client
+                else:
+                    self._clients[key] = connect_smb_share(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
             self._profiles[key] = profile
+        elif spec.kind == "smb":
+            # A cache hit on (kind, credentials_ref) alone isn't quite enough
+            # for smb: a source spec and a destination spec can share the
+            # same credentials_ref profile while pointing at two different
+            # shares on that profile's host (the cache key doesn't include
+            # the share). Make sure THIS spec's exact resource has been net
+            # use'd too before handing back the already-cached session.
+            client = self._clients[key]
+            profile = self._profiles.get(key)
+            if isinstance(client, SmbSession) and profile is not None:
+                try:
+                    server, share = parse_unc_root(spec.root)
+                except ValueError as exc:
+                    raise SmbConnectError(str(exc)) from None
+                client.ensure_resource(f"\\\\{server}\\{share}", profile.username, profile.password)
         return self._clients[key]
 
     def client_for(self, spec: FileSourceSpec):
-        """Public accessor for the cached S3/SFTP client of ``spec`` (used by
-        ``api.services.file_transfer``). Same one-client-per-(kind,
+        """Public accessor for the cached S3/SFTP/SMB client of ``spec`` (used
+        by ``api.services.file_transfer``). Same one-client-per-(kind,
         credentials_ref) caching as every other call on this session."""
         return self._client_for(spec)
 
