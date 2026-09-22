@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import types
 
 import pytest
 from cryptography.fernet import Fernet
@@ -318,19 +319,32 @@ def test_test_connection_smb_reports_clear_error_without_real_windows_net_use(cl
         "name": "vendor-share-2", "kind": "smb", "host": "fileserver02",
         "username": "svc", "password": "s3cret",
     }).json()
+    # Force the route's platform guard down the Windows branch regardless of
+    # the OS actually running this test, so it behaves the same in CI on
+    # Linux as it does on a Windows dev box.
+    monkeypatch.setattr("api.routes.file_servers.os", types.SimpleNamespace(name="nt"))
 
-    def _raise(*args, **kwargs):
+    net_use_calls = []
+    delete_calls = []
+
+    def _raise(resource, u, p):
+        net_use_calls.append((resource, u, p))
         from api.services.multi_file_remote import SmbConnectError
         raise SmbConnectError("net use \\\\fileserver02\\IPC$ failed: System error 53 has occurred.")
 
     monkeypatch.setattr("api.services.multi_file_remote._net_use", _raise)
-    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda *a, **k: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: delete_calls.append(resource))
 
     resp = client.post(f"/api/file-servers/{created['id']}/test")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "error"
     assert "System error 53" in body["message"]
+    assert "s3cret" not in resp.text
+    # The real (decrypted) password is what gets forwarded to _net_use, not the mask.
+    assert net_use_calls == [("\\\\fileserver02\\IPC$", "svc", "s3cret")]
+    # Teardown still runs even though _net_use failed.
+    assert delete_calls == ["\\\\fileserver02\\IPC$"]
 
 
 def test_test_connection_smb_succeeds_and_always_disconnects(client, monkeypatch):
@@ -338,15 +352,31 @@ def test_test_connection_smb_succeeds_and_always_disconnects(client, monkeypatch
         "name": "vendor-share-3", "kind": "smb", "host": "fileserver03",
         "username": "svc", "password": "s3cret",
     }).json()
+    monkeypatch.setattr("api.routes.file_servers.os", types.SimpleNamespace(name="nt"))
 
     calls = []
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: calls.append(("use", resource)))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: calls.append(("use", resource, u, p)))
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: calls.append(("delete", resource)))
 
     resp = client.post(f"/api/file-servers/{created['id']}/test")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok", "presented_fingerprint": None, "pinned_fingerprint": None, "message": None}
-    assert calls == [("use", "\\\\fileserver03\\IPC$"), ("delete", "\\\\fileserver03\\IPC$")]
+    # The real (decrypted) password is what gets forwarded to _net_use, not the mask.
+    assert calls == [("use", "\\\\fileserver03\\IPC$", "svc", "s3cret"), ("delete", "\\\\fileserver03\\IPC$")]
+
+
+def test_test_connection_smb_reports_clear_error_on_non_windows(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "vendor-share-4", "kind": "smb", "host": "fileserver04",
+        "username": "svc", "password": "s3cret",
+    }).json()
+    monkeypatch.setattr("api.routes.file_servers.os", types.SimpleNamespace(name="posix"))
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert "Windows" in body["message"]
 
 
 def test_file_servers_module_imports_without_paramiko_installed(monkeypatch):

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,13 @@ def _net_use_delete(resource: str) -> None:
     raise NotImplementedError
 
 
+_SMB_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?$")
+
+
+def valid_smb_host(host: str) -> bool:
+    return bool(_SMB_HOST_RE.fullmatch(host.strip()))
+
+
 _smb_host_locks: dict[str, threading.Lock] = {}
 _smb_host_locks_guard = threading.Lock()
 
@@ -66,11 +74,15 @@ _smb_host_locks_guard = threading.Lock()
 def _smb_host_lock(host: str) -> threading.Lock:
     """Return the process-wide lock serializing ``net use`` connections to
     ``host`` (Windows allows only one credential per server at a time),
-    creating it on first use."""
+    creating it on first use. Keyed case-insensitively (``strip().casefold()``)
+    since Windows server names are case-insensitive -- otherwise
+    "FILESERVER01" and "fileserver01" would get different locks and
+    serialization between them would be defeated."""
+    key = host.strip().casefold()
     with _smb_host_locks_guard:
-        if host not in _smb_host_locks:
-            _smb_host_locks[host] = threading.Lock()
-        return _smb_host_locks[host]
+        if key not in _smb_host_locks:
+            _smb_host_locks[key] = threading.Lock()
+        return _smb_host_locks[key]
 
 
 _CONTENT_MATCH_READ_LIMIT = 65536

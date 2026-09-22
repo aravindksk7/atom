@@ -186,17 +186,27 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         # _net_use/_net_use_delete/_smb_host_lock are module-private helpers
         # shared between this route and multi_file_remote's real connect path
         # (same convention as _load_sftp_private_key above).
-        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock
+        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock, valid_smb_host
 
-        resource = f"\\\\{profile.host}\\IPC$"
-        lock = _smb_host_lock(profile.host)
-        lock.acquire()
+        if not valid_smb_host(profile.host):
+            return FileServerTestResult(status="error", message="SMB host must be a server name or IP address")
+        resource = f"\\\\{profile.host.strip()}\\IPC$"
+        lock = _smb_host_lock(profile.host.strip())
+        if not lock.acquire(timeout=30):
+            return FileServerTestResult(status="error", message="Another SMB operation is in progress for this host -- try again shortly")
         try:
-            _net_use(resource, profile.username, profile.password)
-        except SmbConnectError as exc:
-            return FileServerTestResult(status="error", message=str(exc))
+            try:
+                _net_use(resource, profile.username, profile.password)
+            except SmbConnectError as exc:
+                return FileServerTestResult(status="error", message=str(exc))
+            except Exception:
+                return FileServerTestResult(status="error", message="SMB connection failed -- see server logs")
+            finally:
+                try:
+                    _net_use_delete(resource)
+                except Exception:
+                    pass
         finally:
-            _net_use_delete(resource)
             lock.release()
         return FileServerTestResult(status="ok")
 
