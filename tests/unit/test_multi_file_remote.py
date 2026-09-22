@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import types
 
 import pandas as pd
 import pytest
@@ -813,8 +814,16 @@ def _reset_smb_host_locks(monkeypatch):
     held when the next test tries to acquire it, hanging that test forever
     since RemoteFileSourceSession's lock is a plain (non-timeout) acquire.
     Giving each test its own fresh, empty lock registry keeps these tests
-    independent of each other's cleanup."""
+    independent of each other's cleanup.
+
+    Also patches ``multi_file_remote``'s ``os`` to report ``name == "nt"``
+    regardless of the real platform: ``connect_smb_share`` starts with a
+    "must run on Windows" guard, and every smb test below wants to exercise
+    what's past that guard even when the suite runs on Linux CI. ``os.`` is
+    used exactly once in that module (that guard), so swapping the whole
+    module reference for a minimal stand-in is safe."""
     monkeypatch.setattr("api.services.multi_file_remote._smb_host_locks", {})
+    monkeypatch.setattr("api.services.multi_file_remote.os", types.SimpleNamespace(name="nt"))
 
 
 def _smb_profile(name="vendor-share", host="fileserver01", username="svc", password="s3cret"):
@@ -830,7 +839,6 @@ def test_parse_unc_root_used_by_connect_smb_share_rejects_bad_root(db, monkeypat
 
     FileServerProfileRepository(db).create(_smb_profile())
     spec = FileSourceSpec(kind="smb", root="not-a-unc-path", pattern="*.csv", credentials_ref="vendor-share")
-    monkeypatch.setattr("api.services.multi_file_remote.resolve_file_server_profile", lambda db_, spec_: FileServerProfileRepository(db).get_decrypted_by_name("vendor-share"))
 
     with pytest.raises(SmbConnectError, match="UNC path"):
         connect_smb_share(FileServerProfileRepository(db).get_decrypted_by_name("vendor-share"), spec)
@@ -877,7 +885,7 @@ def test_connect_smb_share_calls_net_use_with_resource_password_and_user(db, mon
 
 
 def test_connect_smb_share_releases_host_lock_on_net_use_failure(db, monkeypatch):
-    from api.services.multi_file_remote import SmbConnectError, _smb_host_lock, connect_smb_share
+    from api.services.multi_file_remote import SmbConnectError, connect_smb_share
     from etl_framework.repository.repository import FileServerProfileRepository
 
     FileServerProfileRepository(db).create(_smb_profile())
@@ -944,6 +952,10 @@ def test_location_key_for_smb_keys_on_server_and_share(db, monkeypatch):
 
     assert session_local.location_key_for(spec_a) == session_local.location_key_for(spec_b)
     assert session_local.location_key_for(spec_a) == ("smb", "fileserver01", "share")
+    # location_key_for must not have actually connected -- see the comment on
+    # its smb branch for why that would self-deadlock comparing two profiles
+    # on the same host.
+    assert session_local._clients == {}
 
 
 def test_discover_smb_reuses_discover_local_files(db, monkeypatch, tmp_path):
@@ -1015,8 +1027,10 @@ def test_client_for_smb_rejects_second_profile_on_same_host_in_one_session(db, m
     from api.services.multi_file_remote import SmbConnectError
     from etl_framework.repository.repository import FileServerProfileRepository
 
-    FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
-    FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01"))
+    # Genuinely different identities (different passwords) on the same host --
+    # Windows really can't hold both at once, so this must be rejected.
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01", password="secret-a"))
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01", password="secret-b"))
     monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
     session_local = RemoteFileSourceSession(db)
     spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
@@ -1025,6 +1039,24 @@ def test_client_for_smb_rejects_second_profile_on_same_host_in_one_session(db, m
     session_local.client_for(spec_a)
     with pytest.raises(SmbConnectError, match="already holds an SMB connection"):
         session_local.client_for(spec_b)
+
+
+def test_client_for_smb_allows_second_profile_on_same_host_when_same_identity(db, monkeypatch):
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    # Two differently-named profile rows for the same host+username+password
+    # (a normal "one profile per share" setup) are really the same identity,
+    # so connecting both in one run must NOT be rejected even though it's the
+    # same host under two different profile names.
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01"))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    session_local = RemoteFileSourceSession(db)
+    spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
+    spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\other", pattern="*.csv", credentials_ref="profile-b")
+
+    session_local.client_for(spec_a)
+    session_local.client_for(spec_b)  # must not raise
 
 
 def test_connect_smb_share_lock_acquire_times_out_instead_of_hanging(db, monkeypatch):
@@ -1045,3 +1077,56 @@ def test_connect_smb_share_lock_acquire_times_out_instead_of_hanging(db, monkeyp
             connect_smb_share(profile, spec)
     finally:
         lock.release()
+
+
+def test_net_use_scrubs_password_from_nonzero_returncode_stderr(db, monkeypatch):
+    """Stubs subprocess.run itself (not _net_use_delete/_net_use) so this
+    proves the scrubbing _net_use actually does on a failing `net use` call,
+    not just that some mock was configured not to leak it."""
+    import subprocess
+
+    from api.services.multi_file_remote import SmbConnectError, _net_use
+
+    def _fake_run(args, **kwargs):
+        assert "s3cret" in args  # the real password positional arg
+        return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="net use failed: bad password s3cret")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    with pytest.raises(SmbConnectError) as exc_info:
+        _net_use("\\\\fileserver01\\share", "svc", "s3cret")
+
+    assert "s3cret" not in str(exc_info.value)
+    assert "***" in str(exc_info.value)
+
+
+def test_net_use_does_not_leak_password_via_chained_timeout_exception(db, monkeypatch):
+    """Proves the `from None` fix on _net_use's except branch actually closes
+    the leak: subprocess.TimeoutExpired's own __str__ embeds the full argv
+    (password included), so even a scrubbed SmbConnectError message would
+    still leak the password via __cause__ in any rendered traceback if it
+    were chained with `from exc` instead."""
+    import subprocess
+    import traceback
+
+    from api.services.multi_file_remote import SmbConnectError, _net_use
+
+    # Kept in a variable rather than written as a literal in the calls below:
+    # traceback.format_exception() prints each frame's literal source line
+    # from the .py file, so a hardcoded "s3cret" argument at the call sites
+    # would show up in the rendered traceback regardless of the `from None`
+    # fix under test here -- that would be a leak via this test's own source
+    # code, not the __cause__ chaining finding 2 fixes.
+    password = "s3cret"
+
+    def _fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["net", "use", "\\\\fileserver01\\share", password, "/user:svc"], timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    with pytest.raises(SmbConnectError) as exc_info:
+        _net_use("\\\\fileserver01\\share", "svc", password)
+
+    assert password not in str(exc_info.value)
+    rendered = "".join(traceback.format_exception(exc_info.value))
+    assert password not in rendered

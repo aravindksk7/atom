@@ -4,9 +4,10 @@ discovery/read dispatch for ``multi_file`` reconciliation jobs.
 Both ``RunExecutor`` (live job execution, ``api/services/run_executor.py``)
 and ``difference_export`` (recomputing a run's full diff set for export/HTML
 reports, ``api/services/difference_export.py``) need to discover and read
-files from the same three source kinds (``local``, ``s3``, ``sftp``). This
-module is the single place that owns that logic, so the two call sites don't
-each re-derive their own copy of client construction and credential lookup.
+files from the same four source kinds (``local``, ``s3``, ``sftp``, ``smb``).
+This module is the single place that owns that logic, so the two call sites
+don't each re-derive their own copy of client construction and credential
+lookup.
 
 Credentials come from a persisted, encrypted ``FileServerProfile`` (see
 ``etl_framework.repository.repository.FileServerProfileRepository``) looked
@@ -47,7 +48,9 @@ from etl_framework.repository.repository import FileServerProfileRepository, Res
 class SmbConnectError(RuntimeError):
     """Raised when connecting to a UNC share fails: bad credentials, an
     unreachable host, a missing share, or (on a non-Windows atom server) the
-    platform itself. Recognised by ``file_transfer.is_transport_error``."""
+    platform itself. Intended to be recognised by
+    ``file_transfer.is_transport_error`` once ``file_transfer.py`` gains smb
+    support (not yet wired up)."""
 
 
 def _scrub_smb_error(text: str, password: str | None) -> str:
@@ -66,9 +69,14 @@ def _net_use(resource: str, username: str | None, password: str | None) -> None:
     if username:
         args.append("/user:" + username)
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=30)
     except Exception as exc:
-        raise SmbConnectError(_scrub_smb_error(str(exc), password)) from exc
+        # `from None` deliberately drops __cause__ -- the raw exception (e.g.
+        # subprocess.TimeoutExpired) embeds the full argv, password included,
+        # in its own __str__/repr, and keeping it chained would print that
+        # unscrubbed the moment anything renders a traceback or logs with
+        # exc_info=True, even though the message above has been scrubbed.
+        raise SmbConnectError(_scrub_smb_error(str(exc), password)) from None
     if result.returncode != 0:
         message = _scrub_smb_error((result.stderr or result.stdout or "").strip(), password)
         raise SmbConnectError(f"net use {resource} failed: {message}")
@@ -77,7 +85,14 @@ def _net_use(resource: str, username: str | None, password: str | None) -> None:
 def _net_use_delete(resource: str) -> None:
     """Best-effort ``net use ... /delete`` -- never raises."""
     try:
-        subprocess.run(["net", "use", resource, "/delete"], capture_output=True, text=True, timeout=30)
+        subprocess.run(
+            ["net", "use", resource, "/delete", "/y"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=30,
+            stdin=subprocess.DEVNULL,
+        )
     except Exception:
         pass
 
@@ -100,10 +115,14 @@ def _smb_host_lock(host: str) -> threading.Lock:
         return _smb_host_locks[key]
 
 
-# Overridable in tests -- a genuinely-contended host lock (two concurrent
-# runs targeting the same server) should fail with a clear error rather than
-# hang the whole process forever.
-_SMB_LOCK_TIMEOUT_SECONDS = 30
+# Concurrent smb access to one host still serializes by design (spec §9) --
+# RunExecutor runs multi_file pairs concurrently, and two pairs whose smb
+# sources/destinations share a host will legitimately queue up on this lock,
+# not race it. This timeout is a safety net against a genuinely stuck
+# connection (a killed net.exe, a hung server), not a concurrency fix, so it
+# defaults high enough to give real concurrent work room to finish; override
+# with the SMB_LOCK_TIMEOUT_SECONDS env var if a deployment needs it tighter.
+_SMB_LOCK_TIMEOUT_SECONDS = int(os.environ.get("SMB_LOCK_TIMEOUT_SECONDS", "300"))
 
 
 class SmbSession:
@@ -112,9 +131,10 @@ class SmbSession:
     releases the per-host lock -- picked up automatically by
     ``close_remote_client``'s generic ``getattr(client, "close", None)``."""
 
-    def __init__(self, resource: str, lock: "threading.Lock") -> None:
+    def __init__(self, resource: str, lock: "threading.Lock", host: str) -> None:
         self.resource = resource
         self._lock = lock
+        self.host = host
 
     def close(self) -> None:
         try:
@@ -144,9 +164,13 @@ def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourc
     try:
         _net_use(resource, profile.username, profile.password)
     except Exception:
+        # A timed-out/killed net.exe can leave a half-established connection
+        # that would block the next identity's connect to this host, so
+        # clean it up (best-effort) before releasing the lock.
+        _net_use_delete(resource)
         lock.release()
         raise
-    return SmbSession(resource, lock)
+    return SmbSession(resource, lock, server)
 
 
 _CONTENT_MATCH_READ_LIMIT = 65536
@@ -307,21 +331,48 @@ class RemoteFileSourceSession:
             elif spec.kind == "sftp":
                 self._clients[key] = build_sftp_client(profile, spec)
             elif spec.kind == "smb":
-                server, _ = parse_unc_root(spec.root)
+                try:
+                    server, _ = parse_unc_root(spec.root)
+                except ValueError as exc:
+                    raise SmbConnectError(str(exc)) from None
+                reused_client = None
                 for (other_kind, other_ref), other_client in self._clients.items():
-                    if (
+                    if not (
                         other_kind == "smb"
                         and other_ref != spec.credentials_ref
                         and isinstance(other_client, SmbSession)
-                        and other_client.resource.split("\\")[2].casefold() == server.casefold()
+                        and other_client.host.casefold() == server.casefold()
                     ):
+                        continue
+                    # Two different profile names on the same host are only a
+                    # real conflict if they're not actually the same identity
+                    # -- a normal "one profile per share" setup can easily
+                    # have two profile rows for the same host+username+
+                    # password, and that must not be rejected. When they
+                    # really are the same identity, reuse that side's
+                    # already-open connection instead of opening a second
+                    # net use to the same host: a second connect would
+                    # otherwise contend forever on the host's lock, which the
+                    # first, still-open connection holds for its whole life.
+                    other_profile = self._profiles.get((other_kind, other_ref))
+                    same_identity = (
+                        other_profile is not None
+                        and profile is not None
+                        and (
+                            other_profile.id == profile.id
+                            or (other_profile.username, other_profile.password) == (profile.username, profile.password)
+                        )
+                    )
+                    if not same_identity:
                         raise SmbConnectError(
                             f"This run already holds an SMB connection to host '{server}' via file server profile "
                             f"'{other_ref}' -- Windows allows only one active identity per server, so profile "
                             f"'{spec.credentials_ref}' cannot also connect to it in the same run. Use the same "
                             "file server profile for both sides, or point one side at a different host."
                         )
-                self._clients[key] = connect_smb_share(profile, spec)
+                    reused_client = other_client
+                    break
+                self._clients[key] = reused_client if reused_client is not None else connect_smb_share(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
             self._profiles[key] = profile
@@ -336,9 +387,9 @@ class RemoteFileSourceSession:
     def location_key_for(self, spec: FileSourceSpec) -> tuple | None:
         """Where ``spec`` really points, independent of the profile's name, so
         two differently named profiles for the same server compare equal:
-        ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there) or
-        ``("sftp", host, port, username)``. None for local specs or a spec with no
-        resolved profile."""
+        ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there),
+        ``("sftp", host, port, username)``, or ``("smb", server, share)``.
+        None for local specs or a spec with no resolved profile."""
         if spec.kind not in ("s3", "sftp", "smb"):
             return None
         if spec.kind == "smb":
@@ -360,7 +411,10 @@ class RemoteFileSourceSession:
             # the way an SFTP root can be), so the account isn't part of the
             # location -- two profiles for the same server+share are the
             # same object regardless of which account each uses.
-            server, share = parse_unc_root(spec.root)
+            try:
+                server, share = parse_unc_root(spec.root)
+            except ValueError as exc:
+                raise SmbConnectError(str(exc)) from None
             return ("smb", server.lower(), share.lower())
         self._client_for(spec)
         profile = self._profiles.get((spec.kind, spec.credentials_ref))
@@ -453,7 +507,17 @@ class RemoteFileSourceSession:
 
     def close(self) -> None:
         try:
+            closed_ids: set[int] = set()
             for client in self._clients.values():
+                # An smb client can be cached under more than one
+                # credentials_ref key when _client_for detects two profiles
+                # for the same host+identity and reuses the same SmbSession
+                # (see its smb branch) -- closing the same object twice would
+                # double-release its per-host lock (a plain threading.Lock
+                # raises RuntimeError on an unlocked release).
+                if id(client) in closed_ids:
+                    continue
+                closed_ids.add(id(client))
                 try:
                     close_remote_client(client)
                 except Exception:
