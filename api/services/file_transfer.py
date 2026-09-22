@@ -30,7 +30,7 @@ from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
 from api.services.file_source import resolve_allowed_path
-from etl_framework.reconciliation.file_mapping import DiscoveredFile
+from etl_framework.reconciliation.file_mapping import DiscoveredFile, parse_unc_root
 
 CHUNK_SIZE = 1024 * 1024
 PART_SUFFIX = ".part"
@@ -149,6 +149,7 @@ class SmbEndpoint(_FilesystemEndpoint):
     def __init__(self, root: str, *, location_key: tuple | None = None) -> None:
         self.credentials_ref = None
         self.location_key = location_key
+        parse_unc_root(root)
         self.root = Path(root).resolve()
 
     def identity(self, path: str) -> tuple:
@@ -490,6 +491,9 @@ class TransferOutcome:
     failed_exc: BaseException | None = None
 
 
+_SMB_TRANSPORT_WINERRORS = {51, 53, 54, 55, 59, 64, 67, 121, 1231, 1232}
+
+
 def is_transport_error(exc: BaseException | None) -> bool:
     """True when ``exc`` is a connection/credential/host-key/missing-bucket
     problem (the executor reports these as ERROR) rather than a data problem
@@ -503,6 +507,8 @@ def is_transport_error(exc: BaseException | None) -> bool:
     from api.services.multi_file_remote import SmbConnectError
 
     if isinstance(exc, SmbConnectError):
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "winerror", None) in _SMB_TRANSPORT_WINERRORS:
         return True
     try:
         import botocore.exceptions

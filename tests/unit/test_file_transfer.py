@@ -1239,6 +1239,18 @@ def test_is_transport_error_false_for_data_and_local_problems(exc):
     assert ft.is_transport_error(exc) is False
 
 
+def test_is_transport_error_true_for_smb_network_loss_winerror():
+    exc = OSError("The specified network resource or device is no longer available.")
+    exc.winerror = 64
+    assert ft.is_transport_error(exc) is True
+
+
+def test_is_transport_error_false_for_a_plain_oserror_winerror():
+    exc = OSError("The system cannot find the file specified.")
+    exc.winerror = 2
+    assert ft.is_transport_error(exc) is False
+
+
 def test_run_transfer_end_to_end_local_to_local(allowed_dir):
     source, destination = _local_pair(allowed_dir)
     files = _make_files(allowed_dir / "src", "a.csv", "sub/b.csv")
@@ -1275,7 +1287,19 @@ def test_local_endpoint_still_behaves_identically_after_the_shared_base_refactor
     assert endpoint.identity(str(allowed_dir / "a.csv"))[0] == "local"
 
 
-def test_smb_endpoint_relative_of_and_destination_for(tmp_path):
+def _bypass_unc_validation(monkeypatch) -> None:
+    """SmbEndpoint now self-validates its root's UNC shape via
+    ``parse_unc_root`` (see test_smb_endpoint_rejects_non_unc_root). A real
+    UNC root like ``\\\\fileserver01\\share`` has no local filesystem behind
+    it in tests, so tests that need genuine read/write/identity behavior
+    against a real (tmp_path) directory stand in for "the far side of an
+    already-connected share" by bypassing the shape check here -- the same
+    pattern test_multi_file_remote.py uses for ``connect_smb_share``."""
+    monkeypatch.setattr(ft, "parse_unc_root", lambda root: ("fileserver01", "share"))
+
+
+def test_smb_endpoint_relative_of_and_destination_for(tmp_path, monkeypatch):
+    _bypass_unc_validation(monkeypatch)
     endpoint = ft.SmbEndpoint(str(tmp_path / "src"))
     (tmp_path / "src" / "sub").mkdir(parents=True)
     file = DiscoveredFile(path=str(tmp_path / "src" / "sub" / "a.csv"), file_name="a.csv", tokens={})
@@ -1285,24 +1309,34 @@ def test_smb_endpoint_relative_of_and_destination_for(tmp_path):
     assert Path(dest.destination_for("sub/x.csv")) == tmp_path / "dst" / "sub" / "x.csv"
 
 
-def test_smb_endpoint_rejects_traversal_like_local_endpoint(tmp_path):
+def test_smb_endpoint_rejects_traversal_like_local_endpoint(tmp_path, monkeypatch):
+    _bypass_unc_validation(monkeypatch)
     endpoint = ft.SmbEndpoint(str(tmp_path / "dst"))
     with pytest.raises(ft.TransferError, match="escapes destination root"):
         endpoint.destination_for("../escape.csv")
 
 
-def test_smb_endpoint_has_no_allowlist(tmp_path, monkeypatch):
+def test_smb_endpoint_rejects_non_unc_root():
+    with pytest.raises(ValueError, match="UNC path"):
+        ft.SmbEndpoint(r"C:\Windows\System32")
+
+
+def test_smb_endpoint_has_no_allowlist(monkeypatch):
     # Unlike LocalEndpoint, SmbEndpoint must not call resolve_allowed_path --
-    # a UNC path is never inside SERVER_FILE_ALLOWED_DIRS.
+    # a UNC path is never inside SERVER_FILE_ALLOWED_DIRS. Uses a real
+    # UNC-shaped root (not a bare tmp_path) since construction now validates
+    # the root's shape via parse_unc_root.
     from api.services import file_source
 
     monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
     monkeypatch.setattr(file_source, "_UPLOAD_BASES", ())
-    endpoint = ft.SmbEndpoint(str(tmp_path / "anywhere"))
-    assert endpoint.root == (tmp_path / "anywhere").resolve()
+    root = r"\\fileserver01\share\anywhere"
+    endpoint = ft.SmbEndpoint(root)
+    assert endpoint.root == Path(root).resolve()
 
 
-def test_smb_endpoint_write_read_exists_size_delete(tmp_path):
+def test_smb_endpoint_write_read_exists_size_delete(tmp_path, monkeypatch):
+    _bypass_unc_validation(monkeypatch)
     endpoint = ft.SmbEndpoint(str(tmp_path / "out"))
     dest = endpoint.destination_for("sub/x.csv")
 
@@ -1313,13 +1347,14 @@ def test_smb_endpoint_write_read_exists_size_delete(tmp_path):
     assert endpoint.size(dest) == 5
     with endpoint.open_read(dest) as fh:
         assert fh.read() == b"id\n1\n"
-    assert not Path(dest + ".part").exists()
+    assert list(Path(dest).parent.glob("*.part")) == []
 
     endpoint.delete(dest)
     assert not endpoint.exists(dest)
 
 
-def test_smb_endpoint_identity_prefers_location_key_over_none(tmp_path):
+def test_smb_endpoint_identity_prefers_location_key_over_none(tmp_path, monkeypatch):
+    _bypass_unc_validation(monkeypatch)
     a = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver01", "share"))
     b = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver01", "share"))
     c = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver02", "share"))
@@ -1329,7 +1364,9 @@ def test_smb_endpoint_identity_prefers_location_key_over_none(tmp_path):
     assert a.identity(path)[0] == "smb"
 
 
-def test_build_endpoint_smb_connects_via_session_and_returns_smb_endpoint(tmp_path):
+def test_build_endpoint_smb_connects_via_session_and_returns_smb_endpoint(tmp_path, monkeypatch):
+    _bypass_unc_validation(monkeypatch)
+
     class _FakeSession:
         def __init__(self) -> None:
             self.connected = []
@@ -1349,6 +1386,23 @@ def test_build_endpoint_smb_connects_via_session_and_returns_smb_endpoint(tmp_pa
     assert isinstance(endpoint, ft.SmbEndpoint)
     assert session.connected == ["vendor-share"]
     assert endpoint.identity(str(tmp_path / "in" / "x.csv"))[1] == ("smb", "host", "share")
+
+
+def test_build_endpoint_smb_rejects_non_unc_root_even_when_session_does_not_validate(tmp_path):
+    # The session's client_for never inspects the root's shape (that's
+    # connect_smb_share's job, in a different module) -- SmbEndpoint must
+    # reject a non-UNC root on its own, independent of the session.
+    class _FakeSession:
+        def client_for(self, spec):
+            return _FakeSmbSession(r"\\host\share")
+
+        def location_key_for(self, spec):
+            return ("smb", "host", "share")
+
+    spec = FileSourceSpec(kind="smb", root=str(tmp_path / "in"), pattern="*.csv", credentials_ref="vendor-share")
+
+    with pytest.raises(ValueError, match="UNC path"):
+        ft.build_endpoint(_FakeSession(), spec)
 
 
 def test_is_transport_error_recognizes_smb_connect_error():
