@@ -516,3 +516,30 @@ def test_summary_caps_file_list_but_reports_true_counts(db_session, allowed_dir)
     assert result.mismatch_summary["copied"] == 105
     assert len(result.mismatch_summary["files"]) == 100
     assert result.mismatch_summary["files_truncated"] is True
+
+
+def test_smb_to_local_copies_files_end_to_end(db_session, allowed_dir, tmp_path, monkeypatch):
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    smb_src = tmp_path / "smb_src"
+    smb_src.mkdir()
+    (smb_src / "sales_east.csv").write_bytes(b"id\n1\n")
+
+    FileServerProfileRepository(db_session).create({
+        "name": "vendor-share", "kind": "smb", "host": "fileserver01",
+        "username": "svc", "password": "s3cret",
+    })
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
+    monkeypatch.setattr("api.services.file_transfer.parse_unc_root", lambda root: ("fileserver01", "share"))
+
+    job = transfer_job(
+        {"kind": "smb", "root": str(smb_src), "pattern": "sales_{region}.csv", "credentials_ref": "vendor-share"},
+        {"kind": "local", "root": str(allowed_dir / "dst")},
+    )
+
+    result = executor(db_session)._execute_file_transfer(job)
+
+    assert result.status == TestStatus.PASSED
+    assert (allowed_dir / "dst" / "sales_east.csv").read_bytes() == b"id\n1\n"
+    assert result.mismatch_summary["copied"] == 1
