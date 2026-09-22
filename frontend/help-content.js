@@ -295,7 +295,7 @@
         },
         {
           title: 'Scenario 6: File Watcher Gating a Sequence on a Nightly Drop',
-          text: 'Create a file_watcher job with local, S3, SFTP, or SCP location, folder or bucket path, file-name pattern such as SALES_*.csv, credentials_ref for remote storage, and a bounded max tries or window end. Put it first in a sequence and make processing depend on it so timeout blocks downstream work.',
+          text: 'Create a file_watcher job with local, S3, SFTP, SCP, or SMB location, folder or bucket path, file-name pattern such as SALES_*.csv, credentials_ref for remote storage, and a bounded max tries or window end. Put it first in a sequence and make processing depend on it so timeout blocks downstream work.',
           where: 'Launch -> Job Editor -> file_watcher, then Sequences -> dependencies',
           when: 'A nightly workflow must wait for a bounded external file arrival.',
           uiMockup: { title: 'Nightly drop gate', elements: [
@@ -317,7 +317,7 @@
         },
         {
           title: 'Scenario 7: Staging Files with File Transfer Before a Reconciliation',
-          text: 'Create a file_transfer job with a source (local, S3, SFTP, or SCP folder plus a file-name pattern) and a destination (local, S3, SFTP, or SCP folder). Files stream from source to destination and are size-checked; a .part temp name means watchers never see half-written files. Point a multi_file reconciliation at the same destination. on_exists controls collisions: fail (default) stops before writing anything, skip resumes idempotently after a restart, overwrite replaces. Retries inside a run resume automatically whatever on_exists says: files this run already copied in an earlier attempt are not treated as collisions, so the original error still surfaces. A restart as a new run starts fresh, so choose skip if you expect to restart one. Include subfolders walks nested folders; Preserve subfolder structure keeps their relative paths. SCP is really SFTP, and the destination file server needs write permission.',
+          text: 'Create a file_transfer job with a source (local, S3, SFTP, SCP, or SMB folder plus a file-name pattern) and a destination (local, S3, SFTP, SCP, or SMB folder). Files stream from source to destination and are size-checked; a .part temp name means watchers never see half-written files. Point a multi_file reconciliation at the same destination. on_exists controls collisions: fail (default) stops before writing anything, skip resumes idempotently after a restart, overwrite replaces. Retries inside a run resume automatically whatever on_exists says: files this run already copied in an earlier attempt are not treated as collisions, so the original error still surfaces. A restart as a new run starts fresh, so choose skip if you expect to restart one. Include subfolders walks nested folders; Preserve subfolder structure keeps their relative paths. SCP is really SFTP, and the destination file server needs write permission.',
           where: 'Launch -> Job Editor -> file_transfer, then Sequences -> dependencies',
           when: 'Reconciliation or another job needs files copied from one server or bucket to another first.',
           uiMockup: { title: 'Stage vendor files to S3', elements: [
@@ -340,7 +340,7 @@
         },
         {
           title: 'Which Job Type When?',
-          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; file_transfer to copy files between local, S3, and SFTP/SCP locations; and AWS or enterprise adapter types when execution belongs to those systems.',
+          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; file_transfer to copy files between local, S3, SFTP/SCP, and SMB locations; and AWS or enterprise adapter types when execution belongs to those systems.',
           where: 'Launch -> Job Editor -> Job Type',
           when: 'Choosing the execution engine and required fields for a new job.',
           uiMockup: { title: 'Job type decision matrix', elements: [
@@ -996,7 +996,7 @@
       steps: [
         {
           title: 'Configure and test storage profiles',
-          text: 'Profiles centralize credentials for file watcher and multi-file jobs. The supported profile kinds are exactly sftp, scp, and s3. SFTP/SCP profiles can pin host fingerprints and use password or private-key authentication; S3 profiles use encrypted AWS credentials, region, and optional endpoint URL.',
+          text: 'Profiles centralize credentials for file watcher and multi-file jobs. The supported profile kinds are exactly sftp, scp, s3, and smb. SFTP/SCP profiles can pin host fingerprints and use password or private-key authentication; S3 profiles use encrypted AWS credentials, region, and optional endpoint URL.',
           where: 'File Servers -> Add Profile -> Test Connection',
           when: 'Jobs need reusable remote storage access without inline credentials.',
           uiMockup: { title: 'File server profile', badge: 'Fingerprint pinned', elements: [
