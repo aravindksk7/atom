@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -37,6 +36,7 @@ from etl_framework.reconciliation.file_mapping import (
     discover_local_files,
     discover_s3_files,
     discover_sftp_files,
+    valid_smb_host,
 )
 from etl_framework.repository.repository import FileServerProfileRepository, ResolvedFileServerProfile
 
@@ -58,13 +58,6 @@ def _net_use(resource: str, username: str | None, password: str | None) -> None:
 def _net_use_delete(resource: str) -> None:
     """Best-effort ``net use ... /delete`` -- never raises."""
     raise NotImplementedError
-
-
-_SMB_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?$")
-
-
-def valid_smb_host(host: str) -> bool:
-    return bool(_SMB_HOST_RE.fullmatch(host.strip()))
 
 
 _smb_host_locks: dict[str, threading.Lock] = {}

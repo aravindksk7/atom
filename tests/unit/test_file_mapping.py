@@ -921,14 +921,66 @@ def test_parse_unc_root_splits_server_and_share() -> None:
 
     assert parse_unc_root(r"\\fileserver01\vendor") == ("fileserver01", "vendor")
     assert parse_unc_root(r"\\fileserver01\vendor\inbound\daily") == ("fileserver01", "vendor")
+    assert parse_unc_root("\\\\fileserver01\\vendor\\") == ("fileserver01", "vendor")
 
 
-@pytest.mark.parametrize("bad_root", ["", "/vendor/inbound", r"\\fileserver01", r"\\", "C:\\local\\path"])
-def test_parse_unc_root_rejects_non_unc_paths(bad_root: str) -> None:
+@pytest.mark.parametrize(
+    ("bad_root", "match"),
+    [
+        ("", "must be a UNC path"),
+        ("/vendor/inbound", "must be a UNC path"),
+        ("C:\\local\\path", "must be a UNC path"),
+        (r"\\fileserver01", "both a server and a share"),
+        (r"\\", "both a server and a share"),
+    ],
+)
+def test_parse_unc_root_rejects_non_unc_paths(bad_root: str, match: str) -> None:
     from etl_framework.reconciliation.file_mapping import parse_unc_root
 
-    with pytest.raises(ValueError, match="UNC path"):
+    with pytest.raises(ValueError, match=match):
         parse_unc_root(bad_root)
+
+
+def test_parse_unc_root_strips_trailing_separator() -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    assert parse_unc_root("\\\\server\\share\\") == ("server", "share")
+    assert parse_unc_root("\\\\server\\share\\\\") == ("server", "share")
+
+
+def test_parse_unc_root_mixed_separators_only_uses_first_two_segments() -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    assert parse_unc_root(r"\\server\share/sub") == ("server", "share")
+
+
+def test_parse_unc_root_strips_whitespace_around_segments() -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    assert parse_unc_root("\\\\ server \\share") == ("server", "share")
+    assert parse_unc_root("\\\\server\\share ") == ("server", "share")
+
+
+def test_parse_unc_root_rejects_whitespace_only_share_segment() -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    with pytest.raises(ValueError, match="both a server and a share"):
+        parse_unc_root("\\\\server\\   \\sub")
+
+
+@pytest.mark.parametrize(
+    "bad_host_root",
+    [
+        "\\\\server;evil\\share",
+        r"\\?\UNC\server\share",
+        r"\\.\pipe\x",
+    ],
+)
+def test_parse_unc_root_rejects_invalid_host_names(bad_host_root: str) -> None:
+    from etl_framework.reconciliation.file_mapping import parse_unc_root
+
+    with pytest.raises(ValueError, match="not a valid host name"):
+        parse_unc_root(bad_host_root)
 
 
 def test_parse_file_source_accepts_smb_kind() -> None:

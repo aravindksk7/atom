@@ -478,18 +478,30 @@ class FileMappingSpec:
         )
 
 
+_SMB_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?$")
+
+
+def valid_smb_host(host: str) -> bool:
+    return bool(_SMB_HOST_RE.fullmatch(host.strip()))
+
+
 def parse_unc_root(root: str) -> tuple[str, str]:
     """Split a UNC path (``\\\\server\\share`` or ``\\\\server\\share\\sub\\path``)
-    into its server and share segments. Raises ``ValueError`` for anything
-    that isn't a well-formed UNC path with at least a server and a share --
-    used both to validate an ``smb`` location's root and to build the
+    into its server and share segments. Accepts ``/`` as well as ``\\`` as a
+    separator and strips whitespace around each segment. Raises ``ValueError``
+    for anything that isn't a well-formed UNC path with at least a server and
+    a share, or whose server segment isn't a valid host name -- used both to
+    validate an ``smb`` location's root and to build the
     ``net use \\\\server\\share`` resource for it."""
     if not root.startswith("\\\\"):
         raise ValueError(f"SMB root must be a UNC path (\\\\server\\share\\...): {root!r}")
-    parts = [part for part in root[2:].split("\\") if part]
-    if len(parts) < 2:
-        raise ValueError(f"SMB root must be a UNC path with both a server and a share: {root!r}")
-    return parts[0], parts[1]
+    parts = re.split(r"[\\/]+", root[2:])
+    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+        raise ValueError(f"SMB root must include both a server and a share: {root!r}")
+    server, share = parts[0].strip(), parts[1].strip()
+    if not valid_smb_host(server):
+        raise ValueError(f"SMB root's server segment is not a valid host name: {root!r}")
+    return server, share
 
 
 def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
