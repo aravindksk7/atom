@@ -1,4 +1,4 @@
-"""Copy files between ``local``, ``s3`` and ``sftp`` locations for
+"""Copy files between ``local``, ``s3``, ``sftp`` and ``smb`` locations for
 ``file_transfer`` jobs (see docs/superpowers/specs/2026-09-21-file-transfer-job-design.md).
 
 Structure:
@@ -69,13 +69,11 @@ def _windows_illegal_name(component: str) -> str | None:
     return None
 
 
-class LocalEndpoint:
-    kind = "local"
-
-    def __init__(self, root: str) -> None:
-        self.credentials_ref = None
-        # Raises HTTPException(400) when root is outside the server allowlist.
-        self.root = resolve_allowed_path(root)
+class _FilesystemEndpoint:
+    """Shared path-safety and streaming I/O for a filesystem-backed endpoint
+    (``local`` or ``smb``) once ``self.root`` is set. Subclasses set
+    ``self.root`` in their own ``__init__`` -- after their own containment
+    check, if any -- and implement ``identity``."""
 
     def relative_of(self, file: DiscoveredFile) -> str:
         try:
@@ -99,9 +97,6 @@ class LocalEndpoint:
                 if reason:
                     raise TransferError(f"destination name '{component}' in '{relative}' {reason}")
         return str(target)
-
-    def identity(self, path: str) -> tuple:
-        return ("local", None, os.path.normcase(str(Path(path).resolve())))
 
     def exists(self, path: str) -> bool:
         return Path(path).exists()
@@ -129,6 +124,36 @@ class LocalEndpoint:
 
     def delete(self, path: str) -> None:
         Path(path).unlink(missing_ok=True)
+
+
+class LocalEndpoint(_FilesystemEndpoint):
+    kind = "local"
+
+    def __init__(self, root: str) -> None:
+        self.credentials_ref = None
+        # Raises HTTPException(400) when root is outside the server allowlist.
+        self.root = resolve_allowed_path(root)
+
+    def identity(self, path: str) -> tuple:
+        return ("local", None, os.path.normcase(str(Path(path).resolve())))
+
+
+class SmbEndpoint(_FilesystemEndpoint):
+    """A Windows UNC/SMB share, already connected (``net use``) by
+    ``RemoteFileSourceSession``/``build_endpoint`` before this is
+    constructed. No ``SERVER_FILE_ALLOWED_DIRS`` allowlist applies -- a UNC
+    path is remote, matching how ``sftp``/``s3`` also skip it."""
+
+    kind = "smb"
+
+    def __init__(self, root: str, *, location_key: tuple | None = None) -> None:
+        self.credentials_ref = None
+        self.location_key = location_key
+        self.root = Path(root).resolve()
+
+    def identity(self, path: str) -> tuple:
+        location = self.location_key if self.location_key is not None else None
+        return ("smb", location, os.path.normcase(str(Path(path).resolve())))
 
 
 # -- S3 ----------------------------------------------------------------------
@@ -475,6 +500,10 @@ def is_transport_error(exc: BaseException | None) -> bool:
         return False
     if isinstance(exc, (EOFError, ConnectionError, TimeoutError)):
         return True
+    from api.services.multi_file_remote import SmbConnectError
+
+    if isinstance(exc, SmbConnectError):
+        return True
     try:
         import botocore.exceptions
 
@@ -558,6 +587,9 @@ def build_endpoint(session: Any, spec: Any):
     ``RemoteFileSourceSession`` (supplies cached, credential-resolved clients)."""
     if spec.kind == "local":
         return LocalEndpoint(spec.root)
+    if spec.kind == "smb":
+        session.client_for(spec)  # connects (net use) before any path is touched
+        return SmbEndpoint(spec.root, location_key=session.location_key_for(spec))
     client = session.client_for(spec)
     location_key = session.location_key_for(spec)
     if spec.kind == "s3":

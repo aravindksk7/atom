@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from moto import mock_aws
 
 from api.services import file_transfer as ft
-from etl_framework.reconciliation.file_mapping import DiscoveredFile
+from etl_framework.reconciliation.file_mapping import DiscoveredFile, FileSourceSpec
 from tests.helpers.fake_sftp import FakeSFTP
 
 
@@ -1250,3 +1250,109 @@ def test_run_transfer_end_to_end_local_to_local(allowed_dir):
     assert (allowed_dir / "dst" / "a.csv").read_bytes() == b"data-a.csv"
     assert (allowed_dir / "dst" / "sub" / "b.csv").read_bytes() == b"data-sub/b.csv"
     assert list((allowed_dir / "dst").rglob("*.part")) == []
+
+
+# -- SmbEndpoint ---------------------------------------------------------------
+
+class _FakeSmbSession:
+    def __init__(self, resource: str) -> None:
+        self.resource = resource
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_local_endpoint_still_behaves_identically_after_the_shared_base_refactor(allowed_dir):
+    # Regression guard for Task 6's _FilesystemEndpoint extraction: every
+    # existing LocalEndpoint behavior (allowlist, path safety, atomic write,
+    # identity) must be unchanged. The pre-existing test_local_endpoint_*
+    # tests earlier in this file already cover this in detail; this test
+    # just confirms LocalEndpoint is still importable and constructible the
+    # same way after the refactor.
+    endpoint = ft.LocalEndpoint(str(allowed_dir))
+    assert endpoint.kind == "local"
+    assert endpoint.identity(str(allowed_dir / "a.csv"))[0] == "local"
+
+
+def test_smb_endpoint_relative_of_and_destination_for(tmp_path):
+    endpoint = ft.SmbEndpoint(str(tmp_path / "src"))
+    (tmp_path / "src" / "sub").mkdir(parents=True)
+    file = DiscoveredFile(path=str(tmp_path / "src" / "sub" / "a.csv"), file_name="a.csv", tokens={})
+    assert endpoint.relative_of(file) == "sub/a.csv"
+
+    dest = ft.SmbEndpoint(str(tmp_path / "dst"))
+    assert Path(dest.destination_for("sub/x.csv")) == tmp_path / "dst" / "sub" / "x.csv"
+
+
+def test_smb_endpoint_rejects_traversal_like_local_endpoint(tmp_path):
+    endpoint = ft.SmbEndpoint(str(tmp_path / "dst"))
+    with pytest.raises(ft.TransferError, match="escapes destination root"):
+        endpoint.destination_for("../escape.csv")
+
+
+def test_smb_endpoint_has_no_allowlist(tmp_path, monkeypatch):
+    # Unlike LocalEndpoint, SmbEndpoint must not call resolve_allowed_path --
+    # a UNC path is never inside SERVER_FILE_ALLOWED_DIRS.
+    from api.services import file_source
+
+    monkeypatch.setattr(file_source, "_UPLOAD_BASE", None)
+    monkeypatch.setattr(file_source, "_UPLOAD_BASES", ())
+    endpoint = ft.SmbEndpoint(str(tmp_path / "anywhere"))
+    assert endpoint.root == (tmp_path / "anywhere").resolve()
+
+
+def test_smb_endpoint_write_read_exists_size_delete(tmp_path):
+    endpoint = ft.SmbEndpoint(str(tmp_path / "out"))
+    dest = endpoint.destination_for("sub/x.csv")
+
+    assert not endpoint.exists(dest)
+    endpoint.write(dest, io.BytesIO(b"id\n1\n"))
+
+    assert endpoint.exists(dest)
+    assert endpoint.size(dest) == 5
+    with endpoint.open_read(dest) as fh:
+        assert fh.read() == b"id\n1\n"
+    assert not Path(dest + ".part").exists()
+
+    endpoint.delete(dest)
+    assert not endpoint.exists(dest)
+
+
+def test_smb_endpoint_identity_prefers_location_key_over_none(tmp_path):
+    a = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver01", "share"))
+    b = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver01", "share"))
+    c = ft.SmbEndpoint(str(tmp_path / "out"), location_key=("smb", "fileserver02", "share"))
+    path = str(tmp_path / "out" / "x.csv")
+    assert a.identity(path) == b.identity(path)
+    assert a.identity(path) != c.identity(path)
+    assert a.identity(path)[0] == "smb"
+
+
+def test_build_endpoint_smb_connects_via_session_and_returns_smb_endpoint(tmp_path):
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.connected = []
+
+        def client_for(self, spec):
+            self.connected.append(spec.credentials_ref)
+            return _FakeSmbSession(f"\\\\host\\share")
+
+        def location_key_for(self, spec):
+            return ("smb", "host", "share")
+
+    session = _FakeSession()
+    spec = FileSourceSpec(kind="smb", root=str(tmp_path / "in"), pattern="*.csv", credentials_ref="vendor-share")
+
+    endpoint = ft.build_endpoint(session, spec)
+
+    assert isinstance(endpoint, ft.SmbEndpoint)
+    assert session.connected == ["vendor-share"]
+    assert endpoint.identity(str(tmp_path / "in" / "x.csv"))[1] == ("smb", "host", "share")
+
+
+def test_is_transport_error_recognizes_smb_connect_error():
+    from api.services.multi_file_remote import SmbConnectError
+
+    assert ft.is_transport_error(SmbConnectError("net use failed")) is True
+    assert ft.is_transport_error(ft.TransferError("boom")) is False
