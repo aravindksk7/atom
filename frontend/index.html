@@ -1798,6 +1798,7 @@
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
+                <option value="smb">smb</option>
               </select>
               <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix"
                      data-testid="job-modal-mf-source-root-input" aria-label="spool exports or s3 bucket prefix" />
@@ -1807,7 +1808,7 @@
                 <select x-model="jobModal.mf_source_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-mf-source-credentials-ref-select" aria-label="mf source file server">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.mf_source_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_source_kind === 's3' ? f.kind === 's3' : jobModal.mf_source_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
@@ -1821,6 +1822,7 @@
                 <option value="local">local</option>
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
+                <option value="smb">smb</option>
               </select>
               <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix"
                      data-testid="job-modal-mf-target-root-input" aria-label="exports finance or s3 bucket prefix" />
@@ -1830,7 +1832,7 @@
                 <select x-model="jobModal.mf_target_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-mf-target-credentials-ref-select" aria-label="mf target file server">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.mf_target_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_target_kind === 's3' ? f.kind === 's3' : jobModal.mf_target_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
@@ -1957,6 +1959,7 @@
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
                 <option value="scp">scp</option>
+                <option value="smb">smb</option>
               </select>
             </div>
             <div>
@@ -1974,7 +1977,7 @@
               <select x-model="jobModal.fw_credentials_ref" class="field-input field-select"
                       data-testid="job-modal-fw-credentials-ref-select" id="a11y-launch-fw-credentials-ref">
                 <option value="">— select a file server —</option>
-                <template x-for="fs in fileServers.filter(f => jobModal.fw_location_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                <template x-for="fs in fileServers.filter(f => jobModal.fw_location_kind === 's3' ? f.kind === 's3' : jobModal.fw_location_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                   <option :value="fs.name" x-text="fs.name"></option>
                 </template>
               </select>
@@ -2025,6 +2028,7 @@
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
                 <option value="scp">scp</option>
+                <option value="smb">smb</option>
               </select>
             </div>
             <div>
@@ -2042,7 +2046,7 @@
               <select x-model="jobModal.ft_source_credentials_ref" class="field-input field-select"
                       data-testid="job-modal-ft-source-credentials-ref-select" id="a11y-launch-ft-source-credentials-ref">
                 <option value="">— select a file server —</option>
-                <template x-for="fs in fileServers.filter(f => jobModal.ft_source_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                <template x-for="fs in fileServers.filter(f => jobModal.ft_source_kind === 's3' ? f.kind === 's3' : jobModal.ft_source_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                   <option :value="fs.name" x-text="fs.name"></option>
                 </template>
               </select>
@@ -2058,6 +2062,7 @@
                   <option value="s3">s3</option>
                   <option value="sftp">sftp</option>
                   <option value="scp">scp</option>
+                  <option value="smb">smb</option>
                 </select>
               </div>
               <div>
@@ -2070,7 +2075,7 @@
                 <select x-model="jobModal.ft_dest_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-ft-dest-credentials-ref-select" id="a11y-launch-ft-dest-credentials-ref">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.ft_dest_kind === 's3' ? f.kind === 's3' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.ft_dest_kind === 's3' ? f.kind === 's3' : jobModal.ft_dest_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
