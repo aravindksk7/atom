@@ -100,6 +100,12 @@ def _smb_host_lock(host: str) -> threading.Lock:
         return _smb_host_locks[key]
 
 
+# Overridable in tests -- a genuinely-contended host lock (two concurrent
+# runs targeting the same server) should fail with a clear error rather than
+# hang the whole process forever.
+_SMB_LOCK_TIMEOUT_SECONDS = 30
+
+
 class SmbSession:
     """A connected UNC resource, held for the lifetime of one
     ``RemoteFileSourceSession``. ``close()`` runs ``net use ... /delete`` and
@@ -133,7 +139,8 @@ def connect_smb_share(profile: ResolvedFileServerProfile | None, spec: FileSourc
         )
     resource = f"\\\\{server}\\{share}"
     lock = _smb_host_lock(server)
-    lock.acquire()
+    if not lock.acquire(timeout=_SMB_LOCK_TIMEOUT_SECONDS):
+        raise SmbConnectError(f"Timed out waiting for another SMB operation on host '{server}' to finish")
     try:
         _net_use(resource, profile.username, profile.password)
     except Exception:
@@ -300,6 +307,20 @@ class RemoteFileSourceSession:
             elif spec.kind == "sftp":
                 self._clients[key] = build_sftp_client(profile, spec)
             elif spec.kind == "smb":
+                server, _ = parse_unc_root(spec.root)
+                for (other_kind, other_ref), other_client in self._clients.items():
+                    if (
+                        other_kind == "smb"
+                        and other_ref != spec.credentials_ref
+                        and isinstance(other_client, SmbSession)
+                        and other_client.resource.split("\\")[2].casefold() == server.casefold()
+                    ):
+                        raise SmbConnectError(
+                            f"This run already holds an SMB connection to host '{server}' via file server profile "
+                            f"'{other_ref}' -- Windows allows only one active identity per server, so profile "
+                            f"'{spec.credentials_ref}' cannot also connect to it in the same run. Use the same "
+                            "file server profile for both sides, or point one side at a different host."
+                        )
                 self._clients[key] = connect_smb_share(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")

@@ -1009,3 +1009,39 @@ def test_close_releases_smb_client(db, monkeypatch, tmp_path):
 
     session_local.close()
     assert delete_calls == ["\\\\fileserver01\\share"]
+
+
+def test_client_for_smb_rejects_second_profile_on_same_host_in_one_session(db, monkeypatch):
+    from api.services.multi_file_remote import SmbConnectError
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01"))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    session_local = RemoteFileSourceSession(db)
+    spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
+    spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\other", pattern="*.csv", credentials_ref="profile-b")
+
+    session_local.client_for(spec_a)
+    with pytest.raises(SmbConnectError, match="already holds an SMB connection"):
+        session_local.client_for(spec_b)
+
+
+def test_connect_smb_share_lock_acquire_times_out_instead_of_hanging(db, monkeypatch):
+    from api.services.multi_file_remote import SmbConnectError, _smb_host_lock, connect_smb_share
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    FileServerProfileRepository(db).create(_smb_profile(host="fileserver09"))
+    profile = FileServerProfileRepository(db).get_decrypted_by_name("vendor-share")
+    spec = FileSourceSpec(kind="smb", root=r"\\fileserver09\share\sub", pattern="*.csv", credentials_ref="vendor-share")
+
+    monkeypatch.setattr("api.services.multi_file_remote._SMB_LOCK_TIMEOUT_SECONDS", 0.2)
+    # Simulate another in-flight connection already holding this host's lock --
+    # connect_smb_share must fail fast with a clear error rather than hang.
+    lock = _smb_host_lock("fileserver09")
+    lock.acquire()
+    try:
+        with pytest.raises(SmbConnectError, match="Timed out waiting"):
+            connect_smb_share(profile, spec)
+    finally:
+        lock.release()
