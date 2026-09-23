@@ -3,10 +3,10 @@ import { authedContext, deleteJob, deleteFileServerByName } from './api-helpers'
 
 // Covers the smb kind added to File Servers (frontend/partials/tab-file-servers.html)
 // and to the file_watcher/file_transfer/multi-file location pickers
-// (frontend/partials/tab-launch.html). No real Windows host or SMB share is
-// available in CI, so this is UI-round-trip coverage only (matching how the
-// sftp/scp kinds are covered without a live server in 32-launch-remaining-job-types.spec.ts) --
-// live SMB connectivity is a manual verification step, not part of this suite.
+// (frontend/partials/tab-launch.html). UI-round-trip coverage only, with no
+// live server (matching how the sftp/scp kinds are covered in
+// 32-launch-remaining-job-types.spec.ts); live SMB transfers against the
+// docker Samba service are in 57-live-smb-scp-file-transfer.spec.ts.
 test.describe('56 smb file server and job editor', () => {
   const createdJobNames: string[] = [];
   const createdFileServerNames: string[] = [];

@@ -106,6 +106,28 @@ services:
     # here -- unlike MinIO, there's no seed *script* to gate a real readiness
     # check on for this service.
 
+  smb:
+    image: dockurr/samba:latest
+    container_name: atom-smb-integration
+    environment:
+      NAME: "share"
+      USER: "e2euser"
+      PASS: "e2epass"
+    volumes:
+      - ./tests/e2e/fixtures/data/smb_seed:/shared
+    ports:
+      # 1445, not 445: a Windows host's own SMB server always owns 445, so the
+      # app reaches this share as \\127.0.0.1\share through an smb file
+      # server profile with port 1445 (net use /TCPPORT, Windows 11 24H2+).
+      - "1445:445"
+    healthcheck:
+      # The image's own healthcheck, on a 5s interval instead of its 60s
+      # default so `up --wait` doesn't sit a full minute on the first probe.
+      test: ["CMD", "smbclient", "--configfile=/etc/samba.conf", "-L", "\\\\localhost", "-U", "%", "-m", "SMB3"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   floci:
     # Free local AWS emulator used for Glue/Athena live e2e coverage. LocalStack
     # Community does not implement Glue/Athena without a Pro auth token, while
