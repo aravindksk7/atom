@@ -996,7 +996,7 @@
       steps: [
         {
           title: 'Configure and test storage profiles',
-          text: 'Profiles centralize credentials for file watcher and multi-file jobs. The supported profile kinds are exactly sftp, scp, s3, and smb. SFTP/SCP profiles can pin host fingerprints and use password or private-key authentication; S3 profiles use encrypted AWS credentials, region, and optional endpoint URL.',
+          text: 'Profiles centralize credentials for file watcher and multi-file jobs. The supported profile kinds are exactly sftp, scp, s3, and smb. SFTP/SCP profiles can pin host fingerprints and use password or private-key authentication; S3 profiles use encrypted AWS credentials, region, and optional endpoint URL; SMB profiles take a host, Windows credentials, and a port (445 unless the server listens on an alternative SMB port, which needs Windows 11 24H2 / Server 2025 on the atom server).',
           where: 'File Servers -> Add Profile -> Test Connection',
           when: 'Jobs need reusable remote storage access without inline credentials.',
           uiMockup: { title: 'File server profile', badge: 'Fingerprint pinned', elements: [

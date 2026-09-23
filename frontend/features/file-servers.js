@@ -20,6 +20,17 @@
           editingId: profile ? profile.id : null,
           data: profile ? { ...profile } : { kind: 'sftp', port: 22, auth_method: 'password' },
         };
+        this.onFileServerKindChange();
+      },
+
+      // port is shared across kinds: swap the sftp default (22) and the smb
+      // default (445) when the kind changes, leaving any custom port alone.
+      // SMB profiles saved before smb had a port field carry 22, shown as 445.
+      onFileServerKindChange() {
+        const d = this.fileServerModal.data;
+        const port = Number(d.port);
+        if (d.kind === 'smb' && (!port || port === 22)) d.port = 445;
+        else if ((d.kind === 'sftp' || d.kind === 'scp') && (!port || port === 445)) d.port = 22;
       },
 
       async saveFileServer() {

@@ -8469,15 +8469,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="space-y-3">
         <div><label class="field-label">Name</label><input x-model="fileServerModal.data.name" class="field-input" data-testid="file-server-name-input" /></div>
         <div><label class="field-label">Kind</label>
-          <select x-model="fileServerModal.data.kind" class="field-input field-select" data-testid="file-server-kind-select">
+          <select x-model="fileServerModal.data.kind" @change="onFileServerKindChange()" class="field-input field-select" data-testid="file-server-kind-select">
             <option value="sftp">SFTP</option><option value="scp">SCP</option><option value="s3">S3</option><option value="smb">SMB / UNC Share</option>
           </select>
         </div>
         <template x-if="fileServerModal.data.kind === 'sftp' || fileServerModal.data.kind === 'scp'">
           <div class="space-y-3">
-            <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" /></div>
-            <div><label class="field-label">Port</label><input type="number" x-model="fileServerModal.data.port" class="field-input" /></div>
-            <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" /></div>
+            <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" data-testid="file-server-host-input" /></div>
+            <div><label class="field-label">Port</label><input type="number" x-model.number="fileServerModal.data.port" class="field-input" data-testid="file-server-port-input" /></div>
+            <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" data-testid="file-server-username-input" /></div>
             <div><label class="field-label">Auth Method</label>
               <select x-model="fileServerModal.data.auth_method" class="field-input field-select">
                 <option value="password">Password</option><option value="private_key">Private Key</option>
@@ -8495,6 +8495,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <template x-if="fileServerModal.data.kind === 'smb'">
           <div class="space-y-3">
             <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" placeholder="fileserver01" data-testid="file-server-smb-host-input" /></div>
+            <div><label class="field-label">Port (445 unless the server uses an alternative SMB port; needs Windows 11 24H2 / Server 2025)</label><input type="number" x-model.number="fileServerModal.data.port" class="field-input" placeholder="445" data-testid="file-server-smb-port-input" /></div>
             <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" placeholder="DOMAIN\user or user@domain.com" data-testid="file-server-smb-username-input" /></div>
             <div><label class="field-label">Password</label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-smb-password-input" /></div>
           </div>
