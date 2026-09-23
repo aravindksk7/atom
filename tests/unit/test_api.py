@@ -870,7 +870,7 @@ def test_preview_file_mapping_returns_409_quickly_when_smb_host_lock_is_contende
     from api.services.multi_file_remote import _smb_host_lock
 
     monkeypatch.setattr(jobs_module, "_PREVIEW_SMB_LOCK_TIMEOUT_SECONDS", 0.2)
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
 
     with Session(client.engine) as db:
         FileServerProfileRepository(db).create({

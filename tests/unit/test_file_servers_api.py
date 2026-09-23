@@ -327,7 +327,7 @@ def test_test_connection_smb_reports_clear_error_without_real_windows_net_use(cl
     net_use_calls = []
     delete_calls = []
 
-    def _raise(resource, u, p):
+    def _raise(resource, u, p, port=None):
         net_use_calls.append((resource, u, p))
         from api.services.multi_file_remote import SmbConnectError
         raise SmbConnectError("net use \\\\fileserver02\\IPC$ failed: System error 53 has occurred.")
@@ -355,7 +355,7 @@ def test_test_connection_smb_succeeds_and_always_disconnects(client, monkeypatch
     monkeypatch.setattr("api.routes.file_servers.os", types.SimpleNamespace(name="nt"))
 
     calls = []
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: calls.append(("use", resource, u, p)))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: calls.append(("use", resource, u, p)))
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: calls.append(("delete", resource)))
 
     resp = client.post(f"/api/file-servers/{created['id']}/test")
@@ -363,6 +363,26 @@ def test_test_connection_smb_succeeds_and_always_disconnects(client, monkeypatch
     assert resp.json() == {"status": "ok", "presented_fingerprint": None, "pinned_fingerprint": None, "message": None}
     # The real (decrypted) password is what gets forwarded to _net_use, not the mask.
     assert calls == [("use", "\\\\fileserver03\\IPC$", "svc", "s3cret"), ("delete", "\\\\fileserver03\\IPC$")]
+
+
+def test_test_connection_smb_forwards_an_alternative_port(client, monkeypatch):
+    created = client.post("/api/file-servers", json={
+        "name": "vendor-share-alt-port", "kind": "smb", "host": "127.0.0.1", "port": 1445,
+        "username": "svc", "password": "s3cret",
+    }).json()
+    assert created["port"] == 1445
+    monkeypatch.setattr("api.routes.file_servers.os", types.SimpleNamespace(name="nt"))
+
+    calls = []
+    monkeypatch.setattr(
+        "api.services.multi_file_remote._net_use",
+        lambda resource, u, p, port=None: calls.append((resource, port)),
+    )
+    monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: None)
+
+    resp = client.post(f"/api/file-servers/{created['id']}/test")
+    assert resp.json()["status"] == "ok"
+    assert calls == [("\\\\127.0.0.1\\IPC$", 1445)]
 
 
 def test_test_connection_smb_reports_clear_error_on_non_windows(client, monkeypatch):

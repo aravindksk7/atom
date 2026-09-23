@@ -58,15 +58,30 @@ def _scrub_smb_error(text: str, password: str | None) -> str:
     return text
 
 
-def _net_use(resource: str, username: str | None, password: str | None) -> None:
+def smb_tcp_port(port: Any) -> int | None:
+    """The alternative TCP port an SMB profile's ``port`` asks for, or None
+    for the standard 445. 22 also means "standard": it is the schema-wide
+    default (an sftp port) every smb profile created before smb had a port
+    field was stored with, not a real SMB port choice."""
+    if port in (None, ""):
+        return None
+    value = int(port)
+    return None if value in (22, 445) else value
+
+
+def _net_use(resource: str, username: str | None, password: str | None, port: int | None = None) -> None:
     """Authenticate to a UNC resource (``\\\\server\\share``) via Windows'
-    built-in ``net use``. Raises ``SmbConnectError`` on any failure, its
-    message scrubbed of ``password``."""
+    built-in ``net use``. ``port`` (an alternative SMB TCP port, see
+    ``smb_tcp_port``) adds ``/TCPPORT:<port>`` -- supported by the SMB client
+    from Windows 11 24H2 / Server 2025. Raises ``SmbConnectError`` on any
+    failure, its message scrubbed of ``password``."""
     if not password:
         raise SmbConnectError("SMB profile requires a password")
     args = ["net", "use", resource, password]
     if username:
         args.append("/user:" + username)
+    if port:
+        args.append(f"/TCPPORT:{port}")
     try:
         # stdin=DEVNULL: net use prompts interactively on several failure
         # modes (bad password, "continue connection? Y/N") -- under a
@@ -163,10 +178,11 @@ class SmbSession:
     also releases the per-host lock -- picked up automatically by
     ``close_remote_client``'s generic ``getattr(client, "close", None)``."""
 
-    def __init__(self, resource: str, lock: "threading.Lock", host: str) -> None:
+    def __init__(self, resource: str, lock: "threading.Lock", host: str, port: int | None = None) -> None:
         self.resource = resource
         self.resources = {resource}
         self.host = host
+        self.port = port
         self._lock = lock
 
     def ensure_resource(self, resource: str, username: str | None, password: str | None) -> None:
@@ -176,7 +192,7 @@ class SmbSession:
         that's what makes it exclusive to connect an additional share on the
         same host while nothing else can race it."""
         if resource not in self.resources:
-            _net_use(resource, username, password)
+            _net_use(resource, username, password, port=self.port)
             self.resources.add(resource)
 
     def close(self) -> None:
@@ -212,8 +228,9 @@ def connect_smb_share(
     timeout = _SMB_LOCK_TIMEOUT_SECONDS if lock_timeout_seconds is None else lock_timeout_seconds
     if not lock.acquire(timeout=timeout):
         raise SmbConnectError(f"Timed out waiting for another SMB operation on host '{server}' to finish")
+    port = smb_tcp_port(profile.port)
     try:
-        _net_use(resource, profile.username, profile.password)
+        _net_use(resource, profile.username, profile.password, port=port)
     except Exception:
         # A timed-out/killed net.exe can leave a half-established connection
         # that would block the next identity's connect to this host, so
@@ -221,7 +238,7 @@ def connect_smb_share(
         _net_use_delete(resource)
         lock.release()
         raise
-    return SmbSession(resource, lock, server)
+    return SmbSession(resource, lock, server, port)
 
 
 _CONTENT_MATCH_READ_LIMIT = 65536
@@ -426,7 +443,8 @@ class RemoteFileSourceSession:
                         # always two different rows -- kept for clarity/
                         # future-proofing in case that constraint ever loosens.
                         other_profile.id == profile.id
-                        or (other_profile.username, other_profile.password) == (profile.username, profile.password)
+                        or (other_profile.username, other_profile.password, smb_tcp_port(other_profile.port))
+                        == (profile.username, profile.password, smb_tcp_port(profile.port))
                     )
                     if not same_identity:
                         raise SmbConnectError(

@@ -535,7 +535,7 @@ def test_smb_to_local_copies_files_end_to_end(db_session, allowed_dir, tmp_path,
     monkeypatch.setattr("api.services.multi_file_remote._smb_host_locks", {})
     monkeypatch.setattr(
         "api.services.multi_file_remote._net_use",
-        lambda resource, u, p: net_use_calls.append((resource, u, p)),
+        lambda resource, u, p, port=None: net_use_calls.append((resource, u, p)),
     )
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))

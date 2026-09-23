@@ -829,9 +829,9 @@ def _reset_smb_host_locks(monkeypatch):
     monkeypatch.setattr("api.services.multi_file_remote.os", types.SimpleNamespace(name="nt"))
 
 
-def _smb_profile(name="vendor-share", host="fileserver01", username="svc", password="s3cret"):
+def _smb_profile(name="vendor-share", host="fileserver01", username="svc", password="s3cret", port=22):
     return {
-        "name": name, "kind": "smb", "host": host, "port": 22,
+        "name": name, "kind": "smb", "host": host, "port": port,
         "username": username, "password": password,
     }
 
@@ -880,11 +880,59 @@ def test_connect_smb_share_calls_net_use_with_resource_password_and_user(db, mon
     spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
 
     calls = []
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: calls.append((resource, u, p)))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: calls.append((resource, u, p)))
 
     session = connect_smb_share(profile, spec)
     assert calls == [("\\\\fileserver01\\share", "svc", "s3cret")]
     assert session.resource == "\\\\fileserver01\\share"
+
+
+def test_connect_smb_share_passes_a_non_default_profile_port_to_net_use(db, monkeypatch):
+    from api.services.multi_file_remote import connect_smb_share
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    FileServerProfileRepository(db).create(_smb_profile(port=1445))
+    profile = FileServerProfileRepository(db).get_decrypted_by_name("vendor-share")
+    spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
+
+    calls = []
+    monkeypatch.setattr(
+        "api.services.multi_file_remote._net_use",
+        lambda resource, u, p, port=None: calls.append((resource, u, p, port)),
+    )
+
+    session = connect_smb_share(profile, spec)
+    assert calls == [("\\\\fileserver01\\share", "svc", "s3cret", 1445)]
+    # A second share on the same session reuses the same port.
+    session.ensure_resource("\\\\fileserver01\\other", "svc", "s3cret")
+    assert calls[-1] == ("\\\\fileserver01\\other", "svc", "s3cret", 1445)
+
+
+@pytest.mark.parametrize("port, expected", [(None, None), (22, None), (445, None), (1445, 1445), ("1445", 1445)])
+def test_smb_tcp_port_treats_unset_sftp_default_and_445_as_standard(port, expected):
+    from api.services.multi_file_remote import smb_tcp_port
+
+    assert smb_tcp_port(port) == expected
+
+
+def test_net_use_appends_tcpport_only_for_an_alternative_port(monkeypatch):
+    import subprocess
+
+    from api.services.multi_file_remote import _net_use
+
+    seen = []
+
+    def _fake_run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _net_use("\\\\fileserver01\\share", "svc", "s3cret")
+    _net_use("\\\\fileserver01\\share", "svc", "s3cret", port=1445)
+
+    assert seen[0] == ["net", "use", "\\\\fileserver01\\share", "s3cret", "/user:svc"]
+    assert seen[1] == ["net", "use", "\\\\fileserver01\\share", "s3cret", "/user:svc", "/TCPPORT:1445"]
 
 
 def test_connect_smb_share_releases_host_lock_on_net_use_failure(db, monkeypatch):
@@ -895,7 +943,7 @@ def test_connect_smb_share_releases_host_lock_on_net_use_failure(db, monkeypatch
     profile = FileServerProfileRepository(db).get_decrypted_by_name("vendor-share")
     spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
 
-    def _fail(resource, u, p):
+    def _fail(resource, u, p, port=None):
         raise SmbConnectError("boom")
 
     monkeypatch.setattr("api.services.multi_file_remote._net_use", _fail)
@@ -907,7 +955,7 @@ def test_connect_smb_share_releases_host_lock_on_net_use_failure(db, monkeypatch
 
     # A second connect attempt to the same host must not deadlock -- proves
     # the lock was released after the failed attempt.
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session = connect_smb_share(profile, spec)
     assert session.resource == "\\\\fileserver01\\share"
 
@@ -921,7 +969,7 @@ def test_smb_session_close_deletes_connection_and_releases_lock(db, monkeypatch)
     spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
 
     calls = []
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: calls.append(resource))
 
     session = connect_smb_share(profile, spec)
@@ -937,7 +985,7 @@ def test_client_for_smb_caches_the_session(db, monkeypatch):
     from etl_framework.repository.repository import FileServerProfileRepository
 
     FileServerProfileRepository(db).create(_smb_profile())
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session_local = RemoteFileSourceSession(db)
     spec = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
 
@@ -951,7 +999,7 @@ def test_location_key_for_smb_keys_on_server_and_share(db, monkeypatch):
 
     FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
     FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01"))
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session_local = RemoteFileSourceSession(db)
     spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
     spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\other", pattern="*.csv", credentials_ref="profile-b")
@@ -975,7 +1023,7 @@ def test_discover_smb_reuses_discover_local_files(db, monkeypatch, tmp_path):
     # the real tmp_path directory underneath.
     (tmp_path / "sales_east.csv").write_text("id\n1\n", encoding="utf-8")
     FileServerProfileRepository(db).create(_smb_profile())
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
     session_local = RemoteFileSourceSession(db)
     spec = FileSourceSpec(kind="smb", root=str(tmp_path), pattern="sales_{region}.csv", credentials_ref="vendor-share")
@@ -989,7 +1037,7 @@ def test_read_file_smb_reads_without_allowlist(db, monkeypatch, tmp_path):
 
     (tmp_path / "sales_east.csv").write_text("id,value\n1,alpha\n", encoding="utf-8")
     FileServerProfileRepository(db).create(_smb_profile())
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
     session_local = RemoteFileSourceSession(db)
     spec = FileSourceSpec(kind="smb", root=str(tmp_path), pattern="sales_{region}.csv", credentials_ref="vendor-share")
@@ -1004,7 +1052,7 @@ def test_read_text_smb(db, monkeypatch, tmp_path):
 
     (tmp_path / "DONE.flag").write_bytes(b"STATUS=COMPLETE\n")
     FileServerProfileRepository(db).create(_smb_profile())
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
     session_local = RemoteFileSourceSession(db)
     spec = FileSourceSpec(kind="smb", root=str(tmp_path), pattern="DONE.flag", credentials_ref="vendor-share")
@@ -1017,7 +1065,7 @@ def test_close_releases_smb_client(db, monkeypatch, tmp_path):
     from etl_framework.repository.repository import FileServerProfileRepository
 
     FileServerProfileRepository(db).create(_smb_profile())
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     monkeypatch.setattr("api.services.multi_file_remote.parse_unc_root", lambda root: ("fileserver01", "share"))
     delete_calls = []
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: delete_calls.append(resource))
@@ -1037,7 +1085,26 @@ def test_client_for_smb_rejects_second_profile_on_same_host_in_one_session(db, m
     # Windows really can't hold both at once, so this must be rejected.
     FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01", password="secret-a"))
     FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01", password="secret-b"))
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
+    session_local = RemoteFileSourceSession(db)
+    spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
+    spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\other", pattern="*.csv", credentials_ref="profile-b")
+
+    session_local.client_for(spec_a)
+    with pytest.raises(SmbConnectError, match="already holds an SMB connection"):
+        session_local.client_for(spec_b)
+
+
+def test_client_for_smb_rejects_same_credentials_on_a_different_port_of_the_same_host(db, monkeypatch):
+    from api.services.multi_file_remote import SmbConnectError
+    from etl_framework.repository.repository import FileServerProfileRepository
+
+    # Same username/password but a different SMB port is a different server
+    # endpoint -- reusing profile-a's connection would silently talk to the
+    # wrong port, so it must be treated as a conflicting identity.
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
+    FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01", port=1445))
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session_local = RemoteFileSourceSession(db)
     spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
     spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\other", pattern="*.csv", credentials_ref="profile-b")
@@ -1059,7 +1126,7 @@ def test_client_for_smb_allows_second_profile_on_same_host_when_same_identity(db
     # both, not just the first.
     FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
     FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="fileserver01"))
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     delete_calls = []
     monkeypatch.setattr("api.services.multi_file_remote._net_use_delete", lambda resource: delete_calls.append(resource))
     session_local = RemoteFileSourceSession(db)
@@ -1085,7 +1152,7 @@ def test_client_for_smb_reuse_path_still_validates_profile_host_matches_root(db,
     # silently reused from profile-a's already-open connection.
     FileServerProfileRepository(db).create(_smb_profile(name="profile-a", host="fileserver01"))
     FileServerProfileRepository(db).create(_smb_profile(name="profile-b", host="wrong-host"))
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session_local = RemoteFileSourceSession(db)
     spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="profile-a")
     spec_b = FileSourceSpec(kind="smb", root=r"\\fileserver01\other-share\x", pattern="*.csv", credentials_ref="profile-b")
@@ -1105,7 +1172,7 @@ def test_client_for_smb_cache_hit_path_validates_host_against_existing_connectio
     # (client.host) can catch a second spec reusing the same credentials_ref
     # but pointing at a completely different server.
     FileServerProfileRepository(db).create(_smb_profile(host=""))
-    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p: None)
+    monkeypatch.setattr("api.services.multi_file_remote._net_use", lambda resource, u, p, port=None: None)
     session_local = RemoteFileSourceSession(db)
     spec_a = FileSourceSpec(kind="smb", root=r"\\fileserver01\share\sub", pattern="*.csv", credentials_ref="vendor-share")
     spec_b = FileSourceSpec(kind="smb", root=r"\\OTHERHOST\out", pattern="*.csv", credentials_ref="vendor-share")

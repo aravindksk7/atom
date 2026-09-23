@@ -186,7 +186,7 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         # _net_use/_net_use_delete/_smb_host_lock are module-private helpers
         # shared between this route and multi_file_remote's real connect path
         # (same convention as _load_sftp_private_key above).
-        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock
+        from api.services.multi_file_remote import SmbConnectError, _net_use, _net_use_delete, _smb_host_lock, smb_tcp_port
         from etl_framework.reconciliation.file_mapping import valid_smb_host
 
         if not valid_smb_host(profile.host):
@@ -197,7 +197,7 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
             return FileServerTestResult(status="error", message="Another SMB operation is in progress for this host -- try again shortly")
         try:
             try:
-                _net_use(resource, profile.username, profile.password)
+                _net_use(resource, profile.username, profile.password, port=smb_tcp_port(profile.port))
             except SmbConnectError as exc:
                 return FileServerTestResult(status="error", message=str(exc))
             except Exception:
