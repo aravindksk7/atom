@@ -19,8 +19,9 @@
     // NOTE: app-help.js's global Escape-key handler reads this flag directly to
     // close the modal — don't rename without updating app-help.js too.
     showContractModal: false,
-    contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' },
+    contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' },
     contractModalEditing: false,
+    contractConsumerDraft: '',
     contractBumpType: 'minor',
     showContractExamples: false,
     contractExamplesAutoApplied: false,
@@ -80,9 +81,35 @@
       return Array.isArray(this.jobs) && this.jobs.length > 0 && !this.contractSourceJobKnown(name);
     },
 
+    addContractConsumer() {
+      const v = this.contractConsumerDraft.replace(/,/g, '').trim();
+      if (v && !this.contractModal.consumers.includes(v)) this.contractModal.consumers.push(v);
+      this.contractConsumerDraft = '';
+    },
+
+    removeContractConsumer(idx) {
+      this.contractModal.consumers.splice(idx, 1);
+    },
+
+    onContractConsumerKeydown(e) {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        this.addContractConsumer();
+      } else if (e.key === 'Backspace' && this.contractConsumerDraft === '' && this.contractModal.consumers.length) {
+        this.contractModal.consumers.pop();
+      }
+    },
+
+    contractConsumerSuggestions() {
+      const all = new Set();
+      for (const c of this.contracts) for (const name of (c.consumers || [])) all.add(name);
+      return [...all].filter(n => !this.contractModal.consumers.includes(n)).sort();
+    },
+
     async openNewContractModal() {
-      this.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' };
+      this.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' };
       this.contractModalEditing = false;
+      this.contractConsumerDraft = '';
       this.showContractModal = true;
       await this._ensureJobsLoaded();
     },
@@ -94,11 +121,13 @@
         source_job: c.source_job || '',
         owner: c.owner || '',
         sla_hours: c.sla_hours != null ? c.sla_hours : 4,
-        consumers_raw: c.consumers_raw || (Array.isArray(c.consumers) ? c.consumers.join(', ') : ''),
+        consumers: Array.isArray(c.consumers) ? [...c.consumers]
+          : String(c.consumers_raw || '').split(',').map(s => s.trim()).filter(Boolean),
         breach_severity: c.breach_severity || 'error',
         version: c.version || '1.0',
       };
       this.contractModalEditing = false;
+      this.contractConsumerDraft = '';
       this.showContractExamples = false;
       this.expandedExampleId = null;
       this.showContractModal = true;
@@ -111,19 +140,19 @@
         source_job: contract.source_job,
         owner: contract.owner,
         sla_hours: contract.sla_hours,
-        consumers_raw: (contract.consumers || []).join(', '),
+        consumers: [...(contract.consumers || [])],
         breach_severity: contract.breach_severity,
         version: contract.version,
       };
       this.contractModalEditing = true;
+      this.contractConsumerDraft = '';
       this.showContractModal = true;
       await this._ensureJobsLoaded();
     },
 
     async saveContract() {
-      const consumers = this.contractModal.consumers_raw
-        ? this.contractModal.consumers_raw.split(',').map(s => s.trim()).filter(Boolean)
-        : [];
+      if (this.contractConsumerDraft.trim()) this.addContractConsumer();
+      const consumers = [...this.contractModal.consumers];
       const payload = {
         name: this.contractModal.name,
         source_job: this.contractModal.source_job,

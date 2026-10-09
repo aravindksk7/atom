@@ -99,7 +99,7 @@ const dialogCases: DialogCase[] = [
     prepare: async (page) => {
       await page.evaluate(() => {
         const app = window.Alpine.$data(document.body);
-        app.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' };
+        app.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' };
         app.contractModalEditing = false;
       });
     },

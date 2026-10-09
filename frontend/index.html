@@ -8990,8 +8990,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <input data-testid="contract-modal-sla-input" x-model.number="contractModal.sla_hours" type="number" min="0.5" step="0.5" class="field-input" id="a11y-index-template-sla-hours" />
         </div>
         <div>
-          <label  class="field-label" for="a11y-index-template-consumers-comma-separated">Consumers (comma-separated)</label>
-          <input data-testid="contract-modal-consumers-input" x-model="contractModal.consumers_raw" type="text" class="field-input" placeholder="finance, ops, analytics" id="a11y-index-template-consumers-comma-separated" />
+          <label  class="field-label" for="a11y-index-template-consumers">Consumers</label>
+          <div class="flex flex-wrap gap-1 mb-1" x-show="contractModal.consumers.length">
+            <template x-for="(name, idx) in contractModal.consumers" :key="name">
+              <span data-testid="contract-consumer-chip" class="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 rounded px-1.5 py-0.5">
+                <span x-text="name"></span>
+                <button type="button" data-testid="contract-consumer-chip-remove" @click="removeContractConsumer(idx)" class="text-indigo-400 hover:text-indigo-700" :aria-label="'Remove consumer ' + name">&times;</button>
+              </span>
+            </template>
+          </div>
+          <input data-testid="contract-modal-consumers-input" x-model="contractConsumerDraft" @keydown="onContractConsumerKeydown($event)" @blur="addContractConsumer()" type="text" list="contract-consumer-options" autocomplete="off" class="field-input" placeholder="Type a consumer, press Enter" id="a11y-index-template-consumers" />
+          <datalist id="contract-consumer-options">
+            <template x-for="n in contractConsumerSuggestions()" :key="n"><option :value="n"></option></template>
+          </datalist>
         </div>
         <div>
           <label  class="field-label" for="a11y-index-template-breach-severity">Breach Severity</label>
