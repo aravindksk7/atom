@@ -87,7 +87,10 @@
              class="flex items-center justify-between p-2 rounded border cursor-pointer mb-1 transition-colors">
           <div>
             <div class="text-sm font-medium text-slate-800" x-text="c.name"></div>
-            <div class="text-xs text-slate-500" x-text="'&rarr; ' + c.source_job"></div>
+            <div class="text-xs text-slate-500">
+              <span x-text="'&rarr; ' + c.source_job"></span>
+              <span x-show="contractJobMissing(c.source_job)" data-testid="contract-job-missing-badge" class="ml-1 text-[10px] font-semibold px-1 rounded bg-amber-50 text-amber-700" title="No job with this name is defined">job missing</span>
+            </div>
           </div>
           <span :class="{
             'text-emerald-700 bg-emerald-50': (contractStatusMap[c.name] || {}).status === 'OK',

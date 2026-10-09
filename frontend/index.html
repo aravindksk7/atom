@@ -8167,7 +8167,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
              class="flex items-center justify-between p-2 rounded border cursor-pointer mb-1 transition-colors">
           <div>
             <div class="text-sm font-medium text-slate-800" x-text="c.name"></div>
-            <div class="text-xs text-slate-500" x-text="'&rarr; ' + c.source_job"></div>
+            <div class="text-xs text-slate-500">
+              <span x-text="'&rarr; ' + c.source_job"></span>
+              <span x-show="contractJobMissing(c.source_job)" data-testid="contract-job-missing-badge" class="ml-1 text-[10px] font-semibold px-1 rounded bg-amber-50 text-amber-700" title="No job with this name is defined">job missing</span>
+            </div>
           </div>
           <span :class="{
             'text-emerald-700 bg-emerald-50': (contractStatusMap[c.name] || {}).status === 'OK',
@@ -8968,7 +8971,15 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <div>
           <label  class="field-label" for="a11y-index-template-source-job">Source Job</label>
-          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" class="field-input" placeholder="e.g. orders_etl" id="a11y-index-template-source-job" />
+          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" list="contract-source-job-options" autocomplete="off" class="field-input" placeholder="Pick a job or type a name" id="a11y-index-template-source-job" />
+          <datalist id="contract-source-job-options" data-testid="contract-source-job-options">
+            <template x-for="j in (jobs || [])" :key="j.name">
+              <option :value="j.name" :label="j.job_type"></option>
+            </template>
+          </datalist>
+          <div x-show="!contractModalEditing && contractModal.source_job && !contractSourceJobKnown(contractModal.source_job)" data-testid="contract-modal-source-job-warning" class="text-xs text-amber-700 mt-1">
+            Job not defined yet — contract will be saved anyway.
+          </div>
         </div>
         <div>
           <label  class="field-label" for="a11y-index-template-owner-email">Owner (email)</label>

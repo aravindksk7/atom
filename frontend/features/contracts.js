@@ -37,6 +37,7 @@
       this.contractsLoading = true;
       try {
         this.contracts = await api('GET', '/api/contracts');
+        this._ensureJobsLoaded();
         // Expand the example library only on the first load of the tab, and only
         // when there is nothing else to show. After that the toggle is the user's:
         // creating the first contract or deleting the last must not move it.
@@ -65,13 +66,28 @@
       try { this.contractVersionHistory = await api('GET', `/api/contracts/${encodeURIComponent(contract.name)}/versions`); } catch {}
     },
 
-    openNewContractModal() {
+    async _ensureJobsLoaded() {
+      if (!Array.isArray(this.jobs) || this.jobs.length === 0) await this.loadJobs();
+    },
+
+    contractSourceJobKnown(name) {
+      return Array.isArray(this.jobs) && this.jobs.some(j => j.name === name);
+    },
+
+    contractJobMissing(name) {
+      // Only flag once a job list has actually loaded; an empty/failed load
+      // must not paint every contract as broken.
+      return Array.isArray(this.jobs) && this.jobs.length > 0 && !this.contractSourceJobKnown(name);
+    },
+
+    async openNewContractModal() {
       this.contractModal = { name: '', source_job: '', owner: '', sla_hours: 4, consumers_raw: '', breach_severity: 'error', version: '1.0' };
       this.contractModalEditing = false;
       this.showContractModal = true;
+      await this._ensureJobsLoaded();
     },
 
-    useContractExample(ex) {
+    async useContractExample(ex) {
       const c = ex.contract || {};
       this.contractModal = {
         name: c.name || '',
@@ -86,9 +102,10 @@
       this.showContractExamples = false;
       this.expandedExampleId = null;
       this.showContractModal = true;
+      await this._ensureJobsLoaded();
     },
 
-    openEditContractModal(contract) {
+    async openEditContractModal(contract) {
       this.contractModal = {
         name: contract.name,
         source_job: contract.source_job,
@@ -100,6 +117,7 @@
       };
       this.contractModalEditing = true;
       this.showContractModal = true;
+      await this._ensureJobsLoaded();
     },
 
     async saveContract() {
