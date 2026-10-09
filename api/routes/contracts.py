@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -117,6 +117,11 @@ class BreachResolveIn(BaseModel):
         return v
 
 
+class ContractImportRequest(BaseModel):
+    yaml: str
+    dry_run: bool = True
+
+
 # ---------------------------------------------------------------------------
 # CRUD endpoints
 # ---------------------------------------------------------------------------
@@ -133,6 +138,37 @@ def create_contract(body: ContractCreate, db: Session = Depends(get_session)):
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return ContractOut.from_orm(contract)
+
+
+@router.get("/export")
+def export_contracts(name: list[str] | None = Query(None), db: Session = Depends(get_session)) -> Response:
+    from api.services.contract_yaml import export_contracts_yaml
+    repo = ContractRepository(db)
+    if name:
+        contracts = []
+        for n in name:
+            contract = repo.get(n)
+            if contract is None:
+                raise HTTPException(status_code=404, detail=f"Contract '{n}' not found")
+            contracts.append(contract)
+    else:
+        contracts = repo.list()
+    return Response(
+        content=export_contracts_yaml(contracts),
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": 'attachment; filename="contracts.yaml"'},
+    )
+
+
+@router.post("/import")
+def import_contracts(body: ContractImportRequest, db: Session = Depends(get_session)) -> dict[str, Any]:
+    from api.services.contract_yaml import ContractImportError, apply_import, plan_import
+    try:
+        rows, items = plan_import(db, body.yaml)
+    except ContractImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    applied = False if body.dry_run else apply_import(db, rows, items)
+    return {"dry_run": body.dry_run, "applied": applied, "rows": rows}
 
 
 @router.get("/{name}", response_model=ContractOut)

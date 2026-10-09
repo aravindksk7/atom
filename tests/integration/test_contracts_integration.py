@@ -237,3 +237,71 @@ def test_resolve_all_route(client):
     assert resp.json() == {"resolved": 1}
     assert c.post("/api/contracts/resolve_c/breaches/resolve-all", json={"note": "bulk"}).json() == {"resolved": 0}
     assert c.post("/api/contracts/missing/breaches/resolve-all", json={"note": "x"}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# YAML export / import
+# ---------------------------------------------------------------------------
+
+def _create(c, name, source_job):
+    resp = c.post("/api/contracts", json={
+        "name": name, "source_job": source_job, "owner": "o@co.com", "sla_hours": 4.0, "consumers": ["bi"],
+    })
+    assert resp.status_code == 201, resp.text
+
+
+def test_export_all_and_by_name(client):
+    import yaml
+    c, _ = client
+    _create(c, "exp_a", "job_a")
+    _create(c, "exp_b", "job_b")
+
+    resp = c.get("/api/contracts/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/x-yaml")
+    assert 'filename="contracts.yaml"' in resp.headers["content-disposition"]
+    assert [i["name"] for i in yaml.safe_load(resp.text)["contracts"]] == ["exp_a", "exp_b"]
+
+    one = c.get("/api/contracts/export", params={"name": "exp_b"})
+    assert [i["name"] for i in yaml.safe_load(one.text)["contracts"]] == ["exp_b"]
+
+    assert c.get("/api/contracts/export", params={"name": "missing"}).status_code == 404
+
+
+def test_import_round_trip_and_apply(client):
+    import yaml
+    c, _ = client
+    _create(c, "imp_a", "job_a")
+    exported = c.get("/api/contracts/export").text
+
+    preview = c.post("/api/contracts/import", json={"yaml": exported})
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == {"dry_run": True, "applied": False,
+                              "rows": [{"name": "imp_a", "action": "unchanged"}]}
+
+    parsed = yaml.safe_load(exported)
+    parsed["contracts"].append({"name": "imp_new", "source_job": "job_new", "owner": "n@co.com", "sla_hours": 2})
+    doc = yaml.safe_dump(parsed)
+    applied = c.post("/api/contracts/import", json={"yaml": doc, "dry_run": False})
+    assert applied.json()["applied"] is True
+    assert c.get("/api/contracts/imp_new").status_code == 200
+
+
+def test_import_apply_blocked_by_error_row(client):
+    c, _ = client
+    _create(c, "imp_b", "job_b")
+    doc = ("contracts:\n"
+           "  - {name: imp_b, source_job: other, owner: o, sla_hours: 1}\n"
+           "  - {name: imp_c, source_job: job_c, owner: o, sla_hours: 1}\n")
+    resp = c.post("/api/contracts/import", json={"yaml": doc, "dry_run": False})
+    assert resp.status_code == 200
+    assert resp.json()["applied"] is False
+    assert resp.json()["rows"][0]["action"] == "error"
+    assert c.get("/api/contracts/imp_c").status_code == 404
+
+
+def test_import_invalid_yaml_422(client):
+    c, _ = client
+    resp = c.post("/api/contracts/import", json={"yaml": "contracts: ["})
+    assert resp.status_code == 422
+    assert "Invalid YAML" in resp.json()["detail"]
