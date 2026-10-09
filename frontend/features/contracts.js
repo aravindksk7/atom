@@ -27,6 +27,11 @@
     resolveNote: '',
     resolveBy: '',
     resolveLoading: false,
+    showContractImport: false,
+    contractImportText: '',
+    contractImportPreview: null,    // { dry_run, applied, rows: [{name, action, reason?, warning?}] }
+    contractImportError: '',
+    contractImportLoading: false,
     contractBumpType: 'minor',
     showContractExamples: false,
     contractExamplesAutoApplied: false,
@@ -255,17 +260,76 @@
       return this.contractTestResult.checks.filter(c => c.category === this.contractTestCategoryFilter);
     },
 
-    exportContractTestReport() {
-      if (!this.contractTestResult) return;
-      const blob = new Blob([JSON.stringify(this.contractTestResult, null, 2)], { type: 'application/json' });
+    _downloadBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `contract-test-${this.contractTestResult.contract}-${Date.now()}.json`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    },
+
+    exportContractTestReport() {
+      if (!this.contractTestResult) return;
+      const blob = new Blob([JSON.stringify(this.contractTestResult, null, 2)], { type: 'application/json' });
+      this._downloadBlob(blob, `contract-test-${this.contractTestResult.contract}-${Date.now()}.json`);
+    },
+
+    async exportContractsYaml(name) {
+      const query = name ? `?name=${encodeURIComponent(name)}` : '';
+      try {
+        const { blob } = await apiBlob(`/api/contracts/export${query}`);
+        this._downloadBlob(blob, name ? `${name}.contract.yaml` : 'contracts.yaml');
+      } catch (e) { alert('Export failed: ' + (e.message || e)); }
+    },
+
+    openContractImport() {
+      this.contractImportText = '';
+      this.contractImportPreview = null;
+      this.contractImportError = '';
+      this.showContractImport = true;
+    },
+
+    async onContractImportFile(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      this.contractImportText = await file.text();
+      this.contractImportPreview = null;
+      this.contractImportError = '';
+    },
+
+    async _postContractImport(dryRun) {
+      this.contractImportLoading = true;
+      this.contractImportError = '';
+      try {
+        return await api('POST', '/api/contracts/import', { yaml: this.contractImportText, dry_run: dryRun });
+      } catch (e) {
+        this.contractImportError = e.message || String(e);
+        return null;
+      } finally {
+        this.contractImportLoading = false;
+      }
+    },
+
+    async previewContractImport() {
+      this.contractImportPreview = await this._postContractImport(true);
+    },
+
+    contractImportCanApply() {
+      const rows = (this.contractImportPreview && this.contractImportPreview.rows) || [];
+      return !rows.some(r => r.action === 'error') && rows.some(r => r.action === 'create' || r.action === 'update');
+    },
+
+    async applyContractImport() {
+      const result = await this._postContractImport(false);
+      if (!result) return;
+      this.contractImportPreview = result;
+      if (result.applied) {
+        this.showContractImport = false;
+        await this.loadContracts();
+      }
     },
 
     // NOTE: dead code — not called from index.html markup (contract status

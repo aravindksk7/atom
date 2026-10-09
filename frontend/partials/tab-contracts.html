@@ -6,6 +6,8 @@
     </div>
     <div class="flex gap-2">
       <button @click="showContractExamples = !showContractExamples" class="btn-outline btn-sm" :class="showContractExamples ? 'bg-indigo-50 border-indigo-300' : ''">Examples</button>
+      <button data-testid="contracts-import-btn" @click="openContractImport()" class="btn-outline btn-sm">Import</button>
+      <button data-testid="contracts-export-all-btn" @click="exportContractsYaml()" :disabled="contracts.length === 0" class="btn-outline btn-sm">Export all</button>
       <button data-testid="contracts-new-btn" @click="openNewContractModal()" class="btn-primary btn-sm">+ New Contract</button>
     </div>
   </div>
@@ -122,6 +124,7 @@
                 </div>
               </div>
               <div class="flex gap-2">
+                <button data-testid="contract-export-btn" @click="exportContractsYaml(selectedContract.name)" class="btn-outline btn-sm text-xs">Export YAML</button>
                 <button @click="openEditContractModal(selectedContract)" class="btn-outline btn-sm text-xs">Edit</button>
                 <button data-testid="contract-delete-btn" @click="deleteContract(selectedContract.name)" class="btn-danger btn-sm text-xs">Delete</button>
               </div>
