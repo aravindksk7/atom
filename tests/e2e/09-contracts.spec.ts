@@ -116,17 +116,46 @@ test.describe('09 contracts', () => {
     await authedPage.locator('[data-testid="contract-delete-btn"]').click();
   });
 
-  test('source job datalist lists jobs and warns on unknown name', async ({ authedPage }) => {
+  test('source job dropdown lists jobs, picks one, and warns on unknown name', async ({ authedPage }) => {
     await authedPage.route('**/api/jobs', (route) =>
       route.request().method() === 'GET'
-        ? route.fulfill({ json: [{ name: 'e2e_listed_job', job_type: 'reconciliation' }] })
+        ? route.fulfill({ json: [
+            { name: 'e2e_listed_job', job_type: 'reconciliation' },
+            { name: 'e2e_other_job', job_type: 'bo_report' },
+          ] })
         : route.continue());
     await openContracts(authedPage);
     await authedPage.locator('[data-testid="contracts-new-btn"]').click();
-    await expect(authedPage.locator('[data-testid="contract-source-job-options"] option[value="e2e_listed_job"]')).toHaveCount(1);
 
     const input = authedPage.locator('[data-testid="contract-modal-source-job-input"]');
-    await input.fill('e2e_listed_job');
+    const menu = authedPage.locator('[data-testid="contract-source-job-options"]');
+    const options = authedPage.locator('[data-testid="contract-source-job-option"]');
+
+    // Themed dropdown opens on focus and filters as you type.
+    await input.click();
+    await expect(menu).toBeVisible();
+    await expect(options).toHaveCount(2);
+    await expect(options.first()).toContainText('reconciliation');
+    await input.fill('other');
+    await expect(options).toHaveCount(1);
+
+    // Keyboard pick: ArrowDown highlights, Enter selects and closes.
+    await input.press('ArrowDown');
+    await input.press('Enter');
+    await expect(input).toHaveValue('e2e_other_job');
+    await expect(menu).toBeHidden();
+
+    // Escape closes only the dropdown, not the modal.
+    await input.fill('');
+    await expect(menu).toBeVisible();
+    await input.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(authedPage.locator('[data-testid="contract-modal"]')).toBeVisible();
+
+    // Mouse pick.
+    await input.click();
+    await authedPage.locator('[data-testid="contract-source-job-option"]', { hasText: 'e2e_listed_job' }).click();
+    await expect(input).toHaveValue('e2e_listed_job');
     await expect(authedPage.locator('[data-testid="contract-modal-source-job-warning"]')).toBeHidden();
     await input.fill('not_a_job');
     await expect(authedPage.locator('[data-testid="contract-modal-source-job-warning"]')).toBeVisible();

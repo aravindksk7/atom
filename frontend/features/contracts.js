@@ -22,6 +22,8 @@
     contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' },
     contractModalEditing: false,
     contractConsumerDraft: '',
+    contractComboOpen: null,        // 'job' | 'consumer' | null — which themed dropdown is open
+    contractComboIndex: 0,
     showResolveModal: false,
     resolveTarget: null,            // breach id, or 'all'
     resolveNote: '',
@@ -105,6 +107,7 @@
 
     onContractConsumerKeydown(e) {
       if (e.isComposing || e.keyCode === 229) return;
+      if (this.onContractComboKeydown('consumer', e)) return;
       if (e.key === 'Enter' || e.key === ',') {
         e.preventDefault();
         this.addContractConsumer();
@@ -117,6 +120,71 @@
       const all = new Set();
       for (const c of this.contracts) for (const name of (c.consumers || [])) all.add(name);
       return [...all].filter(n => !this.contractModal.consumers.includes(n)).sort();
+    },
+
+    // Themed replacement for <datalist>, whose popup is drawn by the browser
+    // and cannot follow the app's dark theme.
+    contractComboOptions(kind) {
+      const query = (kind === 'job' ? this.contractModal.source_job : this.contractConsumerDraft)
+        .trim().toLowerCase();
+      const options = kind === 'job'
+        ? (this.jobs || []).map(j => ({ value: j.name, hint: j.job_type || '' }))
+        : this.contractConsumerSuggestions().map(n => ({ value: n, hint: '' }));
+      return options
+        .filter(o => !query || o.value.toLowerCase().includes(query))
+        .slice(0, 50);
+    },
+
+    openContractCombo(kind) {
+      this.contractComboOpen = kind;
+      // Nothing highlighted until an arrow key is used, so Enter on typed
+      // text keeps the text instead of silently picking the first match.
+      this.contractComboIndex = -1;
+    },
+
+    closeContractCombo() {
+      this.contractComboOpen = null;
+    },
+
+    pickContractCombo(kind, value) {
+      if (kind === 'job') {
+        this.contractModal.source_job = value;
+      } else {
+        this.contractConsumerDraft = value;
+        this.addContractConsumer();
+      }
+      this.closeContractCombo();
+    },
+
+    // Returns true when the key was consumed by the dropdown.
+    onContractComboKeydown(kind, e) {
+      const open = this.contractComboOpen === kind;
+      const options = this.contractComboOptions(kind);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!open) { this.openContractCombo(kind); return true; }
+        if (!options.length) return true;
+        const n = options.length;
+        const i = this.contractComboIndex;
+        this.contractComboIndex = e.key === 'ArrowDown'
+          ? (i + 1) % n
+          : (i <= 0 ? n - 1 : i - 1);
+        return true;
+      }
+      if (!open || !options.length) return false;
+      if (e.key === 'Enter' && options[this.contractComboIndex]) {
+        e.preventDefault();
+        this.pickContractCombo(kind, options[this.contractComboIndex].value);
+        return true;
+      }
+      if (e.key === 'Escape') {
+        // Close only the dropdown; keep the dialog's own Escape handler from firing.
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeContractCombo();
+        return true;
+      }
+      return false;
     },
 
     contractHasOpenBreach() {

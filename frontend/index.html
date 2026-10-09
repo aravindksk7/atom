@@ -8982,12 +8982,21 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <div>
           <label  class="field-label" for="a11y-index-template-source-job">Source Job</label>
-          <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" list="contract-source-job-options" autocomplete="off" class="field-input" placeholder="Pick a job or type a name" id="a11y-index-template-source-job" />
-          <datalist id="contract-source-job-options" data-testid="contract-source-job-options">
-            <template x-for="j in (jobs || [])" :key="j.name">
-              <option :value="j.name" :label="j.job_type"></option>
-            </template>
-          </datalist>
+          <div class="combo">
+            <input data-testid="contract-modal-source-job-input" x-model="contractModal.source_job" :disabled="contractModalEditing" type="text" autocomplete="off" class="field-input combo-input" placeholder="Pick a job or type a name" id="a11y-index-template-source-job"
+                   role="combobox" aria-autocomplete="list" aria-controls="contract-source-job-menu" :aria-expanded="contractComboOpen === 'job' ? 'true' : 'false'"
+                   :aria-activedescendant="contractComboOpen === 'job' && contractComboIndex >= 0 ? 'contract-job-opt-' + contractComboIndex : null"
+                   @focus="openContractCombo('job')" @click="openContractCombo('job')" @input="openContractCombo('job')" @blur="closeContractCombo()" @keydown="onContractComboKeydown('job', $event)" />
+            <ul x-show="contractComboOpen === 'job' &amp;&amp; contractComboOptions('job').length" id="contract-source-job-menu" role="listbox" aria-label="Defined jobs" class="combo-menu" data-testid="contract-source-job-options">
+              <template x-for="(opt, i) in contractComboOptions('job')" :key="opt.value">
+                <li role="option" :id="'contract-job-opt-' + i" :aria-selected="i === contractComboIndex ? 'true' : 'false'" class="combo-option" :class="i === contractComboIndex ? 'is-active' : ''"
+                    data-testid="contract-source-job-option" @mousedown.prevent="pickContractCombo('job', opt.value)" @mouseenter="contractComboIndex = i">
+                  <span class="combo-option-label" x-text="opt.value"></span>
+                  <span class="combo-option-hint" x-text="opt.hint"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
           <div x-show="!contractModalEditing && contractModal.source_job && contractJobMissing(contractModal.source_job)" data-testid="contract-modal-source-job-warning" class="text-xs text-amber-700 mt-1">
             Job not defined yet — contract will be saved anyway.
           </div>
@@ -9010,10 +9019,20 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               </span>
             </template>
           </div>
-          <input data-testid="contract-modal-consumers-input" x-model="contractConsumerDraft" @keydown="onContractConsumerKeydown($event)" @blur="addContractConsumer()" type="text" list="contract-consumer-options" autocomplete="off" class="field-input" placeholder="Type a consumer, press Enter" id="a11y-index-template-consumers" />
-          <datalist id="contract-consumer-options">
-            <template x-for="n in contractConsumerSuggestions()" :key="n"><option :value="n"></option></template>
-          </datalist>
+          <div class="combo">
+            <input data-testid="contract-modal-consumers-input" x-model="contractConsumerDraft" type="text" autocomplete="off" class="field-input combo-input" placeholder="Type a consumer, press Enter" id="a11y-index-template-consumers"
+                   role="combobox" aria-autocomplete="list" aria-controls="contract-consumer-menu" :aria-expanded="contractComboOpen === 'consumer' ? 'true' : 'false'"
+                   :aria-activedescendant="contractComboOpen === 'consumer' && contractComboIndex >= 0 ? 'contract-consumer-opt-' + contractComboIndex : null"
+                   @focus="openContractCombo('consumer')" @click="openContractCombo('consumer')" @input="openContractCombo('consumer')" @keydown="onContractConsumerKeydown($event)" @blur="closeContractCombo(); addContractConsumer()" />
+            <ul x-show="contractComboOpen === 'consumer' &amp;&amp; contractComboOptions('consumer').length" id="contract-consumer-menu" role="listbox" aria-label="Known consumers" class="combo-menu" data-testid="contract-consumer-options">
+              <template x-for="(opt, i) in contractComboOptions('consumer')" :key="opt.value">
+                <li role="option" :id="'contract-consumer-opt-' + i" :aria-selected="i === contractComboIndex ? 'true' : 'false'" class="combo-option" :class="i === contractComboIndex ? 'is-active' : ''"
+                    data-testid="contract-consumer-option" @mousedown.prevent="pickContractCombo('consumer', opt.value)" @mouseenter="contractComboIndex = i">
+                  <span class="combo-option-label" x-text="opt.value"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
         </div>
         <div>
           <label  class="field-label" for="a11y-index-template-breach-severity">Breach Severity</label>

@@ -1380,6 +1380,52 @@ select option {
   color: var(--text);
 }
 
+/* Themed autocomplete dropdown (replaces native <datalist>, whose popup is
+   browser-drawn and ignores the dark theme). */
+.combo { position: relative; }
+.combo-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 60;
+  max-height: 14rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #0d0f12;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.combo-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.combo-option.is-active {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+}
+.combo-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.combo-option-hint {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+}
+
 /* ---- Native controls --------------------------------------------------
    These render with OS chrome by default, which reads as a light-theme
    artifact on a dark panel. accent-color handles checkbox/radio fill in
