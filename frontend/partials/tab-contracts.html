@@ -130,16 +130,24 @@
 
           <!-- Breach history -->
           <div class="card">
-            <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Breach History</div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs font-semibold text-slate-500 uppercase">Breach History</div>
+              <button x-show="contractHasOpenBreach()" data-testid="contract-breach-resolve-all-btn" @click="openResolveBreach('all')" class="btn-outline btn-sm text-xs">Resolve all open</button>
+            </div>
             <div x-show="contractBreachLoading" class="text-slate-400 text-sm">Loading...</div>
             <div x-show="!contractBreachLoading && contractBreachHistory.length === 0" class="text-slate-400 text-sm">No breaches recorded.</div>
             <template x-for="b in contractBreachHistory" :key="b.id">
-              <div class="flex items-center gap-3 py-1.5 border-b border-slate-100 text-xs">
-                <span :class="b.resolved_at ? 'text-slate-400' : 'text-rose-600'" class="font-medium w-20 flex-shrink-0" x-text="b.resolved_at ? 'Resolved' : 'Open'"></span>
-                <span class="text-slate-600" x-text="b.breach_type"></span>
-                <span class="text-slate-400 flex-1" x-text="b.opened_at ? fmtDate(b.opened_at) : ''"></span>
-                <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
-                <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
+              <div class="py-1.5 border-b border-slate-100 text-xs" data-testid="contract-breach-row">
+                <div class="flex items-center gap-3">
+                  <span :class="b.resolved_at ? 'text-slate-400' : 'text-rose-600'" class="font-medium w-20 flex-shrink-0" x-text="b.resolved_at ? 'Resolved' : 'Open'"></span>
+                  <span class="text-slate-600" x-text="b.breach_type"></span>
+                  <span class="text-slate-400 flex-1" x-text="b.opened_at ? fmtDate(b.opened_at) : ''"></span>
+                  <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
+                  <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
+                  <button x-show="!b.resolved_at" data-testid="contract-breach-resolve-btn" @click="openResolveBreach(b.id)" class="btn-outline btn-sm text-xs">Resolve</button>
+                </div>
+                <div x-show="b.resolution_note" class="text-slate-500 mt-0.5 ml-[5.75rem] truncate" :title="b.resolution_note"
+                     x-text="(b.resolved_by ? 'resolved by ' + b.resolved_by + ' — ' : '') + (b.resolution_note || '')"></div>
               </div>
             </template>
           </div>

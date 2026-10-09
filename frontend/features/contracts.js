@@ -22,6 +22,11 @@
     contractModal: { name: '', source_job: '', owner: '', sla_hours: 4, consumers: [], breach_severity: 'error', version: '1.0' },
     contractModalEditing: false,
     contractConsumerDraft: '',
+    showResolveModal: false,
+    resolveTarget: null,            // breach id, or 'all'
+    resolveNote: '',
+    resolveBy: '',
+    resolveLoading: false,
     contractBumpType: 'minor',
     showContractExamples: false,
     contractExamplesAutoApplied: false,
@@ -104,6 +109,35 @@
       const all = new Set();
       for (const c of this.contracts) for (const name of (c.consumers || [])) all.add(name);
       return [...all].filter(n => !this.contractModal.consumers.includes(n)).sort();
+    },
+
+    contractHasOpenBreach() {
+      return this.contractBreachHistory.some(b => !b.resolved_at);
+    },
+
+    openResolveBreach(target) {
+      this.resolveTarget = target;
+      this.resolveNote = '';
+      try { this.resolveBy = localStorage.getItem('contract_resolved_by') || ''; } catch { this.resolveBy = ''; }
+      this.showResolveModal = true;
+    },
+
+    async confirmResolveBreach() {
+      if (!this.selectedContract || !this.resolveNote.trim()) return;
+      const name = this.selectedContract.name;
+      const base = `/api/contracts/${encodeURIComponent(name)}/breaches`;
+      const path = this.resolveTarget === 'all' ? `${base}/resolve-all` : `${base}/${this.resolveTarget}/resolve`;
+      this.resolveLoading = true;
+      try {
+        await api('POST', path, { note: this.resolveNote.trim(), resolved_by: this.resolveBy.trim() || null });
+        try { localStorage.setItem('contract_resolved_by', this.resolveBy.trim()); } catch {}
+        this.showResolveModal = false;
+        try {
+          this.contractStatusMap[name] = await api('GET', `/api/contracts/${encodeURIComponent(name)}/status`);
+        } catch {}
+        await this.selectContract(this.selectedContract);
+      } catch (e) { alert('Resolve failed: ' + (e.message || e)); }
+      this.resolveLoading = false;
     },
 
     async openNewContractModal() {
