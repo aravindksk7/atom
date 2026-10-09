@@ -68,7 +68,7 @@ The gate (`gate_service.py`) already filters `resolved_at IS NULL`, so no gate c
 ### UI
 - Breach history table: "Resolve" button on rows with no `resolved_at` (`data-testid="contract-breach-resolve-btn"`); header button "Resolve all open" shown when any open (`contract-breach-resolve-all-btn`).
 - Both open a small modal: required note textarea, optional "Resolved by" input prefilled from last value (localStorage, try/catch), Confirm disabled until note non-blank (`contract-resolve-modal`, `contract-resolve-note-input`, `contract-resolve-confirm-btn`).
-- On success: reload breach history and status map; toast.
+- On success: reload breach history and status map. Errors use `alert`, matching the rest of the contracts slice (no toast helper exists there).
 - Resolved rows show "resolved by X — note" (truncated, full text in title).
 
 ## 4. YAML export / import
@@ -83,8 +83,9 @@ contracts:
     sla_hours: 4
     consumers: [finance, ops]
     breach_severity: error
-    active: true
 ```
+
+`active` is not exported: in this codebase it is the soft-delete flag, so only live contracts are exported.
 
 ### Export
 `GET /api/contracts/export` with optional repeated `name` query params. No names → all contracts. Response `application/x-yaml`, `Content-Disposition: attachment; filename="contracts.yaml"`. 404 if any requested name is unknown.
@@ -95,8 +96,9 @@ contracts:
 - Duplicate names inside the file → 422.
 - Per item, plan action:
   - `create` — name not in DB.
+  - `error` — name belongs to a soft-deleted contract (reason: "name belongs to a deleted contract").
   - `error` — name exists and `source_job` differs (reason: "source_job is immutable").
-  - `unchanged` — name exists, all of owner/sla_hours/consumers/breach_severity/active equal.
+  - `unchanged` — name exists, all of owner/sla_hours/consumers/breach_severity equal.
   - `update` — otherwise. If file `version` differs from DB, add `warning: "version differs; use bump to change version"`; version is not changed.
 - Response: `{"dry_run": bool, "applied": bool, "rows": [{name, action, reason?, warning?}]}`.
 - When `dry_run=false`: if any row is `error`, nothing is applied (`applied: false`, HTTP 200 with rows). Otherwise all creates/updates run in one DB transaction and `applied: true`. Created contracts use the file's `version` (default "1.0").
@@ -104,7 +106,7 @@ contracts:
 ### UI
 - Per-contract "Export YAML" button in detail header (`contract-export-btn`); list header "Export all" (`contracts-export-all-btn`). Download via fetch + blob (auth header needed).
 - List header "Import" button (`contracts-import-btn`) opens modal: textarea + file picker (reads file into textarea), "Preview" runs dry run, table of rows with action badges, "Apply" enabled only when preview has no `error` rows and at least one create/update (`contract-import-modal`, `contract-import-textarea`, `contract-import-preview-btn`, `contract-import-apply-btn`, `contract-import-row`).
-- After apply: reload contracts, toast with counts.
+- After apply: close modal, reload contracts.
 
 ## Error handling summary
 
@@ -112,7 +114,7 @@ contracts:
 |------|--------|
 | Unknown source job in modal | Amber warning, save allowed |
 | Blank resolve note | 422; button disabled in UI |
-| Resolve already-resolved breach | 409, toast |
+| Resolve already-resolved breach | 409, alert |
 | Bad YAML / schema | 422 with message shown in import modal |
 | Import row source_job mismatch | Row `error`; apply blocked |
 
