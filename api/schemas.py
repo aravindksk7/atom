@@ -33,12 +33,12 @@ class ConfigOut(BaseModel):
 
 class FileServerProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    kind: Literal["sftp", "scp", "s3", "smb"]
+    kind: Literal["sftp", "scp", "s3", "smb", "crushftp"]
     description: str = ""
     host: str | None = None
     port: int = 22
     username: str | None = None
-    auth_method: Literal["password", "private_key"] | None = None
+    auth_method: Literal["password", "private_key", "api_key"] | None = None
     password: str | None = None
     private_key: str | None = None
     key_passphrase: str | None = None
@@ -48,16 +48,20 @@ class FileServerProfileCreate(BaseModel):
     aws_session_token: str | None = None
     region_name: str | None = None
     endpoint_url: str | None = None
+    protocol: Literal["https", "sftp"] | None = None
+    api_key_header: str | None = None
+    api_key: str | None = None
+    tls_ca_bundle: str | None = None
 
 
 class FileServerProfileUpdate(BaseModel):
     name: str | None = None
-    kind: Literal["sftp", "scp", "s3", "smb"] | None = None
+    kind: Literal["sftp", "scp", "s3", "smb", "crushftp"] | None = None
     description: str | None = None
     host: str | None = None
     port: int | None = None
     username: str | None = None
-    auth_method: Literal["password", "private_key"] | None = None
+    auth_method: Literal["password", "private_key", "api_key"] | None = None
     password: str | None = None
     private_key: str | None = None
     key_passphrase: str | None = None
@@ -67,6 +71,10 @@ class FileServerProfileUpdate(BaseModel):
     aws_session_token: str | None = None
     region_name: str | None = None
     endpoint_url: str | None = None
+    protocol: Literal["https", "sftp"] | None = None
+    api_key_header: str | None = None
+    api_key: str | None = None
+    tls_ca_bundle: str | None = None
 
 
 class FileServerProfileOut(BaseModel):
@@ -87,6 +95,10 @@ class FileServerProfileOut(BaseModel):
     aws_session_token: str | None = None
     region_name: str | None = None
     endpoint_url: str | None = None
+    protocol: str | None = None
+    api_key_header: str | None = None
+    api_key: str | None = None
+    tls_ca_bundle: str | None = None
     created_at: datetime
     updated_at: datetime
 
