@@ -48,3 +48,5 @@ class ContractBreach(Base):
     escalated = Column(Boolean, nullable=False, default=False)
     escalated_at = Column(DateTime(timezone=True), nullable=True)
     duration_hours = Column(Float, nullable=True)  # computed on resolve
+    resolved_by = Column(String(255), nullable=True)
+    resolution_note = Column(Text, nullable=True)

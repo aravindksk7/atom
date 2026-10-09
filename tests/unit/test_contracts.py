@@ -253,3 +253,38 @@ def test_bump_major_version():
     repo.create(_contract_data())
     v = repo.bump_version("payments_v1", "major")
     assert v.version == "2.0"
+
+
+# --- Migration ---
+
+
+def test_ensure_contract_columns_adds_resolution_columns_to_old_table():
+    from sqlalchemy import inspect, text
+    from etl_framework.repository.database import _ensure_contract_columns
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE contract_breaches ("
+            "id INTEGER PRIMARY KEY, contract_id INTEGER NOT NULL, run_id VARCHAR(36) NOT NULL, "
+            "breach_type VARCHAR(30) NOT NULL, opened_at DATETIME NOT NULL, resolved_at DATETIME, "
+            "resolution_run_id VARCHAR(36), escalated BOOLEAN NOT NULL DEFAULT 0, "
+            "escalated_at DATETIME, duration_hours FLOAT)"
+        ))
+
+    _ensure_contract_columns(engine)
+    _ensure_contract_columns(engine)  # idempotent
+
+    cols = {c["name"] for c in inspect(engine).get_columns("contract_breaches")}
+    assert {"resolved_by", "resolution_note"} <= cols
+
+
+def test_ensure_contract_columns_noop_without_table():
+    from etl_framework.repository.database import _ensure_contract_columns
+
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
+    _ensure_contract_columns(engine)  # must not raise

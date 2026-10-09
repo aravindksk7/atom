@@ -27,7 +27,20 @@ def init_db() -> None:
     from etl_framework.repository import contract_models  # noqa: F401 — registers contract ORM models
     Base.metadata.create_all(bind=engine)
     _ensure_compare_columns(engine)
+    _ensure_contract_columns(engine)
     _backfill_schedule_selections(engine)
+
+
+def _ensure_contract_columns(bind) -> None:
+    """Add manual-resolution columns to contract_breaches on existing databases.
+
+    Not SQLite-gated: plain ADD COLUMN DDL works on every supported dialect.
+    """
+    if "contract_breaches" not in set(inspect(bind).get_table_names()):
+        return
+    with bind.begin() as conn:
+        ensure_column(conn, "contract_breaches", "resolved_by", "ALTER TABLE contract_breaches ADD COLUMN resolved_by VARCHAR(255)")
+        ensure_column(conn, "contract_breaches", "resolution_note", "ALTER TABLE contract_breaches ADD COLUMN resolution_note TEXT")
 
 
 def _ensure_compare_columns(bind) -> None:
