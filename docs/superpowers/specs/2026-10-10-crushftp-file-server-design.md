@@ -28,7 +28,7 @@ Decisions made while scoping:
 
 Two things could not be confirmed while designing and are settled during implementation, not assumed:
 
-1. **The CrushFTP HTTP API wire format.** The general shape (a login call to `/WebInterface/function/`, a `CrushAuth` session cookie with a derived anti-CSRF token, list / download / upload commands) is known only from memory, and command names and the upload protocol vary by CrushFTP version. The first implementation task probes a real container and records the observed requests and responses in this spec (§10) before the client is written.
+1. **The CrushFTP HTTP API wire format.** Resolved for CrushFTP 11.5.5: a local container was probed before the client was written, and §10 records what was observed. Other major versions are not verified.
 2. **How a cloud instance treats the API-key header.** This is not a stock CrushFTP login mechanism that could be confirmed; it is most likely enforced by an API gateway or reverse proxy in front of the server. The design therefore sends the header on every request and logs in only when a username is set, which covers both a gateway that authenticates on the key alone and one that still expects a CrushFTP session behind it. This mode cannot be verified against the local container and stays labelled unverified until the manual checklist in §9 is run against the real cloud instance.
 
 ## 3. Profile model
@@ -58,7 +58,9 @@ Validation rules, enforced in the `FileServerProfileCreate` / `FileServerProfile
 - `endpoint_url` must be `https://`. An `http://` URL is accepted only when the environment variable `CRUSHFTP_ALLOW_INSECURE_HTTP=1` is set on the atom server, which exists for the local Docker container and nothing else.
 - `api_key` / `api_key_header` are rejected on any profile that is not `crushftp` + `https`.
 
-One idempotent migration script, following `scripts/upgrade_db_20260913_to_current.py`, adds the four columns to already-deployed databases.
+These cross-field rules run in the routes against the merged profile (the stored row overlaid with the request body), because an update may send only some fields.
+
+Already-deployed databases gain the four columns at startup through `ensure_column` in `etl_framework/repository/database.py`, the mechanism every other added column uses. `scripts/upgrade_db_20260913_to_current.py` checks that `file_server_profiles` has an exact column set, so its column list and `CREATE TABLE` statement gain the same four columns.
 
 ## 4. Dispatch
 
@@ -90,11 +92,15 @@ New module `api/services/crushftp_client.py`. Every piece of CrushFTP wire knowl
 
 `discover_crushftp_files(client, root, pattern, recursive)` sits beside the existing S3 and SFTP discovery functions and returns the same `DiscoveredFile` shape.
 
-`CrushFtpEndpoint` in `api/services/file_transfer.py` implements the same interface as `SftpEndpoint`: `relative_of`, `destination_for` (rejecting paths that escape the root), `identity`, `exists`, `exists_many`, `size`, `open_read`, `write`, `delete`. `write` uploads to a `.part` name and then renames, so a destination is never left half-written; the existing `_copy_one` verifies the size afterwards.
+`CrushFtpEndpoint` in `api/services/file_transfer.py` implements the same interface as `SftpEndpoint`: `relative_of`, `destination_for` (rejecting paths that escape the root), `identity`, `exists`, `exists_many`, `size`, `open_read`, `write`, `delete`. `write` uploads to a `.part` name and then renames, so a destination is never left half-written; the existing `_copy_one` verifies the size afterwards. The server refuses to rename onto an existing file (§10), so replacing a file moves the old one aside, renames the new one in, and restores the old one if that fails — the same sequence `SftpEndpoint` uses when the server lacks `posix-rename`.
+
+The server answers an upload with the MD5 of the bytes it stored. The client hashes the stream as it sends it and raises if the two differ, which catches corruption in transit without a second request.
+
+A destination path containing `%` is rejected with a clear error: the server's handling of that character differs between upload, listing, and rename (§10), so it cannot be written reliably. Reading and discovering existing files whose names contain `%` works.
 
 Security properties:
 
-- **No cross-origin redirects.** `requests` strips `Authorization` on a cross-host redirect but not custom headers, so the API key would otherwise be sent to whatever host a redirect names. Redirects are followed only when scheme, host, and port match the configured base URL; any other redirect raises `CrushFtpConnectError`.
+- **No redirects.** `requests` strips `Authorization` on a cross-host redirect but not custom headers, so following a redirect could send the API key to whatever host it names. The server also answers a rejected or expired session with a redirect to its login page (§10). The client therefore never follows a redirect; any 3xx response raises `CrushFtpConnectError`.
 - **No secrets in output.** The password, the API key, and the session cookie value are scrubbed from every exception message before it can reach a run result, a log line, or a Test Connection response.
 - **TLS.** `verify` is the path to a temporary file holding `tls_ca_bundle` when one is set, otherwise `True`. It is never `False`.
 
@@ -119,7 +125,7 @@ Edits are made in `frontend/partials/` and `frontend/features/`, and `frontend/i
 ## 8. Testing
 
 - **Unit.** `tests/helpers/fake_crushftp.py` is an in-process HTTP server implementing the subset of the API observed in §10, in the spirit of `tests/helpers/fake_sftp.py`. Covered: both HTTPS auth modes; the header sent on every request; login skipped without a username; cross-origin redirect refused; secrets scrubbed from errors; `transport_for` and every branch that uses it; `CrushFtpEndpoint` path safety and `.part`-then-rename; the profile validation rules; `is_transport_error`; the migration script run twice.
-- **Live, environment-gated.** Transfer, watcher, and reconciliation against the Docker container over both HTTPS and SFTP. Skipped unless the live variables are set, matching the existing live tracks.
+- **Live, environment-gated.** The client, discovery, and endpoint against the Docker container over its HTTP port and its SFTP port. Skipped unless the live variables are set, matching the existing live tracks. The container's stock certificate is self-signed for `CN=www.crushftp.com` with no subject alternative name, so it cannot pass hostname verification on `127.0.0.1`; the live track therefore runs over plain HTTP with `CRUSHFTP_ALLOW_INSECURE_HTTP=1`, and TLS verification with a CA bundle is covered by a unit test against the fake server with a generated certificate.
 - **Playwright.** Profile CRUD for both protocols and both HTTPS auth modes, and a job-editor round trip for a `crushftp` location, with a mocked `/test` response.
 
 ## 9. Manual checklist for the cloud instance
@@ -133,7 +139,30 @@ Run against the real cloud instance before relying on API-key mode:
 
 ## 10. Observed CrushFTP API
 
-Filled in by the first implementation task from the probe of the local container: CrushFTP version, and the exact request and response for login, list, stat, download, upload, rename, mkdir, delete, and logout.
+Observed on 2026-10-10 against the official `crushftp/crushftp11` image, version 11.5.5, with a test user whose single virtual folder `/data/` maps to a writable directory. Commands are form-encoded `POST`s to `/WebInterface/function/`.
+
+| Operation | Request | Response |
+|---|---|---|
+| Login | `command=login&username=…&password=…` | 200, XML `<loginResult><response>success</response><c2f>XXXX</c2f></loginResult>`; sets cookies `CrushAuth` (HttpOnly) and `currentAuth`. A wrong password is also 200, with `<response>failure</response>` and a message. |
+| Anti-CSRF token | `c2f` = the `<c2f>` value = the last four characters of the `CrushAuth` cookie. | Read-only commands work without it. Mutating commands without it, or with a wrong one, return 200 with `<response>FAILURE:Access Denied. (c2f)</response>`. |
+| List | `command=getXMLListing&path=/dir/&format=JSONOBJ&c2f=…` | 200, JSON with `path` and `listing`; each entry has `name`, `type` (`FILE` / `DIR`), `size`, `modified` (epoch milliseconds), all as strings. A missing directory, or a path without a trailing slash, returns `{"error_msg": "error_item"}`. |
+| Size / existence | `HEAD /dir/file` | 200 with `Content-Length`; 404 when missing. A directory also answers 200. |
+| Download | `GET /dir/file`, optional `Range: bytes=a-b` | 200, or 206 with `Content-Range`; 404 when missing. A ranged request on an empty file returns 200 with no body. |
+| Upload | `PUT /dir/file` with the bytes as the body (chunked transfer encoding accepted) | 201, body is the lowercase hex MD5 of the stored bytes. Overwrites an existing file. 403 when the parent directory is missing or the account lacks write permission. |
+| Make directory | `command=makedir&path=/dir/sub/&c2f=…` | 200, empty `<response>`. Creates missing parents; succeeds when the directory already exists. |
+| Rename | `command=rename&path=/dir/&name1=old&name2=new&c2f=…` | 200, empty `<response>` on success. `name2` may contain a subdirectory. Renaming onto an existing file fails with `File rename error. (bad path? in use? locked?)` and leaves both files untouched. A missing source fails with `%RNFR-bad%ERROR:Access not allowed.` |
+| Delete | `command=delete&names=/dir/file&c2f=…` | 200, empty `<response>`, for an existing file, a directory, and a missing path alike. |
+| Logout | `command=logout&c2f=…` | 200, `<response>Logged out.</response>`. |
+
+Other observed behaviour the client depends on:
+
+- **Not authenticated.** A command `POST` without a valid session returns 404. A `GET` of a file returns 302 to `/WebInterface/login.html`. A `PUT` returns 401.
+- **Form encoding.** The server does not decode `+` as a space in a form body, so a body built by `requests` (which encodes a space as `+`) addresses the wrong name. Form values must be percent-encoded (`%20`).
+- **Error text** inside `<response>` is percent-encoded.
+- **Single virtual folder.** Listing `/` for an account with one virtual folder returns that folder's contents, with `path` set to the folder (`/data/`). File paths are therefore built from the `path` in the response, not from the path requested.
+- **The `%` character.** A file uploaded as `pct%x.txt` is listed as `pct%25x.txt`, and a rename whose source name contains an encoded `%` fails. Listing names are unescaped (`%25` to `%`) for reading; writing such names is refused (§5).
+- **SFTP** listens on port 2222 in the image, presents an `ssh-rsa` host key, accepts password authentication, and does not support the `posix-rename@openssh.com` extension; the existing `SftpEndpoint` fallback handles that.
+- **TLS.** The stock HTTPS certificate is self-signed for `CN=www.crushftp.com` with no subject alternative name.
 
 ## 11. Out of scope
 
