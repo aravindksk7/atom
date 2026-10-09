@@ -217,6 +217,9 @@ test.describe('Job Selections', () => {
 
     // 409 -> toast, modal must not silently close on failure.
     await expect(dialog).toBeVisible();
-    await expect(page.getByText(/already exists/i)).toBeVisible();
+    // Scoped to the error toast: a bare getByText(/already exists/i) also
+    // matches the file_transfer "If a file already exists at the destination"
+    // label on the Launch tab and trips strict mode.
+    await expect(page.locator('.toast-error .toast-msg')).toContainText(/already exists/i);
   });
 });

@@ -373,6 +373,7 @@ function _appRaw() {
       this.currentView = id;
       if (id === 'contracts') this.loadContracts();
       if (id === 'ci-runs') this.loadCiRuns();
+      if (id === 'sequences') this.loadSequences();
       if (id === 'scheduler-reports') this.startSchedulerReportPolling();
       else this.stopSchedulerReportPolling();
       if (id === 'logs') this.startGlobalLogsPolling();

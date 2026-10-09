@@ -15,6 +15,26 @@ test.beforeAll(async ({ adminToken }) => {
 });
 
 test.describe('Execution sequences', () => {
+  test('saved sequences are listed when the tab is opened', async ({ authedPage: page, adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    const name = `e2e-preexisting-seq-${Date.now()}`;
+    let sequenceId: number | undefined;
+    try {
+      const resp = await ctx.post('/api/sequences', {
+        data: { name, steps: [{ step_id: 'a', job_name: firstJobName, depends_on: [] }] },
+      });
+      expect(resp.ok()).toBe(true);
+      sequenceId = (await resp.json()).id;
+
+      await page.goto('/');
+      await page.getByRole('button', { name: 'Sequences' }).click();
+      await expect(page.getByTestId(`sequence-row-${name}`)).toBeVisible();
+    } finally {
+      if (sequenceId !== undefined) await ctx.delete(`/api/sequences/${sequenceId}`);
+      await ctx.dispose();
+    }
+  });
+
   test('build a two-branch sequence and attach it to a schedule', async ({ authedPage: page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Sequences' }).click();
