@@ -288,3 +288,70 @@ def test_ensure_contract_columns_noop_without_table():
 
     engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
     _ensure_contract_columns(engine)  # must not raise
+
+
+# --- Manual resolve ---
+
+from etl_framework.repository.contract_repository import BreachAlreadyResolved, BreachNotFound
+
+
+def test_resolve_breach_sets_fields():
+    db = _db()
+    repo = ContractRepository(db)
+    c = repo.create(_contract_data())
+    b = repo.open_breach(c.id, "run-1", "dq_violation")
+
+    resolved = repo.resolve_breach("payments_v1", b.id, "false positive", "alice")
+
+    assert resolved.resolved_at is not None
+    assert resolved.resolution_note == "false positive"
+    assert resolved.resolved_by == "alice"
+    assert resolved.resolution_run_id is None
+    assert resolved.duration_hours is not None and resolved.duration_hours >= 0
+    assert repo.get_status("payments_v1")["status"] == "OK"
+
+
+def test_resolve_breach_twice_raises_already_resolved():
+    db = _db()
+    repo = ContractRepository(db)
+    c = repo.create(_contract_data())
+    b = repo.open_breach(c.id, "run-1", "dq_violation")
+    repo.resolve_breach("payments_v1", b.id, "n", None)
+    with pytest.raises(BreachAlreadyResolved):
+        repo.resolve_breach("payments_v1", b.id, "n", None)
+
+
+def test_resolve_breach_scoped_to_contract():
+    db = _db()
+    repo = ContractRepository(db)
+    c1 = repo.create(_contract_data())
+    repo.create(_contract_data(name="other", source_job="other_job"))
+    b = repo.open_breach(c1.id, "run-1", "dq_violation")
+    with pytest.raises(BreachNotFound):
+        repo.resolve_breach("other", b.id, "n", None)
+
+
+def test_resolve_breach_unknown_contract_raises():
+    db = _db()
+    repo = ContractRepository(db)
+    with pytest.raises(BreachNotFound):
+        repo.resolve_breach("nope", 1, "n", None)
+
+
+def test_resolve_open_breaches_counts_only_open():
+    db = _db()
+    repo = ContractRepository(db)
+    c = repo.create(_contract_data())
+    b1 = repo.open_breach(c.id, "run-1", "dq_violation")
+    repo.resolve_breach("payments_v1", b1.id, "done", None)
+    repo.open_breach(c.id, "run-2", "sla_breach")
+
+    assert repo.resolve_open_breaches("payments_v1", "bulk", "bob") == 1
+    assert repo.resolve_open_breaches("payments_v1", "bulk", "bob") == 0
+    assert repo.list_open_breaches(c.id) == []
+
+
+def test_resolve_open_breaches_unknown_contract_raises():
+    db = _db()
+    with pytest.raises(BreachNotFound):
+        ContractRepository(db).resolve_open_breaches("nope", "n", None)

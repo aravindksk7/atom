@@ -6,6 +6,14 @@ from sqlalchemy.orm import Session
 from etl_framework.repository.contract_models import Contract, ContractBreach, ContractVersion
 
 
+class BreachNotFound(LookupError):
+    """Contract or breach (scoped to that contract) does not exist."""
+
+
+class BreachAlreadyResolved(ValueError):
+    """Breach already has resolved_at set."""
+
+
 class ContractRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -99,6 +107,14 @@ class ContractRepository:
         self._db.refresh(breach)
         return breach
 
+    @staticmethod
+    def _close_breach(breach: ContractBreach, now: datetime) -> None:
+        opened = breach.opened_at
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        breach.resolved_at = now
+        breach.duration_hours = round((now - opened).total_seconds() / 3600, 4)
+
     def resolve_breaches_for_job(
         self, job_name: str, run_id: str
     ) -> list[tuple[ContractBreach, Contract]]:
@@ -115,17 +131,49 @@ class ContractRepository:
                 .all()
             )
             for breach in open_breaches:
-                opened = breach.opened_at
-                if opened.tzinfo is None:
-                    opened = opened.replace(tzinfo=timezone.utc)
-                duration = (now - opened).total_seconds() / 3600
-                breach.resolved_at = now
+                self._close_breach(breach, now)
                 breach.resolution_run_id = run_id
-                breach.duration_hours = round(duration, 4)
                 self._db.commit()
                 self._db.refresh(breach)
                 resolved.append((breach, contract))
         return resolved
+
+    def resolve_breach(
+        self, contract_name: str, breach_id: int, note: str, resolved_by: str | None
+    ) -> ContractBreach:
+        contract = self.get(contract_name)
+        if contract is None:
+            raise BreachNotFound(f"Contract '{contract_name}' not found")
+        breach = (
+            self._db.query(ContractBreach)
+            .filter(ContractBreach.id == breach_id, ContractBreach.contract_id == contract.id)
+            .first()
+        )
+        if breach is None:
+            raise BreachNotFound(f"Breach {breach_id} not found on contract '{contract_name}'")
+        if breach.resolved_at is not None:
+            raise BreachAlreadyResolved(f"Breach {breach_id} is already resolved")
+        self._close_breach(breach, datetime.now(timezone.utc))
+        breach.resolution_note = note
+        breach.resolved_by = resolved_by
+        self._db.commit()
+        self._db.refresh(breach)
+        return breach
+
+    def resolve_open_breaches(
+        self, contract_name: str, note: str, resolved_by: str | None
+    ) -> int:
+        contract = self.get(contract_name)
+        if contract is None:
+            raise BreachNotFound(f"Contract '{contract_name}' not found")
+        now = datetime.now(timezone.utc)
+        open_breaches = self.list_open_breaches(contract.id)
+        for breach in open_breaches:
+            self._close_breach(breach, now)
+            breach.resolution_note = note
+            breach.resolved_by = resolved_by
+        self._db.commit()
+        return len(open_breaches)
 
     def escalate_overdue(self) -> list[tuple[ContractBreach, Contract]]:
         now = datetime.now(timezone.utc)
