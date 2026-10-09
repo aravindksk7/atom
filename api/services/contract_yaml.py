@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from etl_framework.repository.contract_models import Contract
@@ -24,11 +24,16 @@ class ContractImportError(ValueError):
     """The YAML document is unparseable or fails validation as a whole."""
 
 
+_Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
 class ContractImportItem(BaseModel):
-    name: str = Field(min_length=1)
-    source_job: str = Field(min_length=1)
-    owner: str = Field(min_length=1)
-    sla_hours: float = Field(gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+    name: _Text
+    source_job: _Text
+    owner: _Text
+    sla_hours: float = Field(gt=0, allow_inf_nan=False)
     consumers: list[str] = []
     breach_severity: Literal["error", "warn"] = "error"
     version: str = "1.0"
@@ -37,6 +42,8 @@ class ContractImportItem(BaseModel):
     @classmethod
     def _version_to_str(cls, v: Any) -> Any:
         # YAML reads an unquoted 1.2 as a float.
+        if isinstance(v, bool):
+            raise ValueError('version must be a string, e.g. "1.2"')
         return str(v) if isinstance(v, (int, float)) else v
 
 

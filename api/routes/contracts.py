@@ -146,7 +146,7 @@ def export_contracts(name: list[str] | None = Query(None), db: Session = Depends
     repo = ContractRepository(db)
     if name:
         contracts = []
-        for n in name:
+        for n in dict.fromkeys(name):
             contract = repo.get(n)
             if contract is None:
                 raise HTTPException(status_code=404, detail=f"Contract '{n}' not found")

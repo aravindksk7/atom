@@ -305,3 +305,11 @@ def test_import_invalid_yaml_422(client):
     resp = c.post("/api/contracts/import", json={"yaml": "contracts: ["})
     assert resp.status_code == 422
     assert "Invalid YAML" in resp.json()["detail"]
+
+
+def test_export_dedupes_repeated_names(client):
+    import yaml
+    c, _ = client
+    _create(c, "dup_x", "job_dx")
+    resp = c.get("/api/contracts/export", params=[("name", "dup_x"), ("name", "dup_x")])
+    assert [i["name"] for i in yaml.safe_load(resp.text)["contracts"]] == ["dup_x"]

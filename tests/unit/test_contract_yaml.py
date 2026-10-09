@@ -142,3 +142,26 @@ def test_apply_blocked_by_error_row():
     rows, items = plan_import(db, text)
     assert apply_import(db, rows, items) is False
     assert ContractRepository(db).get("new_c") is None
+
+
+def test_apply_rolls_back_on_commit_failure(monkeypatch):
+    db = _db()
+    _seed(db)
+    text = yaml.safe_dump({"contracts": [
+        {"name": "orders_c", "source_job": "orders_etl", "owner": "x@co.com", "sla_hours": 8},
+        {"name": "new_c", "source_job": "new_job", "owner": "n@co.com", "sla_hours": 2},
+    ]})
+    rows, items = plan_import(db, text)
+    real_commit = db.commit
+
+    def boom():
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(db, "commit", boom)
+    with pytest.raises(RuntimeError):
+        apply_import(db, rows, items)
+    monkeypatch.setattr(db, "commit", real_commit)
+
+    repo = ContractRepository(db)
+    assert repo.get("new_c") is None
+    assert repo.get("orders_c").owner == "o@co.com"
