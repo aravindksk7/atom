@@ -5,11 +5,15 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
-from etl_framework.repository.contract_repository import ContractRepository
+from etl_framework.repository.contract_repository import (
+    BreachAlreadyResolved,
+    BreachNotFound,
+    ContractRepository,
+)
 
 router = APIRouter(tags=["contracts"])
 
@@ -82,6 +86,8 @@ class BreachOut(BaseModel):
     escalated: bool
     escalated_at: datetime | None = None
     duration_hours: float | None = None
+    resolved_by: str | None = None
+    resolution_note: str | None = None
 
 
 class VersionOut(BaseModel):
@@ -96,6 +102,19 @@ class VersionOut(BaseModel):
 class BumpRequest(BaseModel):
     bump_type: str = "minor"  # "minor" or "major"
     note: str | None = None
+
+
+class BreachResolveIn(BaseModel):
+    note: str
+    resolved_by: str | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _note_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("note must not be blank")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +178,25 @@ def list_breaches(name: str, db: Session = Depends(get_session)):
     if contract is None:
         raise HTTPException(status_code=404, detail=f"Contract '{name}' not found")
     return repo.list_breaches(contract.id)
+
+
+@router.post("/{name}/breaches/resolve-all")
+def resolve_all_breaches(name: str, body: BreachResolveIn, db: Session = Depends(get_session)) -> dict[str, int]:
+    try:
+        count = ContractRepository(db).resolve_open_breaches(name, body.note, body.resolved_by)
+    except BreachNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"resolved": count}
+
+
+@router.post("/{name}/breaches/{breach_id}/resolve", response_model=BreachOut)
+def resolve_breach(name: str, breach_id: int, body: BreachResolveIn, db: Session = Depends(get_session)):
+    try:
+        return ContractRepository(db).resolve_breach(name, breach_id, body.note, body.resolved_by)
+    except BreachNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except BreachAlreadyResolved as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

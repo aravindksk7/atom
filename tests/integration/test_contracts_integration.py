@@ -181,3 +181,59 @@ def test_contract_version_bump_lifecycle(client):
     versions = resp.json()
     assert len(versions) == 2
     assert versions[0]["version"] == "2.0"  # ordered desc
+
+
+# ---------------------------------------------------------------------------
+# Manual breach resolve
+# ---------------------------------------------------------------------------
+
+def _seed_contract_with_breach(c, engine, name="resolve_c"):
+    from etl_framework.repository.contract_repository import ContractRepository
+    resp = c.post("/api/contracts", json={
+        "name": name, "source_job": f"{name}_job", "owner": "o@co.com", "sla_hours": 4.0,
+    })
+    assert resp.status_code == 201, resp.text
+    with Session(engine) as db:
+        breach = ContractRepository(db).open_breach(resp.json()["id"], "run-x", "dq_violation")
+        return breach.id
+
+
+def test_resolve_breach_route(client):
+    c, engine = client
+    breach_id = _seed_contract_with_breach(c, engine)
+
+    resp = c.post(f"/api/contracts/resolve_c/breaches/{breach_id}/resolve",
+                  json={"note": "upstream fixed", "resolved_by": "alice"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolved_at"] is not None
+    assert body["resolved_by"] == "alice"
+    assert body["resolution_note"] == "upstream fixed"
+    assert c.get("/api/contracts/resolve_c/status").json()["status"] == "OK"
+
+    again = c.post(f"/api/contracts/resolve_c/breaches/{breach_id}/resolve", json={"note": "x"})
+    assert again.status_code == 409
+
+
+def test_resolve_breach_route_blank_note_422(client):
+    c, engine = client
+    breach_id = _seed_contract_with_breach(c, engine)
+    resp = c.post(f"/api/contracts/resolve_c/breaches/{breach_id}/resolve", json={"note": "   "})
+    assert resp.status_code == 422
+
+
+def test_resolve_breach_route_404s(client):
+    c, engine = client
+    _seed_contract_with_breach(c, engine)
+    assert c.post("/api/contracts/resolve_c/breaches/99999/resolve", json={"note": "x"}).status_code == 404
+    assert c.post("/api/contracts/missing/breaches/1/resolve", json={"note": "x"}).status_code == 404
+
+
+def test_resolve_all_route(client):
+    c, engine = client
+    _seed_contract_with_breach(c, engine)
+    resp = c.post("/api/contracts/resolve_c/breaches/resolve-all", json={"note": "bulk"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"resolved": 1}
+    assert c.post("/api/contracts/resolve_c/breaches/resolve-all", json={"note": "bulk"}).json() == {"resolved": 0}
+    assert c.post("/api/contracts/missing/breaches/resolve-all", json={"note": "x"}).status_code == 404
