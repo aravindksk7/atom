@@ -95,3 +95,37 @@ def test_delete_removes_the_row():
     assert repo.delete(created.id) is True
     assert repo.get_decrypted_by_name("x") is None
     assert repo.delete(created.id) is False
+
+
+def test_crushftp_api_key_is_encrypted_at_rest_and_decrypted_on_resolve():
+    db = _db()
+    repo = FileServerProfileRepository(db)
+    created = repo.create({
+        "name": "cloud-crush", "kind": "crushftp", "protocol": "https",
+        "endpoint_url": "https://files.example.com", "auth_method": "api_key",
+        "api_key_header": "X-Api-Key", "api_key": "s3cr3t-key", "tls_ca_bundle": "PEM",
+    })
+
+    assert created.api_key != "s3cr3t-key"  # stored encrypted, not plaintext
+    resolved = repo.get_decrypted_by_name("cloud-crush")
+    assert (resolved.protocol, resolved.api_key_header, resolved.api_key, resolved.tls_ca_bundle) == (
+        "https", "X-Api-Key", "s3cr3t-key", "PEM",
+    )
+    assert "s3cr3t-key" not in repr(resolved)
+
+
+def test_ensure_file_server_columns_adds_missing_columns_and_is_idempotent(tmp_path):
+    from sqlalchemy import inspect, text
+
+    from etl_framework.repository.database import _ensure_file_server_columns
+
+    engine = create_engine(f"sqlite:///{(tmp_path / 'old.db').as_posix()}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE file_server_profiles (id INTEGER PRIMARY KEY, name VARCHAR(255))"))
+
+    _ensure_file_server_columns(engine)
+    _ensure_file_server_columns(engine)  # second run must not raise
+
+    columns = {c["name"] for c in inspect(engine).get_columns("file_server_profiles")}
+    assert {"protocol", "api_key_header", "api_key", "tls_ca_bundle"} <= columns
+    engine.dispose()

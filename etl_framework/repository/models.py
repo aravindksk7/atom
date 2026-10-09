@@ -326,7 +326,7 @@ class FileServerProfile(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False, unique=True, index=True)
-    kind = Column(String(10), nullable=False)  # "sftp" | "scp" | "s3" | "smb" -- scp uses the sftp client/fields too
+    kind = Column(String(10), nullable=False)  # "sftp" | "scp" | "s3" | "smb" | "crushftp" -- scp uses the sftp client/fields too
     description = Column(Text, nullable=False, default="")
 
     # sftp / scp -- password/private_key/key_passphrase encrypted at rest, see
@@ -346,6 +346,14 @@ class FileServerProfile(Base):
     aws_session_token = Column(Text, nullable=True)
     region_name = Column(String(50), nullable=True)
     endpoint_url = Column(String(1024), nullable=True)
+
+    # crushftp -- protocol picks the transport ("https" reuses endpoint_url as
+    # the base URL, "sftp" reuses the sftp fields above); api_key encrypted at
+    # rest, same repository
+    protocol = Column(String(10), nullable=True)
+    api_key_header = Column(String(255), nullable=True)
+    api_key = Column(Text, nullable=True)
+    tls_ca_bundle = Column(Text, nullable=True)  # PEM of a private CA, not a secret
 
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)

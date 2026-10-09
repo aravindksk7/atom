@@ -38,6 +38,10 @@ class ResolvedFileServerProfile:
     aws_session_token: str | None = field(repr=False)
     region_name: str | None
     endpoint_url: str | None
+    protocol: str | None = None
+    api_key_header: str | None = None
+    api_key: str | None = field(default=None, repr=False)
+    tls_ca_bundle: str | None = None
 
 
 def ci_context_present_filter():
@@ -1047,7 +1051,9 @@ class RunBatchRepository:
         )
 
 
-_FILE_SERVER_SECRET_FIELDS = frozenset({"password", "private_key", "key_passphrase", "aws_secret_access_key", "aws_session_token"})
+_FILE_SERVER_SECRET_FIELDS = frozenset({
+    "password", "private_key", "key_passphrase", "aws_secret_access_key", "aws_session_token", "api_key",
+})
 
 
 class FileServerProfileRepository:
@@ -1123,6 +1129,10 @@ class FileServerProfileRepository:
             aws_session_token=decrypt_secret(profile.aws_session_token) if profile.aws_session_token else None,
             region_name=profile.region_name,
             endpoint_url=profile.endpoint_url,
+            protocol=profile.protocol,
+            api_key_header=profile.api_key_header,
+            api_key=decrypt_secret(profile.api_key) if profile.api_key else None,
+            tls_ca_bundle=profile.tls_ca_bundle,
         )
 
 

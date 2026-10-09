@@ -107,6 +107,12 @@ FILE_SERVER_PROFILE_COLUMNS = {
     "updated_at": ColumnSpec("NUMERIC", True),
 }
 
+# Columns the application adds to file_server_profiles at startup after this
+# upgrade's target schema (etl_framework.repository.database._ensure_file_server_columns).
+# Tolerated when present so a database the newer application has already
+# opened is not rejected as incompatible.
+FILE_SERVER_PROFILE_LATER_COLUMNS = frozenset({"protocol", "api_key_header", "api_key", "tls_ca_bundle"})
+
 ADDED_COLUMN_SPECS = {
     "test_runs.run_batch_id": ColumnSpec("TEXT"),
     "test_runs.restarted_from_run_id": ColumnSpec("TEXT"),
@@ -255,7 +261,8 @@ def _validate_existing_targets(connection: sqlite3.Connection, schema: dict[str,
         if table not in schema["tables"]:
             continue
         actual = schema["columns"][table]
-        if set(actual) != set(specs):
+        later = FILE_SERVER_PROFILE_LATER_COLUMNS if table == "file_server_profiles" else frozenset()
+        if set(actual) - later != set(specs):
             raise UpgradeError(f"Incompatible object {table}: columns do not exactly match")
         for column, spec in specs.items():
             _validate_column(f"{table}.{column}", actual[column], spec)

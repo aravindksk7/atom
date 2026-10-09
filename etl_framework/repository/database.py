@@ -28,6 +28,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_compare_columns(engine)
     _ensure_contract_columns(engine)
+    _ensure_file_server_columns(engine)
     _backfill_schedule_selections(engine)
 
 
@@ -42,6 +43,17 @@ def _ensure_contract_columns(bind) -> None:
     with bind.begin() as conn:
         ensure_column(conn, "contract_breaches", "resolved_by", "ALTER TABLE contract_breaches ADD COLUMN resolved_by VARCHAR(255)")
         ensure_column(conn, "contract_breaches", "resolution_note", "ALTER TABLE contract_breaches ADD COLUMN resolution_note TEXT")
+
+
+def _ensure_file_server_columns(bind) -> None:
+    """Add the crushftp columns to file_server_profiles on existing databases."""
+    if "file_server_profiles" not in set(inspect(bind).get_table_names()):
+        return
+    with bind.begin() as conn:
+        ensure_column(conn, "file_server_profiles", "protocol", "ALTER TABLE file_server_profiles ADD COLUMN protocol VARCHAR(10)")
+        ensure_column(conn, "file_server_profiles", "api_key_header", "ALTER TABLE file_server_profiles ADD COLUMN api_key_header VARCHAR(255)")
+        ensure_column(conn, "file_server_profiles", "api_key", "ALTER TABLE file_server_profiles ADD COLUMN api_key TEXT")
+        ensure_column(conn, "file_server_profiles", "tls_ca_bundle", "ALTER TABLE file_server_profiles ADD COLUMN tls_ca_bundle TEXT")
 
 
 def _ensure_compare_columns(bind) -> None:
