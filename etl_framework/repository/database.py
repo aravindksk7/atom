@@ -34,7 +34,8 @@ def init_db() -> None:
 def _ensure_contract_columns(bind) -> None:
     """Add manual-resolution columns to contract_breaches on existing databases.
 
-    Not SQLite-gated: plain ADD COLUMN DDL works on every supported dialect.
+    Not SQLite-gated: ADD COLUMN DDL works on SQLite, Postgres and MySQL
+    (SQL Server would need ``ADD`` without ``COLUMN``).
     """
     if "contract_breaches" not in set(inspect(bind).get_table_names()):
         return

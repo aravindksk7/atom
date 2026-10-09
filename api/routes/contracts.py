@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -106,7 +106,7 @@ class BumpRequest(BaseModel):
 
 class BreachResolveIn(BaseModel):
     note: str
-    resolved_by: str | None = None
+    resolved_by: str | None = Field(default=None, max_length=255)
 
     @field_validator("note")
     @classmethod
