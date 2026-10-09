@@ -8227,7 +8227,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span class="text-slate-400 flex-1" x-text="b.opened_at ? fmtDate(b.opened_at) : ''"></span>
                   <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
                   <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
-                  <button x-show="!b.resolved_at" data-testid="contract-breach-resolve-btn" @click="openResolveBreach(b.id)" class="btn-outline btn-sm text-xs">Resolve</button>
+                  <button x-show="!b.resolved_at" data-testid="contract-breach-resolve-btn" :aria-label="'Resolve ' + b.breach_type + ' breach'" @click="openResolveBreach(b.id)" class="btn-outline btn-sm text-xs">Resolve</button>
                 </div>
                 <div x-show="b.resolution_note" class="text-slate-500 mt-0.5 ml-[5.75rem] truncate" :title="b.resolution_note"
                      x-text="(b.resolved_by ? 'resolved by ' + b.resolved_by + ' — ' : '') + (b.resolution_note || '')"></div>
@@ -8988,7 +8988,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
               <option :value="j.name" :label="j.job_type"></option>
             </template>
           </datalist>
-          <div x-show="!contractModalEditing && contractModal.source_job && !contractSourceJobKnown(contractModal.source_job)" data-testid="contract-modal-source-job-warning" class="text-xs text-amber-700 mt-1">
+          <div x-show="!contractModalEditing && contractModal.source_job && contractJobMissing(contractModal.source_job)" data-testid="contract-modal-source-job-warning" class="text-xs text-amber-700 mt-1">
             Job not defined yet — contract will be saved anyway.
           </div>
         </div>
@@ -9006,7 +9006,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <template x-for="(name, idx) in contractModal.consumers" :key="name">
               <span data-testid="contract-consumer-chip" class="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 rounded px-1.5 py-0.5">
                 <span x-text="name"></span>
-                <button type="button" data-testid="contract-consumer-chip-remove" @click="removeContractConsumer(idx)" class="text-indigo-400 hover:text-indigo-700" :aria-label="'Remove consumer ' + name">&times;</button>
+                <button type="button" data-testid="contract-consumer-chip-remove" @click="removeContractConsumer(idx)" class="text-indigo-700 hover:text-indigo-900" :aria-label="'Remove consumer ' + name">&times;</button>
               </span>
             </template>
           </div>
@@ -9033,8 +9033,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
 <!-- Contract breach resolve modal -->
 <template x-if="showResolveModal">
-  <div data-testid="contract-resolve-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showResolveModal = false" @keydown.escape.window="showResolveModal = false">
-    <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="contractResolveTitle">
+  <div data-testid="contract-resolve-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showResolveModal = false">
+    <div x-ref="contractResolveDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true" aria-labelledby="contractResolveTitle">
       <h2 id="contractResolveTitle" class="text-base font-semibold text-slate-900 mb-4" x-text="resolveTarget === 'all' ? 'Resolve all open breaches' : 'Resolve breach'"></h2>
       <div class="space-y-3">
         <div>
@@ -9043,7 +9043,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
         <div>
           <label class="field-label" for="contract-resolve-by">Resolved by</label>
-          <input data-testid="contract-resolve-by-input" x-model="resolveBy" type="text" class="field-input" id="contract-resolve-by" placeholder="name or email (optional)" />
+          <input data-testid="contract-resolve-by-input" x-model="resolveBy" type="text" maxlength="255" class="field-input" id="contract-resolve-by" placeholder="name or email (optional)" />
         </div>
       </div>
       <div class="flex justify-end gap-2 mt-5">
@@ -9056,8 +9056,8 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
 <!-- Contract YAML import modal -->
 <template x-if="showContractImport">
-  <div data-testid="contract-import-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractImport = false" @keydown.escape.window="showContractImport = false">
-    <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4" role="dialog" aria-modal="true" aria-labelledby="contractImportTitle">
+  <div data-testid="contract-import-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" @click.self="showContractImport = false">
+    <div x-ref="contractImportDialog" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4" role="dialog" aria-modal="true" aria-labelledby="contractImportTitle">
       <h2 id="contractImportTitle" class="text-base font-semibold text-slate-900 mb-4">Import contracts (YAML)</h2>
       <div class="space-y-3">
         <div>

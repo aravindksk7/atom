@@ -92,8 +92,10 @@
     },
 
     addContractConsumer() {
-      const v = this.contractConsumerDraft.replace(/,/g, '').trim();
-      if (v && !this.contractModal.consumers.includes(v)) this.contractModal.consumers.push(v);
+      for (const part of this.contractConsumerDraft.split(',')) {
+        const v = part.trim();
+        if (v && !this.contractModal.consumers.includes(v)) this.contractModal.consumers.push(v);
+      }
       this.contractConsumerDraft = '';
     },
 
@@ -102,6 +104,7 @@
     },
 
     onContractConsumerKeydown(e) {
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'Enter' || e.key === ',') {
         e.preventDefault();
         this.addContractConsumer();
@@ -160,8 +163,8 @@
         source_job: c.source_job || '',
         owner: c.owner || '',
         sla_hours: c.sla_hours != null ? c.sla_hours : 4,
-        consumers: Array.isArray(c.consumers) ? [...c.consumers]
-          : String(c.consumers_raw || '').split(',').map(s => s.trim()).filter(Boolean),
+        consumers: [...new Set(Array.isArray(c.consumers) ? c.consumers
+          : String(c.consumers_raw || '').split(',').map(s => s.trim()).filter(Boolean))],
         breach_severity: c.breach_severity || 'error',
         version: c.version || '1.0',
       };
@@ -179,7 +182,7 @@
         source_job: contract.source_job,
         owner: contract.owner,
         sla_hours: contract.sla_hours,
-        consumers: [...(contract.consumers || [])],
+        consumers: [...new Set(contract.consumers || [])],
         breach_severity: contract.breach_severity,
         version: contract.version,
       };
@@ -295,9 +298,14 @@
     async onContractImportFile(event) {
       const file = event.target.files && event.target.files[0];
       if (!file) return;
-      this.contractImportText = await file.text();
-      this.contractImportPreview = null;
-      this.contractImportError = '';
+      try {
+        this.contractImportText = await file.text();
+        this.contractImportPreview = null;
+        this.contractImportError = '';
+      } catch (e) {
+        this.contractImportError = 'Could not read file: ' + (e.message || e);
+      }
+      event.target.value = '';
     },
 
     async _postContractImport(dryRun) {
@@ -329,6 +337,12 @@
       if (result.applied) {
         this.showContractImport = false;
         await this.loadContracts();
+        if (this.selectedContract) {
+          const updated = this.contracts.find(c => c.name === this.selectedContract.name);
+          if (updated) this.selectedContract = updated;
+        }
+      } else if (!(result.rows || []).some(r => r.action === 'error')) {
+        this.contractImportError = 'Nothing to apply.';
       }
     },
 

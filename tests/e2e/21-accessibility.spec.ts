@@ -105,6 +105,38 @@ const dialogCases: DialogCase[] = [
     },
   },
   {
+    name: 'contract resolve',
+    statePath: 'showResolveModal',
+    refName: 'contractResolveDialog',
+    dialog: '[data-testid="contract-resolve-modal"] [role="dialog"]',
+    firstFocus: '[data-testid="contract-resolve-note-input"]',
+    lastFocus: '[data-testid="contract-resolve-confirm-btn"]',
+    prepare: async (page) => {
+      await page.evaluate(() => {
+        const app = window.Alpine.$data(document.body);
+        app.resolveTarget = 'all';
+        app.resolveNote = 'Resolved by accessibility probe';
+        app.resolveBy = '';
+      });
+    },
+  },
+  {
+    name: 'contract import',
+    statePath: 'showContractImport',
+    refName: 'contractImportDialog',
+    dialog: '[data-testid="contract-import-modal"] [role="dialog"]',
+    firstFocus: '[data-testid="contract-import-file"]',
+    lastFocus: '[data-testid="contract-import-cancel-btn"]',
+    prepare: async (page) => {
+      await page.evaluate(() => {
+        const app = window.Alpine.$data(document.body);
+        app.contractImportText = '';
+        app.contractImportPreview = null;
+        app.contractImportError = '';
+      });
+    },
+  },
+  {
     name: 'help',
     statePath: 'showingHelp',
     refName: 'helpDialog',

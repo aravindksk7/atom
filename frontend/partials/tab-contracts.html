@@ -147,7 +147,7 @@
                   <span class="text-slate-400 flex-1" x-text="b.opened_at ? fmtDate(b.opened_at) : ''"></span>
                   <span x-show="b.duration_hours != null" class="text-slate-500" x-text="b.duration_hours != null ? b.duration_hours.toFixed(2) + 'h' : ''"></span>
                   <span x-show="b.escalated" class="text-orange-600 font-semibold">ESCALATED</span>
-                  <button x-show="!b.resolved_at" data-testid="contract-breach-resolve-btn" @click="openResolveBreach(b.id)" class="btn-outline btn-sm text-xs">Resolve</button>
+                  <button x-show="!b.resolved_at" data-testid="contract-breach-resolve-btn" :aria-label="'Resolve ' + b.breach_type + ' breach'" @click="openResolveBreach(b.id)" class="btn-outline btn-sm text-xs">Resolve</button>
                 </div>
                 <div x-show="b.resolution_note" class="text-slate-500 mt-0.5 ml-[5.75rem] truncate" :title="b.resolution_note"
                      x-text="(b.resolved_by ? 'resolved by ' + b.resolved_by + ' — ' : '') + (b.resolution_note || '')"></div>

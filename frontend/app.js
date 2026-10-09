@@ -484,6 +484,8 @@ function _appRaw() {
         ['showAuthModal', 'authDialog', () => this.closeAuthModal()],
         ['drawer.show', 'drawerDialog', () => { this.drawer.show = false; }],
         ['showContractModal', 'contractDialog', () => { this.showContractModal = false; }],
+        ['showResolveModal', 'contractResolveDialog', () => { this.showResolveModal = false; }],
+        ['showContractImport', 'contractImportDialog', () => { this.showContractImport = false; }],
         ['showingHelp', 'helpDialog', () => { this.showingHelp = false; }],
         ['bulkDecisionForm.open', 'bulkDecisionDialog', () => this.closeBulkDecisionForm()],
         ['mismatchDecisionForm.open', 'mismatchDecisionDialog', () => this.closeMismatchDecisionForm()],
