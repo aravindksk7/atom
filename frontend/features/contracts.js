@@ -143,7 +143,9 @@
         try {
           this.contractStatusMap[name] = await api('GET', `/api/contracts/${encodeURIComponent(name)}/status`);
         } catch {}
-        await this.selectContract(this.selectedContract);
+        try {
+          this.contractBreachHistory = await api('GET', `/api/contracts/${encodeURIComponent(name)}/breaches`);
+        } catch {}
       } catch (e) { alert('Resolve failed: ' + (e.message || e)); }
       this.resolveLoading = false;
     },
@@ -263,28 +265,17 @@
       return this.contractTestResult.checks.filter(c => c.category === this.contractTestCategoryFilter);
     },
 
-    _downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    },
-
     exportContractTestReport() {
       if (!this.contractTestResult) return;
       const blob = new Blob([JSON.stringify(this.contractTestResult, null, 2)], { type: 'application/json' });
-      this._downloadBlob(blob, `contract-test-${this.contractTestResult.contract}-${Date.now()}.json`);
+      triggerDownload(blob, `contract-test-${this.contractTestResult.contract}-${Date.now()}.json`);
     },
 
     async exportContractsYaml(name) {
       const query = name ? `?name=${encodeURIComponent(name)}` : '';
       try {
         const { blob } = await apiBlob(`/api/contracts/export${query}`);
-        this._downloadBlob(blob, name ? `${name}.contract.yaml` : 'contracts.yaml');
+        triggerDownload(blob, name ? `${name}.contract.yaml` : 'contracts.yaml');
       } catch (e) { alert('Export failed: ' + (e.message || e)); }
     },
 

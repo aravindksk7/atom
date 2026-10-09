@@ -88,7 +88,9 @@ def _parse(text: str) -> list[ContractImportItem]:
             items.append(ContractImportItem.model_validate(raw))
         except ValidationError as exc:
             where = f"contracts[{idx}]" + (f" ({label})" if label else "")
-            raise ContractImportError(f"{where}: {exc.errors()[0]['loc']} {exc.errors()[0]['msg']}") from exc
+            err = exc.errors()[0]
+            field = ".".join(str(part) for part in err["loc"])
+            raise ContractImportError(f"{where}: {field + ': ' if field else ''}{err['msg']}") from exc
 
     seen: set[str] = set()
     for item in items:
