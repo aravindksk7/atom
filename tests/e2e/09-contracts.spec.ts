@@ -115,4 +115,110 @@ test.describe('09 contracts', () => {
     authedPage.once('dialog', (d) => d.accept());
     await authedPage.locator('[data-testid="contract-delete-btn"]').click();
   });
+
+  test('source job datalist lists jobs and warns on unknown name', async ({ authedPage }) => {
+    await authedPage.route('**/api/jobs', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: [{ name: 'e2e_listed_job', job_type: 'reconciliation' }] })
+        : route.continue());
+    await openContracts(authedPage);
+    await authedPage.locator('[data-testid="contracts-new-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-source-job-options"] option[value="e2e_listed_job"]')).toHaveCount(1);
+
+    const input = authedPage.locator('[data-testid="contract-modal-source-job-input"]');
+    await input.fill('e2e_listed_job');
+    await expect(authedPage.locator('[data-testid="contract-modal-source-job-warning"]')).toBeHidden();
+    await input.fill('not_a_job');
+    await expect(authedPage.locator('[data-testid="contract-modal-source-job-warning"]')).toBeVisible();
+    await authedPage.locator('[data-testid="contract-modal-cancel-btn"]').click();
+  });
+
+  test('consumers are entered as chips and persist', async ({ authedPage }) => {
+    const name = `e2e_chips_${Date.now()}`;
+    await openContracts(authedPage);
+    await authedPage.locator('[data-testid="contracts-new-btn"]').click();
+    await authedPage.locator('[data-testid="contract-modal-name-input"]').fill(name);
+    await authedPage.locator('[data-testid="contract-modal-source-job-input"]').fill('e2e_source_job');
+    await authedPage.locator('[data-testid="contract-modal-owner-input"]').fill('e2e@test.local');
+    const consumers = authedPage.locator('[data-testid="contract-modal-consumers-input"]');
+    await consumers.fill('finance');
+    await consumers.press('Enter');
+    await consumers.fill('ops');
+    await consumers.press('Enter');
+    await consumers.fill('drop_me');
+    await consumers.press('Enter');
+    await expect(authedPage.locator('[data-testid="contract-consumer-chip"]')).toHaveCount(3);
+    await authedPage.locator('[data-testid="contract-consumer-chip-remove"]').nth(2).click();
+    await expect(authedPage.locator('[data-testid="contract-consumer-chip"]')).toHaveCount(2);
+    await authedPage.locator('[data-testid="contract-modal-save-btn"]').click();
+
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+    await expect(authedPage.locator('text=Consumers: finance, ops')).toBeVisible();
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
+
+  test('resolve an open breach with a note', async ({ authedPage }) => {
+    const name = `e2e_resolve_${Date.now()}`;
+    let resolved = false;
+    let sentBody: any = null;
+    await authedPage.route(`**/api/contracts/${name}/breaches`, (route) => route.fulfill({
+      json: [{
+        id: 7, contract_id: 1, run_id: 'r1', breach_type: 'dq_violation',
+        opened_at: '2026-10-10T08:00:00Z', escalated: false,
+        resolved_at: resolved ? '2026-10-10T09:00:00Z' : null,
+        duration_hours: resolved ? 1 : null,
+        resolved_by: resolved ? 'e2e' : null,
+        resolution_note: resolved ? 'false positive' : null,
+      }],
+    }));
+    await authedPage.route(`**/api/contracts/${name}/breaches/7/resolve`, async (route) => {
+      sentBody = route.request().postDataJSON();
+      resolved = true;
+      await route.fulfill({ json: {} });
+    });
+
+    await openContracts(authedPage);
+    await createContract(authedPage, name);
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+    await authedPage.locator('[data-testid="contract-breach-resolve-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-resolve-confirm-btn"]')).toBeDisabled();
+    await authedPage.locator('[data-testid="contract-resolve-note-input"]').fill('false positive');
+    await authedPage.locator('[data-testid="contract-resolve-by-input"]').fill('e2e');
+    await authedPage.locator('[data-testid="contract-resolve-confirm-btn"]').click();
+
+    await expect(authedPage.locator('[data-testid="contract-resolve-modal"]')).toBeHidden();
+    expect(sentBody).toEqual({ note: 'false positive', resolved_by: 'e2e' });
+    await expect(authedPage.locator('text=resolved by e2e — false positive')).toBeVisible();
+    await expect(authedPage.locator('[data-testid="contract-breach-resolve-btn"]')).toBeHidden();
+
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
+
+  test('export a contract as yaml and preview it as unchanged on import', async ({ authedPage }) => {
+    const name = `e2e_yaml_${Date.now()}`;
+    await openContracts(authedPage);
+    await createContract(authedPage, name);
+    await authedPage.locator(`[data-testid="contract-row-${name}"]`).click();
+
+    const downloadPromise = authedPage.waitForEvent('download');
+    await authedPage.locator('[data-testid="contract-export-btn"]').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(`${name}.contract.yaml`);
+    const fs = await import('fs');
+    const text = fs.readFileSync(await download.path() as string, 'utf-8');
+    expect(text).toContain(`name: ${name}`);
+
+    await authedPage.locator('[data-testid="contracts-import-btn"]').click();
+    await authedPage.locator('[data-testid="contract-import-textarea"]').fill(text);
+    await authedPage.locator('[data-testid="contract-import-preview-btn"]').click();
+    await expect(authedPage.locator('[data-testid="contract-import-row"]')).toHaveCount(1);
+    await expect(authedPage.locator('[data-testid="contract-import-row"]')).toContainText('unchanged');
+    await expect(authedPage.locator('[data-testid="contract-import-apply-btn"]')).toBeDisabled();
+    await authedPage.locator('[data-testid="contract-import-cancel-btn"]').click();
+
+    authedPage.once('dialog', (d) => d.accept());
+    await authedPage.locator('[data-testid="contract-delete-btn"]').click();
+  });
 });
