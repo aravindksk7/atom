@@ -2457,6 +2457,28 @@ Every source file is scored against every target file using the selected signals
 
 One client per `(kind, credentials_ref)` is reused for the whole job (discovery and every file read), not reopened per file.
 
+**CrushFTP (on-premises or cloud):** `kind: "crushftp"` works for `file_transfer`, `file_watcher`, and multi-file sources and targets. `credentials_ref` names a **CrushFTP** profile created in the **File Servers** tab, and that profile — not the job — decides how the server is reached, so moving a job between an on-premises and a cloud instance means pointing it at a different profile:
+
+| Profile protocol | Authentication | Notes |
+|---|---|---|
+| `https` (CrushFTP's web API) | Username and password | Base URL such as `https://files.example.com`. Paste a PEM **CA certificate** for a server signed by a private CA; certificate verification cannot be turned off. |
+| `https` | API key in a header you name (for example `X-Api-Key`), optionally with a username and password as well | The header is sent on every request. A login is made only when a username is set. |
+| `sftp` | Password or SSH private key | Same host-key review-and-pin step as an SFTP profile (**Test Connection**, then **Accept & Pin**). |
+
+```json
+{ "source": { "kind": "crushftp", "root": "/inbound/daily", "pattern": "sales_{region}.csv", "credentials_ref": "crush_cloud" } }
+```
+
+`root` is a path on the server for either protocol. Limits and behaviour worth knowing:
+
+- Verified against CrushFTP 11.5.5. The API-key mode depends on how the gateway in front of a cloud instance handles the header and has not been exercised against a real cloud instance — run **Test Connection** and one small transfer before relying on it.
+- Destination paths containing `%` are rejected; the server handles that character inconsistently between upload, listing, and rename. Existing files with `%` in the name can still be discovered and read.
+- Redirects are never followed. A redirect from the server (it answers an expired or rejected session that way) fails the run with a connection error instead of sending credentials to another address.
+- An HTTPS profile and an SFTP profile for the same server are not recognised as the same place, so the same-file guard in `file_transfer` does not apply between them.
+- `http://` base URLs are refused unless the server process has `CRUSHFTP_ALLOW_INSECURE_HTTP=1`, which exists for a local test container only.
+
+A live test against the official container: `docker compose -f docker-compose.integration.yml up -d crushftp`, then run `tests/integration/test_crushftp_live.py` with the variables listed at the top of that file.
+
 **Readiness (waiting for a live spool to finish writing):** for a local root a live process is still writing into, add a `readiness` block to either side's source spec:
 
 ```json

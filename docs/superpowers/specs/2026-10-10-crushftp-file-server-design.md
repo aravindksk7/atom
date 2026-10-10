@@ -60,7 +60,7 @@ Validation rules, enforced in the `FileServerProfileCreate` / `FileServerProfile
 
 These cross-field rules run in the routes against the merged profile (the stored row overlaid with the request body), because an update may send only some fields.
 
-Already-deployed databases gain the four columns at startup through `ensure_column` in `etl_framework/repository/database.py`, the mechanism every other added column uses. `scripts/upgrade_db_20260913_to_current.py` checks that `file_server_profiles` has an exact column set, so its column list and `CREATE TABLE` statement gain the same four columns.
+Already-deployed databases gain the four columns at startup through `ensure_column` in `etl_framework/repository/database.py`, the mechanism every other added column uses. `scripts/upgrade_db_20260913_to_current.py` checks that an existing `file_server_profiles` table has an exact column set; it now tolerates these four columns, so a database the newer application has already opened is not rejected. The table that script creates is unchanged, and gains the columns at the next startup like any other.
 
 ## 4. Dispatch
 
@@ -84,7 +84,7 @@ New module `api/services/crushftp_client.py`. Every piece of CrushFTP wire knowl
 |---|---|
 | `login()` | Session login when a username is set; no-op otherwise. |
 | `list(path)` | Entries with name, size, modified time, and directory flag. |
-| `stat(path)` | One entry, or `FileNotFoundError`. |
+| `exists(path)`, `size(path)` | Existence and byte size; `size` raises `FileNotFoundError` when missing. |
 | `open_read(path, limit=None)` | Streamed download; `limit` bounds the read for `file_watcher` content matching. |
 | `upload(path, stream)` | Streamed upload. |
 | `rename(src, dst)`, `mkdir(path)`, `delete(path)` | As named. |
