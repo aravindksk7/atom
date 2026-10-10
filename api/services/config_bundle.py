@@ -74,6 +74,8 @@ def _export_file_server(profile) -> dict:
         "aws_secret_access_key": profile.aws_secret_access_key,
         "aws_session_token": profile.aws_session_token,
         "region_name": profile.region_name, "endpoint_url": profile.endpoint_url,
+        "protocol": profile.protocol, "api_key_header": profile.api_key_header,
+        "api_key": profile.api_key, "tls_ca_bundle": profile.tls_ca_bundle,
     }
     return _strip_file_server_secrets(data)
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_session
 from api.schemas import FileServerProfileCreate, FileServerProfileOut, FileServerProfileUpdate, FileServerTestResult
 from api.services.audit_service import AuditService
+from api.services.file_server_validation import file_server_profile_errors
 from etl_framework.repository.repository import FileServerProfileRepository, _FILE_SERVER_SECRET_FIELDS
 from etl_framework.repository.models import ExecutionSequenceVersion, SavedJob, ScheduledRun
 
@@ -56,6 +57,16 @@ def _preserve_masked_secrets(incoming: dict, existing) -> dict:
     return result
 
 
+def _reject_invalid(data: dict) -> None:
+    """422 when the profile breaks a cross-field rule. ``data`` is the whole
+    profile as it would be stored -- for an update, the stored row overlaid
+    with the request body, since the body may carry only some fields (a stored
+    secret is ciphertext here, which is enough to count as present)."""
+    errors = file_server_profile_errors(data)
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+
 def _references_credentials_ref(value, name: str) -> bool:
     """Recursively scan a saved job's params / a sequence step / a schedule's
     job_sequence for a `credentials_ref` key equal to `name`. Generic rather
@@ -81,6 +92,7 @@ def create_file_server(body: FileServerProfileCreate, request: Request, db: Sess
     repo = FileServerProfileRepository(db)
     if repo.get_by_name(body.name) is not None:
         raise HTTPException(status_code=409, detail=f"File server profile '{body.name}' already exists")
+    _reject_invalid(body.model_dump())
     profile = repo.create(body.model_dump())
     AuditService(db).log(request, "file_server.created", "file_server", profile.id, {"name": profile.name, "kind": profile.kind})
     return _mask(profile)
@@ -101,6 +113,7 @@ def update_file_server(profile_id: int, body: FileServerProfileUpdate, request: 
     if existing is None:
         raise HTTPException(status_code=404, detail="File server profile not found")
     data = _preserve_masked_secrets({k: v for k, v in body.model_dump().items() if v is not None}, existing)
+    _reject_invalid({**{c.name: getattr(existing, c.name) for c in existing.__table__.columns}, **data})
     profile = repo.update(profile_id, data)
     AuditService(db).log(request, "file_server.updated", "file_server", profile.id, {"name": profile.name})
     return _mask(profile)
@@ -137,7 +150,8 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         raise HTTPException(status_code=404, detail="File server profile not found")
     profile = repo.get_decrypted_by_name(existing.name)
 
-    if profile.kind in ("sftp", "scp"):
+    # A crushftp profile on the sftp protocol is an ordinary SFTP server here.
+    if profile.kind in ("sftp", "scp") or (profile.kind == "crushftp" and profile.protocol == "sftp"):
         if paramiko is None:
             return FileServerTestResult(status="error", message="paramiko is not installed -- SFTP/SCP connections are unavailable")
         # Reuse the same working key-loading helper build_sftp_client relies
@@ -177,6 +191,22 @@ def test_file_server(profile_id: int, body: TestConnectionRequest = TestConnecti
         if fingerprint != profile.host_key_fingerprint:
             return FileServerTestResult(status="mismatch", presented_fingerprint=fingerprint, pinned_fingerprint=profile.host_key_fingerprint)
         return FileServerTestResult(status="ok", presented_fingerprint=fingerprint)
+
+    if profile.kind == "crushftp":
+        from api.services.crushftp_client import build_crushftp_client
+        from etl_framework.reconciliation.file_mapping import FileSourceSpec
+
+        crushftp_client = None
+        try:
+            crushftp_client = build_crushftp_client(profile, FileSourceSpec(kind="crushftp", root="/", pattern="*"))
+            crushftp_client.list("/")
+            return FileServerTestResult(status="ok")
+        except Exception as exc:
+            # The client scrubs its own credentials out of every message it raises.
+            return FileServerTestResult(status="error", message=str(exc))
+        finally:
+            if crushftp_client is not None:
+                crushftp_client.close()
 
     if profile.kind == "smb":
         if os.name != "nt":

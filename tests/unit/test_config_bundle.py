@@ -255,3 +255,23 @@ def test_apply_bundle_skips_existing_file_server_by_name():
     results = apply_bundle(db, bundle)
     assert results[0].status == "skipped"
     assert results[0].reason == "already exists"
+
+
+def test_bundle_round_trips_a_crushftp_profile_without_its_api_key():
+    db = _db()
+    FileServerProfileRepository(db).create({
+        "name": "crush_cloud", "kind": "crushftp", "protocol": "https", "endpoint_url": "https://files.example.com",
+        "auth_method": "api_key", "api_key_header": "X-Api-Key", "api_key": "k3y-value", "tls_ca_bundle": "PEM",
+    })
+
+    bundle = build_bundle(db, {"file_servers": ["crush_cloud"]})
+    entry = bundle["file_servers"][0]
+
+    assert entry["api_key"] is None
+    assert (entry["protocol"], entry["api_key_header"], entry["tls_ca_bundle"]) == ("https", "X-Api-Key", "PEM")
+
+    other = _db()
+    results = apply_bundle(other, bundle)
+    assert [(r.type, r.name, r.status) for r in results] == [("file_servers", "crush_cloud", "created")]
+    restored = FileServerProfileRepository(other).get_decrypted_by_name("crush_cloud")
+    assert (restored.protocol, restored.api_key_header, restored.api_key) == ("https", "X-Api-Key", None)

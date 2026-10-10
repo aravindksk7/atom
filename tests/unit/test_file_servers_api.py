@@ -431,3 +431,125 @@ def test_file_servers_module_imports_without_paramiko_installed(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(file_servers_module)  # restore real paramiko for every later test in this file
+
+
+# -- crushftp ------------------------------------------------------------------
+
+_CRUSH_KEY = {
+    "name": "crush_cloud", "kind": "crushftp", "protocol": "https", "endpoint_url": "https://files.example.com",
+    "auth_method": "api_key", "api_key_header": "X-Api-Key", "api_key": "k3y-value", "tls_ca_bundle": "PEM",
+}
+_CRUSH_PW = {
+    "name": "crush_onprem", "kind": "crushftp", "protocol": "https", "endpoint_url": "https://files.internal",
+    "auth_method": "password", "username": "svc", "password": "hunter2",
+}
+
+
+def test_create_crushftp_api_key_profile_masks_only_the_key(client):
+    resp = client.post("/api/file-servers", json=_CRUSH_KEY)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["api_key"] == "********"
+    assert (data["protocol"], data["api_key_header"], data["tls_ca_bundle"]) == ("https", "X-Api-Key", "PEM")
+
+
+@pytest.mark.parametrize("change, fragment", [
+    ({"protocol": None}, "protocol"),
+    ({"endpoint_url": "http://files.example.com"}, "https://"),
+    ({"api_key": None}, "api_key"),
+    ({"api_key_header": "Cookie"}, "api_key_header"),
+])
+def test_create_crushftp_rejects_invalid_profiles(client, monkeypatch, change, fragment):
+    monkeypatch.delenv("CRUSHFTP_ALLOW_INSECURE_HTTP", raising=False)
+
+    resp = client.post("/api/file-servers", json={**_CRUSH_KEY, **change})
+
+    assert resp.status_code == 422
+    assert fragment in str(resp.json()["detail"])
+    assert client.get("/api/file-servers").json() == []
+
+
+def test_create_rejects_api_key_on_a_non_crushftp_profile(client):
+    resp = client.post("/api/file-servers", json={"name": "s", "kind": "sftp", "host": "h", "api_key": "k"})
+
+    assert resp.status_code == 422
+
+
+def test_update_crushftp_validates_the_merged_profile(client, encryption_key):
+    created = client.post("/api/file-servers", json=_CRUSH_PW).json()
+    url = f"/api/file-servers/{created['id']}"
+
+    # a partial update that leaves the profile valid is accepted
+    assert client.put(url, json={"description": "on-prem"}).status_code == 200
+    # switching to api_key without supplying a key is not
+    resp = client.put(url, json={"auth_method": "api_key", "api_key_header": "X-Api-Key"})
+    assert resp.status_code == 422 and "api_key" in resp.json()["detail"]
+    # and the rejected update changed nothing
+    assert client.get(url).json()["auth_method"] == "password"
+    # supplying the key makes the same switch valid
+    assert client.put(url, json={"auth_method": "api_key", "api_key_header": "X-Api-Key", "api_key": "k"}).status_code == 200
+
+
+def test_update_echoing_the_mask_keeps_the_stored_api_key(client, encryption_key):
+    created = client.post("/api/file-servers", json=_CRUSH_KEY).json()
+
+    resp = client.put(f"/api/file-servers/{created['id']}", json={"api_key": "********", "description": "edited"})
+
+    assert resp.status_code == 200
+    with Session(client.engine) as db:
+        assert FileServerProfileRepository(db).get_decrypted_by_name("crush_cloud").api_key == "k3y-value"
+
+
+def test_test_connection_crushftp_https_ok_and_scrubbed_error(client, monkeypatch):
+    from tests.helpers.fake_crushftp import FakeCrushFtp
+
+    monkeypatch.setenv("CRUSHFTP_ALLOW_INSECURE_HTTP", "1")
+    with FakeCrushFtp() as fake:
+        good = client.post("/api/file-servers", json={
+            **_CRUSH_PW, "endpoint_url": fake.base_url, "username": "atom", "password": "atompass",
+        }).json()
+        bad = client.post("/api/file-servers", json={
+            **_CRUSH_PW, "name": "crush_bad", "endpoint_url": fake.base_url, "username": "atom", "password": "wr0ng-secret",
+        }).json()
+
+        ok = client.post(f"/api/file-servers/{good['id']}/test").json()
+        failed = client.post(f"/api/file-servers/{bad['id']}/test").json()
+
+        assert ok == {"status": "ok", "presented_fingerprint": None, "pinned_fingerprint": None, "message": None}
+        assert failed["status"] == "error"
+        assert "wr0ng-secret" not in failed["message"]
+        assert fake.commands().count("logout") == 1  # the successful test closed its session
+
+
+def test_test_connection_crushftp_sftp_protocol_uses_the_fingerprint_flow(client, monkeypatch):
+    class _FakeKey:
+        def asbytes(self):
+            return b"crush-host-key"
+
+    class _FakeTransport:
+        def __init__(self, addr):
+            self.addr = addr
+
+        def connect(self, **kwargs):
+            pass
+
+        def get_remote_server_key(self):
+            return _FakeKey()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("api.routes.file_servers.paramiko.Transport", _FakeTransport)
+    created = client.post("/api/file-servers", json={
+        "name": "crush_sftp", "kind": "crushftp", "protocol": "sftp", "host": "files.internal", "port": 2222,
+        "username": "svc", "auth_method": "password", "password": "hunter2",
+    }).json()
+    url = f"/api/file-servers/{created['id']}/test"
+
+    first = client.post(url).json()
+    pinned = client.post(url, json={"accept_fingerprint": True}).json()
+
+    assert first["status"] == "unpinned" and first["presented_fingerprint"]
+    assert pinned["status"] == "ok"
+    assert client.get(f"/api/file-servers/{created['id']}").json()["host_key_fingerprint"] == first["presented_fingerprint"]
