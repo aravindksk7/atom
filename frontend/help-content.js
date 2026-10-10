@@ -295,7 +295,7 @@
         },
         {
           title: 'Scenario 6: File Watcher Gating a Sequence on a Nightly Drop',
-          text: 'Create a file_watcher job with local, S3, SFTP, SCP, or SMB location, folder or bucket path, file-name pattern such as SALES_*.csv, credentials_ref for remote storage, and a bounded max tries or window end. Put it first in a sequence and make processing depend on it so timeout blocks downstream work.',
+          text: 'Create a file_watcher job with local, S3, SFTP, SCP, SMB, or CrushFTP location, folder or bucket path, file-name pattern such as SALES_*.csv, credentials_ref for remote storage, and a bounded max tries or window end. Put it first in a sequence and make processing depend on it so timeout blocks downstream work.',
           where: 'Launch -> Job Editor -> file_watcher, then Sequences -> dependencies',
           when: 'A nightly workflow must wait for a bounded external file arrival.',
           uiMockup: { title: 'Nightly drop gate', elements: [
@@ -340,7 +340,7 @@
         },
         {
           title: 'Which Job Type When?',
-          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; file_transfer to copy files between local, S3, SFTP/SCP, and SMB locations; and AWS or enterprise adapter types when execution belongs to those systems.',
+          text: 'Choose reconciliation for authoritative source-target SQL or file matching; bo_report for SAP BO exports and prompts; sql_direct for a single SQL assertion; multi_file_reconciliation for folder or object batches; api_reconciliation for REST datasets; file_watcher to gate on arrival; file_transfer to copy files between local, S3, SFTP/SCP, SMB, and CrushFTP locations; and AWS or enterprise adapter types when execution belongs to those systems.',
           where: 'Launch -> Job Editor -> Job Type',
           when: 'Choosing the execution engine and required fields for a new job.',
           uiMockup: { title: 'Job type decision matrix', elements: [
@@ -992,7 +992,7 @@
       id: 'file-servers',
       category: 'Storage',
       title: 'File Servers & Storage',
-      intro: 'Create reusable SFTP, SCP, and S3 profiles; test connectivity; browse files; and feed masked secure profiles into file jobs.',
+      intro: 'Create reusable SFTP, SCP, S3, and CrushFTP profiles (CrushFTP over HTTPS with a login or an API-key header, or over SFTP — on-premises or cloud); test connectivity; browse files; and feed masked secure profiles into file jobs.',
       steps: [
         {
           title: 'Configure and test storage profiles',

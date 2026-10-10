@@ -26,11 +26,19 @@
       // port is shared across kinds: swap the sftp default (22) and the smb
       // default (445) when the kind changes, leaving any custom port alone.
       // SMB profiles saved before smb had a port field carry 22, shown as 445.
+      // crushftp also runs on a protocol change: each protocol has its own
+      // set of auth methods, so one left over from the other is reset.
       onFileServerKindChange() {
         const d = this.fileServerModal.data;
         const port = Number(d.port);
         if (d.kind === 'smb' && (!port || port === 22)) d.port = 445;
         else if ((d.kind === 'sftp' || d.kind === 'scp') && (!port || port === 445)) d.port = 22;
+        else if (d.kind === 'crushftp') {
+          if (d.protocol !== 'sftp') d.protocol = 'https';
+          const allowed = d.protocol === 'sftp' ? ['password', 'private_key'] : ['password', 'api_key'];
+          if (!allowed.includes(d.auth_method)) d.auth_method = 'password';
+          if (d.protocol === 'sftp' && (!port || port === 445)) d.port = 22;
+        }
       },
 
       async saveFileServer() {

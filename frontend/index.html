@@ -1799,6 +1799,7 @@
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
                 <option value="smb">smb</option>
+                <option value="crushftp">crushftp</option>
               </select>
               <input x-model="jobModal.mf_source_root" class="field-input" placeholder="/spool/exports or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-mf-source-root-input" aria-label="spool exports or s3 bucket prefix" />
@@ -1808,7 +1809,7 @@
                 <select x-model="jobModal.mf_source_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-mf-source-credentials-ref-select" aria-label="mf source file server">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.mf_source_kind === 's3' ? f.kind === 's3' : jobModal.mf_source_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_source_kind === 's3' ? f.kind === 's3' : jobModal.mf_source_kind === 'smb' ? f.kind === 'smb' : jobModal.mf_source_kind === 'crushftp' ? f.kind === 'crushftp' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
@@ -1823,6 +1824,7 @@
                 <option value="s3">s3</option>
                 <option value="sftp">sftp</option>
                 <option value="smb">smb</option>
+                <option value="crushftp">crushftp</option>
               </select>
               <input x-model="jobModal.mf_target_root" class="field-input" placeholder="/exports/finance or s3://bucket/prefix or \\server\share\path"
                      data-testid="job-modal-mf-target-root-input" aria-label="exports finance or s3 bucket prefix" />
@@ -1832,7 +1834,7 @@
                 <select x-model="jobModal.mf_target_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-mf-target-credentials-ref-select" aria-label="mf target file server">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.mf_target_kind === 's3' ? f.kind === 's3' : jobModal.mf_target_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.mf_target_kind === 's3' ? f.kind === 's3' : jobModal.mf_target_kind === 'smb' ? f.kind === 'smb' : jobModal.mf_target_kind === 'crushftp' ? f.kind === 'crushftp' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
@@ -1960,6 +1962,7 @@
                 <option value="sftp">sftp</option>
                 <option value="scp">scp</option>
                 <option value="smb">smb</option>
+                <option value="crushftp">crushftp</option>
               </select>
             </div>
             <div>
@@ -1977,7 +1980,7 @@
               <select x-model="jobModal.fw_credentials_ref" class="field-input field-select"
                       data-testid="job-modal-fw-credentials-ref-select" id="a11y-launch-fw-credentials-ref">
                 <option value="">— select a file server —</option>
-                <template x-for="fs in fileServers.filter(f => jobModal.fw_location_kind === 's3' ? f.kind === 's3' : jobModal.fw_location_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                <template x-for="fs in fileServers.filter(f => jobModal.fw_location_kind === 's3' ? f.kind === 's3' : jobModal.fw_location_kind === 'smb' ? f.kind === 'smb' : jobModal.fw_location_kind === 'crushftp' ? f.kind === 'crushftp' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                   <option :value="fs.name" x-text="fs.name"></option>
                 </template>
               </select>
@@ -2029,6 +2032,7 @@
                 <option value="sftp">sftp</option>
                 <option value="scp">scp</option>
                 <option value="smb">smb</option>
+                <option value="crushftp">crushftp</option>
               </select>
             </div>
             <div>
@@ -2046,7 +2050,7 @@
               <select x-model="jobModal.ft_source_credentials_ref" class="field-input field-select"
                       data-testid="job-modal-ft-source-credentials-ref-select" id="a11y-launch-ft-source-credentials-ref">
                 <option value="">— select a file server —</option>
-                <template x-for="fs in fileServers.filter(f => jobModal.ft_source_kind === 's3' ? f.kind === 's3' : jobModal.ft_source_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                <template x-for="fs in fileServers.filter(f => jobModal.ft_source_kind === 's3' ? f.kind === 's3' : jobModal.ft_source_kind === 'smb' ? f.kind === 'smb' : jobModal.ft_source_kind === 'crushftp' ? f.kind === 'crushftp' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                   <option :value="fs.name" x-text="fs.name"></option>
                 </template>
               </select>
@@ -2063,6 +2067,7 @@
                   <option value="sftp">sftp</option>
                   <option value="scp">scp</option>
                   <option value="smb">smb</option>
+                  <option value="crushftp">crushftp</option>
                 </select>
               </div>
               <div>
@@ -2075,7 +2080,7 @@
                 <select x-model="jobModal.ft_dest_credentials_ref" class="field-input field-select"
                         data-testid="job-modal-ft-dest-credentials-ref-select" id="a11y-launch-ft-dest-credentials-ref">
                   <option value="">— select a file server —</option>
-                  <template x-for="fs in fileServers.filter(f => jobModal.ft_dest_kind === 's3' ? f.kind === 's3' : jobModal.ft_dest_kind === 'smb' ? f.kind === 'smb' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
+                  <template x-for="fs in fileServers.filter(f => jobModal.ft_dest_kind === 's3' ? f.kind === 's3' : jobModal.ft_dest_kind === 'smb' ? f.kind === 'smb' : jobModal.ft_dest_kind === 'crushftp' ? f.kind === 'crushftp' : (f.kind === 'sftp' || f.kind === 'scp'))" :key="fs.id">
                     <option :value="fs.name" x-text="fs.name"></option>
                   </template>
                 </select>
@@ -8429,7 +8434,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div class="section-header">
     <div>
       <div class="section-title">File Servers</div>
-      <div class="section-sub">SFTP / SCP / S3 / SMB authentication profiles for file_watcher, file_transfer and multi-file jobs</div>
+      <div class="section-sub">SFTP / SCP / S3 / SMB / CrushFTP authentication profiles for file_watcher, file_transfer and multi-file jobs</div>
     </div>
     <button @click="openFileServerModal(null)" class="btn-primary" data-testid="file-server-add-btn">Add File Server</button>
   </div>
@@ -8437,7 +8442,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   <div x-show="fileServers.length === 0" class="card empty-state" data-testid="file-servers-empty-state">
     <div class="empty-state-icon">🗄️</div>
     <div class="empty-state-title">No file servers yet</div>
-    <div class="empty-state-sub">Add an SFTP, SCP, S3, or SMB profile to use with file_watcher, file_transfer and multi-file jobs (file_transfer destinations need write access)</div>
+    <div class="empty-state-sub">Add an SFTP, SCP, S3, SMB, or CrushFTP profile to use with file_watcher, file_transfer and multi-file jobs (file_transfer destinations need write access)</div>
   </div>
 
   <div class="space-y-3">
@@ -8446,7 +8451,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="flex items-start justify-between">
           <div>
             <div class="font-semibold" x-text="fs.name"></div>
-            <div class="text-muted text-sm" x-text="fs.kind + (fs.host ? (' · ' + fs.host) : '')"></div>
+            <div class="text-muted text-sm" x-text="fs.kind + (fs.kind === 'crushftp' && fs.protocol === 'https' ? (fs.endpoint_url ? (' · ' + fs.endpoint_url) : '') : (fs.host ? (' · ' + fs.host) : ''))"></div>
           </div>
           <div class="flex gap-2">
             <button @click="testFileServer(fs.id)" class="btn-secondary btn-sm" :data-testid="'file-server-test-' + fs.id">Test Connection</button>
@@ -8484,7 +8489,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div><label class="field-label">Name</label><input x-model="fileServerModal.data.name" class="field-input" data-testid="file-server-name-input" /></div>
         <div><label class="field-label">Kind</label>
           <select x-model="fileServerModal.data.kind" @change="onFileServerKindChange()" class="field-input field-select" data-testid="file-server-kind-select">
-            <option value="sftp">SFTP</option><option value="scp">SCP</option><option value="s3">S3</option><option value="smb">SMB / UNC Share</option>
+            <option value="sftp">SFTP</option><option value="scp">SCP</option><option value="s3">S3</option><option value="smb">SMB / UNC Share</option><option value="crushftp">CrushFTP</option>
           </select>
         </div>
         <template x-if="fileServerModal.data.kind === 'sftp' || fileServerModal.data.kind === 'scp'">
@@ -8512,6 +8517,53 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <div><label class="field-label">Port (445 unless the server uses an alternative SMB port; needs Windows 11 24H2 / Server 2025)</label><input type="number" x-model.number="fileServerModal.data.port" class="field-input" placeholder="445" data-testid="file-server-smb-port-input" /></div>
             <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" placeholder="DOMAIN\user or user@domain.com" data-testid="file-server-smb-username-input" /></div>
             <div><label class="field-label">Password</label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-smb-password-input" /></div>
+          </div>
+        </template>
+        <template x-if="fileServerModal.data.kind === 'crushftp'">
+          <div class="space-y-3">
+            <div><label class="field-label">Protocol</label>
+              <select x-model="fileServerModal.data.protocol" @change="onFileServerKindChange()" class="field-input field-select" data-testid="file-server-crushftp-protocol-select">
+                <option value="https">HTTPS (web API)</option><option value="sftp">SFTP</option>
+              </select>
+            </div>
+            <template x-if="fileServerModal.data.protocol === 'https'">
+              <div class="space-y-3">
+                <div><label class="field-label">Base URL</label><input x-model="fileServerModal.data.endpoint_url" class="field-input" placeholder="https://files.example.com" data-testid="file-server-crushftp-url-input" /></div>
+                <div><label class="field-label">Auth Method</label>
+                  <select x-model="fileServerModal.data.auth_method" class="field-input field-select" data-testid="file-server-crushftp-auth-select">
+                    <option value="password">Username and password</option><option value="api_key">API key header</option>
+                  </select>
+                </div>
+                <template x-if="fileServerModal.data.auth_method === 'api_key'">
+                  <div class="space-y-3">
+                    <div><label class="field-label">Header Name</label><input x-model="fileServerModal.data.api_key_header" class="field-input" placeholder="X-Api-Key" data-testid="file-server-crushftp-header-input" /></div>
+                    <div><label class="field-label">API Key</label><input type="password" x-model="fileServerModal.data.api_key" class="field-input" data-testid="file-server-crushftp-key-input" /></div>
+                  </div>
+                </template>
+                <div><label class="field-label" x-text="fileServerModal.data.auth_method === 'api_key' ? 'Username (optional — only if the server also needs a login)' : 'Username'"></label><input x-model="fileServerModal.data.username" class="field-input" data-testid="file-server-crushftp-username-input" /></div>
+                <div><label class="field-label" x-text="fileServerModal.data.auth_method === 'api_key' ? 'Password (optional)' : 'Password'"></label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-crushftp-password-input" /></div>
+                <div><label class="field-label">CA Certificate (PEM, optional — for a private on-premises CA)</label><textarea x-model="fileServerModal.data.tls_ca_bundle" class="field-input" rows="3" data-testid="file-server-crushftp-ca-input"></textarea></div>
+              </div>
+            </template>
+            <template x-if="fileServerModal.data.protocol === 'sftp'">
+              <div class="space-y-3">
+                <div><label class="field-label">Host</label><input x-model="fileServerModal.data.host" class="field-input" data-testid="file-server-crushftp-sftp-host-input" /></div>
+                <div><label class="field-label">Port</label><input type="number" x-model.number="fileServerModal.data.port" class="field-input" data-testid="file-server-crushftp-sftp-port-input" /></div>
+                <div><label class="field-label">Username</label><input x-model="fileServerModal.data.username" class="field-input" data-testid="file-server-crushftp-sftp-username-input" /></div>
+                <div><label class="field-label">Auth Method</label>
+                  <select x-model="fileServerModal.data.auth_method" class="field-input field-select" data-testid="file-server-crushftp-sftp-auth-select">
+                    <option value="password">Password</option><option value="private_key">Private Key</option>
+                  </select>
+                </div>
+                <div x-show="fileServerModal.data.auth_method === 'password'"><label class="field-label">Password</label><input type="password" x-model="fileServerModal.data.password" class="field-input" data-testid="file-server-crushftp-sftp-password-input" /></div>
+                <template x-if="fileServerModal.data.auth_method === 'private_key'">
+                  <div class="space-y-3">
+                    <div><label class="field-label">Private Key</label><textarea x-model="fileServerModal.data.private_key" class="field-input" rows="4"></textarea></div>
+                    <div><label class="field-label">Key Passphrase (optional)</label><input type="password" x-model="fileServerModal.data.key_passphrase" class="field-input" /></div>
+                  </div>
+                </template>
+              </div>
+            </template>
           </div>
         </template>
         <template x-if="fileServerModal.data.kind === 's3'">
