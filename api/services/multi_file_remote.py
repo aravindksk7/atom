@@ -4,7 +4,8 @@ discovery/read dispatch for ``multi_file`` reconciliation jobs.
 Both ``RunExecutor`` (live job execution, ``api/services/run_executor.py``)
 and ``difference_export`` (recomputing a run's full diff set for export/HTML
 reports, ``api/services/difference_export.py``) need to discover and read
-files from the same four source kinds (``local``, ``s3``, ``sftp``, ``smb``).
+files from the same source kinds (``local``, ``s3``, ``sftp``, ``smb``,
+``crushftp``).
 This module is the single place that owns that logic, so the two call sites
 don't each re-derive their own copy of client construction and credential
 lookup.
@@ -27,7 +28,7 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -36,6 +37,7 @@ from api.services.file_source import _read_tabular_bytes, read_tabular, resolve_
 from etl_framework.reconciliation.file_mapping import (
     DiscoveredFile,
     FileSourceSpec,
+    discover_crushftp_files,
     discover_local_files,
     discover_s3_files,
     discover_sftp_files,
@@ -357,8 +359,8 @@ def close_remote_client(client) -> None:
 
 
 class RemoteFileSourceSession:
-    """Discovers and reads files for a ``local``/``s3``/``sftp``/``smb``
-    source spec, reusing one client per ``(kind, credentials_ref)`` across
+    """Discovers and reads files for a ``local``/``s3``/``sftp``/``smb``/
+    ``crushftp`` source spec, reusing one client per ``(kind, credentials_ref)`` across
     every call for the lifetime of this session -- construct one per job
     execution, use it for both sides' discovery and every subsequent file
     read, then ``close()`` it (or use as a context manager) once the job is
@@ -465,6 +467,15 @@ class RemoteFileSourceSession:
                     self._clients[key] = reused_client
                 else:
                     self._clients[key] = connect_smb_share(profile, spec, lock_timeout_seconds)
+            elif spec.kind == "crushftp":
+                # The profile picks the transport: its sftp protocol is the
+                # ordinary paramiko path, its https protocol the HTTP API.
+                if profile is not None and profile.protocol == "sftp":
+                    self._clients[key] = build_sftp_client(profile, spec)
+                else:
+                    from api.services.crushftp_client import build_crushftp_client
+
+                    self._clients[key] = build_crushftp_client(profile, spec)
             else:
                 raise ValueError(f"Unsupported multi_file source kind: {spec.kind}")
             self._profiles[key] = profile
@@ -508,13 +519,27 @@ class RemoteFileSourceSession:
         credentials_ref) caching as every other call on this session."""
         return self._client_for(spec)
 
+    def transport_for(self, spec: FileSourceSpec) -> str:
+        """The transport that actually serves ``spec``: ``spec.kind``, except
+        for a ``crushftp`` location, whose profile picks ``sftp`` (the
+        paramiko client) or ``crushftp`` (the HTTP API). Resolves the profile,
+        so it connects on first use like every other call here."""
+        if spec.kind != "crushftp":
+            return spec.kind
+        self._client_for(spec)
+        profile = self._profiles.get((spec.kind, spec.credentials_ref))
+        return "sftp" if profile is not None and profile.protocol == "sftp" else "crushftp"
+
     def location_key_for(self, spec: FileSourceSpec) -> tuple | None:
         """Where ``spec`` really points, independent of the profile's name, so
         two differently named profiles for the same server compare equal:
         ``("s3", endpoint_url)`` (empty = AWS; bucket names are global there),
-        ``("sftp", host, port, username)``, or ``("smb", server, share)``.
+        ``("sftp", host, port, username)``, ``("smb", server, share)``, or
+        ``("crushftp", host, port, account)`` for CrushFTP's HTTP API (a
+        ``crushftp`` location on the sftp protocol gets the sftp key, so it
+        compares equal to a plain sftp profile for the same account).
         None for local specs or a spec with no resolved profile."""
-        if spec.kind not in ("s3", "sftp", "smb"):
+        if spec.kind not in ("s3", "sftp", "smb", "crushftp"):
             return None
         if spec.kind == "smb":
             # Computing the smb location key only needs the resolved profile
@@ -549,6 +574,13 @@ class RemoteFileSourceSession:
             # MinIO); tenant-scoped gateways such as Ceph RGW would need the
             # tenant in this key.
             return ("s3", (profile.endpoint_url or "").rstrip("/").lower())
+        if self.transport_for(spec) == "crushftp":
+            # The account is part of the location, as for sftp: each CrushFTP
+            # user has its own virtual file system. An API-key-only profile
+            # has no username, so its header name stands in.
+            parts = urlsplit(profile.endpoint_url or "")
+            port = parts.port or (443 if parts.scheme == "https" else 80)
+            return ("crushftp", (parts.hostname or "").lower(), port, profile.username or profile.api_key_header or "")
         # The SSH username is part of the location: relative roots resolve
         # against each account's own home and chrooted accounts can both use
         # the same absolute path.
@@ -567,8 +599,11 @@ class RemoteFileSourceSession:
             return discover_local_files(root, spec.pattern, recursive=recursive)
         if spec.kind == "s3":
             return discover_s3_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
-        if spec.kind == "sftp":
+        transport = self.transport_for(spec)
+        if transport == "sftp":
             return discover_sftp_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
+        if transport == "crushftp":
+            return discover_crushftp_files(self._client_for(spec), spec.root, spec.pattern, recursive=recursive)
         if spec.kind == "smb":
             # connects (net use); the UNC path is then a normal filesystem path
             self._client_for(spec, lock_timeout_seconds=lock_timeout_seconds)
@@ -582,9 +617,14 @@ class RemoteFileSourceSession:
             parsed = urlparse(file.path)
             obj = self._client_for(spec).get_object(Bucket=parsed.netloc, Key=unquote(parsed.path.lstrip("/")))
             return _read_tabular_bytes(obj["Body"].read(), Path(file.file_name).suffix.lower())
-        if spec.kind == "sftp":
+        transport = self.transport_for(spec)
+        if transport == "sftp":
             client = self._client_for(spec)
             with client.open(file.path, "rb") as fh:
+                raw = fh.read()
+            return _read_tabular_bytes(raw, Path(file.file_name).suffix.lower())
+        if transport == "crushftp":
+            with self._client_for(spec).open_read(file.path) as fh:
                 raw = fh.read()
             return _read_tabular_bytes(raw, Path(file.file_name).suffix.lower())
         if spec.kind == "smb":
@@ -627,10 +667,14 @@ class RemoteFileSourceSession:
                     return b""
                 raise
             return obj["Body"].read()
-        if spec.kind == "sftp":
+        transport = self.transport_for(spec)
+        if transport == "sftp":
             client = self._client_for(spec)
             with client.open(file.path, "rb") as fh:
                 return fh.read(_CONTENT_MATCH_READ_LIMIT)
+        if transport == "crushftp":
+            with self._client_for(spec).open_read(file.path, limit=_CONTENT_MATCH_READ_LIMIT) as fh:
+                return fh.read()
         if spec.kind == "smb":
             self._client_for(spec)
             with open(file.path, "rb") as fh:
