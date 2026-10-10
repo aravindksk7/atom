@@ -373,6 +373,109 @@ class SftpEndpoint:
             pass
 
 
+# -- CrushFTP (HTTP API) -------------------------------------------------------
+
+class CrushFtpEndpoint:
+    """A CrushFTP location reached over its HTTP API. A ``crushftp`` location
+    whose profile uses the sftp protocol is served by ``SftpEndpoint`` instead
+    (see ``build_endpoint``)."""
+
+    kind = "crushftp"
+
+    def __init__(
+        self, root: str, client: Any, credentials_ref: str | None, *, location_key: tuple | None = None,
+    ) -> None:
+        self.client = client
+        self.credentials_ref = credentials_ref
+        # Where the profile really points (see RemoteFileSourceSession.location_key_for);
+        # identity() prefers it so two profiles for one server compare equal.
+        self.location_key = location_key
+        self.root = root.rstrip("/") or "/"
+
+    def relative_of(self, file: DiscoveredFile) -> str:
+        prefix = self.root.rstrip("/") + "/"
+        if not file.path.startswith(prefix):
+            raise TransferError(f"'{file.path}' is not under source root '{self.root}'")
+        return file.path[len(prefix):]
+
+    def destination_for(self, relative: str) -> str:
+        target = posixpath.normpath(posixpath.join(self.root, relative))
+        if not target.startswith(self.root.rstrip("/") + "/"):
+            raise TransferError(
+                f"destination path for '{relative}' escapes destination root '{self.root}'"
+            )
+        return target
+
+    def identity(self, path: str) -> tuple:
+        location = self.location_key if self.location_key is not None else self.credentials_ref
+        return ("crushftp", location, posixpath.normpath(path))
+
+    def exists(self, path: str) -> bool:
+        return self.client.exists(path)
+
+    def exists_many(self, paths: list[str]) -> set[str]:
+        """Subset of ``paths`` that exist. Few paths are checked one by one;
+        from ``_SFTP_LISTING_THRESHOLD`` paths up, each parent directory is
+        listed once instead (an existing sub-directory of the same name counts
+        as existing, as it does for a single check)."""
+        paths = list(paths)
+        if len(paths) < _SFTP_LISTING_THRESHOLD:
+            return {path for path in paths if self.exists(path)}
+        by_directory: dict[str, list[str]] = {}
+        for path in paths:
+            by_directory.setdefault(posixpath.dirname(path), []).append(path)
+        found: set[str] = set()
+        for directory, members in by_directory.items():
+            try:
+                names = {entry.name for entry in self.client.list(directory)}
+            except FileNotFoundError:
+                continue
+            found.update(path for path in members if posixpath.basename(path) in names)
+        return found
+
+    def size(self, path: str) -> int:
+        return self.client.size(path)
+
+    def open_read(self, path: str):
+        return self.client.open_read(path)
+
+    def _discard(self, path: str) -> None:
+        try:
+            self.client.delete(path)
+        except Exception:
+            pass
+
+    def write(self, path: str, stream: Any) -> None:
+        if "%" in path:
+            # The server treats "%" differently in upload, listing and rename,
+            # so such a name cannot be written and then found again reliably.
+            raise TransferError(f"CrushFTP destination paths cannot contain '%': {path}")
+        self.client.mkdir(posixpath.dirname(path))
+        part = f"{path}.{uuid4().hex}{PART_SUFFIX}"
+        try:
+            self.client.upload(part, stream)
+            if not self.client.exists(path):
+                self.client.rename(part, path)
+                return
+            # The server refuses to rename onto an existing file, so move the
+            # old one aside and restore it if the swap fails: the destination
+            # is never left missing.
+            backup = f"{path}.{uuid4().hex}.bak"
+            self.client.rename(path, backup)
+            try:
+                self.client.rename(part, path)
+            except BaseException:
+                self.client.rename(backup, path)
+                raise
+            self._discard(backup)
+        except BaseException:
+            self._discard(part)
+            raise
+
+    def delete(self, path: str) -> None:
+        self.client.delete(path)
+
+
 # -- Planning ----------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -504,9 +607,10 @@ def is_transport_error(exc: BaseException | None) -> bool:
         return False
     if isinstance(exc, (EOFError, ConnectionError, TimeoutError)):
         return True
+    from api.services.crushftp_client import CrushFtpConnectError
     from api.services.multi_file_remote import SmbConnectError
 
-    if isinstance(exc, SmbConnectError):
+    if isinstance(exc, (SmbConnectError, CrushFtpConnectError)):
         return True
     if isinstance(exc, OSError) and getattr(exc, "winerror", None) in _SMB_TRANSPORT_WINERRORS:
         return True
@@ -600,6 +704,10 @@ def build_endpoint(session: Any, spec: Any):
     location_key = session.location_key_for(spec)
     if spec.kind == "s3":
         return S3Endpoint(spec.root, client, spec.credentials_ref, location_key=location_key)
-    if spec.kind == "sftp":
+    # A crushftp location is served by whichever transport its profile picks.
+    transport = session.transport_for(spec) if spec.kind == "crushftp" else spec.kind
+    if transport == "sftp":
         return SftpEndpoint(spec.root, client, spec.credentials_ref, location_key=location_key)
+    if transport == "crushftp":
+        return CrushFtpEndpoint(spec.root, client, spec.credentials_ref, location_key=location_key)
     raise ValueError(f"Unsupported file_transfer location kind: {spec.kind}")
