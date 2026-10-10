@@ -218,15 +218,15 @@ def _validate_file_watcher(params: dict[str, Any], issues: list[ValidationIssue]
         issues.append(ValidationIssue("params.location", "file_watcher jobs require a 'location' object in params"))
         location = {}
     kind = location.get("kind")
-    if kind not in ("local", "s3", "sftp", "scp", "smb"):
+    if kind not in ("local", "s3", "sftp", "scp", "smb", "crushftp"):
         issues.append(ValidationIssue(
-            "params.location.kind", "file_watcher location.kind must be 'local', 's3', 'sftp', 'scp', or 'smb'",
+            "params.location.kind", "file_watcher location.kind must be 'local', 's3', 'sftp', 'scp', 'smb', or 'crushftp'",
         ))
     if not location.get("root"):
         issues.append(ValidationIssue("params.location.root", "file_watcher location requires 'root'"))
     if not location.get("pattern"):
         issues.append(ValidationIssue("params.location.pattern", "file_watcher location requires 'pattern'"))
-    if kind in ("s3", "sftp", "scp", "smb") and not location.get("credentials_ref"):
+    if kind in ("s3", "sftp", "scp", "smb", "crushftp") and not location.get("credentials_ref"):
         issues.append(ValidationIssue(
             "params.location.credentials_ref",
             f"file_watcher location.kind '{kind}' requires 'credentials_ref'",

@@ -323,6 +323,41 @@ def discover_sftp_files(client: Any, root: str, pattern: str, *, recursive: bool
     return sorted(discovered, key=lambda f: f.path)
 
 
+def discover_crushftp_files(client: Any, root: str, pattern: str, *, recursive: bool = False) -> list[DiscoveredFile]:
+    """Discover files under a CrushFTP directory over its HTTP API. Same
+    contract as ``discover_sftp_files``; ``client`` is an
+    ``api.services.crushftp_client.CrushFtpHttpClient`` (or a test double with
+    the same ``list``). A file's path comes from the listing itself, since the
+    server may answer for a different directory than the one asked for (an
+    account with a single virtual folder gets that folder for ``/``).
+    """
+    regex = compile_token_pattern(pattern)
+    discovered: list[DiscoveredFile] = []
+
+    def _walk(directory: str, depth: int) -> None:
+        for entry in client.list(directory):
+            if entry.is_dir:
+                if not recursive:
+                    continue
+                if depth < _MAX_RECURSION_DEPTH:
+                    _walk(entry.path, depth + 1)
+                else:
+                    logger.warning(
+                        "Recursive discovery under %s stopped at the %d-level depth cap; %s was not entered",
+                        root,
+                        _MAX_RECURSION_DEPTH,
+                        entry.path,
+                    )
+                continue
+            match = regex.match(entry.name)
+            if match is None:
+                continue
+            discovered.append(DiscoveredFile(path=entry.path, file_name=entry.name, tokens=match.groupdict()))
+
+    _walk(root.rstrip("/") or "/", 0)
+    return sorted(discovered, key=lambda f: f.path)
+
+
 @dataclass(frozen=True)
 class FileGroup:
     key: tuple[str, ...]
@@ -510,10 +545,10 @@ def _parse_file_source(raw: Any, side: str) -> FileSourceSpec:
             f"file_mapping.{side} requires an object with 'kind', 'root', and 'pattern'"
         )
     kind = raw.get("kind", "local")
-    if kind not in {"local", "s3", "sftp", "smb"}:
+    if kind not in {"local", "s3", "sftp", "smb", "crushftp"}:
         raise ValueError(
             f"file_mapping.{side}.kind '{kind}' is not supported yet; "
-            "supported kinds are 'local', 's3', 'sftp', and 'smb'"
+            "supported kinds are 'local', 's3', 'sftp', 'smb', and 'crushftp'"
         )
     root = raw.get("root")
     pattern = raw.get("pattern")
