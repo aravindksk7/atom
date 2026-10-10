@@ -128,6 +128,22 @@ services:
       timeout: 5s
       retries: 20
 
+  crushftp:
+    # Official image. Starts with an admin (crushadmin / password, set by the
+    # image's entrypoint) and no other users; tests/integration/test_crushftp_live.py
+    # creates its own test user through the admin API.
+    image: crushftp/crushftp11:latest
+    container_name: atom-crushftp-integration
+    tmpfs:
+      # The server runs as uid 65532 and needs a directory it can write to
+      # for the test user's virtual folder.
+      - /srv/atomdata:uid=65532,gid=65532
+    ports:
+      - "28080:8080"   # HTTP WebInterface (the stock HTTPS certificate cannot pass hostname verification)
+      - "22222:2222"   # SFTP
+    # No healthcheck: the image has no shell or HTTP client to probe with. The
+    # live test's own first request retries until the server answers.
+
   floci:
     # Free local AWS emulator used for Glue/Athena live e2e coverage. LocalStack
     # Community does not implement Glue/Athena without a Pro auth token, while
