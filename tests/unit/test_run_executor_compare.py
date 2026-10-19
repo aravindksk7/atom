@@ -262,6 +262,39 @@ def test_compare_sql_job_requires_live_connections():
         _executor(_session())._build_case(job)()
 
 
+def test_compare_sql_job_rejects_mutating_query_before_building_engines(monkeypatch):
+    """A stored job whose request bypassed save-time validation is still guarded at run time."""
+    def _explode(*args, **kwargs):
+        raise AssertionError("DBEngine must not be constructed for a mutating query")
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _explode)
+    db = _session()
+    id_a, id_b = _seed_sql_configs(db)
+    job = JobDefinition.model_construct(
+        name="bad_cmp",
+        job_type="compare",
+        description="",
+        tags=[],
+        query="",
+        key_columns=[],
+        exclude_columns=[],
+        source_env=None,
+        target_env=None,
+        params={"compare_type": "sql", "request": {
+            "config_id_a": id_a, "config_id_b": id_b,
+            "query_a": "SELECT id FROM dbo.orders",
+            "query_b": "SELECT 1; DROP TABLE x",
+        }},
+        enabled=True,
+        rules=[],
+        depends_on=[],
+        pass_condition=None,
+    )
+
+    with pytest.raises(ValueError, match="read-only SELECT or WITH"):
+        _live_executor(db)._build_case(job)()
+
+
 def test_compare_sql_job_with_missing_config_raises(monkeypatch):
     monkeypatch.setattr("etl_framework.db.engine.DBEngine", _FrameDBEngine)
     job = JobDefinition(

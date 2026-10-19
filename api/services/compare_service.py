@@ -579,6 +579,13 @@ class CompareService:
         """Run both queries against their configs and reconcile; returns ONE result."""
         from etl_framework.db.engine import DBEngine
         from etl_framework.config.models import resolve_connection
+        from etl_framework.db.sql_utils import is_read_only_sql
+
+        for side, query in (("A", req.query_a), ("B", req.query_b)):
+            if not is_read_only_sql(query):
+                raise ValueError(
+                    f"compare job Source {side} query must be a single read-only SELECT or WITH query"
+                )
 
         cfg_a = self._config_repo.get(req.config_id_a)
         if cfg_a is None:

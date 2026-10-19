@@ -368,6 +368,20 @@ def _check_sql_connection_names(body: SQLCompareRequest, db: Session) -> None:
             )
 
 
+def _check_sql_queries_read_only(body: SQLCompareRequest) -> None:
+    """Raise 422 before starting a run when either query is not read-only."""
+    from etl_framework.db.sql_utils import is_read_only_sql
+
+    for side, query in (("A", body.query_a), ("B", body.query_b)):
+        if not is_read_only_sql(query):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"compare job Source {side} query must be a single read-only SELECT or WITH query"
+                ),
+            )
+
+
 @router.post("/sql", response_model=RunStatusOut, status_code=202)
 def compare_sql(
     body: SQLCompareRequest,
@@ -375,6 +389,7 @@ def compare_sql(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
+    _check_sql_queries_read_only(body)
     _check_sql_connection_names(body, db)
     run_id = str(uuid.uuid4())
     snapshot = {

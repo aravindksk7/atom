@@ -397,6 +397,30 @@ def test_sql_compare_valid_connection_accepted(client, monkeypatch):
     assert resp.status_code == 202
 
 
+def test_sql_compare_mutating_query_returns_422_without_connecting(client, monkeypatch):
+    """A mutating query must be rejected at the route before any run is started."""
+    import api.routes.compare as compare_module
+
+    launched = []
+    monkeypatch.setattr(compare_module, "_run_sql_bg", lambda *a, **kw: launched.append(a))
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("DBEngine must not be constructed for a mutating query")
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _explode)
+
+    resp = client.post("/api/compare/sql", json={
+        "config_id_a": 1,
+        "config_id_b": 1,
+        "query_a": "SELECT 1",
+        "query_b": "SELECT 1; DROP TABLE x",
+    })
+
+    assert resp.status_code == 422
+    assert "read-only SELECT or WITH" in resp.json()["detail"]
+    assert launched == []
+
+
 # ---------------------------------------------------------------------------
 # _load_in_chunks unit tests
 # ---------------------------------------------------------------------------
