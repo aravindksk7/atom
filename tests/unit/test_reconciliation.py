@@ -13,6 +13,9 @@ from etl_framework.exceptions import SchemaValidationError
 def _batcher(df):
     """iter_query_batches side effect: yield ``df`` in cursor batches."""
     def side_effect(query, params=None, *, batch_size):
+        if df.empty:
+            yield df.iloc[0:0]
+            return
         for start in range(0, len(df), batch_size):
             yield df.iloc[start:start + batch_size].reset_index(drop=True)
     return side_effect
@@ -397,6 +400,8 @@ def test_chunk_size_nonzero_reconciles_correctly():
     target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "x"]})  # mismatch on row 3
     engine = _make_paginating_engine(source, target, chunk_size=2)
     result = engine.reconcile("SELECT 1", "chunked_mismatch")
+    engine._source_engine.execute_query.assert_not_called()
+    engine._target_engine.execute_query.assert_not_called()
     assert result.value_mismatch_count >= 1
 
 
@@ -410,6 +415,16 @@ def test_chunk_size_nonzero_unequal_row_counts_no_infinite_loop():
     assert result.missing_in_source_count == 1
 
 
+def test_chunk_size_nonzero_empty_source_reports_missing_in_source():
+    """An empty chunked source keeps its columns, so keyed compare reports missing rows."""
+    source = pd.DataFrame({"id": [], "val": []})
+    target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    engine = _make_paginating_engine(source, target, chunk_size=2)
+    result = engine.reconcile("SELECT 1", "empty_source")
+    assert result.status == TestStatus.FAILED
+    assert result.missing_in_source_count == 3
+
+
 def test_chunk_size_nonzero_loads_longer_side_fully():
     """Chunked mode must continue loading until both sides are exhausted."""
     source = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
@@ -417,6 +432,7 @@ def test_chunk_size_nonzero_loads_longer_side_fully():
     engine = _make_paginating_engine(source, target, chunk_size=2)
 
     result = engine.reconcile("SELECT 1", "longer_target")
+    engine._source_engine.execute_query.assert_not_called()
 
     assert result.source_row_count == 3
     assert result.target_row_count == 5

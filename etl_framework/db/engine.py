@@ -192,15 +192,19 @@ class DBEngine:
         one (psycopg); pyodbc, oracledb and nzpy fall back to ``fetchmany``
         batching. Either way there is no ORDER BY/OFFSET paging, so no
         per-dialect SQL and no need for unique keys. The connection is held
-        until the generator is exhausted or closed.
+        until the generator is exhausted or closed. An empty result yields
+        one empty frame that still carries the column names.
         """
         if batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
         with self._engine.connect().execution_options(stream_results=True) as conn:
+            first = True
             for batch in pd.read_sql(text(query), conn, params=params or {}, chunksize=batch_size):
-                # pandas yields one empty frame for an empty result; yield nothing.
-                if not batch.empty:
+                # An empty result yields one empty, column-bearing frame so
+                # callers keep the schema; later empty batches are skipped.
+                if first or not batch.empty:
                     yield batch
+                first = False
 
     def dispose(self) -> None:
         self._engine.dispose()

@@ -322,10 +322,13 @@ def test_iter_query_batches_binds_params(cfg, sqlite_five_rows):
     assert sorted(int(i) for i in batches[0]["id"]) == [4, 5]
 
 
-def test_iter_query_batches_empty_result_yields_nothing(cfg, sqlite_five_rows):
+def test_iter_query_batches_empty_result_yields_one_empty_frame_with_columns(cfg, sqlite_five_rows):
     with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
         engine = DBEngine(cfg)
-    assert list(engine.iter_query_batches("SELECT id FROM nums WHERE id > 99", batch_size=2)) == []
+    batches = list(engine.iter_query_batches("SELECT id FROM nums WHERE id > 99", batch_size=2))
+    assert len(batches) == 1
+    assert len(batches[0]) == 0
+    assert list(batches[0].columns) == ["id"]
 
 
 def test_iter_query_batches_rejects_non_positive_batch_size(cfg, sqlite_five_rows):

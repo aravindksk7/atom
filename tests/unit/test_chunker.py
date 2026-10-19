@@ -74,6 +74,9 @@ class _BatchEngine:
 
     def iter_query_batches(self, query: str, params=None, *, batch_size: int):
         self.batch_calls.append((query, params, batch_size))
+        if self._df.empty:
+            yield self._df.iloc[0:0]
+            return
         for start in range(0, len(self._df), batch_size):
             yield self._df.iloc[start:start + batch_size].reset_index(drop=True)
 
@@ -148,3 +151,4 @@ def test_load_in_chunks_empty_result_returns_empty_frame():
     engine = _BatchEngine(pd.DataFrame({"id": []}))
     out = load_in_chunks(engine, "SELECT * FROM t", ["id"], 2)
     assert out.empty
+    assert list(out.columns) == ["id"]
