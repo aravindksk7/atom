@@ -17,7 +17,7 @@ def strip_trailing_semicolon(sql: str) -> str:
     return sql.strip().rstrip(";").strip()
 
 
-def _without_comments(sql: str) -> str:
+def _without_comments(sql: str, backslash_escapes: bool = False) -> str:
     """Single left-to-right scan: literals become ``''``, comments become a space.
 
     Quoted identifiers ("x", [x]) are blanked the same way so a ``--`` inside
@@ -31,6 +31,9 @@ def _without_comments(sql: str) -> str:
             close = "]" if ch == "[" else ch
             j = i + 1
             while j < n:
+                if backslash_escapes and ch == "'" and sql[j] == "\\":
+                    j += 2  # Postgres E'...' style: backslash escapes the next char
+                    continue
                 if sql[j] == close:
                     if close != "]" and j + 1 < n and sql[j + 1] == close:
                         j += 2  # doubled quote is an escape
@@ -54,7 +57,16 @@ def _without_comments(sql: str) -> str:
 
 
 def is_read_only_sql(sql: str) -> bool:
-    cleaned = strip_trailing_semicolon(_without_comments(sql)).strip()
+    # Dialects disagree on whether a backslash escapes a quote inside a literal
+    # (Postgres E'..' yes, SQL Server no), so require read-only under both readings.
+    return all(
+        _read_only_after_cleaning(_without_comments(sql, backslash_escapes=flag))
+        for flag in (False, True)
+    )
+
+
+def _read_only_after_cleaning(text: str) -> bool:
+    cleaned = strip_trailing_semicolon(text).strip()
     if not cleaned:
         return False
     if ";" in cleaned:

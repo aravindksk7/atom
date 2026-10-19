@@ -24,6 +24,8 @@ def test_read_only_sql_detection():
     "SELECT 1 /* ' */ ; DROP TABLE t",
     'SELECT * FROM t WHERE "a--" = 1 ; DROP TABLE t',
     "DELETE FROM t",
+    "SELECT E'\\'' ; DROP TABLE t ; --'",
+    "SELECT 'a\\' ; DROP TABLE t --'",
 ])
 def test_read_only_sql_rejects_statements_hidden_near_literals_and_comments(sql):
     assert not is_read_only_sql(sql)
@@ -33,6 +35,8 @@ def test_read_only_sql_rejects_statements_hidden_near_literals_and_comments(sql)
     "SELECT * FROM t WHERE a = 'a;b'",
     "SELECT * FROM t WHERE action IN ('INSERT','UPDATE')",
     "SELECT 'it''s' AS x",
+    "SELECT 'C:\\temp' AS p",
+    "SELECT * FROM t WHERE p LIKE 'C:\\%'",
     "SELECT 1 -- trailing comment",
     "SELECT 1 /* c */ FROM t;",
 ])
