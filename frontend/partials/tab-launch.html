@@ -211,6 +211,7 @@
       <div class="font-semibold text-slate-700">Job Catalog</div>
       <div class="flex items-center gap-3">
         <span class="text-muted" x-text="jobCatalogCountLabel"></span>
+        <button @click="openBulkCompareModal()" class="btn-secondary btn-sm" data-testid="bulk-compare-open-btn">Bulk import compares</button>
         <button @click="openNewJobModal()" class="btn-primary btn-sm" data-testid="job-new-btn">+ New Job</button>
       </div>
     </div>
@@ -282,6 +283,72 @@
           </div>
         </div>
       </template>
+    </div>
+  </div>
+
+  <!-- Bulk compare import modal -->
+  <div x-show="bulkCompare.open" x-cloak class="modal-backdrop" @click.self="closeBulkCompareModal()" data-testid="bulk-compare-modal">
+    <div class="modal-box w-full max-w-5xl" role="dialog" aria-modal="true" aria-labelledby="bulkCompareTitle">
+      <div class="flex items-center mb-3">
+        <h2 id="bulkCompareTitle" class="text-lg font-bold">Bulk import compare jobs</h2>
+        <button @click="closeBulkCompareModal()" class="ml-auto text-slate-400" aria-label="close bulk compare import">✕</button>
+      </div>
+      <p class="text-sm text-slate-600 mb-3">
+        One row per table pair. Configs are referenced by name; columns as <code>source:target</code> or a shared name, separated by <code>;</code>.
+        <button @click="downloadBulkCompareTemplate()" class="text-indigo-600 underline" data-testid="bulk-compare-template-btn">Download template</button>
+      </p>
+      <label class="field-label" for="bulk-compare-file">Mapping sheet (.csv or .xlsx)</label>
+      <input id="bulk-compare-file" type="file" accept=".csv,.xlsx" @change="previewBulkCompareFile($event)" class="field-input mb-3" data-testid="bulk-compare-file-input" />
+      <p x-show="bulkCompare.loading" class="text-sm text-slate-500">Validating…</p>
+      <p x-show="bulkCompare.error" x-text="bulkCompare.error" class="text-sm text-red-600 mb-2" data-testid="bulk-compare-error"></p>
+
+      <template x-if="bulkCompare.preview">
+        <div>
+          <p class="text-sm mb-2" data-testid="bulk-compare-summary"
+             x-text="`${bulkCompare.preview.valid_count} valid, ${bulkCompare.preview.invalid_count} invalid`"></p>
+          <div class="overflow-auto border border-slate-200 rounded" style="max-height: 50vh">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50 text-left">
+                <tr><th class="px-2 py-1">Row</th><th class="px-2 py-1">Job</th><th class="px-2 py-1">Source</th><th class="px-2 py-1">Target</th><th class="px-2 py-1">Status</th><th class="px-2 py-1"></th></tr>
+              </thead>
+              <tbody>
+                <template x-for="row in bulkCompare.preview.rows" :key="row.row_number">
+                  <tr class="border-t border-slate-100 align-top" :data-testid="`bulk-compare-row-${row.row_number}`">
+                    <td class="px-2 py-1" x-text="row.row_number"></td>
+                    <td class="px-2 py-1 font-mono" x-text="row.job_name"></td>
+                    <td class="px-2 py-1" x-text="row.source"></td>
+                    <td class="px-2 py-1" x-text="row.target"></td>
+                    <td class="px-2 py-1">
+                      <span class="compare-chip" :class="row.status === 'valid' ? 'chip-passed' : 'chip-regressed'" x-text="row.status"></span>
+                      <span x-show="row.will_update" class="compare-chip" data-testid="bulk-compare-will-update">will update</span>
+                      <div x-show="bulkCompare.expanded[row.row_number]" class="mt-1">
+                        <template x-for="err in row.errors" :key="err"><p class="text-red-600" x-text="err"></p></template>
+                        <template x-if="row.query_a"><pre class="font-mono whitespace-pre-wrap text-slate-600" x-text="`A: ${row.query_a}\nB: ${row.query_b}`"></pre></template>
+                      </div>
+                    </td>
+                    <td class="px-2 py-1">
+                      <button @click="toggleBulkCompareRow(row.row_number)" class="text-indigo-600" x-text="bulkCompare.expanded[row.row_number] ? 'Hide' : 'Details'"></button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center gap-2 mt-3">
+            <input type="checkbox" id="bulk-compare-create-selection" x-model="bulkCompare.createSelection" data-testid="bulk-compare-create-selection" />
+            <label for="bulk-compare-create-selection" class="text-sm">Create a job selection with these jobs</label>
+            <input x-show="bulkCompare.createSelection" x-model="bulkCompare.selectionName" class="field-input" style="width:260px" placeholder="Selection name" aria-label="selection name" data-testid="bulk-compare-selection-name" />
+          </div>
+        </div>
+      </template>
+
+      <div class="flex justify-end gap-2 mt-4">
+        <button @click="closeBulkCompareModal()" class="btn-secondary">Cancel</button>
+        <button @click="commitBulkCompare()" :disabled="!bulkCompareCanImport()" class="btn-primary disabled:opacity-40" data-testid="bulk-compare-import-btn">
+          <span x-show="!bulkCompare.committing">Import</span>
+          <span x-show="bulkCompare.committing">Importing…</span>
+        </button>
+      </div>
     </div>
   </div>
 
