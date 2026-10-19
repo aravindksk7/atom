@@ -7,6 +7,7 @@ target-side names so both frames carry identical column names.
 from __future__ import annotations
 
 import io
+import math
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -42,24 +43,38 @@ def read_sheet(filename: str, content: bytes) -> list[dict[str, str]]:
     if not (lower.endswith(".csv") or lower.endswith(".xlsx")):
         raise SheetError("Upload a .csv or .xlsx file")
     try:
+        # header=None keeps the raw header row, so duplicates are not mangled by pandas.
         if lower.endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), dtype=str, keep_default_na=False, encoding="utf-8-sig",
+            raw = pd.read_csv(
+                io.BytesIO(content), dtype=str, keep_default_na=False, na_values=[],
+                encoding="utf-8-sig", header=None,
             )
         else:
-            df = pd.read_excel(io.BytesIO(content), sheet_name=0, dtype=str)
+            raw = pd.read_excel(
+                io.BytesIO(content), sheet_name=0, dtype=str, header=None,
+                keep_default_na=False, na_values=[],
+            )
     except Exception as exc:
         raise SheetError(f"Could not read {filename}: {exc}") from exc
 
-    headers = [str(c).strip().lower() for c in df.columns]
+    raw = raw.fillna("")
+    if raw.empty:
+        raise SheetError("The sheet has no data rows")
+    raw_headers = [str(c).strip() for c in raw.iloc[0]]
+    if any(not h for h in raw_headers):
+        raise SheetError("The sheet has a blank column header")
+    headers = [h.lower() for h in raw_headers]
+    duplicates = sorted({h for h in headers if headers.count(h) > 1})
+    if duplicates:
+        raise SheetError(f"Duplicate column(s): {', '.join(duplicates)}")
     unknown = [h for h in headers if h not in ALL_COLUMNS]
     if unknown:
         raise SheetError(f"Unknown column(s): {', '.join(unknown)}")
     missing = [c for c in REQUIRED_COLUMNS if c not in headers]
     if missing:
         raise SheetError(f"Missing required column(s): {', '.join(missing)}")
+    df = raw.iloc[1:].copy()
     df.columns = headers
-    df = df.fillna("")
 
     rows = [
         {key: str(value).strip() for key, value in record.items()}
@@ -178,6 +193,9 @@ def _resolve_side(row: Mapping[str, str], prefix: str, configs: Mapping[str, Any
         if entry is None:
             errors.append(f"{prefix}_connection '{connection}' does not exist in config '{config_name}'")
             return None
+        if not isinstance(entry, Mapping):
+            errors.append(f"{prefix}_connection '{connection}' is not a valid connection")
+            return None
     db_type = entry.get("db_type") or config_json.get("db_type") or "mssql"
     if db_type not in DIALECT_BY_DB_TYPE:
         errors.append(f"{prefix}_config '{config_name}' ({db_type}) is not a SQL database")
@@ -192,6 +210,21 @@ def _parse_bool(cell: str, field: str, errors: list[str]) -> bool:
     if value not in _FALSE:
         errors.append(f"{field} must be true or false, got '{cell}'")
     return False
+
+
+def _finite_float(cell: str) -> float:
+    value = float(cell)
+    if not math.isfinite(value):
+        raise ValueError("not finite")
+    return value
+
+
+def _whole_number(cell: str) -> int:
+    """Accept '500' and CSV-style '10000.0'; reject '1.5'."""
+    value = float(cell)
+    if not math.isfinite(value) or value != int(value):
+        raise ValueError("not a whole number")
+    return int(value)
 
 
 def _parse_number(cell: str, field: str, cast, default, errors: list[str]):
@@ -229,8 +262,8 @@ def build_job(row: Mapping[str, str], configs: Mapping[str, Any]) -> tuple[JobDe
         except ValueError as exc:
             errors.append(str(exc))
     excludes = [c.strip() for c in row.get("exclude_columns", "").split(";") if c.strip()]
-    tolerance = _parse_number(row.get("numeric_tolerance", ""), "numeric_tolerance", float, 0.0, errors)
-    chunk_size = _parse_number(row.get("chunk_size", ""), "chunk_size", int, DEFAULT_CHUNK_SIZE, errors)
+    tolerance = _parse_number(row.get("numeric_tolerance", ""), "numeric_tolerance", _finite_float, 0.0, errors)
+    chunk_size = _parse_number(row.get("chunk_size", ""), "chunk_size", _whole_number, DEFAULT_CHUNK_SIZE, errors)
     ignore_case = _parse_bool(row.get("ignore_case", ""), "ignore_case", errors)
 
     source_table, target_table = row.get("source_table", ""), row.get("target_table", "")
@@ -239,6 +272,9 @@ def build_job(row: Mapping[str, str], configs: Mapping[str, Any]) -> tuple[JobDe
         errors.append(
             "a renamed key needs an explicit compare_columns list (SELECT * would duplicate the key)"
         )
+    mapped = [k.target for k in keys] + [c.target for c in compares if c.target not in {k.target for k in keys}]
+    for name in sorted({t for t in mapped if mapped.count(t) > 1}):
+        errors.append(f"target column '{name}' is mapped more than once")
     if ignore_case and not compares:
         errors.append("ignore_case needs compare_columns (the case-insensitive column list)")
     for prefix, table in (("source", source_table), ("target", target_table)):
@@ -298,7 +334,10 @@ def build_job(row: Mapping[str, str], configs: Mapping[str, Any]) -> tuple[JobDe
             params={"compare_type": "sql", "request": request.model_dump()},
         )
     except ValidationError as exc:
-        raise RowError([err["msg"] for err in exc.errors()]) from exc
+        raise RowError([
+            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" if err["loc"] else err["msg"]
+            for err in exc.errors()
+        ]) from exc
     return job, query_a, query_b
 
 

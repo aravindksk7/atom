@@ -48,6 +48,35 @@ def test_read_sheet_xlsx_first_sheet():
     assert rows[0]["numeric_tolerance"] == "0.5"
 
 
+def test_read_sheet_xlsx_keeps_na_text():
+    buf = io.BytesIO()
+    pd.DataFrame([{
+        "job_name": "x", "source_config": "s", "source_table": "a",
+        "target_config": "t", "target_table": "b", "description": "N/A", "tags": "NA",
+    }]).to_excel(buf, index=False)
+    rows = bulk.read_sheet("map.xlsx", buf.getvalue())
+    assert rows[0]["description"] == "N/A"
+    assert rows[0]["tags"] == "NA"
+
+
+@pytest.mark.parametrize("fname", ["map.csv", "map.xlsx"])
+def test_read_sheet_rejects_duplicate_headers(fname):
+    if fname.endswith(".csv"):
+        content = _csv(HEADER + ",Job_Name", "a,s,t1,t,t2,b")
+    else:
+        buf = io.BytesIO()
+        pd.DataFrame([["a", "s", "t1", "t", "t2", "b"]],
+                     columns=HEADER.split(",") + ["Job_Name"]).to_excel(buf, index=False)
+        content = buf.getvalue()
+    with pytest.raises(bulk.SheetError, match="Duplicate column.*job_name"):
+        bulk.read_sheet(fname, content)
+
+
+def test_read_sheet_rejects_blank_header():
+    with pytest.raises(bulk.SheetError, match="blank column header"):
+        bulk.read_sheet("map.csv", _csv(HEADER + ",", "a,s,t1,t,t2,"))
+
+
 def test_read_sheet_rejects_other_extensions():
     with pytest.raises(bulk.SheetError, match=r"\.csv or \.xlsx"):
         bulk.read_sheet("map.txt", b"x")
@@ -255,6 +284,49 @@ def test_build_job_row_errors(overrides, message):
 def test_build_job_rejects_where_hiding_a_statement_behind_a_literal():
     with pytest.raises(bulk.RowError, match="read-only"):
         bulk.build_job(_row(source_where="name = 'x--' ; DROP TABLE dbo.t"), CONFIGS)
+
+
+def test_build_job_rejects_target_column_mapped_twice():
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(compare_columns="A:x;B:x"), CONFIGS)
+    assert any("target column 'x' is mapped more than once" in e for e in exc_info.value.errors)
+
+
+def test_build_job_key_repeated_in_compare_columns_is_not_a_duplicate():
+    job, _, _ = bulk.build_job(_row(compare_columns="CUST_ID:customer_id;email"), CONFIGS)
+    assert job.params["request"]["key_columns"] == ["customer_id"]
+
+
+@pytest.mark.parametrize("value", ["inf", "nan", "-inf"])
+def test_build_job_rejects_non_finite_tolerance(value):
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(numeric_tolerance=value), CONFIGS)
+    assert any("numeric_tolerance" in e for e in exc_info.value.errors)
+
+
+def test_build_job_accepts_integral_float_chunk_size_and_rejects_fractions():
+    job, _, _ = bulk.build_job(_row(chunk_size="10000.0"), CONFIGS)
+    assert job.params["request"]["chunk_size"] == 10000
+    for bad in ("1.5", "-5"):
+        with pytest.raises(bulk.RowError) as exc_info:
+            bulk.build_job(_row(chunk_size=bad), CONFIGS)
+        assert any("chunk_size" in e for e in exc_info.value.errors)
+
+
+def test_build_job_validation_errors_include_field_location(monkeypatch):
+    from api.schemas import SQLCompareRequest
+
+    monkeypatch.setattr(bulk, "SQLCompareRequest", lambda **kw: SQLCompareRequest(config_id_a="x"))
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(), CONFIGS)
+    assert any(e.startswith("config_id_a: ") for e in exc_info.value.errors), exc_info.value.errors
+
+
+def test_build_job_non_dict_connection_entry_is_a_row_error():
+    configs = {**CONFIGS, "BAD": _Cfg(9, "BAD", {"db_type": "mssql", "connections": {"c": "oops"}})}
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(source_config="BAD", source_connection="c"), configs)
+    assert any("is not a valid connection" in e for e in exc_info.value.errors)
 
 
 def test_build_job_collects_several_errors():
