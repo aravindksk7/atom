@@ -77,3 +77,76 @@ def test_read_sheet_rejects_too_many_rows(monkeypatch):
 def test_read_sheet_unreadable_xlsx():
     with pytest.raises(bulk.SheetError, match="Could not read"):
         bulk.read_sheet("map.xlsx", b"not a zip")
+
+
+# -- column lists ---------------------------------------------------------------
+
+def test_parse_column_list_pairs_and_bare_names():
+    assert bulk.parse_column_list("CUST_ID:customer_id; email ;", field="key_columns") == [
+        bulk.ColumnPair("CUST_ID", "customer_id"), bulk.ColumnPair("email", "email"),
+    ]
+
+
+def test_parse_column_list_blank_is_empty():
+    assert bulk.parse_column_list("", field="compare_columns") == []
+
+
+@pytest.mark.parametrize("cell", ["a:b:c", ":x", "x:"])
+def test_parse_column_list_rejects_malformed_entries(cell):
+    with pytest.raises(ValueError, match="compare_columns"):
+        bulk.parse_column_list(cell, field="compare_columns")
+
+
+# -- dialect + SQL ----------------------------------------------------------------
+
+@pytest.mark.parametrize("db_type,dialect", [
+    ("mssql", "sqlserver"), ("oracle", "oracle"), ("netezza", "netezza"),
+    ("postgresql", "postgresql"), ("aurora_postgresql", "postgresql"),
+])
+def test_dialect_for_db_type(db_type, dialect):
+    assert bulk.dialect_for(db_type) == dialect
+
+
+def test_is_query_detects_select_and_with_only():
+    assert bulk.is_query("  select * from t")
+    assert bulk.is_query("WITH x AS (SELECT 1) SELECT * FROM x")
+    assert not bulk.is_query("dbo.selections")
+    assert not bulk.is_query("public.with_history")
+
+
+def test_build_select_star_when_no_columns():
+    assert bulk.build_select("dbo.customer", [], "", "sqlserver") == "SELECT * FROM dbo.customer"
+
+
+def test_build_select_aliases_source_to_target_names_sqlserver():
+    cols = [bulk.ColumnPair("CUST_ID", "customer_id"), bulk.ColumnPair("NAME", "full_name")]
+    assert bulk.build_select("dbo.customer", cols, "active = 1", "sqlserver") == (
+        "SELECT CUST_ID AS [customer_id], NAME AS [full_name] FROM dbo.customer WHERE active = 1"
+    )
+
+
+def test_build_select_quotes_aliases_for_postgres_and_oracle():
+    cols = [bulk.ColumnPair("customer_id", "customer_id")]
+    assert bulk.build_select("public.customer", cols, "", "postgresql") == (
+        'SELECT customer_id AS "customer_id" FROM public.customer'
+    )
+    assert bulk.build_select("SALES.CUSTOMER", [bulk.ColumnPair("CUST_ID", "customer_id")], "", "oracle") == (
+        'SELECT CUST_ID AS "customer_id" FROM SALES.CUSTOMER'
+    )
+
+
+def test_build_select_quotes_non_plain_names_on_sqlserver():
+    cols = [bulk.ColumnPair("Order Date", "order_date")]
+    assert bulk.build_select("dbo.Order Lines", cols, "", "sqlserver") == (
+        "SELECT [Order Date] AS [order_date] FROM dbo.[Order Lines]"
+    )
+
+
+def test_build_select_rejects_non_plain_names_on_postgres():
+    with pytest.raises(ValueError, match="Invalid SQL identifier"):
+        bulk.build_select("public.orders", [bulk.ColumnPair("order date", "order_date")], "", "postgresql")
+
+
+def test_build_select_rejects_mutating_where():
+    with pytest.raises(ValueError, match="read-only"):
+        bulk.build_select("dbo.t", [], "1=1; DROP TABLE dbo.t", "sqlserver")
