@@ -40,10 +40,13 @@ Status: approved design, pending implementation plan
   `CompareService.run_sql_comparison`) already resolves both configs, named
   connections, chunked loading and advanced options correctly. It is not
   available as a saved compare job type.
-- `build_chunk_query` / `build_hash_query` in
-  `etl_framework/reconciliation/chunker.py` default to SQL Server quoting
-  (`[col]`) and `load_in_chunks` never passes a dialect, so chunked loading is
-  wrong for every non-SQL Server database, Postgres included.
+- `load_in_chunks` in `etl_framework/reconciliation/chunker.py` pages with
+  `ORDER BY keys OFFSET n FETCH NEXT m` built by `build_chunk_query`, which
+  defaults to SQL Server quoting (`[col]`) and never receives a dialect, so
+  chunked loading is wrong for every non-SQL Server database, Postgres
+  included. Even where it works, every page re-sorts and skips all prior rows
+  (quadratic database work), pages are only stable with unique keys, and all
+  pages are concatenated into one frame anyway, so paging saves no memory.
 
 ## Part 1: PostgreSQL and Aurora PostgreSQL
 
@@ -70,10 +73,7 @@ postgresql+psycopg://{quote_plus(user)}:{quote_plus(pwd)}@{host}:{port}/{db}
     ?sslmode={sslmode}&connect_timeout={db_connect_timeout}
 ```
 
-Pool settings are passed as for the other types. `DBEngine` exposes a
-`dialect` property returning the normalized dialect name (`sqlserver`,
-`postgresql`, `oracle`, `netezza`) so callers can generate dialect-correct
-SQL; both Postgres types map to `postgresql`.
+Pool settings are passed as for the other types.
 
 ### Discovery, preview, test connection
 
@@ -85,18 +85,47 @@ In `api/routes/configs.py`:
 - Preview: `SELECT * FROM ({query}) AS _preview LIMIT {n}`.
 - Test connection uses the same engine path; no change beyond the branch.
 
-### Chunked loading per dialect
+### Chunked loading: cursor batches instead of OFFSET paging
 
-`load_in_chunks` takes the dialect from `engine.dialect` (falling back to
-`sqlserver` when the engine has none, so fakes and existing callers keep
-working) and passes it to `build_chunk_query`:
+Chunked loading changes from repeated `OFFSET`/`FETCH` queries to one query
+read in cursor batches. This is database-agnostic, so no per-dialect paging
+SQL is needed for Postgres, and Oracle and Netezza chunked loading are fixed
+as a side effect.
 
-- `sqlserver`, `postgresql`: `SELECT * FROM (q) AS _base ORDER BY ... OFFSET n
-  ROWS FETCH NEXT m ROWS ONLY` with dialect quoting.
-- `oracle`: same, without `AS` before the derived-table alias.
-- `netezza`: `... ORDER BY ... LIMIT m OFFSET n`.
+- `DBEngine.iter_query_batches(query, params, batch_size)` yields DataFrames
+  from `pd.read_sql(text(query), conn, params=..., chunksize=batch_size)` on
+  a connection opened with `execution_options(stream_results=True)`. On
+  psycopg this uses a server-side cursor; on pyodbc, oracledb and nzpy it
+  falls back to driver `fetchmany` batching. The connection stays open until
+  the generator is exhausted or closed.
+- `load_in_chunks(engine, query, key_columns, chunk_size, params, normalize)`
+  keeps its signature. When `chunk_size > 0` and the engine has
+  `iter_query_batches`, it applies `normalize` per batch and concatenates;
+  otherwise it does a single `execute_query` read as today. `key_columns` is
+  no longer needed for loading (no `ORDER BY`), so chunked loading also works
+  without key columns; the parameter is kept for callers and ignored.
+- `chunk_size` keeps its meaning to users ("rows per fetch"); 0 still means a
+  single plain read. Query safety stays as today: `SQLCompareRequest` queries
+  pass through the same `reject_mutating_sql` checks at the call sites that
+  already apply them.
+- `build_chunk_query` is removed along with its tests
+  (`tests/unit/test_chunker.py`, the chunk-query assertions in
+  `tests/test_oracle_integration.py`). The OFFSET-window emulation in the
+  file-backed fake engine in `api/services/run_executor.py` (`_apply_window`
+  and the `_base` unwrapping) becomes dead and is removed; that fake has no
+  `iter_query_batches`, so it gets a single read.
+- `build_hash_query` is SQL Server-only (`CHECKSUM_AGG`) and unrelated to
+  paging; it is left as is.
 
-`build_hash_query` is SQL Server-only (`CHECKSUM_AGG`); it is left as is.
+Peak memory is unchanged: both full frames are still held for the compare.
+Lowering it would need a streaming or hash-partitioned compare and is out of
+scope.
+
+Follow-up, not in this work: an optional fast path for very large tables
+using Polars with connectorx
+(`pl.read_database_uri(..., engine="connectorx", partition_on=key,
+partition_num=k)`), giving parallel Arrow-native reads for SQL Server,
+Postgres and Oracle (not Netezza) when a numeric partition key exists.
 
 ### Frontend
 
@@ -247,9 +276,11 @@ Jobs view gets a "Bulk import compares" action opening a modal:
 ## Testing
 
 - Unit: config validator defaults for both new types; `DBEngine` URL
-  building and `dialect` property (engine creation mocked); discovery and
-  preview SQL selection per type; `build_chunk_query` per dialect;
-  `load_in_chunks` dialect pickup with and without `engine.dialect`.
+  building (engine creation mocked); discovery and preview SQL selection per
+  type; `DBEngine.iter_query_batches` against SQLite (batch sizes, params,
+  empty result, generator closed early releases the connection);
+  `load_in_chunks` batched path, single-read fallback for engines without
+  `iter_query_batches`, `normalize` per batch, chunking without key columns.
 - Unit: `JobDefinition` with `compare_type: "sql"`; executor `sql` branch with
   a fake `CompareService`.
 - Unit: mapping-sheet parser (CSV and XLSX, header normalization, list and
