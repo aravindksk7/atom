@@ -150,3 +150,131 @@ def test_build_select_rejects_non_plain_names_on_postgres():
 def test_build_select_rejects_mutating_where():
     with pytest.raises(ValueError, match="read-only"):
         bulk.build_select("dbo.t", [], "1=1; DROP TABLE dbo.t", "sqlserver")
+
+
+# -- build_job / preview ------------------------------------------------------------
+
+class _Cfg:
+    def __init__(self, id, name, config_json):
+        self.id, self.name, self.config_json = id, name, config_json
+
+
+CONFIGS = {
+    "SQL_PROD": _Cfg(1, "SQL_PROD", {"db_type": "mssql", "connections": {"dw": {"db_type": "oracle"}}}),
+    "PG_PROD": _Cfg(2, "PG_PROD", {"db_type": "aurora_postgresql"}),
+    "S3_ONLY": _Cfg(3, "S3_ONLY", {"db_type": "snowflake"}),
+}
+
+
+def _row(**overrides) -> dict:
+    row = {
+        "job_name": "cust_cmp", "source_config": "SQL_PROD", "source_table": "dbo.customer",
+        "target_config": "PG_PROD", "target_table": "public.customer",
+        "key_columns": "CUST_ID:customer_id", "compare_columns": "NAME:full_name;email",
+    }
+    return {**row, **overrides}
+
+
+def test_build_job_generates_sql_compare_job():
+    job, query_a, query_b = bulk.build_job(_row(tags="nightly;crm", description="Customer"), CONFIGS)
+    assert query_a == "SELECT CUST_ID AS [customer_id], NAME AS [full_name], email AS [email] FROM dbo.customer"
+    assert query_b == 'SELECT customer_id AS "customer_id", full_name AS "full_name", email AS "email" FROM public.customer'
+    assert job.name == "cust_cmp"
+    assert job.job_type == "compare"
+    assert job.tags == ["nightly", "crm"]
+    assert job.description == "Customer"
+    req = job.params["request"]
+    assert job.params["compare_type"] == "sql"
+    assert (req["config_id_a"], req["config_id_b"]) == (1, 2)
+    assert req["key_columns"] == ["customer_id"]
+    assert req["label_a"] == "SQL_PROD dbo.customer"
+    assert req["label_b"] == "PG_PROD public.customer"
+    assert req["chunk_size"] == 10000
+    assert req["advanced"]["float_tolerance"] == 1e-9
+
+
+def test_build_job_uses_named_connection_dialect():
+    _, query_a, _ = bulk.build_job(_row(source_connection="dw"), CONFIGS)
+    assert query_a.startswith('SELECT CUST_ID AS "customer_id"')
+
+
+def test_build_job_key_only_without_rename_selects_star():
+    _, query_a, query_b = bulk.build_job(_row(key_columns="id", compare_columns=""), CONFIGS)
+    assert query_a == "SELECT * FROM dbo.customer"
+    assert query_b == "SELECT * FROM public.customer"
+
+
+def test_build_job_options_tolerance_ignore_case_chunk_exclude():
+    job, _, _ = bulk.build_job(_row(
+        numeric_tolerance="0.01", ignore_case="yes", chunk_size="500", exclude_columns="load_ts;etl_id",
+    ), CONFIGS)
+    req = job.params["request"]
+    assert req["advanced"]["float_tolerance"] == 0.01
+    assert req["advanced"]["case_insensitive_columns"] == ["customer_id", "full_name", "email"]
+    assert req["chunk_size"] == 500
+    assert req["exclude_columns"] == ["load_ts", "etl_id"]
+
+
+def test_build_job_wheres_apply_per_side():
+    _, query_a, query_b = bulk.build_job(_row(source_where="active = 1", target_where="is_active"), CONFIGS)
+    assert query_a.endswith("FROM dbo.customer WHERE active = 1")
+    assert query_b.endswith("FROM public.customer WHERE is_active")
+
+
+def test_build_job_query_cell_passes_through():
+    _, query_a, _ = bulk.build_job(_row(
+        source_table="SELECT CUST_ID AS customer_id, NAME AS full_name, email FROM dbo.customer",
+        key_columns="customer_id", compare_columns="",
+    ), CONFIGS)
+    assert query_a == "SELECT CUST_ID AS customer_id, NAME AS full_name, email FROM dbo.customer"
+
+
+@pytest.mark.parametrize("overrides,message", [
+    ({"job_name": ""}, "job_name is required"),
+    ({"source_config": "NOPE"}, "source_config 'NOPE' does not exist"),
+    ({"target_connection": "missing"}, "target_connection 'missing' does not exist in config 'PG_PROD'"),
+    ({"target_config": "S3_ONLY"}, "is not a SQL database"),
+    ({"key_columns": "a:b:c"}, "key_columns"),
+    ({"compare_columns": "", "key_columns": "CUST_ID:customer_id"}, "renamed key"),
+    ({"compare_columns": "", "key_columns": "id", "ignore_case": "true"}, "ignore_case needs compare_columns"),
+    ({"source_table": "SELECT * FROM dbo.customer"}, "source_table is a query"),
+    ({"target_table": "SELECT * FROM public.customer", "key_columns": "id", "compare_columns": "",
+      "target_where": "x = 1"}, "target_where"),
+    ({"numeric_tolerance": "abc"}, "numeric_tolerance"),
+    ({"numeric_tolerance": "-1"}, "numeric_tolerance"),
+    ({"chunk_size": "-5"}, "chunk_size"),
+    ({"ignore_case": "maybe"}, "ignore_case"),
+    ({"source_where": "1=1; DELETE FROM x"}, "read-only"),
+])
+def test_build_job_row_errors(overrides, message):
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(**overrides), CONFIGS)
+    assert any(message in err for err in exc_info.value.errors), exc_info.value.errors
+
+
+def test_build_job_collects_several_errors():
+    with pytest.raises(bulk.RowError) as exc_info:
+        bulk.build_job(_row(source_config="", target_config=""), CONFIGS)
+    assert len(exc_info.value.errors) >= 2
+
+
+def test_preview_rows_flags_duplicates_updates_and_counts():
+    rows = [
+        _row(job_name="a"), _row(job_name="a"),
+        _row(job_name="b"), _row(job_name="c", source_config="NOPE"),
+    ]
+    out = bulk.preview_rows(rows, CONFIGS, existing_job_names={"b"})
+    by_row = {r["row_number"]: r for r in out["rows"]}
+    assert by_row[2]["status"] == "invalid" and "appears 2 times" in by_row[2]["errors"][0]
+    assert by_row[3]["status"] == "invalid"
+    assert by_row[4]["status"] == "valid" and by_row[4]["will_update"] is True
+    assert by_row[4]["job"]["name"] == "b"
+    assert by_row[4]["query_a"].startswith("SELECT ")
+    assert by_row[5]["status"] == "invalid" and by_row[5]["job"] is None
+    assert (out["valid_count"], out["invalid_count"]) == (1, 3)
+
+
+def test_template_parses_and_matches_columns():
+    rows = bulk.read_sheet("t.csv", bulk.TEMPLATE_CSV.encode())
+    assert len(rows) == 2
+    assert list(rows[0]) == list(bulk.ALL_COLUMNS)

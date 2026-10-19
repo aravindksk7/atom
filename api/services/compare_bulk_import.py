@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import io
 import re
+from collections import Counter
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 import pandas as pd
+from pydantic import ValidationError
 
+from api.schemas import AdvancedCompareOptions, JobDefinition, SQLCompareRequest
 from etl_framework.db.sql_utils import quote_identifier, reject_mutating_sql
 
 MAX_ROWS = 1000
@@ -137,3 +141,206 @@ def build_select(table: str, columns: list[ColumnPair], where: str, dialect: str
     if where:
         sql = f"{sql} WHERE {where}"
     return reject_mutating_sql(sql)
+
+
+DEFAULT_CHUNK_SIZE = 10_000
+_TRUE = {"true", "yes", "y", "1"}
+_FALSE = {"false", "no", "n", "0", ""}
+
+
+class RowError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("; ".join(errors))
+        self.errors = errors
+
+
+@dataclass(frozen=True)
+class _Side:
+    config: Any
+    connection: str | None
+    dialect: str
+
+
+def _resolve_side(row: Mapping[str, str], prefix: str, configs: Mapping[str, Any], errors: list[str]) -> _Side | None:
+    config_name = row.get(f"{prefix}_config", "")
+    connection = row.get(f"{prefix}_connection", "") or None
+    if not config_name:
+        errors.append(f"{prefix}_config is required")
+        return None
+    cfg = configs.get(config_name)
+    if cfg is None:
+        errors.append(f"{prefix}_config '{config_name}' does not exist")
+        return None
+    config_json = cfg.config_json or {}
+    entry: Mapping[str, Any] = {}
+    if connection:
+        entry = (config_json.get("connections") or {}).get(connection)
+        if entry is None:
+            errors.append(f"{prefix}_connection '{connection}' does not exist in config '{config_name}'")
+            return None
+    db_type = entry.get("db_type") or config_json.get("db_type") or "mssql"
+    if db_type not in DIALECT_BY_DB_TYPE:
+        errors.append(f"{prefix}_config '{config_name}' ({db_type}) is not a SQL database")
+        return None
+    return _Side(cfg, connection, dialect_for(db_type))
+
+
+def _parse_bool(cell: str, field: str, errors: list[str]) -> bool:
+    value = (cell or "").strip().lower()
+    if value in _TRUE:
+        return True
+    if value not in _FALSE:
+        errors.append(f"{field} must be true or false, got '{cell}'")
+    return False
+
+
+def _parse_number(cell: str, field: str, cast, default, errors: list[str]):
+    if not (cell or "").strip():
+        return default
+    try:
+        value = cast(cell)
+    except ValueError:
+        errors.append(f"{field} must be a number, got '{cell}'")
+        return default
+    if value < 0:
+        errors.append(f"{field} must be >= 0, got '{cell}'")
+        return default
+    return value
+
+
+def _side_label(cfg: Any, table: str) -> str:
+    return cfg.name if is_query(table) else f"{cfg.name} {table}"
+
+
+def build_job(row: Mapping[str, str], configs: Mapping[str, Any]) -> tuple[JobDefinition, str, str]:
+    """Compile one sheet row; raises RowError listing every problem found."""
+    errors: list[str] = []
+    for field in ("job_name", "source_table", "target_table"):
+        if not row.get(field):
+            errors.append(f"{field} is required")
+    source = _resolve_side(row, "source", configs, errors)
+    target = _resolve_side(row, "target", configs, errors)
+
+    keys: list[ColumnPair] = []
+    compares: list[ColumnPair] = []
+    for field, sink in (("key_columns", keys), ("compare_columns", compares)):
+        try:
+            sink.extend(parse_column_list(row.get(field, ""), field=field))
+        except ValueError as exc:
+            errors.append(str(exc))
+    excludes = [c.strip() for c in row.get("exclude_columns", "").split(";") if c.strip()]
+    tolerance = _parse_number(row.get("numeric_tolerance", ""), "numeric_tolerance", float, 0.0, errors)
+    chunk_size = _parse_number(row.get("chunk_size", ""), "chunk_size", int, DEFAULT_CHUNK_SIZE, errors)
+    ignore_case = _parse_bool(row.get("ignore_case", ""), "ignore_case", errors)
+
+    source_table, target_table = row.get("source_table", ""), row.get("target_table", "")
+    renamed_key = any(k.source != k.target for k in keys)
+    if not compares and renamed_key:
+        errors.append(
+            "a renamed key needs an explicit compare_columns list (SELECT * would duplicate the key)"
+        )
+    if ignore_case and not compares:
+        errors.append("ignore_case needs compare_columns (the case-insensitive column list)")
+    for prefix, table in (("source", source_table), ("target", target_table)):
+        if is_query(table):
+            if compares or renamed_key:
+                errors.append(
+                    f"{prefix}_table is a query; column mapping only applies to table references - "
+                    "alias the columns inside the query instead"
+                )
+            if row.get(f"{prefix}_where"):
+                errors.append(f"{prefix}_where only applies to a table reference; put the filter in the query")
+
+    if errors or source is None or target is None:
+        raise RowError(errors)
+
+    key_targets = {k.target for k in keys}
+    columns = keys + [c for c in compares if c.target not in key_targets] if compares else []
+    queries: list[str] = []
+    for prefix, side, table, side_columns in (
+        ("source", source, source_table, columns),
+        ("target", target, target_table, [ColumnPair(c.target, c.target) for c in columns]),
+    ):
+        try:
+            if is_query(table):
+                queries.append(reject_mutating_sql(table))
+            else:
+                queries.append(build_select(table, side_columns, row.get(f"{prefix}_where", ""), side.dialect))
+        except ValueError as exc:
+            errors.append(f"{prefix}: {exc}")
+    if errors:
+        raise RowError(errors)
+    query_a, query_b = queries
+
+    try:
+        request = SQLCompareRequest(
+            config_id_a=source.config.id,
+            config_id_b=target.config.id,
+            query_a=query_a,
+            query_b=query_b,
+            label_a=_side_label(source.config, source_table),
+            label_b=_side_label(target.config, target_table),
+            connection_a=source.connection,
+            connection_b=target.connection,
+            key_columns=[k.target for k in keys],
+            exclude_columns=excludes,
+            chunk_size=chunk_size,
+            advanced=AdvancedCompareOptions(
+                float_tolerance=tolerance if tolerance > 0 else 1e-9,
+                case_insensitive_columns=[c.target for c in columns] if ignore_case else [],
+            ),
+        )
+        job = JobDefinition(
+            name=row["job_name"],
+            description=row.get("description", ""),
+            tags=[t.strip() for t in row.get("tags", "").split(";") if t.strip()],
+            job_type="compare",
+            params={"compare_type": "sql", "request": request.model_dump()},
+        )
+    except ValidationError as exc:
+        raise RowError([err["msg"] for err in exc.errors()]) from exc
+    return job, query_a, query_b
+
+
+def preview_rows(
+    rows: list[dict[str, str]],
+    configs: Mapping[str, Any],
+    existing_job_names: set[str],
+) -> dict[str, Any]:
+    """Validate every row; nothing is saved. Row numbers match the sheet (header = 1)."""
+    name_counts = Counter(row.get("job_name", "") for row in rows)
+    results: list[dict[str, Any]] = []
+    for row_number, row in enumerate(rows, start=2):
+        name = row.get("job_name", "")
+        errors: list[str] = []
+        if name and name_counts[name] > 1:
+            errors.append(f"job_name '{name}' appears {name_counts[name]} times in the file")
+        job = query_a = query_b = None
+        try:
+            job, query_a, query_b = build_job(row, configs)
+        except RowError as exc:
+            errors.extend(exc.errors)
+        valid = not errors
+        results.append({
+            "row_number": row_number,
+            "job_name": name,
+            "source": f"{row.get('source_config', '')} {row.get('source_table', '')}".strip(),
+            "target": f"{row.get('target_config', '')} {row.get('target_table', '')}".strip(),
+            "status": "valid" if valid else "invalid",
+            "will_update": valid and name in existing_job_names,
+            "errors": errors,
+            "job": job.model_dump() if valid else None,
+            "query_a": query_a,
+            "query_b": query_b,
+        })
+    valid_count = sum(1 for r in results if r["status"] == "valid")
+    return {"rows": results, "valid_count": valid_count, "invalid_count": len(results) - valid_count}
+
+
+TEMPLATE_CSV = (
+    ",".join(ALL_COLUMNS) + "\n"
+    + "customer_cmp,PROD_MSSQL,,dbo.customer,PROD_AURORA,,public.customer,"
+      "CUST_ID:customer_id,NAME:full_name;EMAIL:email,,active = 1,,0,false,10000,nightly,Customer master\n"
+    + "orders_cmp,PROD_ORACLE,,SALES.ORDERS,PROD_PG,,sales.orders,"
+      "ORDER_ID:order_id;LINE_NO:line_no,AMOUNT:amount,load_ts,,,0.01,false,10000,nightly,Order lines\n"
+)
