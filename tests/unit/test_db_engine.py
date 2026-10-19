@@ -258,19 +258,24 @@ def test_postgresql_url_quotes_credentials_and_sets_ssl_and_timeout():
     with patch("etl_framework.db.engine.create_engine") as mock_create:
         DBEngine(_pg_cfg())
     url = mock_create.call_args[0][0]
-    assert url == (
-        "postgresql+psycopg://etl%40corp:p%40ss%3Aword@pg.local:5432/sales%20db"
-        "?sslmode=prefer&connect_timeout=7"
-    )
+    assert url.drivername == "postgresql+psycopg"
+    assert url.username == "etl@corp"
+    assert url.password == "p@ss:word"
+    assert url.host == "pg.local"
+    assert url.port == 5432
+    assert url.database == "sales db"
+    assert url.query["sslmode"] == "prefer"
+    assert url.query["connect_timeout"] == "7"
 
 
 def test_aurora_postgresql_url_requires_ssl():
     with patch("etl_framework.db.engine.create_engine") as mock_create:
         DBEngine(_pg_cfg(db_type="aurora_postgresql", db_host="c.cluster-x.eu-west-1.rds.amazonaws.com"))
     url = mock_create.call_args[0][0]
-    assert url.startswith("postgresql+psycopg://")
-    assert "@c.cluster-x.eu-west-1.rds.amazonaws.com:5432/" in url
-    assert "sslmode=require" in url
+    assert url.drivername == "postgresql+psycopg"
+    assert url.host == "c.cluster-x.eu-west-1.rds.amazonaws.com"
+    assert url.port == 5432
+    assert url.query["sslmode"] == "require"
 
 
 def test_postgresql_passes_pool_settings():

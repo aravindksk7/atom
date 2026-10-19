@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 from etl_framework.config.models import EnvironmentConfig, POSTGRES_DB_TYPES
 
@@ -139,16 +140,17 @@ class DBEngine:
                     connection_url = f"netezza+pyodbc:///?odbc_connect={params}"
             elif db_type in POSTGRES_DB_TYPES:
                 _ensure_psycopg()
-                user = urllib.parse.quote(env_config.db_user, safe="")
-                pwd = urllib.parse.quote(env_config.db_password, safe="")
-                database = urllib.parse.quote(env_config.db_name, safe="")
-                query = urllib.parse.urlencode({
-                    "sslmode": env_config.db_sslmode or "prefer",
-                    "connect_timeout": env_config.db_connect_timeout,
-                })
-                connection_url = (
-                    f"postgresql+psycopg://{user}:{pwd}"
-                    f"@{env_config.db_host}:{env_config.db_port}/{database}?{query}"
+                connection_url = URL.create(
+                    "postgresql+psycopg",
+                    username=env_config.db_user,
+                    password=env_config.db_password,
+                    host=env_config.db_host,
+                    port=env_config.db_port,
+                    database=env_config.db_name,
+                    query={
+                        "sslmode": env_config.db_sslmode or "prefer",
+                        "connect_timeout": str(env_config.db_connect_timeout),
+                    },
                 )
             else:
                 # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
