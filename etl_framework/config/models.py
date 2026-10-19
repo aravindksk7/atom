@@ -14,12 +14,15 @@ SECRET_FIELDS = frozenset({
     "aws_secret_access_key", "aws_session_token",
 })
 
+DbType = Literal["mssql", "netezza", "oracle", "postgresql", "aurora_postgresql"]
+POSTGRES_DB_TYPES = frozenset({"postgresql", "aurora_postgresql"})
+
 
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = ""
-    db_type: Literal["mssql", "netezza", "oracle"] = "mssql"
+    db_type: DbType = "mssql"
     db_host: str
     db_port: int = 1433
     db_name: str = ""
@@ -31,6 +34,8 @@ class EnvironmentConfig(BaseModel):
     db_pool_timeout: int = 30
     db_pool_recycle: int = 3600
     db_connect_timeout: int = 15
+    # libpq sslmode for postgresql / aurora_postgresql; ignored by other types.
+    db_sslmode: str = ""
     automic_url: str = ""
     automic_user: str = ""
     automic_password: str = ""
@@ -78,6 +83,15 @@ class EnvironmentConfig(BaseModel):
                     data["db_port"] = 1521
                 if "db_driver" not in data or "SQL Server" in str(data.get("db_driver")):
                     data["db_driver"] = "oracledb"
+            elif data.get("db_type") in POSTGRES_DB_TYPES:
+                if "db_port" not in data or data.get("db_port") == 1433:
+                    data["db_port"] = 5432
+                if "db_driver" not in data or "SQL Server" in str(data.get("db_driver")):
+                    data["db_driver"] = "psycopg"
+                if not data.get("db_sslmode"):
+                    data["db_sslmode"] = (
+                        "require" if data["db_type"] == "aurora_postgresql" else "prefer"
+                    )
         return data
 
     @field_validator("db_port")
@@ -162,7 +176,7 @@ class EnvironmentConfig(BaseModel):
 
 class ConnectionEntry(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    db_type: Literal["mssql", "netezza", "oracle"] | None = None
+    db_type: DbType | None = None
     db_host: str | None = None
     db_port: int | None = None
     db_name: str | None = None
@@ -174,6 +188,7 @@ class ConnectionEntry(BaseModel):
     db_pool_timeout: int | None = None
     db_pool_recycle: int | None = None
     db_connect_timeout: int | None = None
+    db_sslmode: str | None = None
 
 
 def resolve_connection(
