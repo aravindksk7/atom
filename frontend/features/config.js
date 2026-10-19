@@ -120,6 +120,42 @@
       }
     },
 
+    dbTypeDefaults(type) {
+      switch (type) {
+        case 'oracle': return { port: 1521, driver: 'oracledb', sslmode: '' };
+        case 'netezza': return { port: 5480, driver: 'nzpy', sslmode: '' };
+        case 'postgresql': return { port: 5432, driver: 'psycopg', sslmode: 'prefer' };
+        case 'aurora_postgresql': return { port: 5432, driver: 'psycopg', sslmode: 'require' };
+        default: return { port: 1433, driver: 'ODBC Driver 17 for SQL Server', sslmode: '' };
+      }
+    },
+
+    isPostgresType(type) {
+      return type === 'postgresql' || type === 'aurora_postgresql';
+    },
+
+    // A driver the user typed for a different DB type is a stale default, not a choice.
+    _isDefaultDriver(driver) {
+      return !driver || ['SQL Server', 'nzpy', 'oracledb', 'psycopg'].some(d => driver.includes(d));
+    },
+
+    onConfigDbTypeChange() {
+      const m = this.configModal;
+      const d = this.dbTypeDefaults(m.db_type);
+      m.db_port = d.port;
+      if (this._isDefaultDriver(m.db_driver)) m.db_driver = d.driver;
+      m.db_sslmode = d.sslmode;
+    },
+
+    onConnectionDbTypeChange(conn) {
+      if (!conn.db_type) return;
+      const d = this.dbTypeDefaults(conn.db_type);
+      if (!conn.db_port) conn.db_port = d.port;
+      if (this._isDefaultDriver(conn.db_driver)) conn.db_driver = d.driver;
+      if (!this.isPostgresType(conn.db_type)) conn.db_sslmode = '';
+      else if (!conn.db_sslmode) conn.db_sslmode = d.sslmode;
+    },
+
     openNewConfigModal() {
       this.configModal = {
         id: null, name: '', env_name: 'dev',
@@ -127,6 +163,7 @@
         db_driver: 'ODBC Driver 17 for SQL Server',
         db_host: 'localhost', db_port: 1433, db_name: '', db_user: '', db_password: '',
         db_connect_timeout: 15,
+        db_sslmode: '',
         bo_url: '', bo_user: '', bo_password: '', bo_auth_type: 'secEnterprise', bo_timeout: 60,
         bo_proxy_url: '', bo_verify_ssl: true,
         ds_url: '', ds_user: '', ds_password: '', ds_repository: '', ds_auth_type: 'secEnterprise', ds_cms_system: '', ds_timeout: 60,
@@ -146,8 +183,9 @@
       this.configModal = {
         id: cfg.id, name: cfg.name, env_name: cfg.env_name,
         db_type: d.db_type || 'mssql',
-        db_driver: d.db_driver || (d.db_type === 'oracle' ? 'oracledb' : (d.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server')),
-        db_host: d.db_host || '', db_port: d.db_port || (d.db_type === 'oracle' ? 1521 : (d.db_type === 'netezza' ? 5480 : 1433)),
+        db_driver: d.db_driver || this.dbTypeDefaults(d.db_type).driver,
+        db_host: d.db_host || '', db_port: d.db_port || this.dbTypeDefaults(d.db_type).port,
+        db_sslmode: d.db_sslmode || this.dbTypeDefaults(d.db_type).sslmode,
         db_name: d.db_name || '', db_user: d.db_user || '', db_password: d.db_password || '',
         db_connect_timeout: d.db_connect_timeout || 15,
         bo_url: d.bo_url || '', bo_user: d.bo_user || '', bo_password: d.bo_password || '',
@@ -173,6 +211,7 @@
           db_name: entry.db_name || '',
           db_user: entry.db_user || '',
           db_password: entry.db_password || '',
+          db_sslmode: entry.db_sslmode || '',
           expanded: false,
         })),
         apiBaseHost: d.api_base_host || '',
@@ -225,11 +264,14 @@
       const data = {
         db_type: m.db_type || 'mssql',
         db_host: m.db_host || 'localhost',
-        db_port: Number(m.db_port) || (m.db_type === 'oracle' ? 1521 : (m.db_type === 'netezza' ? 5480 : 1433)),
+        db_port: Number(m.db_port) || this.dbTypeDefaults(m.db_type).port,
         db_name: m.db_name || '',
         db_user: m.db_user || '',
         db_password: m.db_password || '',
-        db_driver: m.db_driver || (m.db_type === 'oracle' ? 'oracledb' : (m.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server')),
+        db_driver: m.db_driver || this.dbTypeDefaults(m.db_type).driver,
+        ...(this.isPostgresType(m.db_type)
+          ? { db_sslmode: m.db_sslmode || this.dbTypeDefaults(m.db_type).sslmode }
+          : {}),
         db_pool_size: 5, db_pool_overflow: 10, db_pool_timeout: 30,
         db_pool_recycle: 3600,
         db_connect_timeout: Number(m.db_connect_timeout) || 15,
@@ -263,6 +305,7 @@
               ...(c.db_name ? { db_name: c.db_name } : {}),
               ...(c.db_user ? { db_user: c.db_user } : {}),
               ...(c.db_password ? { db_password: c.db_password } : {}),
+              ...(c.db_sslmode ? { db_sslmode: c.db_sslmode } : {}),
             }])
         );
       }
@@ -330,7 +373,7 @@
       const idx = this.configModal.connections.length + 1;
       this.configModal.connections.push({
         name: `connection_${idx}`,
-        db_type: '', db_driver: '', db_host: '', db_port: '', db_name: '', db_user: '', db_password: '',
+        db_type: '', db_driver: '', db_host: '', db_port: '', db_name: '', db_user: '', db_password: '', db_sslmode: '',
         expanded: true,
       });
     },
