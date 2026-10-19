@@ -50,6 +50,27 @@ def test_connection_entry_accepts_postgres_types():
     assert ConnectionEntry(db_type="aurora_postgresql", db_sslmode="require").db_type == "aurora_postgresql"
 
 
+@pytest.mark.parametrize("mode", ["disable", "prefer", "require", "verify-ca", "verify-full"])
+def test_db_sslmode_accepts_known_libpq_modes(mode):
+    assert _env(db_type="postgresql", db_sslmode=mode).db_sslmode == mode
+
+
+def test_db_sslmode_blank_stays_blank_for_non_postgres():
+    assert _env(db_sslmode="").db_sslmode == ""
+
+
+def test_db_sslmode_rejects_unknown_value():
+    with pytest.raises(ValidationError, match="must be one of"):
+        _env(db_type="postgresql", db_sslmode="bogus")
+
+
+def test_connection_entry_sslmode_validation():
+    assert ConnectionEntry(db_sslmode=None).db_sslmode is None
+    assert ConnectionEntry(db_sslmode="verify-ca").db_sslmode == "verify-ca"
+    with pytest.raises(ValidationError, match="must be one of"):
+        ConnectionEntry(db_sslmode="bogus")
+
+
 def test_named_connection_switches_base_mssql_config_to_postgres_defaults():
     config_json = {
         "db_type": "mssql", "db_host": "sql.local", "db_port": 1433, "db_password": "pw",

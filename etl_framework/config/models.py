@@ -17,6 +17,16 @@ SECRET_FIELDS = frozenset({
 DbType = Literal["mssql", "netezza", "oracle", "postgresql", "aurora_postgresql"]
 POSTGRES_DB_TYPES = frozenset({"postgresql", "aurora_postgresql"})
 
+# libpq sslmode values accepted for postgresql / aurora_postgresql connections.
+# "" means "unset": the dialect default applies.
+SSLMODES = frozenset({"", "disable", "prefer", "require", "verify-ca", "verify-full"})
+
+
+def _validate_sslmode(value: str) -> str:
+    if value not in SSLMODES:
+        raise ValueError(f"must be one of {sorted(SSLMODES)}, got {value!r}")
+    return value
+
 
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -93,6 +103,11 @@ class EnvironmentConfig(BaseModel):
                         "require" if data["db_type"] == "aurora_postgresql" else "prefer"
                     )
         return data
+
+    @field_validator("db_sslmode")
+    @classmethod
+    def validate_db_sslmode(cls, v: str) -> str:
+        return _validate_sslmode(v)
 
     @field_validator("db_port")
     @classmethod
@@ -189,6 +204,13 @@ class ConnectionEntry(BaseModel):
     db_pool_recycle: int | None = None
     db_connect_timeout: int | None = None
     db_sslmode: str | None = None
+
+    @field_validator("db_sslmode")
+    @classmethod
+    def validate_db_sslmode(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_sslmode(v)
 
 
 def resolve_connection(
