@@ -7068,6 +7068,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <label  class="field-label" for="a11y-compare-exclude-columns-3">Exclude Columns</label>
           <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" id="a11y-compare-exclude-columns-3" />
         </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-chunk-size-3">Chunk Size <span class="text-slate-400 font-normal">(rows per batch; 0 disables chunking)</span></label>
+          <input x-model.number="sqlChunkSize" type="number" min="0" class="field-input" placeholder="10000" id="a11y-compare-chunk-size-3" />
+        </div>
       </div>
       <!-- Advanced Options accordion -->
       <div class="border rounded">
