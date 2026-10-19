@@ -943,10 +943,14 @@
           </div>
         </div>
       </div>
-      <button data-testid="compare-sql-run-btn" @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
-        <span x-show="!sqlCompareLoading">Run SQL Compare</span>
-        <span x-show="sqlCompareLoading">Comparing...</span>
-      </button>
+      <div class="flex items-center gap-2">
+        <button data-testid="compare-sql-run-btn" @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
+          <span x-show="!sqlCompareLoading">Run SQL Compare</span>
+          <span x-show="sqlCompareLoading">Comparing...</span>
+        </button>
+        <button data-testid="compare-sql-save-job-btn" @click="openSaveCompareAsJob('sql')"
+                class="btn-secondary btn-sm text-xs">Save as Job</button>
+      </div>
     </div>
 
     <template x-if="sqlCompareResult">
