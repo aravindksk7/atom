@@ -237,7 +237,9 @@ All under `api/routes/jobs.py`, using a new service
 
 - `GET /api/jobs/bulk-compare/template` returns a sample CSV with the header
   and two example rows.
-- `POST /api/jobs/bulk-compare/preview` (multipart file upload) returns
+- `POST /api/jobs/bulk-compare/preview` (JSON `{filename, content_b64}`,
+  matching the frontend's JSON-only `api()` helper and the existing
+  base64 upload convention) returns
   `{rows: [{row_number, job_name, status: "valid"|"invalid", will_update,
   errors: [str], job: JobDefinition|null, query_a, query_b}], valid_count,
   invalid_count}`. Nothing is saved. File-level errors (unreadable file,
