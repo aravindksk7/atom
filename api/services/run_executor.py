@@ -2334,7 +2334,7 @@ class RunExecutor:
 
     def _build_case_compare(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:
-            from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest
+            from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest, SQLCompareRequest
             from api.services.compare_service import CompareService
             from etl_framework.repository.repository import ConfigRepository
 
@@ -2366,6 +2366,12 @@ class RunExecutor:
                         "compare jobs with live or API sources require live connections to be enabled"
                     )
                 result = service.compare_matrix(parsed_matrix)
+            elif compare_type == "sql":
+                if not self._settings.use_live_connections:
+                    raise ValueError(
+                        "compare jobs with SQL sources require live connections to be enabled"
+                    )
+                result = service.compare_sql(SQLCompareRequest.model_validate(request))
             else:
                 raise ValueError(
                     f"unknown compare_type '{compare_type}' for compare job '{job.name}'"
