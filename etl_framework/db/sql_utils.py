@@ -18,8 +18,39 @@ def strip_trailing_semicolon(sql: str) -> str:
 
 
 def _without_comments(sql: str) -> str:
-    no_block = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    return re.sub(r"--.*?$", " ", no_block, flags=re.MULTILINE)
+    """Single left-to-right scan: literals become ``''``, comments become a space.
+
+    Quoted identifiers ("x", [x]) are blanked the same way so a ``--`` inside
+    them is not mistaken for a comment that hides a following statement.
+    """
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch in ("'", '"', "["):
+            close = "]" if ch == "[" else ch
+            j = i + 1
+            while j < n:
+                if sql[j] == close:
+                    if close != "]" and j + 1 < n and sql[j + 1] == close:
+                        j += 2  # doubled quote is an escape
+                        continue
+                    break
+                j += 1
+            out.append("''" if ch == "'" else '""')
+            i = j + 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j == -1 else j
+            out.append(" ")
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            out.append(" ")
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
 def is_read_only_sql(sql: str) -> bool:

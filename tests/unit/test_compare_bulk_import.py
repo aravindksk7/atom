@@ -252,6 +252,11 @@ def test_build_job_row_errors(overrides, message):
     assert any(message in err for err in exc_info.value.errors), exc_info.value.errors
 
 
+def test_build_job_rejects_where_hiding_a_statement_behind_a_literal():
+    with pytest.raises(bulk.RowError, match="read-only"):
+        bulk.build_job(_row(source_where="name = 'x--' ; DROP TABLE dbo.t"), CONFIGS)
+
+
 def test_build_job_collects_several_errors():
     with pytest.raises(bulk.RowError) as exc_info:
         bulk.build_job(_row(source_config="", target_config=""), CONFIGS)
