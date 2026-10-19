@@ -215,6 +215,41 @@ def test_compare_job_runs_a_sql_compare_and_names_the_result_after_the_job(monke
     assert result.value_mismatch_count == 1
 
 
+def test_compare_sql_aligns_column_name_case_between_sides(monkeypatch):
+    import pandas as pd
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _FrameDBEngine)
+    _FrameDBEngine.frames = {
+        "src": pd.DataFrame({"order_id": [1, 2], "amount": [10.0, 20.0]}),
+        "tgt": pd.DataFrame({"ORDER_ID": [1, 2], "AMOUNT": [10.0, 25.0]}),
+    }
+    db = _session()
+    id_a, id_b = _seed_sql_configs(db)
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": id_a, "config_id_b": id_b,
+            "query_a": "SELECT order_id, amount FROM t",
+            "query_b": "SELECT order_id, amount FROM t",
+            "key_columns": ["ORDER_ID"],
+        }},
+    )
+
+    result = _live_executor(db)._build_case(job)()
+
+    assert result.value_mismatch_count == 1
+
+
+def test_align_column_case_skips_renames_that_would_collide():
+    import pandas as pd
+    from api.services.compare_service import _align_column_case
+
+    df = pd.DataFrame({"a": [1], "A": [2]})
+    assert list(_align_column_case(df, ["A"]).columns) == ["a", "A"]
+    df2 = pd.DataFrame({"a": [1], "b": [2]})
+    assert list(_align_column_case(df2, ["A", "B"]).columns) == ["A", "B"]
+
+
 def test_compare_sql_job_requires_live_connections():
     job = JobDefinition(
         name="orders_cmp", job_type="compare",

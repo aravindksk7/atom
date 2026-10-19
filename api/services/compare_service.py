@@ -33,6 +33,29 @@ from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
 
 
+def _align_column_case(df: "pd.DataFrame", reference_names) -> "pd.DataFrame":
+    """Rename columns to the reference spelling when names differ only by case.
+
+    Skipped for a column when the match is ambiguous (several reference
+    spellings, or several frame columns sharing the lower-cased name) or when
+    the new name would duplicate an existing column.
+    """
+    spellings: dict[str, set[str]] = {}
+    for name in reference_names:
+        spellings.setdefault(str(name).lower(), set()).add(str(name))
+    lowered = [str(c).lower() for c in df.columns]
+    existing = {str(c) for c in df.columns}
+    rename: dict[Any, str] = {}
+    for column, low in zip(df.columns, lowered):
+        options = spellings.get(low)
+        if not options or len(options) != 1 or lowered.count(low) != 1:
+            continue
+        (wanted,) = options
+        if wanted != str(column) and wanted not in existing:
+            rename[column] = wanted
+    return df.rename(columns=rename) if rename else df
+
+
 def _load_in_chunks(
     db_engine: "DBEngine",
     query: str,
@@ -575,6 +598,10 @@ class CompareService:
         finally:
             engine_a.dispose()
             engine_b.dispose()
+
+        # Oracle's SQLAlchemy dialect lower-cases all-uppercase result names.
+        df_a = _align_column_case(df_a, key_cols + list(df_b.columns))
+        df_b = _align_column_case(df_b, key_cols + list(df_a.columns))
 
         recon_req = ReconFileCompareRequest(
             file_a_path="__sql__",
