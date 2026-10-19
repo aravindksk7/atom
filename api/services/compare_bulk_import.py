@@ -20,6 +20,7 @@ from api.schemas import AdvancedCompareOptions, JobDefinition, SQLCompareRequest
 from etl_framework.db.sql_utils import quote_identifier, reject_mutating_sql
 
 MAX_ROWS = 1000
+MAX_SHEET_BYTES = 5 * 1024 * 1024
 
 REQUIRED_COLUMNS = (
     "job_name", "source_config", "source_table", "target_config", "target_table",
@@ -176,6 +177,26 @@ class _Side:
     dialect: str
 
 
+def side_errors(config: Any, connection: str | None, label: str) -> list[str]:
+    """Problems with one side's connection choice (empty list when usable)."""
+    return _check_side(config, connection, label)[1]
+
+
+def _check_side(config: Any, connection: str | None, label: str) -> tuple[str | None, list[str]]:
+    config_json = config.config_json or {}
+    entry: Mapping[str, Any] = {}
+    if connection:
+        entry = (config_json.get("connections") or {}).get(connection)
+        if entry is None:
+            return None, [f"{label}_connection '{connection}' does not exist in config '{config.name}'"]
+        if not isinstance(entry, Mapping):
+            return None, [f"{label}_connection '{connection}' is not a valid connection"]
+    db_type = entry.get("db_type") or config_json.get("db_type") or "mssql"
+    if db_type not in DIALECT_BY_DB_TYPE:
+        return None, [f"{label}_config '{config.name}' ({db_type}) is not a SQL database"]
+    return dialect_for(db_type), []
+
+
 def _resolve_side(row: Mapping[str, str], prefix: str, configs: Mapping[str, Any], errors: list[str]) -> _Side | None:
     config_name = row.get(f"{prefix}_config", "")
     connection = row.get(f"{prefix}_connection", "") or None
@@ -186,21 +207,11 @@ def _resolve_side(row: Mapping[str, str], prefix: str, configs: Mapping[str, Any
     if cfg is None:
         errors.append(f"{prefix}_config '{config_name}' does not exist")
         return None
-    config_json = cfg.config_json or {}
-    entry: Mapping[str, Any] = {}
-    if connection:
-        entry = (config_json.get("connections") or {}).get(connection)
-        if entry is None:
-            errors.append(f"{prefix}_connection '{connection}' does not exist in config '{config_name}'")
-            return None
-        if not isinstance(entry, Mapping):
-            errors.append(f"{prefix}_connection '{connection}' is not a valid connection")
-            return None
-    db_type = entry.get("db_type") or config_json.get("db_type") or "mssql"
-    if db_type not in DIALECT_BY_DB_TYPE:
-        errors.append(f"{prefix}_config '{config_name}' ({db_type}) is not a SQL database")
+    dialect, side_problems = _check_side(cfg, connection, prefix)
+    if side_problems:
+        errors.extend(side_problems)
         return None
-    return _Side(cfg, connection, dialect_for(db_type))
+    return _Side(cfg, connection, dialect)
 
 
 def _parse_bool(cell: str, field: str, errors: list[str]) -> bool:

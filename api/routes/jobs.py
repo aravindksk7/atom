@@ -1,8 +1,10 @@
 import base64
 import binascii
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session, is_admin_request
@@ -327,6 +329,11 @@ def bulk_compare_template():
 
 @router.post("/bulk-compare/preview")
 def bulk_compare_preview(body: BulkComparePreviewRequest, db: Session = Depends(get_session)):
+    if len(body.content_b64) > math.ceil(compare_bulk_import.MAX_SHEET_BYTES * 4 / 3) + 4:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Sheet is too large; the limit is {compare_bulk_import.MAX_SHEET_BYTES} bytes",
+        )
     try:
         content = base64.b64decode(body.content_b64, validate=True)
     except (binascii.Error, ValueError):
@@ -357,8 +364,16 @@ def bulk_compare_commit(
         req = job.params.get("request") or {}
         for side in ("a", "b"):
             config_id = req.get(f"config_id_{side}")
-            if config_repo.get(config_id) is None:
+            config = config_repo.get(config_id) if config_id is not None else None
+            if config is None:
                 errors.append(f"{job.name}: config {config_id} (source {side.upper()}) no longer exists")
+                continue
+            errors.extend(
+                f"{job.name}: {problem}"
+                for problem in compare_bulk_import.side_errors(
+                    config, req.get(f"connection_{side}") or None, f"source {side.upper()}",
+                )
+            )
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
@@ -370,13 +385,20 @@ def bulk_compare_commit(
     saved = _save_job_definitions(body.jobs, request, db, "bulk_compare_import")
     selection_out = None
     if selection_name:
-        selection = selection_repo.create(
-            name=selection_name,
-            description="Created by bulk compare import",
-            tags=[],
-            job_sequence=[job.name for job in saved],
-            run_settings=RunSettings(use_live_connections=True).model_dump(),
-        )
+        try:
+            selection = selection_repo.create(
+                name=selection_name,
+                description="Created by bulk compare import",
+                tags=[],
+                job_sequence=[job.name for job in saved],
+                run_settings=RunSettings(use_live_connections=True).model_dump(),
+            )
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Jobs were saved, but a job selection named '{selection_name}' already exists",
+            )
         AuditService(db).log(
             request, "selection.created", "job_selection", selection.id,
             {"name": selection.name, "job_count": len(saved), "source": "bulk_compare_import"},

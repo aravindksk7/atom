@@ -145,3 +145,63 @@ def test_commit_rechecks_configs_and_saves_nothing(client, engine):
     assert "999" in resp.text
     with Session(engine) as db:
         assert JobRepository(db).get("cust_cmp") is None
+
+
+def test_commit_rejects_unknown_connection(client, engine):
+    jobs = _preview_jobs(client)
+    jobs[0]["params"]["request"]["connection_a"] = "nope"
+    resp = client.post("/api/jobs/bulk-compare/commit", json={"jobs": jobs})
+    assert resp.status_code == 422
+    assert "nope" in resp.text
+    with Session(engine) as db:
+        assert JobRepository(db).get("cust_cmp") is None
+
+
+def test_commit_rejects_non_sql_config(client, engine):
+    with Session(engine) as db:
+        cfg = ConfigRepository(db).create("CSV_CFG", "dev", {"db_type": "csv"})
+        csv_id = cfg.id
+    jobs = _preview_jobs(client)
+    jobs[0]["params"]["request"]["config_id_b"] = csv_id
+    resp = client.post("/api/jobs/bulk-compare/commit", json={"jobs": jobs})
+    assert resp.status_code == 422
+    assert "not a SQL database" in resp.text
+    with Session(engine) as db:
+        assert JobRepository(db).get("cust_cmp") is None
+
+
+def test_preview_rejects_oversized_upload(client, monkeypatch):
+    from api.services import compare_bulk_import
+    monkeypatch.setattr(compare_bulk_import, "MAX_SHEET_BYTES", 30)
+    resp = client.post("/api/jobs/bulk-compare/preview", json=_upload(VALID))
+    assert resp.status_code == 413
+    assert "too large" in resp.json()["detail"]
+
+
+def test_commit_selection_name_race_is_409(client, engine, monkeypatch):
+    with Session(engine) as db:
+        JobSelectionRepository(db).create(name="raced", description="", tags=[], job_sequence=[], run_settings={})
+    monkeypatch.setattr(JobSelectionRepository, "get_by_name", lambda self, name: None)
+    resp = client.post("/api/jobs/bulk-compare/commit",
+                       json={"jobs": _preview_jobs(client), "selection_name": "raced"})
+    assert resp.status_code == 409
+    assert "Jobs were saved" in resp.json()["detail"]
+    with Session(engine) as db:
+        assert JobRepository(db).get("cust_cmp") is not None
+
+
+def test_non_admin_can_commit_compare_jobs(client, engine):
+    jobs = _preview_jobs(client)
+    with Session(engine) as db:
+        raw, _ = TokenRepository(db).create("plain", is_admin=False)
+    with TestClient(app, headers={"Authorization": f"Bearer {raw}"}) as plain:
+        resp = plain.post("/api/jobs/bulk-compare/commit", json={"jobs": jobs})
+    assert resp.status_code == 201, resp.text
+
+
+def test_commit_audit_records_bulk_source(client, engine):
+    from etl_framework.repository.models import AuditEvent
+    client.post("/api/jobs/bulk-compare/commit", json={"jobs": _preview_jobs(client)})
+    with Session(engine) as db:
+        event = db.query(AuditEvent).filter_by(resource_type="job", resource_id="cust_cmp").one()
+        assert event.diff["source"] == "bulk_compare_import"
