@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.models import EnvironmentConfig, POSTGRES_DB_TYPES
 
 
 @contextmanager
@@ -93,6 +93,17 @@ def _ensure_netezza_dialect() -> None:
         ) from exc
 
 
+def _ensure_psycopg() -> None:
+    """Fail with an actionable message when the PostgreSQL driver is missing."""
+    try:
+        import psycopg  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL / Aurora PostgreSQL support requires the 'psycopg' driver. "
+            "Install it with: pip install 'etl-framework[postgres]'."
+        ) from exc
+
+
 class DBEngine:
     """SQLAlchemy-backed query engine compatible with ReconciliationEngine."""
 
@@ -126,6 +137,19 @@ class DBEngine:
                         f"PWD={env_config.db_password};"
                     )
                     connection_url = f"netezza+pyodbc:///?odbc_connect={params}"
+            elif db_type in POSTGRES_DB_TYPES:
+                _ensure_psycopg()
+                user = urllib.parse.quote(env_config.db_user, safe="")
+                pwd = urllib.parse.quote(env_config.db_password, safe="")
+                database = urllib.parse.quote(env_config.db_name, safe="")
+                query = urllib.parse.urlencode({
+                    "sslmode": env_config.db_sslmode or "prefer",
+                    "connect_timeout": env_config.db_connect_timeout,
+                })
+                connection_url = (
+                    f"postgresql+psycopg://{user}:{pwd}"
+                    f"@{env_config.db_host}:{env_config.db_port}/{database}?{query}"
+                )
             else:
                 # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
                 # (a behavior change from Driver 17, which defaulted to no encryption), so

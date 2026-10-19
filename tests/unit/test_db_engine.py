@@ -243,3 +243,46 @@ def test_preserve_root_logging_prevents_the_log_file_from_being_created(tmp_path
         root.handlers[:] = saved
 
     assert not (tmp_path / "nzalchemy.log").exists()
+
+
+def _pg_cfg(**overrides):
+    base = dict(
+        name="pg", db_type="postgresql", db_host="pg.local",
+        db_name="sales db", db_user="etl@corp", db_password="p@ss:word",
+        db_connect_timeout=7,
+    )
+    return EnvironmentConfig(**{**base, **overrides})
+
+
+def test_postgresql_url_quotes_credentials_and_sets_ssl_and_timeout():
+    with patch("etl_framework.db.engine.create_engine") as mock_create:
+        DBEngine(_pg_cfg())
+    url = mock_create.call_args[0][0]
+    assert url == (
+        "postgresql+psycopg://etl%40corp:p%40ss%3Aword@pg.local:5432/sales%20db"
+        "?sslmode=prefer&connect_timeout=7"
+    )
+
+
+def test_aurora_postgresql_url_requires_ssl():
+    with patch("etl_framework.db.engine.create_engine") as mock_create:
+        DBEngine(_pg_cfg(db_type="aurora_postgresql", db_host="c.cluster-x.eu-west-1.rds.amazonaws.com"))
+    url = mock_create.call_args[0][0]
+    assert url.startswith("postgresql+psycopg://")
+    assert "@c.cluster-x.eu-west-1.rds.amazonaws.com:5432/" in url
+    assert "sslmode=require" in url
+
+
+def test_postgresql_passes_pool_settings():
+    with patch("etl_framework.db.engine.create_engine") as mock_create:
+        DBEngine(_pg_cfg(db_pool_size=3, db_pool_overflow=4))
+    kwargs = mock_create.call_args[1]
+    assert kwargs["pool_size"] == 3
+    assert kwargs["max_overflow"] == 4
+
+
+def test_postgresql_without_psycopg_names_the_extra(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    with pytest.raises(ImportError, match=r"etl-framework\[postgres\]"):
+        DBEngine(_pg_cfg())
