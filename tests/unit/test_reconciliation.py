@@ -10,6 +10,14 @@ from etl_framework.runner.state import TestStatus
 from etl_framework.exceptions import SchemaValidationError
 
 
+def _batcher(df):
+    """iter_query_batches side effect: yield ``df`` in cursor batches."""
+    def side_effect(query, params=None, *, batch_size):
+        for start in range(0, len(df), batch_size):
+            yield df.iloc[start:start + batch_size].reset_index(drop=True)
+    return side_effect
+
+
 def _make_engine(source_df, target_df, key_columns=None, exclude_columns=None,
                  float_tolerance=1e-9, mismatch_row_limit=1000,
                  schema_mismatch_policy="warn", null_equals_null=True,
@@ -18,6 +26,8 @@ def _make_engine(source_df, target_df, key_columns=None, exclude_columns=None,
     target_db = MagicMock()
     source_db.execute_query.return_value = source_df
     target_db.execute_query.return_value = target_df
+    source_db.iter_query_batches.side_effect = _batcher(source_df)
+    target_db.iter_query_batches.side_effect = _batcher(target_df)
     # Give the mock engines a name attribute (used in result fields)
     source_db._env = MagicMock(); source_db._env.name = "dev"
     target_db._env = MagicMock(); target_db._env.name = "qa"
@@ -352,24 +362,14 @@ def test_slo_none_never_triggers_slow():
 # --- Chunked reconciliation tests (Task 9) ---
 
 def _make_paginating_engine(source_df, target_df, chunk_size, key_columns=None):
-    """Build an engine whose execute_query simulates real SQL pagination by
-    slicing the DataFrame according to OFFSET/FETCH values in the query string."""
-    import re
-
-    def _paginate(df):
-        def side_effect(query, params=None):
-            m = re.search(r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY", query, re.IGNORECASE)
-            if m:
-                offset, size = int(m.group(1)), int(m.group(2))
-                return df.iloc[offset: offset + size].reset_index(drop=True)
-            # Hash query or plain query — return full df
-            return df
-        return side_effect
-
+    """Build an engine whose iter_query_batches yields the DataFrames in cursor
+    batches, as DBEngine does for chunked loading."""
     source_db = MagicMock()
     target_db = MagicMock()
-    source_db.execute_query.side_effect = _paginate(source_df)
-    target_db.execute_query.side_effect = _paginate(target_df)
+    source_db.execute_query.return_value = source_df
+    target_db.execute_query.return_value = target_df
+    source_db.iter_query_batches.side_effect = _batcher(source_df)
+    target_db.iter_query_batches.side_effect = _batcher(target_df)
     source_db._env = MagicMock(); source_db._env.name = "dev"
     target_db._env = MagicMock(); target_db._env.name = "qa"
     return ReconciliationEngine(

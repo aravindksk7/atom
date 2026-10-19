@@ -128,29 +128,9 @@ class DataFrameQueryEngine:
     def execute_query(self, query: str, params: dict | None = None) -> pd.DataFrame:
         if query in self._frames:
             return self._frames[query].copy()
-        base_query = self._extract_base_query(query)
-        if base_query in self._frames:
-            frame = self._frames[base_query].copy()
-            return self._apply_window(query, frame)
         if "__default__" in self._frames:
             return self._frames["__default__"].copy()
         return pd.DataFrame()
-
-    def _extract_base_query(self, query: str) -> str:
-        match = re.search(r"FROM \((.*)\) AS _base", query, flags=re.IGNORECASE | re.DOTALL)
-        return match.group(1).strip() if match else query
-
-    def _apply_window(self, query: str, frame: pd.DataFrame) -> pd.DataFrame:
-        match = re.search(
-            r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY",
-            query,
-            flags=re.IGNORECASE,
-        )
-        if not match:
-            return frame
-        offset = int(match.group(1))
-        chunk_size = int(match.group(2))
-        return frame.iloc[offset: offset + chunk_size].reset_index(drop=True)
 
     def connect(self):
         return self
