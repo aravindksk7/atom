@@ -897,9 +897,9 @@ class JobDefinition(BaseModel):
                     raise ValueError("reconciliation jobs require key_columns")
         elif self.job_type == "compare":
             compare_type = self.params.get("compare_type")
-            if compare_type not in ("bo", "recon_file", "matrix"):
+            if compare_type not in ("bo", "recon_file", "matrix", "sql"):
                 raise ValueError(
-                    "compare jobs require params.compare_type of 'bo', 'recon_file', or 'matrix'"
+                    "compare jobs require params.compare_type of 'bo', 'recon_file', 'matrix', or 'sql'"
                 )
             request = self.params.get("request")
             if not isinstance(request, dict):
@@ -930,6 +930,15 @@ class JobDefinition(BaseModel):
                             f"compare job Source {side} uses a "
                             f"{'stored run' if stored else 'file upload'}, "
                             "which cannot be re-run on a schedule - use a file path"
+                        )
+            elif compare_type == "sql":
+                from etl_framework.db.sql_utils import is_read_only_sql
+
+                parsed_sql = SQLCompareRequest.model_validate(request)
+                for side, query in (("A", parsed_sql.query_a), ("B", parsed_sql.query_b)):
+                    if not is_read_only_sql(query):
+                        raise ValueError(
+                            f"compare job Source {side} query must be a single read-only SELECT or WITH query"
                         )
             else:
                 parsed_matrix = MatrixCompareRequest.model_validate(request)

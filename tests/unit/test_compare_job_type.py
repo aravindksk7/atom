@@ -31,7 +31,7 @@ def test_compare_job_requires_a_known_compare_type():
         JobDefinition(
             name="nightly_compare",
             job_type="compare",
-            params={"compare_type": "sql", "request": _bo_request()},
+            params={"compare_type": "bogus", "request": _bo_request()},
         )
 
 
@@ -167,3 +167,40 @@ def test_compare_job_mirrors_key_columns_from_a_matrix_request():
     )
 
     assert job.key_columns == ["region", "product"]
+
+
+def _sql_request(**overrides) -> dict:
+    request = {
+        "config_id_a": 1,
+        "config_id_b": 2,
+        "query_a": "SELECT id, amount FROM dbo.orders",
+        "query_b": "SELECT id, amount FROM public.orders",
+        "key_columns": ["id"],
+    }
+    return {**request, **overrides}
+
+
+def test_compare_job_accepts_a_sql_request():
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": _sql_request()},
+    )
+    assert job.key_columns == ["id"]
+
+
+def test_compare_job_sql_request_requires_both_config_ids():
+    with pytest.raises(ValidationError, match="config_id_b"):
+        JobDefinition(
+            name="orders_cmp", job_type="compare",
+            params={"compare_type": "sql", "request": {
+                "config_id_a": 1, "query_a": "SELECT 1", "query_b": "SELECT 1",
+            }},
+        )
+
+
+def test_compare_job_sql_request_rejects_mutating_sql():
+    with pytest.raises(ValidationError, match="Source B"):
+        JobDefinition(
+            name="orders_cmp", job_type="compare",
+            params={"compare_type": "sql", "request": _sql_request(query_b="DELETE FROM public.orders")},
+        )

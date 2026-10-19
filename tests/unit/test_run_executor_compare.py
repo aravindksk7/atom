@@ -115,7 +115,7 @@ def test_compare_job_with_an_unknown_compare_type_raises():
         exclude_columns=[],
         source_env=None,
         target_env=None,
-        params={"compare_type": "sql", "request": {}},
+        params={"compare_type": "bogus", "request": {}},
         enabled=True,
         rules=[],
         depends_on=[],
