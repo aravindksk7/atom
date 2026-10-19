@@ -946,19 +946,6 @@ Environment configs can be created in the Config tab or through `/api/configs`. 
 
 `chunk_size` means rows per cursor fetch from a single query: the engine streams one query in server-side cursor batches rather than paging with `ORDER BY`/`OFFSET`, so chunked loads work without key columns and on every supported dialect.
 
-### PostgreSQL And Aurora PostgreSQL Database Types
-
-Environment configs and named connections accept `db_type: postgresql` and `db_type: aurora_postgresql` alongside the existing SQL Server, Netezza, and Oracle types.
-
-- Default port: `5432` — applied when the port is unset or still the SQL Server default `1433`.
-- Default driver: `psycopg` — applied when the driver is unset or still a SQL Server ODBC driver name. Install it with `pip install 'etl-framework[postgres]'` (`psycopg[binary]>=3.1`); a missing driver raises a clear error naming the `postgres` extra.
-- `db_sslmode`: optional TLS mode. Defaults to `prefer` for `postgresql` and `require` for `aurora_postgresql` when the user did not set one. The config form offers `disable`, `prefer`, `require`, `verify-ca`, and `verify-full`.
-- `db_name` is the database name. For `aurora_postgresql`, `db_host` is the cluster (writer) or reader endpoint; there are no other Aurora-specific settings.
-
-Both types work anywhere a SQL database source is used today: SQL compare, compare jobs, reconciliation jobs, schema discovery, query preview, and test connection.
-
-`chunk_size` now means rows per cursor fetch from a single query. Chunked loading streams one query in cursor batches (a server-side cursor on `psycopg`) instead of paging with `ORDER BY`/`OFFSET`, so it is correct on every database type and works without key columns. `0` still means one plain read.
-
 ### Config Overlays & Secret Providers (standalone CLI)
 
 The **standalone CLI runner** (`python -m etl_framework.runner.cli --config <file.yml> --source-env dev --target-env prod`) reads its own YAML file — separate from the web app's DB-backed configs above — via `etl_framework.config.loader.ConfigLoader`. That file supports two things worth knowing about:
@@ -3129,48 +3116,6 @@ $body = @{
 } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/sql" -Body $body -ContentType "application/json" -Headers $h
 ```
-
----
-
-### Bulk Import Compare Jobs
-
-The **Jobs** view has a **Bulk import compares** action that opens a modal for creating many table-to-table compare jobs at once from a CSV or XLSX mapping sheet (one row per job). Download the template from the modal, pick a file, review the preview table, then import.
-
-The mapping sheet is CSV (UTF-8, header row) or XLSX (first sheet) with one row per compare job and these columns:
-
-| Column | Required | Meaning |
-|---|---|---|
-| `job_name` | yes | Saved job name; unique within the file. |
-| `source_config` | yes | Saved config name for side A. |
-| `source_connection` | no | Named connection inside that config. |
-| `source_table` | yes | `schema.table`, or a full `SELECT`/`WITH` query. |
-| `target_config` | yes | Saved config name for side B. |
-| `target_connection` | no | Named connection inside that config. |
-| `target_table` | yes | `schema.table`, or a full `SELECT`/`WITH` query. |
-| `key_columns` | no | `;`-separated; each `src:tgt` or a bare name. |
-| `compare_columns` | no | `;`-separated; each `src:tgt` or a bare name. Blank means all columns. |
-| `exclude_columns` | no | `;`-separated target-side names. |
-| `source_where` | no | Filter appended as `WHERE` on side A. |
-| `target_where` | no | Filter appended as `WHERE` on side B. |
-| `numeric_tolerance` | no | Float, default 0. |
-| `ignore_case` | no | `true`/`false`, default false. |
-| `chunk_size` | no | Int, default 10000 (0 disables chunking). |
-| `tags` | no | `;`-separated job tags. |
-| `description` | no | Job description. |
-
-Header names are matched case-insensitively with surrounding whitespace trimmed; unknown headers are a file-level error.
-
-**Column lists and `src:tgt` mapping.** `key_columns`, `compare_columns`, `exclude_columns`, and `tags` are `;`-separated lists. In `key_columns` and `compare_columns`, each entry is either `src:tgt` — a source-side column aliased to the target-side name, so differently named columns pair up — or a bare name used on both sides. A malformed `src:tgt` entry makes the row invalid.
-
-**Query in a table cell.** A `_table` cell is either a table reference (`schema.table`, or a bare name) or a full query starting with `SELECT` or `WITH`. For a table reference, the importer generates the SQL: columns are emitted unquoted when they are plain identifiers and quoted with the side's dialect otherwise, and aliases are always quoted to the target-side name so both sides carry identical column names. When a cell is a query it is used as-is, so that side's column mapping and `_where` must be blank — otherwise the row is an error. `_where` cells are appended verbatim after `WHERE`, and the final query must pass the same mutating-SQL checks as SQL compare.
-
-**Preview saves nothing.** The preview table shows one row per job with row number, job name, source, target, a valid/invalid status chip, a "will update" flag for existing job names, and an expandable cell with the row's errors or the two generated queries. Preview never writes jobs.
-
-**All-or-nothing import.** The Import button is enabled only when every row is valid. Import is all-or-nothing — any invalid job fails the request before any write. Imported jobs are created or updated with the config and connection data resolved, and marked in the audit log with `source: "bulk_compare_import"`.
-
-**Optional selection.** Tick **Create selection**, give it a name, and the import also creates a Job Selection containing the imported jobs in file order. An existing selection name is rejected with `409` before any job is saved. Run or schedule the imported jobs through the existing selection and schedule tools.
-
-The generated jobs are `job_type: "compare"`, `compare_type: "sql"` and run only with **Use Live Connections** enabled, like the other live compare types. The same SQL compare can also be saved as a job directly: the **SQL** sub-tab editor can save an ad-hoc SQL compare as a reusable `compare_type: "sql"` job, which then appears in the Jobs view like any other job.
 
 ---
 
