@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 import urllib.parse
+from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -181,6 +182,25 @@ class DBEngine:
     def execute_query(self, query: str, params: dict | None = None) -> pd.DataFrame:
         with self._engine.connect() as conn:
             return pd.read_sql(text(query), conn, params=params or {})
+
+    def iter_query_batches(
+        self, query: str, params: dict | None = None, *, batch_size: int,
+    ) -> Iterator[pd.DataFrame]:
+        """Run ``query`` once and yield its rows in DataFrames of ``batch_size``.
+
+        ``stream_results`` asks the driver for a server-side cursor where it has
+        one (psycopg); pyodbc, oracledb and nzpy fall back to ``fetchmany``
+        batching. Either way there is no ORDER BY/OFFSET paging, so no
+        per-dialect SQL and no need for unique keys. The connection is held
+        until the generator is exhausted or closed.
+        """
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {batch_size}")
+        with self._engine.connect().execution_options(stream_results=True) as conn:
+            for batch in pd.read_sql(text(query), conn, params=params or {}, chunksize=batch_size):
+                # pandas yields one empty frame for an empty result; yield nothing.
+                if not batch.empty:
+                    yield batch
 
     def dispose(self) -> None:
         self._engine.dispose()

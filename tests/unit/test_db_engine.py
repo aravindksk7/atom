@@ -291,3 +291,59 @@ def test_postgresql_without_psycopg_names_the_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg", None)
     with pytest.raises(ImportError, match=r"etl-framework\[postgres\]"):
         DBEngine(_pg_cfg())
+
+
+@pytest.fixture
+def sqlite_five_rows():
+    from sqlalchemy.pool import StaticPool
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE nums (id INTEGER PRIMARY KEY, v TEXT)"))
+        for i in range(1, 6):
+            conn.execute(text("INSERT INTO nums VALUES (:i, :v)"), {"i": i, "v": f"v{i}"})
+        conn.commit()
+    return engine
+
+
+def test_iter_query_batches_yields_batches_of_requested_size(cfg, sqlite_five_rows):
+    with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
+        engine = DBEngine(cfg)
+    batches = list(engine.iter_query_batches("SELECT id, v FROM nums ORDER BY id", batch_size=2))
+    assert [len(b) for b in batches] == [2, 2, 1]
+    assert [int(i) for b in batches for i in b["id"]] == [1, 2, 3, 4, 5]
+
+
+def test_iter_query_batches_binds_params(cfg, sqlite_five_rows):
+    with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
+        engine = DBEngine(cfg)
+    batches = list(engine.iter_query_batches("SELECT id FROM nums WHERE id > :lo", {"lo": 3}, batch_size=10))
+    assert sorted(int(i) for i in batches[0]["id"]) == [4, 5]
+
+
+def test_iter_query_batches_empty_result_yields_nothing(cfg, sqlite_five_rows):
+    with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
+        engine = DBEngine(cfg)
+    assert list(engine.iter_query_batches("SELECT id FROM nums WHERE id > 99", batch_size=2)) == []
+
+
+def test_iter_query_batches_rejects_non_positive_batch_size(cfg, sqlite_five_rows):
+    with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
+        engine = DBEngine(cfg)
+    with pytest.raises(ValueError, match="batch_size"):
+        list(engine.iter_query_batches("SELECT 1", batch_size=0))
+
+
+def test_iter_query_batches_closing_early_returns_connection(cfg, sqlite_five_rows):
+    with patch("etl_framework.db.engine.create_engine", return_value=sqlite_five_rows):
+        engine = DBEngine(cfg)
+    from sqlalchemy import event
+    out = {"n": 0}
+    event.listen(sqlite_five_rows, "checkout", lambda *a: out.__setitem__("n", out["n"] + 1))
+    event.listen(sqlite_five_rows, "checkin", lambda *a: out.__setitem__("n", out["n"] - 1))
+    gen = engine.iter_query_batches("SELECT id FROM nums", batch_size=1)
+    next(gen)
+    assert out["n"] == 1
+    gen.close()
+    assert out["n"] == 0
