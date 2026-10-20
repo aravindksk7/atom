@@ -115,7 +115,7 @@ def test_compare_job_with_an_unknown_compare_type_raises():
         exclude_columns=[],
         source_env=None,
         target_env=None,
-        params={"compare_type": "sql", "request": {}},
+        params={"compare_type": "bogus", "request": {}},
         enabled=True,
         rules=[],
         depends_on=[],
@@ -154,3 +154,155 @@ def test_compare_job_with_matrix_live_source_respects_live_connections_setting()
 
     with pytest.raises(ValueError, match="live connections"):
         _executor(_session())._build_case(job)()
+
+
+class _FrameDBEngine:
+    """Stands in for DBEngine: serves a DataFrame per db_name, no batching."""
+
+    frames: dict = {}
+
+    def __init__(self, env) -> None:
+        self._env = env
+        self._frame = _FrameDBEngine.frames[env.db_name]
+
+    def execute_query(self, query: str, params=None):
+        return self._frame.copy()
+
+    def dispose(self) -> None:
+        pass
+
+
+def _seed_sql_configs(db) -> tuple[int, int]:
+    from etl_framework.repository.repository import ConfigRepository
+
+    repo = ConfigRepository(db)
+    base = {"db_host": "h", "db_user": "u", "db_password": "p"}
+    a = repo.create("src_cfg", "dev", {**base, "db_type": "mssql", "db_name": "src"})
+    b = repo.create("tgt_cfg", "dev", {**base, "db_type": "postgresql", "db_name": "tgt"})
+    return a.id, b.id
+
+
+def _live_executor(db) -> RunExecutor:
+    return RunExecutor(
+        db=db, run_id="run-1", source_env="Source A", target_env="Source B",
+        job_sequence=[], run_settings=RunSettings(use_live_connections=True), config_snapshot={},
+    )
+
+
+def test_compare_job_runs_a_sql_compare_and_names_the_result_after_the_job(monkeypatch):
+    import pandas as pd
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _FrameDBEngine)
+    _FrameDBEngine.frames = {
+        "src": pd.DataFrame({"id": [1, 2], "amount": [10.0, 20.0]}),
+        "tgt": pd.DataFrame({"id": [1, 2], "amount": [10.0, 25.0]}),
+    }
+    db = _session()
+    id_a, id_b = _seed_sql_configs(db)
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": id_a, "config_id_b": id_b,
+            "query_a": "SELECT id, amount FROM dbo.orders",
+            "query_b": "SELECT id, amount FROM public.orders",
+            "key_columns": ["id"],
+        }},
+    )
+
+    result = _live_executor(db)._build_case(job)()
+
+    assert result.query_name == "orders_cmp"
+    assert result.value_mismatch_count == 1
+
+
+def test_compare_sql_aligns_column_name_case_between_sides(monkeypatch):
+    import pandas as pd
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _FrameDBEngine)
+    _FrameDBEngine.frames = {
+        "src": pd.DataFrame({"order_id": [1, 2], "amount": [10.0, 20.0]}),
+        "tgt": pd.DataFrame({"ORDER_ID": [1, 2], "AMOUNT": [10.0, 25.0]}),
+    }
+    db = _session()
+    id_a, id_b = _seed_sql_configs(db)
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": id_a, "config_id_b": id_b,
+            "query_a": "SELECT order_id, amount FROM t",
+            "query_b": "SELECT order_id, amount FROM t",
+            "key_columns": ["ORDER_ID"],
+        }},
+    )
+
+    result = _live_executor(db)._build_case(job)()
+
+    assert result.value_mismatch_count == 1
+
+
+def test_align_column_case_skips_renames_that_would_collide():
+    import pandas as pd
+    from api.services.compare_service import _align_column_case
+
+    df = pd.DataFrame({"a": [1], "A": [2]})
+    assert list(_align_column_case(df, ["A"]).columns) == ["a", "A"]
+    df2 = pd.DataFrame({"a": [1], "b": [2]})
+    assert list(_align_column_case(df2, ["A", "B"]).columns) == ["A", "B"]
+
+
+def test_compare_sql_job_requires_live_connections():
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": 1, "config_id_b": 2,
+            "query_a": "SELECT 1 AS id", "query_b": "SELECT 1 AS id",
+        }},
+    )
+    with pytest.raises(ValueError, match="live connections"):
+        _executor(_session())._build_case(job)()
+
+
+def test_compare_sql_job_rejects_mutating_query_before_building_engines(monkeypatch):
+    """A stored job whose request bypassed save-time validation is still guarded at run time."""
+    def _explode(*args, **kwargs):
+        raise AssertionError("DBEngine must not be constructed for a mutating query")
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _explode)
+    db = _session()
+    id_a, id_b = _seed_sql_configs(db)
+    job = JobDefinition.model_construct(
+        name="bad_cmp",
+        job_type="compare",
+        description="",
+        tags=[],
+        query="",
+        key_columns=[],
+        exclude_columns=[],
+        source_env=None,
+        target_env=None,
+        params={"compare_type": "sql", "request": {
+            "config_id_a": id_a, "config_id_b": id_b,
+            "query_a": "SELECT id FROM dbo.orders",
+            "query_b": "SELECT 1; DROP TABLE x",
+        }},
+        enabled=True,
+        rules=[],
+        depends_on=[],
+        pass_condition=None,
+    )
+
+    with pytest.raises(ValueError, match="read-only SELECT or WITH"):
+        _live_executor(db)._build_case(job)()
+
+
+def test_compare_sql_job_with_missing_config_raises(monkeypatch):
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _FrameDBEngine)
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": 999, "config_id_b": 998,
+            "query_a": "SELECT 1 AS id", "query_b": "SELECT 1 AS id",
+        }},
+    )
+    with pytest.raises(Exception, match="Config A not found"):
+        _live_executor(_session())._build_case(job)()

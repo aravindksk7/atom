@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest
+from api.schemas import BOCompareRequest, MatrixCompareRequest, ReconFileCompareRequest, SQLCompareRequest
 from etl_framework.assertions.comparators import validate_assertion
 
 
@@ -351,10 +351,10 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
     elif job_type == "compare":
         compare_type = params.get("compare_type")
         request = params.get("request")
-        if compare_type not in ("bo", "recon_file", "matrix"):
+        if compare_type not in ("bo", "recon_file", "matrix", "sql"):
             issues.append(ValidationIssue(
                 "params.compare_type",
-                "compare jobs require compare_type of 'bo', 'recon_file', or 'matrix'",
+                "compare jobs require compare_type of 'bo', 'recon_file', 'matrix', or 'sql'",
             ))
         if not isinstance(request, dict):
             issues.append(ValidationIssue(
@@ -425,6 +425,14 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
                             f"compare job {label} is an upload, which cannot be re-run on a "
                             "schedule - use a file path or another repeatable source",
                         ))
+        elif compare_type == "sql":
+            try:
+                SQLCompareRequest.model_validate(request)
+            except ValidationError as exc:
+                issues.append(ValidationIssue(
+                    "params.request",
+                    f"compare sql request is invalid: {_validation_error_message(exc)}",
+                ))
         for field in ("rules", "pass_condition", "depends_on"):
             if params.get(field) or _get(job, field, None):
                 issues.append(ValidationIssue(

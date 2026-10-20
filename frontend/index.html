@@ -806,22 +806,37 @@
         <div class="grid-2">
           <div>
             <label class="field-label" for="a11y-config-db-type">DB Type</label>
-            <select x-model="configModal.db_type" @change="configModal.db_port = (configModal.db_type === 'oracle' ? 1521 : (configModal.db_type === 'netezza' ? 5480 : 1433)); if (configModal.db_type === 'oracle' && (configModal.db_driver.includes('SQL Server') || configModal.db_driver === 'nzpy')) configModal.db_driver = 'oracledb'; else if (configModal.db_type === 'netezza' && (configModal.db_driver.includes('SQL Server') || configModal.db_driver === 'oracledb')) configModal.db_driver = 'nzpy';" class="field-input field-select" data-testid="config-modal-db-type-select" id="a11y-config-db-type">
+            <select x-model="configModal.db_type" @change="onConfigDbTypeChange()" class="field-input field-select" data-testid="config-modal-db-type-select" id="a11y-config-db-type">
               <option value="mssql">Microsoft SQL Server</option>
               <option value="netezza">IBM Netezza</option>
               <option value="oracle">Oracle Database</option>
+              <option value="postgresql">PostgreSQL</option>
+              <option value="aurora_postgresql">Amazon Aurora PostgreSQL</option>
             </select>
           </div>
           <div>
             <label class="field-label" for="a11y-config-db-driver">DB Driver</label>
-            <input x-model="configModal.db_driver" class="field-input" :placeholder="configModal.db_type === 'oracle' ? 'oracledb' : (configModal.db_type === 'netezza' ? 'nzpy' : 'ODBC Driver 17 for SQL Server')" data-testid="config-modal-db-driver-input" id="a11y-config-db-driver" />
+            <input x-model="configModal.db_driver" class="field-input" :placeholder="dbTypeDefaults(configModal.db_type).driver" data-testid="config-modal-db-driver-input" id="a11y-config-db-driver" />
           </div>
           <div><label  class="field-label" for="a11y-config-db-host">DB Host</label><input x-model="configModal.db_host" class="field-input" placeholder="localhost" data-testid="config-modal-db-host-input" id="a11y-config-db-host" /></div>
-          <div><label  class="field-label" for="a11y-config-db-port">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" :placeholder="configModal.db_type === 'oracle' ? '1521' : (configModal.db_type === 'netezza' ? '5480' : '1433')" data-testid="config-modal-db-port-input" id="a11y-config-db-port" /></div>
+          <div><label  class="field-label" for="a11y-config-db-port">DB Port</label><input x-model="configModal.db_port" type="number" class="field-input" :placeholder="String(dbTypeDefaults(configModal.db_type).port)" data-testid="config-modal-db-port-input" id="a11y-config-db-port" /></div>
           <div><label  class="field-label" for="a11y-config-db-name">DB Name</label><input x-model="configModal.db_name" class="field-input" data-testid="config-modal-db-name-input" id="a11y-config-db-name" /></div>
           <div><label  class="field-label" for="a11y-config-db-user">DB User</label><input x-model="configModal.db_user" class="field-input" data-testid="config-modal-db-user-input" id="a11y-config-db-user" /></div>
           <div><label  class="field-label" for="a11y-config-db-password">DB Password</label><input x-model="configModal.db_password" type="password" class="field-input" data-testid="config-modal-db-password-input" id="a11y-config-db-password" /></div>
           <div><label  class="field-label" for="a11y-config-connect-timeout-s">Connect Timeout (s)</label><input x-model="configModal.db_connect_timeout" type="number" class="field-input" placeholder="15" id="a11y-config-connect-timeout-s" /></div>
+          <div x-show="isPostgresType(configModal.db_type)">
+            <label class="field-label" for="a11y-config-db-sslmode">SSL Mode</label>
+            <select x-model="configModal.db_sslmode" class="field-input field-select" data-testid="config-modal-db-sslmode-select" id="a11y-config-db-sslmode">
+              <option value="disable">disable</option>
+              <option value="prefer">prefer</option>
+              <option value="require">require</option>
+              <option value="verify-ca">verify-ca</option>
+              <option value="verify-full">verify-full</option>
+            </select>
+          </div>
+          <p x-show="configModal.db_type === 'aurora_postgresql'" class="text-xs text-slate-500" data-testid="config-modal-aurora-hint">
+            DB Host is the Aurora cluster endpoint (writer) or reader endpoint, e.g. mycluster.cluster-abc123.eu-west-1.rds.amazonaws.com.
+          </p>
         </div>
         <div class="divider"></div>
         <div>
@@ -843,11 +858,13 @@
               <div x-show="conn.expanded" class="p-3 grid-2">
                 <div>
                   <label class="field-label">DB Type</label>
-                  <select x-model="conn.db_type" @change="if (conn.db_type === 'oracle' && !conn.db_port) conn.db_port = 1521; if (conn.db_type === 'oracle' && (!conn.db_driver || conn.db_driver.includes('SQL Server') || conn.db_driver === 'nzpy')) conn.db_driver = 'oracledb'; if (conn.db_type === 'netezza' && !conn.db_port) conn.db_port = 5480; if (conn.db_type === 'netezza' && (!conn.db_driver || conn.db_driver.includes('SQL Server') || conn.db_driver === 'oracledb')) conn.db_driver = 'nzpy';" class="field-input field-select">
+                  <select x-model="conn.db_type" @change="onConnectionDbTypeChange(conn)" class="field-input field-select">
                     <option value="">(inherits default)</option>
                     <option value="mssql">Microsoft SQL Server</option>
                     <option value="netezza">IBM Netezza</option>
                     <option value="oracle">Oracle Database</option>
+                    <option value="postgresql">PostgreSQL</option>
+                    <option value="aurora_postgresql">Amazon Aurora PostgreSQL</option>
                   </select>
                 </div>
                 <div><label class="field-label">DB Driver</label><input x-model="conn.db_driver" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
@@ -856,6 +873,16 @@
                 <div><label class="field-label">DB Name</label><input x-model="conn.db_name" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB User</label><input x-model="conn.db_user" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
                 <div><label class="field-label">DB Password</label><input x-model="conn.db_password" type="password" class="field-input" placeholder="inherits default" aria-label="inherits default" /></div>
+                <div x-show="isPostgresType(conn.db_type)"><label class="field-label">SSL Mode</label>
+                  <select x-model="conn.db_sslmode" class="field-input field-select" aria-label="connection ssl mode">
+                    <option value="">(type default)</option>
+                    <option value="disable">disable</option>
+                    <option value="prefer">prefer</option>
+                    <option value="require">require</option>
+                    <option value="verify-ca">verify-ca</option>
+                    <option value="verify-full">verify-full</option>
+                  </select>
+                </div>
               </div>
             </div>
           </template>
@@ -1430,6 +1457,7 @@
       <div class="font-semibold text-slate-700">Job Catalog</div>
       <div class="flex items-center gap-3">
         <span class="text-muted" x-text="jobCatalogCountLabel"></span>
+        <button @click="openBulkCompareModal()" class="btn-secondary btn-sm" data-testid="bulk-compare-open-btn">Bulk import compares</button>
         <button @click="openNewJobModal()" class="btn-primary btn-sm" data-testid="job-new-btn">+ New Job</button>
       </div>
     </div>
@@ -1501,6 +1529,72 @@
           </div>
         </div>
       </template>
+    </div>
+  </div>
+
+  <!-- Bulk compare import modal -->
+  <div x-show="bulkCompare.open" x-cloak class="modal-backdrop" @click.self="closeBulkCompareModal()" data-testid="bulk-compare-modal">
+    <div class="modal-box w-full max-w-5xl" role="dialog" aria-modal="true" aria-labelledby="bulkCompareTitle">
+      <div class="flex items-center mb-3">
+        <h2 id="bulkCompareTitle" class="text-lg font-bold">Bulk import compare jobs</h2>
+        <button @click="closeBulkCompareModal()" class="ml-auto text-slate-400" aria-label="close bulk compare import">✕</button>
+      </div>
+      <p class="text-sm text-slate-600 mb-3">
+        One row per table pair. Configs are referenced by name; columns as <code>source:target</code> or a shared name, separated by <code>;</code>.
+        <button @click="downloadBulkCompareTemplate()" class="text-indigo-600 underline" data-testid="bulk-compare-template-btn">Download template</button>
+      </p>
+      <label class="field-label" for="bulk-compare-file">Mapping sheet (.csv or .xlsx)</label>
+      <input id="bulk-compare-file" type="file" accept=".csv,.xlsx" @change="previewBulkCompareFile($event)" class="field-input mb-3" data-testid="bulk-compare-file-input" />
+      <p x-show="bulkCompare.loading" class="text-sm text-slate-500">Validating…</p>
+      <p x-show="bulkCompare.error" x-text="bulkCompare.error" class="text-sm text-red-600 mb-2" data-testid="bulk-compare-error"></p>
+
+      <template x-if="bulkCompare.preview">
+        <div>
+          <p class="text-sm mb-2" data-testid="bulk-compare-summary"
+             x-text="`${bulkCompare.preview.valid_count} valid, ${bulkCompare.preview.invalid_count} invalid`"></p>
+          <div class="overflow-auto border border-slate-200 rounded" style="max-height: 50vh">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50 text-left">
+                <tr><th class="px-2 py-1">Row</th><th class="px-2 py-1">Job</th><th class="px-2 py-1">Source</th><th class="px-2 py-1">Target</th><th class="px-2 py-1">Status</th><th class="px-2 py-1"></th></tr>
+              </thead>
+              <tbody>
+                <template x-for="row in bulkCompare.preview.rows" :key="row.row_number">
+                  <tr class="border-t border-slate-100 align-top" :data-testid="`bulk-compare-row-${row.row_number}`">
+                    <td class="px-2 py-1" x-text="row.row_number"></td>
+                    <td class="px-2 py-1 font-mono" x-text="row.job_name"></td>
+                    <td class="px-2 py-1" x-text="row.source"></td>
+                    <td class="px-2 py-1" x-text="row.target"></td>
+                    <td class="px-2 py-1">
+                      <span class="compare-chip" :class="row.status === 'valid' ? 'chip-passed' : 'chip-regressed'" x-text="row.status"></span>
+                      <span x-show="row.will_update" class="compare-chip" data-testid="bulk-compare-will-update">will update</span>
+                      <div x-show="bulkCompare.expanded[row.row_number]" class="mt-1">
+                        <template x-for="err in row.errors" :key="err"><p class="text-red-600" x-text="err"></p></template>
+                        <template x-if="row.query_a"><pre class="font-mono whitespace-pre-wrap text-slate-600" x-text="`A: ${row.query_a}\nB: ${row.query_b}`"></pre></template>
+                      </div>
+                    </td>
+                    <td class="px-2 py-1">
+                      <button @click="toggleBulkCompareRow(row.row_number)" class="text-indigo-600" x-text="bulkCompare.expanded[row.row_number] ? 'Hide' : 'Details'"></button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center gap-2 mt-3">
+            <input type="checkbox" id="bulk-compare-create-selection" x-model="bulkCompare.createSelection" data-testid="bulk-compare-create-selection" />
+            <label for="bulk-compare-create-selection" class="text-sm">Create a job selection with these jobs</label>
+            <input x-show="bulkCompare.createSelection" x-model="bulkCompare.selectionName" class="field-input" style="width:260px" placeholder="Selection name" aria-label="selection name" data-testid="bulk-compare-selection-name" />
+          </div>
+        </div>
+      </template>
+
+      <div class="flex justify-end gap-2 mt-4">
+        <button @click="closeBulkCompareModal()" class="btn-secondary">Cancel</button>
+        <button @click="commitBulkCompare()" :disabled="!bulkCompareCanImport()" class="btn-primary disabled:opacity-40" data-testid="bulk-compare-import-btn">
+          <span x-show="!bulkCompare.committing">Import</span>
+          <span x-show="bulkCompare.committing">Importing…</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -6974,6 +7068,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <label  class="field-label" for="a11y-compare-exclude-columns-3">Exclude Columns</label>
           <input x-model="sqlExcludeColumns" class="field-input" placeholder="updated_at, etl_ts" id="a11y-compare-exclude-columns-3" />
         </div>
+        <div>
+          <label  class="field-label" for="a11y-compare-chunk-size-3">Chunk Size <span class="text-slate-400 font-normal">(rows per batch; 0 disables chunking)</span></label>
+          <input x-model.number="sqlChunkSize" type="number" min="0" class="field-input" placeholder="10000" id="a11y-compare-chunk-size-3" />
+        </div>
       </div>
       <!-- Advanced Options accordion -->
       <div class="border rounded">
@@ -7024,10 +7122,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
       </div>
-      <button data-testid="compare-sql-run-btn" @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
-        <span x-show="!sqlCompareLoading">Run SQL Compare</span>
-        <span x-show="sqlCompareLoading">Comparing...</span>
-      </button>
+      <div class="flex items-center gap-2">
+        <button data-testid="compare-sql-run-btn" @click="runSQLComparison()" :disabled="sqlCompareLoading" class="btn-primary">
+          <span x-show="!sqlCompareLoading">Run SQL Compare</span>
+          <span x-show="sqlCompareLoading">Comparing...</span>
+        </button>
+        <button data-testid="compare-sql-save-job-btn" @click="openSaveCompareAsJob('sql')"
+                class="btn-secondary btn-sm text-xs">Save as Job</button>
+      </div>
     </div>
 
     <template x-if="sqlCompareResult">
@@ -9200,6 +9302,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <script src="features/adapters.js"></script>
     <script src="features/file-servers.js"></script>
     <script src="features/import-export.js"></script>
+    <script src="features/bulk-compare.js"></script>
     <script src="features/aws.js"></script>
     <script src="features/reports.js"></script>
     <script src="features/differences.js"></script>

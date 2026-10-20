@@ -761,3 +761,26 @@ def test_job_definition_schema_validates_aws_glue_job_run():
             params={"config_id": 1},
         )
 
+
+
+def test_compare_sql_job_has_no_validation_errors():
+    job = JobDefinition(
+        name="orders_cmp", job_type="compare",
+        params={"compare_type": "sql", "request": {
+            "config_id_a": 1, "config_id_b": 2,
+            "query_a": "SELECT id FROM a", "query_b": "SELECT id FROM b",
+        }},
+    )
+    errors = [i for i in validate_job_definition(job) if i.severity.value == "error"]
+    assert errors == []
+
+
+def test_compare_sql_job_with_invalid_request_reports_params_request():
+    job = JobDefinition.model_construct(
+        name="orders_cmp", job_type="compare", description="", tags=[], query="",
+        key_columns=[], exclude_columns=[], source_env=None, target_env=None,
+        params={"compare_type": "sql", "request": {"config_id_a": 1}},
+        enabled=True, rules=[], depends_on=[], pass_condition=None,
+    )
+    fields = [i.field for i in validate_job_definition(job)]
+    assert "params.request" in fields

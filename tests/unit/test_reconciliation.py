@@ -10,6 +10,17 @@ from etl_framework.runner.state import TestStatus
 from etl_framework.exceptions import SchemaValidationError
 
 
+def _batcher(df):
+    """iter_query_batches side effect: yield ``df`` in cursor batches."""
+    def side_effect(query, params=None, *, batch_size):
+        if df.empty:
+            yield df.iloc[0:0]
+            return
+        for start in range(0, len(df), batch_size):
+            yield df.iloc[start:start + batch_size].reset_index(drop=True)
+    return side_effect
+
+
 def _make_engine(source_df, target_df, key_columns=None, exclude_columns=None,
                  float_tolerance=1e-9, mismatch_row_limit=1000,
                  schema_mismatch_policy="warn", null_equals_null=True,
@@ -18,6 +29,8 @@ def _make_engine(source_df, target_df, key_columns=None, exclude_columns=None,
     target_db = MagicMock()
     source_db.execute_query.return_value = source_df
     target_db.execute_query.return_value = target_df
+    source_db.iter_query_batches.side_effect = _batcher(source_df)
+    target_db.iter_query_batches.side_effect = _batcher(target_df)
     # Give the mock engines a name attribute (used in result fields)
     source_db._env = MagicMock(); source_db._env.name = "dev"
     target_db._env = MagicMock(); target_db._env.name = "qa"
@@ -352,24 +365,14 @@ def test_slo_none_never_triggers_slow():
 # --- Chunked reconciliation tests (Task 9) ---
 
 def _make_paginating_engine(source_df, target_df, chunk_size, key_columns=None):
-    """Build an engine whose execute_query simulates real SQL pagination by
-    slicing the DataFrame according to OFFSET/FETCH values in the query string."""
-    import re
-
-    def _paginate(df):
-        def side_effect(query, params=None):
-            m = re.search(r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY", query, re.IGNORECASE)
-            if m:
-                offset, size = int(m.group(1)), int(m.group(2))
-                return df.iloc[offset: offset + size].reset_index(drop=True)
-            # Hash query or plain query — return full df
-            return df
-        return side_effect
-
+    """Build an engine whose iter_query_batches yields the DataFrames in cursor
+    batches, as DBEngine does for chunked loading."""
     source_db = MagicMock()
     target_db = MagicMock()
-    source_db.execute_query.side_effect = _paginate(source_df)
-    target_db.execute_query.side_effect = _paginate(target_df)
+    source_db.execute_query.return_value = source_df
+    target_db.execute_query.return_value = target_df
+    source_db.iter_query_batches.side_effect = _batcher(source_df)
+    target_db.iter_query_batches.side_effect = _batcher(target_df)
     source_db._env = MagicMock(); source_db._env.name = "dev"
     target_db._env = MagicMock(); target_db._env.name = "qa"
     return ReconciliationEngine(
@@ -397,6 +400,8 @@ def test_chunk_size_nonzero_reconciles_correctly():
     target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "x"]})  # mismatch on row 3
     engine = _make_paginating_engine(source, target, chunk_size=2)
     result = engine.reconcile("SELECT 1", "chunked_mismatch")
+    engine._source_engine.execute_query.assert_not_called()
+    engine._target_engine.execute_query.assert_not_called()
     assert result.value_mismatch_count >= 1
 
 
@@ -410,6 +415,16 @@ def test_chunk_size_nonzero_unequal_row_counts_no_infinite_loop():
     assert result.missing_in_source_count == 1
 
 
+def test_chunk_size_nonzero_empty_source_reports_missing_in_source():
+    """An empty chunked source keeps its columns, so keyed compare reports missing rows."""
+    source = pd.DataFrame({"id": [], "val": []})
+    target = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    engine = _make_paginating_engine(source, target, chunk_size=2)
+    result = engine.reconcile("SELECT 1", "empty_source")
+    assert result.status == TestStatus.FAILED
+    assert result.missing_in_source_count == 3
+
+
 def test_chunk_size_nonzero_loads_longer_side_fully():
     """Chunked mode must continue loading until both sides are exhausted."""
     source = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
@@ -417,6 +432,7 @@ def test_chunk_size_nonzero_loads_longer_side_fully():
     engine = _make_paginating_engine(source, target, chunk_size=2)
 
     result = engine.reconcile("SELECT 1", "longer_target")
+    engine._source_engine.execute_query.assert_not_called()
 
     assert result.source_row_count == 3
     assert result.target_row_count == 5

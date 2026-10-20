@@ -17,7 +17,7 @@ from api.schemas import (
 )
 from api.dependencies import get_session
 from etl_framework.config.loader import ConfigLoader
-from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, SECRET_FIELDS, resolve_connection
+from etl_framework.config.models import ApiEndpointEntry, EnvironmentConfig, POSTGRES_DB_TYPES, SECRET_FIELDS, resolve_connection
 from etl_framework.exceptions import ConfigurationError
 from etl_framework.repository.repository import ConfigRepository
 from etl_framework.repository.repository import CustomVariableRepository
@@ -380,6 +380,13 @@ def get_db_schema(config_id: int, connection_name: str | None = None, db: Sessio
                 "FROM INFORMATION_SCHEMA.COLUMNS "
                 "ORDER BY SCHEMA, TABLE_NAME, ORDINAL_POSITION"
             )
+        elif db_type in POSTGRES_DB_TYPES:
+            query = (
+                "SELECT table_schema, table_name, column_name, data_type "
+                "FROM information_schema.columns "
+                "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
+                "ORDER BY table_schema, table_name, ordinal_position"
+            )
         else:
             query = (
                 "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE "
@@ -444,7 +451,7 @@ def preview_query(config_id: int, body: _PreviewRequest, db: Session = Depends(g
         db_type = getattr(env, "db_type", "mssql")
         if db_type == "oracle":
             safe_sql = f"SELECT * FROM ({body.query}) FETCH FIRST {limit} ROWS ONLY"
-        elif db_type == "netezza":
+        elif db_type == "netezza" or db_type in POSTGRES_DB_TYPES:
             safe_sql = f"SELECT * FROM ({body.query}) AS _preview LIMIT {limit}"
         else:
             safe_sql = f"SELECT TOP {limit} * FROM ({body.query}) AS _preview"

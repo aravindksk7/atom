@@ -1,11 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ValidationError
+import base64
+import binascii
+import math
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session, is_admin_request
-from api.schemas import JobDefinition, JobRunSummaryOut, PreviewFileMappingRequest
+from api.schemas import JobDefinition, JobRunSummaryOut, PreviewFileMappingRequest, RunSettings
+from api.services import compare_bulk_import
 from etl_framework.repository.models import SavedJob
-from etl_framework.repository.repository import JobRepository, RunRepository
+from etl_framework.repository.repository import (
+    ConfigRepository, JobRepository, JobSelectionRepository, RunRepository,
+)
 from api.services.audit_service import AuditService
 from etl_framework.runner.job_validation import validate_job_definition
 
@@ -268,20 +276,20 @@ def preview_file_mapping(body: PreviewFileMappingRequest, db: Session = Depends(
     }
 
 
-@router.post("/import", response_model=list[JobDefinition], status_code=201)
-def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
+def _save_job_definitions(
+    jobs: list[JobDefinition], request: Request, db: Session, source: str,
+) -> list[JobDefinition]:
+    """Admin-check and validate every job first, then upsert them all."""
     repo = JobRepository(db)
-    imported = []
-    # Checked for the whole payload first: this route already fails the entire
-    # request on the first invalid item, so a partial import is not a shape
-    # callers can depend on.
-    for job_def in body:
+    for job_def in jobs:
         existing = repo.get(job_def.name)
         require_admin_for_write_capable_job(
             request, job_def.job_type, existing.job_type if existing else None,
         )
-    for job_def in body:
+    for job_def in jobs:
         _raise_validation_errors(job_def)
+    saved = []
+    for job_def in jobs:
         existed = repo.get(job_def.name) is not None
         job = repo.upsert(_job_to_data(job_def))
         AuditService(db).log(
@@ -289,10 +297,114 @@ def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depen
             "job.updated" if existed else "job.created",
             "job",
             job.name,
-            {"source": "import", "job_type": job.job_type},
+            {"source": source, "job_type": job.job_type},
         )
-        imported.append(_job_to_schema(job))
-    return imported
+        saved.append(_job_to_schema(job))
+    return saved
+
+
+@router.post("/import", response_model=list[JobDefinition], status_code=201)
+def import_jobs(body: list[JobDefinition], request: Request, db: Session = Depends(get_session)):
+    return _save_job_definitions(body, request, db, "import")
+
+
+class BulkComparePreviewRequest(BaseModel):
+    filename: str = Field(min_length=1)
+    content_b64: str
+
+
+class BulkCompareCommitRequest(BaseModel):
+    jobs: list[JobDefinition] = Field(min_length=1)
+    selection_name: str | None = None
+
+
+@router.get("/bulk-compare/template")
+def bulk_compare_template():
+    return Response(
+        content=compare_bulk_import.TEMPLATE_CSV,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="bulk-compare-template.csv"'},
+    )
+
+
+@router.post("/bulk-compare/preview")
+def bulk_compare_preview(body: BulkComparePreviewRequest, db: Session = Depends(get_session)):
+    if len(body.content_b64) > math.ceil(compare_bulk_import.MAX_SHEET_BYTES * 4 / 3) + 4:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Sheet is too large; the limit is {compare_bulk_import.MAX_SHEET_BYTES} bytes",
+        )
+    try:
+        content = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="content_b64 is not valid base64")
+    try:
+        rows = compare_bulk_import.read_sheet(body.filename, content)
+    except compare_bulk_import.SheetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    configs = {cfg.name: cfg for cfg in ConfigRepository(db).list()}
+    existing = {job.name for job in JobRepository(db).list()}
+    return compare_bulk_import.preview_rows(rows, configs, existing)
+
+
+@router.post("/bulk-compare/commit", status_code=201)
+def bulk_compare_commit(
+    body: BulkCompareCommitRequest, request: Request, db: Session = Depends(get_session),
+):
+    errors: list[str] = []
+    names = [job.name for job in body.jobs]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        errors.append(f"Duplicate job names: {', '.join(duplicates)}")
+    config_repo = ConfigRepository(db)
+    for job in body.jobs:
+        if job.job_type != "compare" or job.params.get("compare_type") != "sql":
+            errors.append(f"{job.name}: bulk compare import only saves sql compare jobs")
+            continue
+        req = job.params.get("request") or {}
+        for side in ("a", "b"):
+            config_id = req.get(f"config_id_{side}")
+            config = config_repo.get(config_id) if config_id is not None else None
+            if config is None:
+                errors.append(f"{job.name}: config {config_id} (source {side.upper()}) no longer exists")
+                continue
+            errors.extend(
+                f"{job.name}: {problem}"
+                for problem in compare_bulk_import.side_errors(
+                    config, req.get(f"connection_{side}") or None, f"source {side.upper()}",
+                )
+            )
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    selection_repo = JobSelectionRepository(db)
+    selection_name = (body.selection_name or "").strip() or None
+    if selection_name and selection_repo.get_by_name(selection_name) is not None:
+        raise HTTPException(status_code=409, detail="A job selection with this name already exists")
+
+    saved = _save_job_definitions(body.jobs, request, db, "bulk_compare_import")
+    selection_out = None
+    if selection_name:
+        try:
+            selection = selection_repo.create(
+                name=selection_name,
+                description="Created by bulk compare import",
+                tags=[],
+                job_sequence=[job.name for job in saved],
+                run_settings=RunSettings(use_live_connections=True).model_dump(),
+            )
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Jobs were saved, but a job selection named '{selection_name}' already exists",
+            )
+        AuditService(db).log(
+            request, "selection.created", "job_selection", selection.id,
+            {"name": selection.name, "job_count": len(saved), "source": "bulk_compare_import"},
+        )
+        selection_out = {"id": selection.id, "name": selection.name}
+    return {"jobs": [job.model_dump() for job in saved], "selection": selection_out}
 
 
 @router.put("/{name}", response_model=JobDefinition)

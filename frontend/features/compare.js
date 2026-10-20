@@ -119,6 +119,7 @@
     sqlLabelB: 'Source B',
     sqlKeyColumns: '',
     sqlExcludeColumns: '',
+    sqlChunkSize: 10000,
     sqlCompareLoading: false,
     sqlCompareResult: null,
     sqlExpandedDiffs: {},
@@ -664,6 +665,7 @@
     // a non-repeatable source is caught before the round trip. The server stays
     // authoritative.
     _assertCompareJobSourcesAreRepeatable(compareType, payload) {
+      if (compareType === 'sql') return; // config-backed queries always re-run
       if (compareType === 'bo') {
         [['A', payload.source_a], ['B', payload.source_b]].forEach(([side, src]) => {
           if (!src) return;
@@ -707,6 +709,15 @@
           key_columns: payload.key_columns || [],
           exclude_columns: payload.exclude_columns || [],
           params: { source_mode: 'multi_file', file_mapping: payload.file_mapping },
+        };
+      }
+      if (this.saveJobCompareType === 'sql') {
+        const payload = this._buildSqlComparePayload();
+        return {
+          job_type: 'compare',
+          key_columns: payload.key_columns,
+          exclude_columns: payload.exclude_columns,
+          params: { compare_type: 'sql', request: payload },
         };
       }
       if (this.saveJobCompareType === 'matrix') {
@@ -1006,28 +1017,39 @@
       return Object.keys(cfg.config_data.connections);
     },
 
+    _buildSqlComparePayload() {
+      if (!this.sqlConfigA) throw new Error('Select a config for Source A');
+      if (!this.sqlConfigB) throw new Error('Select a config for Source B');
+      if (!this.sqlQueryA.trim()) throw new Error('Enter a SQL query for Source A');
+      if (!this.sqlQueryB.trim()) throw new Error('Enter a SQL query for Source B');
+      return {
+        config_id_a: parseInt(this.sqlConfigA),
+        config_id_b: parseInt(this.sqlConfigB),
+        query_a: this.sqlQueryA.trim(),
+        query_b: this.sqlQueryB.trim(),
+        label_a: this.sqlLabelA || 'Source A',
+        label_b: this.sqlLabelB || 'Source B',
+        connection_a: this.sqlConnectionA || null,
+        connection_b: this.sqlConnectionB || null,
+        key_columns: this.sqlKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
+        exclude_columns: this.sqlExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
+        chunk_size: Number(this.sqlChunkSize) >= 0 ? Number(this.sqlChunkSize) : 10000,
+        advanced: this._buildAdvanced('sql'),
+      };
+    },
+
     async runSQLComparison() {
-      if (!this.sqlConfigA) { this.toast('warn', 'Config A required', 'Select a config for Source A'); return; }
-      if (!this.sqlConfigB) { this.toast('warn', 'Config B required', 'Select a config for Source B'); return; }
-      if (!this.sqlQueryA.trim()) { this.toast('warn', 'Query A required', 'Enter a SQL query for Source A'); return; }
-      if (!this.sqlQueryB.trim()) { this.toast('warn', 'Query B required', 'Enter a SQL query for Source B'); return; }
+      let payload;
+      try {
+        payload = this._buildSqlComparePayload();
+      } catch (e) {
+        this.toast('warn', 'SQL compare', e.message);
+        return;
+      }
       this.sqlCompareLoading = true;
       this.sqlCompareResult = null;
       this.sqlExpandedDiffs = {};
       try {
-        const payload = {
-          config_id_a: parseInt(this.sqlConfigA),
-          config_id_b: parseInt(this.sqlConfigB),
-          query_a: this.sqlQueryA.trim(),
-          query_b: this.sqlQueryB.trim(),
-          label_a: this.sqlLabelA || 'Source A',
-          label_b: this.sqlLabelB || 'Source B',
-          connection_a: this.sqlConnectionA || null,
-          connection_b: this.sqlConnectionB || null,
-          key_columns: this.sqlKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
-          exclude_columns: this.sqlExcludeColumns.split(',').map(s => s.trim()).filter(Boolean),
-          advanced: this._buildAdvanced('sql'),
-        };
         const run = await api('POST', '/api/compare/sql', payload);
         const poll = setInterval(async () => {
           try {

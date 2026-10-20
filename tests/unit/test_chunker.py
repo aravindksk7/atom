@@ -1,10 +1,7 @@
-import re
-
 import pandas as pd
 import pytest
 from etl_framework.reconciliation.chunker import (
     build_hash_query,
-    build_chunk_query,
     hashes_match,
     load_in_chunks,
 )
@@ -17,22 +14,6 @@ def test_build_hash_query_wraps_original():
     assert "SELECT id, val FROM orders" in result
     # Must produce a CHECKSUM or hash aggregate column named hash_value
     assert "hash_value" in result.lower()
-
-
-def test_build_chunk_query_adds_offset_fetch():
-    base = "SELECT id, val FROM orders"
-    result = build_chunk_query(base, key_columns=["id"], offset=0, chunk_size=1000)
-    upper = result.upper()
-    assert "ORDER BY" in upper
-    assert "OFFSET" in upper
-    assert "ROWS FETCH NEXT" in upper or "FETCH NEXT" in upper
-
-
-def test_build_chunk_query_offset_non_zero():
-    base = "SELECT id, val FROM orders"
-    result = build_chunk_query(base, key_columns=["id"], offset=500, chunk_size=250)
-    assert "500" in result
-    assert "250" in result
 
 
 def test_hashes_match_same_df():
@@ -62,16 +43,6 @@ def test_build_hash_query_rejects_mutating_base_query():
         build_hash_query("DELETE FROM orders", key_columns=["id"])
 
 
-def test_build_chunk_query_rejects_unsafe_key_column():
-    with pytest.raises(ValueError, match="Invalid SQL identifier"):
-        build_chunk_query("SELECT id FROM t", key_columns=["id;drop"], offset=0, chunk_size=10)
-
-
-def test_build_chunk_query_raises_on_empty_key_columns():
-    with pytest.raises(ValueError, match="key_columns"):
-        build_chunk_query("SELECT id FROM t", key_columns=[], offset=0, chunk_size=10)
-
-
 def test_hashes_match_both_empty_returns_true():
     df_empty = pd.DataFrame({"id": [], "hash_value": []})
     assert hashes_match(df_empty, df_empty) is True
@@ -88,38 +59,96 @@ def test_hashes_match_copy_not_identity():
     assert hashes_match(df, df.copy()) is True
 
 
-class _WindowEngine:
-    """Fake engine honoring the OFFSET/FETCH pagination emitted by build_chunk_query."""
+class _BatchEngine:
+    """Fake engine with cursor batching, recording how it was called."""
 
-    def __init__(self, name: str, df: pd.DataFrame) -> None:
-        self._env = type("E", (), {"name": name})()
+    def __init__(self, df: pd.DataFrame) -> None:
+        self._env = type("E", (), {"name": "dev"})()
         self._df = df
+        self.batch_calls: list[tuple[str, dict | None, int]] = []
+        self.execute_calls: list[str] = []
 
     def execute_query(self, query: str, params=None) -> pd.DataFrame:
-        m = re.search(r"OFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)", query, re.I)
-        if not m:
-            return self._df.copy()
-        o, n = int(m.group(1)), int(m.group(2))
-        return self._df.iloc[o:o + n].reset_index(drop=True)
+        self.execute_calls.append(query)
+        return self._df.copy()
+
+    def iter_query_batches(self, query: str, params=None, *, batch_size: int):
+        self.batch_calls.append((query, params, batch_size))
+        if self._df.empty:
+            yield self._df.iloc[0:0]
+            return
+        for start in range(0, len(self._df), batch_size):
+            yield self._df.iloc[start:start + batch_size].reset_index(drop=True)
 
 
-def test_load_in_chunks_paginates_fully():
+class _PlainEngine:
+    """Fake engine without iter_query_batches (file-backed engines, test doubles)."""
+
+    def __init__(self, df: pd.DataFrame) -> None:
+        self._env = type("E", (), {"name": "dev"})()
+        self._df = df
+        self.queries: list[str] = []
+
+    def execute_query(self, query: str, params=None) -> pd.DataFrame:
+        self.queries.append(query)
+        return self._df.copy()
+
+
+def test_load_in_chunks_reads_one_query_in_batches():
     df = pd.DataFrame({"id": [1, 2, 3, 4, 5], "v": list("abcde")})
-    out = load_in_chunks(_WindowEngine("dev", df), "SELECT * FROM t", ["id"], 2)
-    assert len(out) == 5
+    engine = _BatchEngine(df)
+    out = load_in_chunks(engine, "SELECT * FROM t", ["id"], 2)
     assert list(out["id"]) == [1, 2, 3, 4, 5]
+    assert engine.batch_calls == [("SELECT * FROM t", None, 2)]
+    assert engine.execute_calls == []
+
+
+def test_load_in_chunks_does_not_rewrite_the_query():
+    engine = _BatchEngine(pd.DataFrame({"id": [1]}))
+    load_in_chunks(engine, "SELECT id FROM t", ["id"], 10)
+    sent = engine.batch_calls[0][0]
+    assert "OFFSET" not in sent.upper()
+    assert "ORDER BY" not in sent.upper()
+
+
+def test_load_in_chunks_batches_without_key_columns():
+    engine = _BatchEngine(pd.DataFrame({"id": [1, 2, 3]}))
+    out = load_in_chunks(engine, "SELECT id FROM t", [], 2)
+    assert len(out) == 3
+    assert len(engine.batch_calls) == 1
+
+
+def test_load_in_chunks_passes_params():
+    engine = _BatchEngine(pd.DataFrame({"id": [1]}))
+    load_in_chunks(engine, "SELECT id FROM t WHERE d = :d", ["id"], 5, params={"d": "2026-10-19"})
+    assert engine.batch_calls[0][1] == {"d": "2026-10-19"}
 
 
 def test_load_in_chunks_single_read_when_disabled():
-    df = pd.DataFrame({"id": [1, 2], "v": ["a", "b"]})
-    assert len(load_in_chunks(_WindowEngine("dev", df), "q", ["id"], 0)) == 2
-    assert len(load_in_chunks(_WindowEngine("dev", df), "q", [], 5)) == 2
+    engine = _BatchEngine(pd.DataFrame({"id": [1, 2]}))
+    assert len(load_in_chunks(engine, "q", ["id"], 0)) == 2
+    assert engine.batch_calls == []
+    assert engine.execute_calls == ["q"]
 
 
-def test_load_in_chunks_applies_normalize():
-    df = pd.DataFrame({"id": [1, 2, 3], "v": [1, 2, 3]})
+def test_load_in_chunks_single_read_for_engine_without_batching():
+    engine = _PlainEngine(pd.DataFrame({"id": [1, 2, 3]}))
+    out = load_in_chunks(engine, "SELECT * FROM t", ["id"], 2)
+    assert len(out) == 3
+    assert engine.queries == ["SELECT * FROM t"]
+
+
+def test_load_in_chunks_applies_normalize_per_batch():
+    engine = _BatchEngine(pd.DataFrame({"id": [1, 2, 3], "v": [1, 2, 3]}))
     out = load_in_chunks(
-        _WindowEngine("dev", df), "SELECT * FROM t", ["id"], 2,
+        engine, "SELECT * FROM t", ["id"], 2,
         normalize=lambda d: d.assign(v=d["v"] * 10),
     )
     assert list(out["v"]) == [10, 20, 30]
+
+
+def test_load_in_chunks_empty_result_returns_empty_frame():
+    engine = _BatchEngine(pd.DataFrame({"id": []}))
+    out = load_in_chunks(engine, "SELECT * FROM t", ["id"], 2)
+    assert out.empty
+    assert list(out.columns) == ["id"]

@@ -3,7 +3,7 @@ from unittest.mock import patch
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.db.engine import DBEngine
 from etl_framework.db.sql_utils import quote_identifier
-from etl_framework.reconciliation.chunker import build_chunk_query, build_hash_query
+from etl_framework.reconciliation.chunker import build_hash_query
 
 
 def test_oracle_environment_config_defaults():
@@ -42,12 +42,6 @@ def test_quote_identifier_oracle():
     assert quote_identifier("MY_COL", "oracle") == '"MY_COL"'
 
 
-def test_oracle_chunk_query():
-    query = build_chunk_query("SELECT id, name FROM users", ["id"], 0, 100, dialect="oracle")
-    assert '"id"' in query
-    assert "OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY" in query
-
-
 def test_oracle_connection_model_serialization():
     from etl_framework.repository.models import ConnectionConfig
 
@@ -81,10 +75,8 @@ def test_oracle_full_reconciliation_workflow_dryrun():
 
     # Verify query builder for Oracle
     hash_q = build_hash_query("SELECT id, amount FROM sales", ["id"], dialect="oracle")
-    chunk_q = build_chunk_query("SELECT id, amount FROM sales", ["id"], 0, 500, dialect="oracle")
 
     assert '"id"' in hash_q
-    assert "OFFSET 0 ROWS FETCH NEXT 500 ROWS ONLY" in chunk_q
 
 
 

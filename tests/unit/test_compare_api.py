@@ -397,62 +397,51 @@ def test_sql_compare_valid_connection_accepted(client, monkeypatch):
     assert resp.status_code == 202
 
 
+def test_sql_compare_mutating_query_returns_422_without_connecting(client, monkeypatch):
+    """A mutating query must be rejected at the route before any run is started."""
+    import api.routes.compare as compare_module
+
+    launched = []
+    monkeypatch.setattr(compare_module, "_run_sql_bg", lambda *a, **kw: launched.append(a))
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("DBEngine must not be constructed for a mutating query")
+
+    monkeypatch.setattr("etl_framework.db.engine.DBEngine", _explode)
+
+    resp = client.post("/api/compare/sql", json={
+        "config_id_a": 1,
+        "config_id_b": 1,
+        "query_a": "SELECT 1",
+        "query_b": "SELECT 1; DROP TABLE x",
+    })
+
+    assert resp.status_code == 422
+    assert "read-only SELECT or WITH" in resp.json()["detail"]
+    assert launched == []
+
+
 # ---------------------------------------------------------------------------
 # _load_in_chunks unit tests
 # ---------------------------------------------------------------------------
 
-def test_load_in_chunks_issues_paginated_queries():
-    """When chunk_size and key_cols are provided, queries are issued in pages."""
+def test_load_in_chunks_reads_cursor_batches():
+    """With a chunk_size, the query is run once and read in cursor batches."""
     import pandas as pd
     from unittest.mock import MagicMock
     from api.services.compare_service import _load_in_chunks
 
-    chunk1 = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
-    chunk2 = pd.DataFrame({"id": [4, 5, 6], "val": ["d", "e", "f"]})
-    empty = pd.DataFrame({"id": [], "val": []})
+    batch1 = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
+    batch2 = pd.DataFrame({"id": [4, 5, 6], "val": ["d", "e", "f"]})
 
     mock_engine = MagicMock()
-    mock_engine.execute_query.side_effect = [chunk1, chunk2, empty]
+    mock_engine.iter_query_batches.return_value = iter([batch1, batch2])
 
     result = _load_in_chunks(mock_engine, "SELECT * FROM t", ["id"], chunk_size=3)
 
-    assert len(result) == 6
     assert list(result["id"]) == [1, 2, 3, 4, 5, 6]
-    assert mock_engine.execute_query.call_count == 3
-
-
-def test_load_in_chunks_stops_early_on_partial_chunk():
-    """A chunk smaller than chunk_size signals the last page — no extra query needed."""
-    import pandas as pd
-    from unittest.mock import MagicMock
-    from api.services.compare_service import _load_in_chunks
-
-    chunk1 = pd.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]})
-    chunk2 = pd.DataFrame({"id": [4, 5], "val": ["d", "e"]})  # 2 < 3 → last page
-
-    mock_engine = MagicMock()
-    mock_engine.execute_query.side_effect = [chunk1, chunk2]
-
-    result = _load_in_chunks(mock_engine, "SELECT * FROM t", ["id"], chunk_size=3)
-
-    assert len(result) == 5
-    assert mock_engine.execute_query.call_count == 2
-
-
-def test_load_in_chunks_falls_back_without_key_columns():
-    """With no key columns, chunking is skipped and a single full query is issued."""
-    import pandas as pd
-    from unittest.mock import MagicMock
-    from api.services.compare_service import _load_in_chunks
-
-    full = pd.DataFrame({"id": [1, 2], "val": ["a", "b"]})
-    mock_engine = MagicMock()
-    mock_engine.execute_query.return_value = full
-
-    result = _load_in_chunks(mock_engine, "SELECT * FROM t", [], chunk_size=1000)
-
-    mock_engine.execute_query.assert_called_once_with("SELECT * FROM t")
-    assert len(result) == 2
+    mock_engine.iter_query_batches.assert_called_once_with("SELECT * FROM t", None, batch_size=3)
+    mock_engine.execute_query.assert_not_called()
 
 
 def test_load_in_chunks_falls_back_when_chunk_size_zero():

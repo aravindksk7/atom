@@ -33,6 +33,29 @@ from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
 
 
+def _align_column_case(df: "pd.DataFrame", reference_names) -> "pd.DataFrame":
+    """Rename columns to the reference spelling when names differ only by case.
+
+    Skipped for a column when the match is ambiguous (several reference
+    spellings, or several frame columns sharing the lower-cased name) or when
+    the new name would duplicate an existing column.
+    """
+    spellings: dict[str, set[str]] = {}
+    for name in reference_names:
+        spellings.setdefault(str(name).lower(), set()).add(str(name))
+    lowered = [str(c).lower() for c in df.columns]
+    existing = {str(c) for c in df.columns}
+    rename: dict[Any, str] = {}
+    for column, low in zip(df.columns, lowered):
+        options = spellings.get(low)
+        if not options or len(options) != 1 or lowered.count(low) != 1:
+            continue
+        (wanted,) = options
+        if wanted != str(column) and wanted not in existing:
+            rename[column] = wanted
+    return df.rename(columns=rename) if rename else df
+
+
 def _load_in_chunks(
     db_engine: "DBEngine",
     query: str,
@@ -552,43 +575,57 @@ class CompareService:
     # SQL-to-SQL comparison
     # ------------------------------------------------------------------
 
-    def run_sql_comparison(self, req: SQLCompareRequest, run_id: str) -> None:
-        """Execute two SQL queries against their respective DB configs and diff the results."""
+    def compare_sql(self, req: SQLCompareRequest) -> "ReconciliationResult":
+        """Run both queries against their configs and reconcile; returns ONE result."""
         from etl_framework.db.engine import DBEngine
         from etl_framework.config.models import resolve_connection
+        from etl_framework.db.sql_utils import is_read_only_sql
 
+        for side, query in (("A", req.query_a), ("B", req.query_b)):
+            if not is_read_only_sql(query):
+                raise ValueError(
+                    f"compare job Source {side} query must be a single read-only SELECT or WITH query"
+                )
+
+        cfg_a = self._config_repo.get(req.config_id_a)
+        if cfg_a is None:
+            raise HTTPException(status_code=404, detail="Config A not found")
+        cfg_b = self._config_repo.get(req.config_id_b)
+        if cfg_b is None:
+            raise HTTPException(status_code=404, detail="Config B not found")
+
+        env_a = resolve_connection(cfg_a.config_json or {}, req.connection_a, env_name=cfg_a.env_name or "")
+        env_b = resolve_connection(cfg_b.config_json or {}, req.connection_b, env_name=cfg_b.env_name or "")
+        engine_a = DBEngine(env_a)
+        engine_b = DBEngine(env_b)
+        key_cols = req.key_columns or []
+        try:
+            df_a = _load_in_chunks(engine_a, req.query_a, key_cols, req.chunk_size)
+            df_b = _load_in_chunks(engine_b, req.query_b, key_cols, req.chunk_size)
+        finally:
+            engine_a.dispose()
+            engine_b.dispose()
+
+        # Oracle's SQLAlchemy dialect lower-cases all-uppercase result names.
+        df_a = _align_column_case(df_a, key_cols + list(df_b.columns))
+        df_b = _align_column_case(df_b, key_cols + list(df_a.columns))
+
+        recon_req = ReconFileCompareRequest(
+            file_a_path="__sql__",
+            file_b_path="__sql__",
+            label_a=req.label_a,
+            label_b=req.label_b,
+            key_columns=req.key_columns or None,
+            exclude_columns=req.exclude_columns,
+            advanced=req.advanced,
+        )
+        return self._tabular_file_result(recon_req, df_a, df_b)
+
+    def run_sql_comparison(self, req: SQLCompareRequest, run_id: str) -> None:
+        """Execute two SQL queries against their respective DB configs and diff the results."""
         try:
             self._repo.update_run_status(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
-
-            cfg_a = self._config_repo.get(req.config_id_a)
-            if cfg_a is None:
-                raise HTTPException(status_code=404, detail="Config A not found")
-            cfg_b = self._config_repo.get(req.config_id_b)
-            if cfg_b is None:
-                raise HTTPException(status_code=404, detail="Config B not found")
-
-            env_a = resolve_connection(cfg_a.config_json or {}, req.connection_a, env_name=cfg_a.env_name or "")
-            env_b = resolve_connection(cfg_b.config_json or {}, req.connection_b, env_name=cfg_b.env_name or "")
-            engine_a = DBEngine(env_a)
-            engine_b = DBEngine(env_b)
-            key_cols = req.key_columns or []
-            try:
-                df_a = _load_in_chunks(engine_a, req.query_a, key_cols, req.chunk_size)
-                df_b = _load_in_chunks(engine_b, req.query_b, key_cols, req.chunk_size)
-            finally:
-                engine_a.dispose()
-                engine_b.dispose()
-
-            recon_req = ReconFileCompareRequest(
-                file_a_path="__sql__",
-                file_b_path="__sql__",
-                label_a=req.label_a,
-                label_b=req.label_b,
-                key_columns=req.key_columns or None,
-                exclude_columns=req.exclude_columns,
-                advanced=req.advanced,
-            )
-            self._run_tabular_file_compare(recon_req, run_id, df_a, df_b)
+            self._persist_single_result(run_id, self.compare_sql(req))
         except Exception as exc:
             logger.exception("SQL comparison failed for run %s", run_id)
             self._add_error_result(run_id, req.label_a or "sql_comparison", exc)

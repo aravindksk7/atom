@@ -1610,6 +1610,7 @@
         if (job.params?.compare_type === 'bo') return 'bo';
         if (job.params?.compare_type === 'recon_file') return 'recon';
         if (job.params?.compare_type === 'matrix') return 'matrix';
+        if (job.params?.compare_type === 'sql') return 'sql';
         return null;
       }
       return null;
@@ -1670,6 +1671,20 @@
         this.matrixIgnoreCase = Boolean(req.ignore_case);
         this.matrixTrimWhitespace = req.trim_whitespace !== false;
         this.matrixBackend = req.comparison_backend || 'pandas';
+      } else if (job.job_type === 'compare' && subTab === 'sql') {
+        const req = job.params?.request || {};
+        this.sqlConfigA = req.config_id_a != null ? String(req.config_id_a) : '';
+        this.sqlConfigB = req.config_id_b != null ? String(req.config_id_b) : '';
+        this.sqlConnectionA = req.connection_a || null;
+        this.sqlConnectionB = req.connection_b || null;
+        this.sqlQueryA = req.query_a || '';
+        this.sqlQueryB = req.query_b || '';
+        this.sqlLabelA = req.label_a || 'Source A';
+        this.sqlLabelB = req.label_b || 'Source B';
+        this.sqlKeyColumns = (req.key_columns || []).join(', ');
+        this.sqlExcludeColumns = (req.exclude_columns || []).join(', ');
+        this.sqlChunkSize = req.chunk_size ?? 10000;
+        this._applyAdvancedToPrefix('sql', req.advanced);
       } else if (subTab === 'bo') {
         this.boSourceAType = opts.runIdA ? 'run' : 'live';
         this.boSourceA = {

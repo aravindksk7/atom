@@ -924,12 +924,14 @@ For non-SQLite deployments, set any SQLAlchemy-supported database URL and ensure
 
 Environment configs can be created in the Config tab or through `/api/configs`. A config stores values such as:
 
+- `db_type`
 - `db_host`
 - `db_port`
 - `db_name`
 - `db_user`
 - `db_password`
 - `db_driver`
+- `db_sslmode` — libpq SSL mode for the Postgres types; defaults to `prefer` for `postgresql` and `require` for `aurora_postgresql`
 - `db_connect_timeout`
 - `bo_url`
 - `bo_user`
@@ -939,6 +941,10 @@ Environment configs can be created in the Config tab or through `/api/configs`. 
 - `automic_url`
 - `automic_user`
 - `automic_password`
+
+`db_type` is one of `mssql`, `netezza`, `oracle`, `postgresql`, or `aurora_postgresql`. The two Postgres types use port `5432` by default (applied when `db_port` is absent or still the SQL Server default `1433`) and driver `psycopg` (applied when `db_driver` is absent or a SQL Server ODBC name); install it with `pip install 'etl-framework[postgres]'`. They add the optional `db_sslmode` field (`disable`, `prefer`, `require`, `verify-ca`, or `verify-full`) described above. For Aurora, set `db_host` to the cluster (writer) or reader endpoint.
+
+`chunk_size` means rows per cursor fetch from a single query: the engine streams one query in server-side cursor batches rather than paging with `ORDER BY`/`OFFSET`, so chunked loads work without key columns and on every supported dialect.
 
 ### Config Overlays & Secret Providers (standalone CLI)
 
@@ -2712,6 +2718,44 @@ The **Compare** tab provides ad-hoc comparison workflows that do not need to sta
 | **Mismatch Diff** | You need to compare mismatch sets between two historical runs. | New, resolved, and persistent mismatch groups. |
 | **Multi-File** | You need a one-off local folder-to-folder file reconciliation without saving a job first. | Persisted multi-file run with per-pair breakdown. |
 | **Matrix** | You need to compare two datasets that live in *different* technologies, such as a SAP BO report against a SQL table. | Row-level compare run with mismatch details. |
+
+---
+
+### Bulk Import Compare Jobs
+
+The Jobs view toolbar has a **Bulk import compares** button that opens the **Bulk import compare jobs** modal. Use it to create many table-to-table SQL compare jobs in one go from a CSV or Excel mapping sheet — one row per compare job, with optional per-column mapping between differently named columns, across any mix of supported DB types.
+
+**Mapping sheet** — CSV (UTF-8, header row) or XLSX (first sheet). Fetch a sample from the modal's **Download template** link.
+
+| Column | Required | Meaning |
+|---|---|---|
+| `job_name` | yes | Saved job name; unique within the file. |
+| `source_config` | yes | Saved config name for side A. |
+| `source_connection` | no | Named connection inside that config. |
+| `source_table` | yes | `schema.table`, or a full `SELECT`/`WITH` query. |
+| `target_config` | yes | Saved config name for side B. |
+| `target_connection` | no | Named connection inside that config. |
+| `target_table` | yes | `schema.table`, or a full `SELECT`/`WITH` query. |
+| `key_columns` | no | `;`-separated; each `src:tgt` or a bare name. |
+| `compare_columns` | no | `;`-separated; each `src:tgt` or a bare name. Blank means all columns. |
+| `exclude_columns` | no | `;`-separated target-side names. |
+| `source_where` | no | Filter appended as `WHERE` on side A. |
+| `target_where` | no | Filter appended as `WHERE` on side B. |
+| `numeric_tolerance` | no | Float, default 0. |
+| `ignore_case` | no | `true`/`false`, default false. |
+| `chunk_size` | no | Int, default 10000 (0 disables chunking). |
+| `tags` | no | `;`-separated job tags. |
+| `description` | no | Job description. |
+
+Header names are matched case-insensitively with surrounding whitespace trimmed. Unknown headers are a file-level error.
+
+- **`src:tgt` mapping and `;` lists** — `key_columns` and `compare_columns` are `;`-separated, and each entry is either `src:tgt` (the source column mapped to the target column) or a bare name used for both sides. `exclude_columns` and `tags` are `;`-separated lists; `exclude_columns` names target-side columns.
+- **Query in a table cell** — `source_table` / `target_table` accept either `schema.table` or a full `SELECT`/`WITH` query. A cell that is a query is used as is, so column mapping for that side and its matching `_where` cell must be blank; otherwise the row is an error.
+- **`source_where` / `target_where`** — the filter cells are embedded into the generated query verbatim: they must pass `reject_mutating_sql`, but are otherwise injected exactly as authored.
+- **Preview** — pick a file and the modal previews every row: row number, job name, source, target, status, a "will update" flag, and an expandable cell with errors or the two generated queries. Preview saves nothing; file-level problems (unreadable file, unknown headers, no rows, over 1000 rows) return HTTP 422.
+- **All-or-nothing import** — the **Import** button stays disabled until every row is valid. Commit re-validates server-side and returns 422 with per-job errors if anything changed since preview, and nothing is written when any job is invalid.
+- **Optional selection** — tick **Create a job selection with these jobs** and name it to also create a Job Selection containing the imported jobs in file order. An existing selection name is rejected with a 409 before any job is saved. Bulk commit validates every row before any write; if the selection name is created concurrently after validation, the jobs are still saved and the request returns a 409 for the selection only. The generated jobs are `job_type: "compare"` with `compare_type: "sql"` and, like the other live compare types, run with **Use Live Connections** on.
+- **Save SQL compares as jobs** — SQL compares can also be saved as jobs from the Compare tab's **SQL** sub-tab via its **Save as Job** button, so an ad-hoc SQL diff can be persisted, scheduled, and reopened in the job editor.
 
 ---
 

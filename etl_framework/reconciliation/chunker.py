@@ -26,25 +26,6 @@ def build_hash_query(base_query: str, key_columns: list[str], dialect: str = "sq
     )
 
 
-def build_chunk_query(
-    base_query: str,
-    key_columns: list[str],
-    offset: int,
-    chunk_size: int,
-    dialect: str = "sqlserver",
-) -> str:
-    if not key_columns:
-        raise ValueError("key_columns must not be empty")
-    _validate_columns(key_columns, dialect)
-    base_query = reject_mutating_sql(base_query)
-    order_cols = ", ".join(_quote_col(c, dialect) for c in key_columns)
-    return (
-        f"SELECT * FROM ({base_query}) AS _base "
-        f"ORDER BY {order_cols} "
-        f"OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY"
-    )
-
-
 def load_in_chunks(
     engine,
     query: str,
@@ -53,31 +34,20 @@ def load_in_chunks(
     params: dict | None = None,
     normalize=None,
 ) -> pd.DataFrame:
-    """Load a query fully via OFFSET/FETCH pagination.
+    """Load a query fully, reading it in cursor batches of ``chunk_size`` rows.
 
-    Falls back to a single read when chunk_size is 0 or key_columns are empty
-    because ORDER BY keys are required for deterministic pagination. normalize,
-    when given, is applied to every chunk and to single-read frames.
+    One query, no ORDER BY/OFFSET paging: engines with ``iter_query_batches``
+    (DBEngine) stream it; anything else, or ``chunk_size`` 0, gets a single
+    read. ``key_columns`` is no longer needed for loading and is kept for
+    callers. ``normalize``, when given, is applied to every batch.
     """
     _n = normalize or (lambda df: df)
-    _execute = (
-        (lambda q: engine.execute_query(q, params))
-        if params is not None
-        else engine.execute_query
-    )
-    if not chunk_size or not key_columns:
-        return _n(_execute(query))
-    parts: list[pd.DataFrame] = []
-    offset = 0
-    while True:
-        q = build_chunk_query(query, key_columns, offset, chunk_size)
-        chunk = _n(_execute(q))
-        if chunk.empty:
-            break
-        parts.append(chunk)
-        if len(chunk) < chunk_size:
-            break
-        offset += chunk_size
+    iter_batches = getattr(engine, "iter_query_batches", None)
+    if not chunk_size or iter_batches is None:
+        if params is not None:
+            return _n(engine.execute_query(query, params))
+        return _n(engine.execute_query(query))
+    parts = [_n(batch) for batch in iter_batches(query, params, batch_size=chunk_size)]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 

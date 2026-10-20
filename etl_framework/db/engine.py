@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 import sys
 import urllib.parse
+from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
-from etl_framework.config.models import EnvironmentConfig
+from etl_framework.config.models import EnvironmentConfig, POSTGRES_DB_TYPES
 
 
 @contextmanager
@@ -93,6 +95,17 @@ def _ensure_netezza_dialect() -> None:
         ) from exc
 
 
+def _ensure_psycopg() -> None:
+    """Fail with an actionable message when the PostgreSQL driver is missing."""
+    try:
+        import psycopg  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "PostgreSQL / Aurora PostgreSQL support requires the 'psycopg' driver. "
+            "Install it with: pip install 'etl-framework[postgres]'."
+        ) from exc
+
+
 class DBEngine:
     """SQLAlchemy-backed query engine compatible with ReconciliationEngine."""
 
@@ -126,6 +139,20 @@ class DBEngine:
                         f"PWD={env_config.db_password};"
                     )
                     connection_url = f"netezza+pyodbc:///?odbc_connect={params}"
+            elif db_type in POSTGRES_DB_TYPES:
+                _ensure_psycopg()
+                connection_url = URL.create(
+                    "postgresql+psycopg",
+                    username=env_config.db_user,
+                    password=env_config.db_password,
+                    host=env_config.db_host,
+                    port=env_config.db_port,
+                    database=env_config.db_name,
+                    query={
+                        "sslmode": env_config.db_sslmode or "prefer",
+                        "connect_timeout": str(env_config.db_connect_timeout),
+                    },
+                )
             else:
                 # ODBC Driver 18 defaults to Encrypt=yes with strict certificate validation
                 # (a behavior change from Driver 17, which defaulted to no encryption), so
@@ -155,6 +182,29 @@ class DBEngine:
     def execute_query(self, query: str, params: dict | None = None) -> pd.DataFrame:
         with self._engine.connect() as conn:
             return pd.read_sql(text(query), conn, params=params or {})
+
+    def iter_query_batches(
+        self, query: str, params: dict | None = None, *, batch_size: int,
+    ) -> Iterator[pd.DataFrame]:
+        """Run ``query`` once and yield its rows in DataFrames of ``batch_size``.
+
+        ``stream_results`` asks the driver for a server-side cursor where it has
+        one (psycopg); pyodbc, oracledb and nzpy fall back to ``fetchmany``
+        batching. Either way there is no ORDER BY/OFFSET paging, so no
+        per-dialect SQL and no need for unique keys. The connection is held
+        until the generator is exhausted or closed. An empty result yields
+        one empty frame that still carries the column names.
+        """
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {batch_size}")
+        with self._engine.connect().execution_options(stream_results=True) as conn:
+            first = True
+            for batch in pd.read_sql(text(query), conn, params=params or {}, chunksize=batch_size):
+                # An empty result yields one empty, column-bearing frame so
+                # callers keep the schema; later empty batches are skipped.
+                if first or not batch.empty:
+                    yield batch
+                first = False
 
     def dispose(self) -> None:
         self._engine.dispose()
