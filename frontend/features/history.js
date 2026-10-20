@@ -12,6 +12,7 @@
     // -----------------------------------------------------------
     runs: [],
     selectedRun: null,
+    markPassedModal: { show: false, busy: false, runId: '', stepId: '', jobName: '', status: '', releasedBy: '', note: '' },
     chartInstance: null,
     historyFilterStatus: '',
     historyFilterRunType: '',
@@ -166,6 +167,48 @@
         this.toast('success', 'Restart queued', `New run ${restarted.run_id.substring(0, 8)}… started`);
       } catch (e) {
         this.toast('error', 'Restart failed', e.message);
+      }
+    },
+
+    // A step the app recorded as failed (e.g. its status poll timed out) can
+    // be attested as passed once the run has finished; the restart then
+    // continues without re-running that job.
+    canMarkStepPassed(run, step) {
+      if (!run || !step || !step.step_id) return false;
+      if (['PENDING', 'RUNNING'].includes(run.status)) return false;
+      return ['FAILED', 'ERROR'].includes(step.status);
+    },
+
+    openMarkPassed(runId, step) {
+      this.markPassedModal = {
+        show: true, busy: false, runId, stepId: step.step_id, jobName: step.job_name,
+        status: step.status, releasedBy: '', note: '',
+      };
+    },
+
+    async submitMarkPassed() {
+      const m = this.markPassedModal;
+      if (!m.note.trim() || !m.releasedBy.trim()) return;
+      m.busy = true;
+      try {
+        const res = await api(
+          'POST',
+          `/api/runs/${m.runId}/steps/by-id/${encodeURIComponent(m.stepId)}/mark-passed`,
+          { note: m.note.trim(), released_by: m.releasedBy.trim() },
+        );
+        this.markPassedModal.show = false;
+        await this.loadRuns();
+        if (res.run_id !== m.runId) {
+          await this.viewRunDetail(res.run_id);
+          this.toast('success', 'Step marked passed', `Continuing as run ${res.run_id.substring(0, 8)}…`);
+        } else {
+          await this.viewRunDetail(m.runId);
+          this.toast('success', 'Step marked passed', 'Nothing left to run');
+        }
+      } catch (e) {
+        this.toast('error', 'Mark passed failed', e.message);
+      } finally {
+        this.markPassedModal.busy = false;
       }
     },
 

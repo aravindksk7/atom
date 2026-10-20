@@ -511,6 +511,22 @@ class RunStepReleaseRequest(BaseModel):
     released_by: str = Field(min_length=1)
 
 
+class RunStepMarkPassedRequest(BaseModel):
+    """Operator attests a FAILED/ERROR step actually passed in the source
+    system (e.g. its status poll timed out), so the run continues without
+    re-running it."""
+    note: str = Field(min_length=1, max_length=1000)
+    released_by: str = Field(min_length=1)
+
+    @field_validator("note", "released_by")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
 class RunTrigger(BaseModel):
     source_env: str
     # Optional: single-environment job types (file_transfer, file_watcher, ...)

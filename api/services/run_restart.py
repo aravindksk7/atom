@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from etl_framework.runner.state import TestCaseState, TestStatus
 
 
 CARRIED_OVER_STATUSES = frozenset({"PASSED", "SLOW", "SKIPPED", "APPROVED"})
+# Step statuses an operator may mark as passed after the fact.
+MARKABLE_STATUSES = frozenset({"FAILED", "ERROR"})
 
 
 class RestartError(ValueError):
@@ -21,6 +24,14 @@ class RestartError(ValueError):
 
 
 class RestartNotFound(RestartError):
+    pass
+
+
+class RunInProgress(RestartError):
+    pass
+
+
+class StepNotFailed(RestartError):
     pass
 
 
@@ -69,34 +80,13 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
     step_repo = RunStepRepository(db)
     step_repo.materialize_steps(new_run_id, steps)
 
-    # Fetched once for the whole run (not once per carried-over step, which
-    # was both an N+1 query pattern and -- worse -- indexed by the wrong key:
-    # a step's *global* step_index doesn't correlate with its position among
-    # same-named TestResult rows when other jobs run in between. Grouping by
-    # job_name and ranking each step by its OCCURRENCE among same-named steps
-    # (both here and in results_by_job, both in step_index/id order) is the
-    # correlation that's actually correct for a job repeated non-contiguously
-    # in a sequence.
-    all_originals = (
-        db.query(TestResult)
-        .filter(TestResult.run_id == original_run_id)
-        .order_by(TestResult.id)
-        .all()
-    )
-    results_by_job: dict[str, list[TestResult]] = {}
-    for result in all_originals:
-        results_by_job.setdefault(result.query_name, []).append(result)
-
-    occurrence_seen: dict[str, int] = {}
+    result_for_step = _results_by_step(db, original_run_id, original_steps)
     carried_states: list[TestCaseState] = []
     seeded: dict[str, ParentOutcome] = {}
     for original_step in original_steps:
-        rank = occurrence_seen.get(original_step.job_name, 0)
-        occurrence_seen[original_step.job_name] = rank + 1
         if original_step.status not in CARRIED_OVER_STATUSES:
             continue
-        candidates = results_by_job.get(original_step.job_name, [])
-        original_result = candidates[rank] if rank < len(candidates) else None
+        original_result = result_for_step.get(original_step.step_index)
         copied_result = (
             _copy_result_for_step(db, original_result, new_run_id)
             if original_result is not None else None
@@ -124,6 +114,75 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
         carried_over_states=carried_states,
         seeded_outcomes=seeded,
     )
+
+
+def mark_step_passed_and_restart(
+    db: Session, run_id: str, step_id: str, note: str, released_by: str,
+) -> RestartPlan | None:
+    """Record that a FAILED/ERROR step actually passed in the source system,
+    then restart the run from there.
+
+    Typical case: a remote job's status poll timed out, so the app marked the
+    step ERROR while the job itself completed. The step becomes APPROVED --
+    already a carried-over status -- so the restart does not re-trigger the
+    job, seeds it as PASSED, and runs only what failed or was blocked.
+    Returns None when that step was the run's last unfinished one: it is
+    still marked, but there is nothing left to run.
+    """
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
+        raise RestartNotFound("Run not found")
+    if run.status in {"PENDING", "RUNNING"}:
+        raise RunInProgress("run is still in progress.")
+    step_repo = RunStepRepository(db)
+    step = step_repo.get_step_by_step_id(run_id, step_id)
+    if step is None:
+        raise RestartNotFound("Step not found")
+    if step.status not in MARKABLE_STATUSES:
+        raise StepNotFailed(f"Step is not failed (current status: {step.status})")
+
+    now = datetime.now(timezone.utc)
+    result = _results_by_step(db, run_id, step_repo.list_steps(run_id)).get(step.step_index)
+    if result is not None:
+        result.override_status = "PASSED"
+        result.override_reason = note
+        result.override_by = released_by
+        result.override_at = now
+    step.status = "APPROVED"
+    step.release_action = "mark_passed"
+    step.release_note = note
+    step.released_by = released_by
+    step.released_at = now
+    db.commit()
+    if all(s.status in CARRIED_OVER_STATUSES for s in step_repo.list_steps(run_id)):
+        return None
+    return restart_run(db, run_id)
+
+
+def _results_by_step(db: Session, run_id: str, steps: list[RunStep]) -> dict[int, TestResult]:
+    """Map step_index -> that step's TestResult in ``run_id``.
+
+    Results are fetched once and grouped by job name; each step takes the Nth
+    result for its job, where N is its OCCURRENCE among same-named steps (both
+    in step_index/id order). A step's global step_index doesn't correlate with
+    its position among same-named results when other jobs run in between, so
+    occurrence rank is the correct key for a job repeated non-contiguously.
+    """
+    results_by_job: dict[str, list[TestResult]] = {}
+    for result in (
+        db.query(TestResult).filter(TestResult.run_id == run_id).order_by(TestResult.id).all()
+    ):
+        results_by_job.setdefault(result.query_name, []).append(result)
+
+    occurrence_seen: dict[str, int] = {}
+    mapped: dict[int, TestResult] = {}
+    for step in sorted(steps, key=lambda s: s.step_index):
+        rank = occurrence_seen.get(step.job_name, 0)
+        occurrence_seen[step.job_name] = rank + 1
+        candidates = results_by_job.get(step.job_name, [])
+        if rank < len(candidates):
+            mapped[step.step_index] = candidates[rank]
+    return mapped
 
 
 def _step_ref_from_row(step: RunStep) -> SequenceStepRef:

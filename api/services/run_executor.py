@@ -2191,6 +2191,7 @@ class RunExecutor:
                     instance_id,
                     timeout_s=job.params.get("timeout_s", 600),
                     poll_interval_s=job.params.get("poll_interval_s", 5),
+                    max_poll_errors=job.params.get("max_poll_errors", 5),
                 )
             finally:
                 client.logout()
@@ -2231,6 +2232,7 @@ class RunExecutor:
                     repository=job.params.get("repository"),
                     timeout_s=job.params.get("timeout_s", 600),
                     poll_interval_s=job.params.get("poll_interval_s", 5),
+                    max_poll_errors=job.params.get("max_poll_errors", 5),
                 )
             finally:
                 client.logout()
