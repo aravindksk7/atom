@@ -36,6 +36,7 @@ import requests
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import DSAPIError
 from etl_framework.runner.state import TestStatus
+from etl_framework.utils.polling import poll_until_terminal
 
 logger = logging.getLogger("etl_framework.sap_ds.client")
 
@@ -414,17 +415,17 @@ class DSRestClient:
     def wait_for_completion(
         self, run_id: str, repository: str | None = None,
         timeout_s: float = 600, poll_interval_s: float = 5,
+        max_poll_errors: int = 5,
     ) -> TestStatus:
         """Poll get_job_status until terminal (PASSED/FAILED) or timeout_s
         elapses. Raises TimeoutError if the run never reaches a terminal
-        status in time."""
-        deadline = time.monotonic() + timeout_s
-        while True:
-            status = self.get_job_status(run_id, repository=repository)
-            if status != TestStatus.RUNNING:
-                return status
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"SAP DS job run '{run_id}' did not complete within {timeout_s}s",
-                )
-            time.sleep(poll_interval_s)
+        status in time. Up to ``max_poll_errors - 1`` consecutive read
+        timeouts / connection errors are polled through, since the DS job
+        keeps running regardless of one slow status response."""
+        return poll_until_terminal(
+            lambda: self.get_job_status(run_id, repository=repository),
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            max_poll_errors=max_poll_errors,
+            describe=f"SAP DS job run '{run_id}'",
+        )

@@ -5,6 +5,7 @@ import json
 from datetime import date
 
 import pytest
+import requests
 from unittest.mock import MagicMock, patch, PropertyMock
 import pandas as pd
 
@@ -1589,6 +1590,17 @@ def test_wait_for_completion_raises_timeout_error_when_never_terminal(authentica
     with patch.object(authenticated_client, "get_schedule_status", return_value=TestStatus.RUNNING):
         with pytest.raises(TimeoutError, match="inst-42"):
             authenticated_client.wait_for_completion("inst-42", timeout_s=0.05, poll_interval_s=0.01)
+
+
+def test_wait_for_completion_survives_poll_read_timeout(authenticated_client):
+    with patch.object(
+        authenticated_client, "get_schedule_status",
+        side_effect=[requests.ReadTimeout("read timed out"), TestStatus.PASSED],
+    ) as mock_get:
+        status = authenticated_client.wait_for_completion("inst-42", timeout_s=5, poll_interval_s=0.01)
+
+    assert status == TestStatus.PASSED
+    assert mock_get.call_count == 2
 
 
 def test_get_document_parameters_parses_nested_prompt_collection(authenticated_client):

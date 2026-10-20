@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from etl_framework.config.models import EnvironmentConfig
 from etl_framework.exceptions import BOAPIError, ReportNotFoundError
 from etl_framework.runner.state import TestStatus
+from etl_framework.utils.polling import poll_until_terminal
 
 logger = logging.getLogger("etl_framework.sap_bo.client")
 
@@ -1348,21 +1349,20 @@ class BORestClient:
 
     def wait_for_completion(
         self, instance_id: str, timeout_s: float = 600, poll_interval_s: float = 5,
+        max_poll_errors: int = 5,
     ) -> TestStatus:
         """Poll get_schedule_status until it returns a terminal status
         (PASSED/FAILED) or timeout_s elapses. Raises TimeoutError if the
         instance never reaches a terminal status in time -- callers treat
-        that as a run error, not a job failure."""
-        deadline = time.monotonic() + timeout_s
-        while True:
-            status = self.get_schedule_status(instance_id)
-            if status != TestStatus.RUNNING:
-                return status
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"SAP BO schedule instance '{instance_id}' did not complete within {timeout_s}s",
-                )
-            time.sleep(poll_interval_s)
+        that as a run error, not a job failure. Up to ``max_poll_errors - 1``
+        consecutive read timeouts / connection errors are polled through."""
+        return poll_until_terminal(
+            lambda: self.get_schedule_status(instance_id),
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            max_poll_errors=max_poll_errors,
+            describe=f"SAP BO schedule instance '{instance_id}'",
+        )
 
     def logout(self) -> None:
         if self._token and self._owns_token:

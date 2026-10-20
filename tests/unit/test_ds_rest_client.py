@@ -518,6 +518,29 @@ def test_wait_for_completion_raises_timeout_error_when_never_terminal(authentica
             authenticated_client.wait_for_completion("4242", timeout_s=0.05, poll_interval_s=0.01)
 
 
+def test_wait_for_completion_survives_poll_read_timeout(authenticated_client):
+    import requests
+    with patch.object(
+        authenticated_client, "get_job_status",
+        side_effect=[requests.ReadTimeout("read timed out"), TestStatus.PASSED],
+    ) as mock_get:
+        status = authenticated_client.wait_for_completion("4242", timeout_s=5, poll_interval_s=0.01)
+    assert status == TestStatus.PASSED
+    assert mock_get.call_count == 2
+
+
+def test_wait_for_completion_raises_when_poll_errors_exceed_limit(authenticated_client):
+    import requests
+    with patch.object(
+        authenticated_client, "get_job_status", side_effect=requests.ReadTimeout("read timed out"),
+    ) as mock_get:
+        with pytest.raises(requests.ReadTimeout):
+            authenticated_client.wait_for_completion(
+                "4242", timeout_s=5, poll_interval_s=0.01, max_poll_errors=2,
+            )
+    assert mock_get.call_count == 2
+
+
 def test_wait_for_completion_passes_repository_override_through(authenticated_client):
     with patch.object(authenticated_client, "get_job_status", return_value=TestStatus.PASSED) as mock_get:
         authenticated_client.wait_for_completion("4242", repository="OTHER_REPO", timeout_s=5, poll_interval_s=0.01)
