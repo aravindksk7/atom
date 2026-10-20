@@ -28,7 +28,6 @@ though the transport is SOAP, not REST.
 import html
 import logging
 import re
-import time
 from urllib.parse import urlparse
 
 import requests

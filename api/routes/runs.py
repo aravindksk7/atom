@@ -47,6 +47,7 @@ from api.schemas import (
     RunProgressOut,
     RunStatusOut,
     RunStepOut,
+    RunStepMarkPassedRequest,
     RunStepReleaseRequest,
     RunTrigger,
     TestCompareOut,
@@ -90,7 +91,14 @@ from api.services.difference_export import (
     write_stored_differences,
 )
 from api.services.run_report import build_run_report_snapshot
-from api.services.run_restart import RestartError, RestartNotFound, restart_run
+from api.services.run_restart import (
+    RestartError,
+    RestartNotFound,
+    RunInProgress,
+    StepNotFailed,
+    mark_step_passed_and_restart,
+    restart_run,
+)
 from etl_framework.config.models import resolve_connection as _resolve_connection
 from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
 from etl_framework.runner.job_validation import validate_job_definition
@@ -539,6 +547,65 @@ def restart_failed_run(
         request, "run.restarted", "run", plan.run_id,
         {"restarted_from_run_id": plan.restarted_from_run_id},
     )
+    background_tasks.add_task(
+        _execute_run,
+        plan.run_id,
+        plan.steps,
+        new_run.source_env,
+        new_run.target_env,
+        plan.run_settings,
+        plan.config_snapshot,
+        plan.carried_over_states,
+        plan.seeded_outcomes,
+    )
+    return RunStatusOut(
+        run_id=plan.run_id,
+        status=plan.status,
+        restarted_from_run_id=plan.restarted_from_run_id,
+    )
+
+
+@router.post(
+    "/{run_id}/steps/by-id/{step_id}/mark-passed",
+    response_model=RunStatusOut,
+    status_code=202,
+)
+def mark_step_passed(
+    run_id: str,
+    step_id: str,
+    body: RunStepMarkPassedRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_session),
+):
+    """Mark a FAILED/ERROR step as passed and continue the run from there.
+
+    For a job that passed in the source system although the app recorded a
+    failure (typically a status-poll read timeout). The step is not re-run;
+    a restart carries it over as APPROVED and runs only what failed or was
+    blocked. When nothing is left to run, the original run is returned.
+    """
+    step = RunStepRepository(db).get_step_by_step_id(run_id, step_id)
+    previous_status = step.status if step is not None else None
+    try:
+        plan = mark_step_passed_and_restart(db, run_id, step_id, body.note, body.released_by)
+    except RestartNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RunInProgress, StepNotFailed) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RestartError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    AuditService(db).log(
+        request, "run.step_marked_passed", "run", run_id,
+        {
+            "run_id": run_id, "step_id": step_id, "job_name": step.job_name,
+            "previous_status": previous_status, "note": body.note,
+            "restarted_as_run_id": plan.run_id if plan is not None else None,
+        },
+    )
+    if plan is None:
+        return _run_status_out(RunRepository(db).get_run(run_id))
+    new_run = RunRepository(db).get_run(plan.run_id)
     background_tasks.add_task(
         _execute_run,
         plan.run_id,

@@ -3795,6 +3795,64 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </div>
       </div>
 
+      <!-- Sequence steps -->
+      <div class="card mb-4" x-show="(selectedRun.steps || []).length" data-testid="history-run-steps">
+        <div class="text-sm font-semibold mb-2">Steps</div>
+        <table class="data-table" aria-label="run steps">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Job</th>
+              <th scope="col">Status</th>
+              <th scope="col">Note</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="s in selectedRun.steps" :key="s.step_id || s.step_index">
+              <tr :data-step-id="s.step_id">
+                <td class="text-xs text-muted" x-text="s.step_index + 1"></td>
+                <td class="font-mono text-xs" x-text="s.job_name"></td>
+                <td>
+                  <span class="badge" :class="stepStatusBadgeClass(s.status)" x-text="s.status"></span>
+                  <span x-show="s.carried_over" class="text-xs text-muted ml-1">carried over</span>
+                </td>
+                <td class="text-xs text-muted" x-text="s.release_note ? (s.release_note + (s.released_by ? ' — ' + s.released_by : '')) : ''"></td>
+                <td>
+                  <button x-show="canMarkStepPassed(selectedRun, s)"
+                          @click="openMarkPassed(selectedRun.run_id, s)"
+                          data-testid="mark-passed-btn"
+                          class="text-emerald-600 hover:underline text-xs">Mark passed &amp; continue</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Mark Passed Modal -->
+      <div x-show="markPassedModal.show" x-cloak class="modal-backdrop" @click.self="markPassedModal.show = false">
+        <div class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="markPassedDialogTitle" data-testid="mark-passed-modal">
+          <h2 id="markPassedDialogTitle" class="text-lg font-bold mb-2">Mark step as passed</h2>
+          <p class="text-sm text-muted mb-4">
+            <span class="font-mono" x-text="markPassedModal.jobName"></span>
+            (<span x-text="markPassedModal.status"></span>) will be recorded as passed and
+            will not be re-run. A new run continues the sequence from the next step.
+          </p>
+          <div class="space-y-3">
+            <div><label class="field-label" for="mark-passed-by">Your name *</label><input x-model="markPassedModal.releasedBy" class="field-input" placeholder="Alice" id="mark-passed-by" data-testid="mark-passed-by" /></div>
+            <div><label class="field-label" for="mark-passed-note">Note *</label><textarea x-model="markPassedModal.note" class="field-input" rows="2" placeholder="Job completed successfully in the source system…" id="mark-passed-note" data-testid="mark-passed-note"></textarea></div>
+          </div>
+          <div class="flex justify-end gap-3 mt-6">
+            <button @click="markPassedModal.show = false" class="btn-secondary">Cancel</button>
+            <button @click="submitMarkPassed()"
+                    :disabled="!markPassedModal.note.trim() || !markPassedModal.releasedBy.trim() || markPassedModal.busy"
+                    data-testid="mark-passed-submit"
+                    class="btn-primary">Mark passed &amp; continue</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Per-test reconcile report -->
       <div class="card overflow-hidden">
         <template x-if="selectedResultCount() > 0">

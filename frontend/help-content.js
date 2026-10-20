@@ -783,6 +783,27 @@
           },
         },
         {
+          title: 'Mark a failed step passed and continue',
+          text: 'When a step is FAILED or ERROR in the app but the job actually succeeded in the source system (for example a SAP DS status poll timed out), mark it passed instead of restarting. The step becomes APPROVED with your note, is NOT re-run, and a new run continues the sequence from the next step. SAP DS and SAP BO jobs already poll through up to 4 consecutive read timeouts; set params.max_poll_errors on a job to change that limit (1 = fail on the first timeout).',
+          where: 'History -> finished run -> Steps -> Mark passed & continue',
+          when: 'A remote job passed but the app recorded a failure, and re-running it would execute it twice.',
+          uiMockup: { title: 'Mark step as passed', elements: [
+            { type: 'status', value: 'ERROR', status: 'failed' },
+            { type: 'input', label: 'Your name', value: 'alice' },
+            { type: 'input', label: 'Note', value: 'Succeeded in DS Management Console' },
+            { type: 'button', label: 'Mark passed & continue', highlight: true },
+          ] },
+          cli: {
+            command: "curl -s -X POST -H 'Authorization: Bearer $ATOM_API_TOKEN' -H 'Content-Type: application/json' -d '{\"note\":\"Succeeded in DS console\",\"released_by\":\"alice\"}' '$ATOM_API_URL/api/runs/run-104/steps/by-id/ds_load/mark-passed'",
+            description: 'Exact API equivalent. Returns the new run, or the original run when nothing is left to run. 409 if the run is still in progress or the step did not fail.',
+            params: [
+              { flag: 'run-104', desc: 'Finished run id.' },
+              { flag: 'ds_load', desc: 'step_id of the FAILED/ERROR step.' },
+            ],
+            sampleOutput: '{"run_id":"run-105","status":"PENDING","restarted_from_run_id":"run-104"}',
+          },
+        },
+        {
           title: 'Export a historical run as CSV',
           text: 'CSV export captures summary and result evidence for audit or offline analysis. Export does not modify decisions, baselines, or the original run.',
           where: 'History -> run detail -> Export CSV',
