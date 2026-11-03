@@ -77,6 +77,34 @@ def get_scheduler_runtime_snapshot() -> dict:
     }
 
 
+def _resolve_schedule_sequence(db, sched, name: str, ref):
+    """Resolve a schedule's sequence and check its preconditions.
+
+    Returns None after recording the skip when the run should not happen.
+    """
+    from api.services.scheduler_telemetry import record_scheduler_event
+    from api.services.sequence_preconditions import check_for_session
+    from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
+
+    try:
+        resolved = resolve_sequence(db, ref)
+    except SequenceResolutionError as exc:
+        logger.error("Schedule '%s' could not resolve its sequence: %s", name, exc)
+        record_scheduler_event(
+            db, sched, "skipped", "ERROR", exit_code=1, error_summary=str(exc)
+        )
+        return None
+    gate = check_for_session(db, resolved.preconditions)
+    if not gate.ok:
+        logger.info("Schedule '%s' skipped: %s", name, gate.reason)
+        record_scheduler_event(
+            db, sched, "skipped", "CANCELLED",
+            error_summary=f"Precondition not met: {gate.reason}",
+        )
+        return None
+    return resolved
+
+
 def _run_schedule(schedule_id: int, name: str) -> None:
     """Called by APScheduler; runs inside a daemon thread."""
     import uuid as _uuid
@@ -133,37 +161,20 @@ def _run_schedule(schedule_id: int, name: str) -> None:
             batch_next_candidate = step_business_date(candidate, step_days, policy).isoformat()
 
         from api.schemas import SequenceRef
-        from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 
         sequence_meta = None
         if sched.sequence_id is not None:
-            try:
-                resolved = resolve_sequence(
-                    db,
-                    SequenceRef(sequence_id=sched.sequence_id,
-                                sequence_version=sched.sequence_version),
-                )
-            except SequenceResolutionError as exc:
-                logger.error("Schedule '%s' could not resolve its sequence: %s", name, exc)
-                record_scheduler_event(
-                    db, sched, "skipped", "ERROR", exit_code=1, error_summary=str(exc)
-                )
+            resolved = _resolve_schedule_sequence(
+                db, sched, name,
+                SequenceRef(sequence_id=sched.sequence_id, sequence_version=sched.sequence_version),
+            )
+            if resolved is None:
                 return
             job_sequence = resolved.as_linear_steps()
             dag_steps = resolved.steps
             run_settings = resolved.defaults.run_settings or {}
             config_id = resolved.defaults.config_id
             sequence_meta = resolved.snapshot_meta()
-            from api.services.sequence_preconditions import check_for_session
-
-            gate = check_for_session(db, resolved.preconditions)
-            if not gate.ok:
-                logger.info("Schedule '%s' skipped: %s", name, gate.reason)
-                record_scheduler_event(
-                    db, sched, "skipped", "CANCELLED",
-                    error_summary=f"Precondition not met: {gate.reason}",
-                )
-                return
             selection_id = None
             selection_version = None
         else:
@@ -183,6 +194,17 @@ def _run_schedule(schedule_id: int, name: str) -> None:
                 )
                 return
             job_sequence = version.job_sequence or []
+            if version.sequence_ref:
+                # Such a selection has no job list of its own; without this the
+                # run would have no steps. Selection launch does the same.
+                resolved = _resolve_schedule_sequence(
+                    db, sched, name, SequenceRef.model_validate(version.sequence_ref),
+                )
+                if resolved is None:
+                    return
+                job_sequence = resolved.as_linear_steps()
+                dag_steps = resolved.steps
+                sequence_meta = resolved.snapshot_meta()
             run_settings = version.run_settings_json or {}
             # Without this, a scheduled run resolves no Saved Config and every
             # live job in it (bo_report, automic_job, compare) runs without

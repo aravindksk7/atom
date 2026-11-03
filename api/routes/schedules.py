@@ -151,7 +151,15 @@ def _resolve_and_validate(db: Session, body: "ScheduleCreate") -> tuple[str, int
 
     version_number = _resolve_selection_version(db, body.selection_id, body.selection_version)
     version = JobSelectionRepository(db).get_version(body.selection_id, version_number)
-    _validate_env_requirements(version.job_sequence or [], jobs_by_name, body.target_env)
+    job_sequence = version.job_sequence or []
+    if version.sequence_ref:
+        try:
+            job_sequence = resolve_sequence(
+                db, SequenceRef.model_validate(version.sequence_ref)
+            ).as_linear_steps()
+        except SequenceResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _validate_env_requirements(job_sequence, jobs_by_name, body.target_env)
     return "selection", version_number
 
 
