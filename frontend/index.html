@@ -3214,7 +3214,10 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <!-- Detail -->
     <div class="card lg:col-span-2" x-show="selectedSequence" data-testid="sequence-detail">
       <div class="flex items-center justify-between">
-        <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
+        <div class="flex items-center gap-2">
+          <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
+          <span class="chip" data-testid="sequence-flow-badge" x-text="selectedSequenceFlowLabel"></span>
+        </div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" data-testid="sequence-launch-btn"
                   @click="openLaunchSequenceModal(selectedSequence)">Run sequence</button>
@@ -3350,110 +3353,209 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
   </div>
 </details>
 
+      <div class="card card-compact mb-3" data-testid="sequence-flow-controls">
+        <div class="flex flex-wrap items-center gap-4">
+          <span class="field-label mb-0">Flow</span>
+          <label class="field-inline">
+            <input type="radio" name="sequence-flow" value="serial" data-testid="sequence-flow-serial"
+                   :checked="sequenceFlow === 'serial'" :disabled="sequenceAdvancedGraph"
+                   @change="setSequenceFlow('serial')" />
+            <span>Serial</span>
+          </label>
+          <label class="field-inline">
+            <input type="radio" name="sequence-flow" value="parallel" data-testid="sequence-flow-parallel"
+                   :checked="sequenceFlow === 'parallel'" :disabled="sequenceAdvancedGraph"
+                   @change="setSequenceFlow('parallel')" />
+            <span>Parallel</span>
+          </label>
+          <label class="field-inline">
+            <input type="radio" name="sequence-flow" value="custom" data-testid="sequence-flow-custom"
+                   :checked="sequenceFlow === 'custom'" :disabled="sequenceAdvancedGraph"
+                   @change="setSequenceFlow('custom')" />
+            <span>Custom stages</span>
+          </label>
+          <label class="field-inline">
+            <input type="checkbox" data-testid="sequence-advanced-graph"
+                   :checked="sequenceAdvancedGraph"
+                   @change="$event.target.checked = setSequenceAdvancedGraph($event.target.checked) ? $event.target.checked : !$event.target.checked" />
+            <span>Advanced graph</span>
+          </label>
+          <label class="field mb-0 ml-auto">
+            <span class="field-label">Max parallel jobs</span>
+            <input type="number" min="1" class="field-input w-24" data-testid="sequence-max-workers"
+                   x-model.number="sequenceMaxWorkers" :disabled="sequencePinnedSequential"
+                   placeholder="4" aria-label="max parallel jobs" />
+          </label>
+        </div>
+        <p class="text-xs text-muted mt-2" x-show="sequencePinnedSequential"
+           data-testid="sequence-pinned-note">
+          This sequence's run settings use sequential mode, so runs are pinned to one worker.
+        </p>
+        <p class="text-xs text-muted mt-2">
+          A selection that references this sequence uses its own run settings instead of this value.
+        </p>
+      </div>
+
       <div class="space-y-3" data-testid="sequence-step-editor">
-        <template x-for="(step, index) in sequenceSteps" :key="index">
-          <div class="card card-compact">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label class="field">
-                <span class="field-label">Job</span>
-                <select class="field-input" :data-testid="'sequence-step-job-' + index"
-                        x-model="step.job_name" @change="onSequenceJobPicked(step)"
-                        aria-label="step job">
-                  <option value="">Select a job…</option>
-                  <template x-for="job in jobs" :key="job.name">
-                    <option :value="job.name" x-text="job.name"></option>
-                  </template>
-                </select>
-              </label>
-              <label class="field">
-                <span class="field-label">Step id</span>
-                <input class="field-input" :data-testid="'sequence-step-id-' + index"
-                       x-model="step.step_id" @input="validateSequenceSteps()"
-                       aria-label="step id" />
-              </label>
-              <div class="field">
-                <span class="field-label">Runs after</span>
-                <div class="flex flex-wrap gap-2" :data-testid="'sequence-step-deps-' + index">
-                  <template x-for="parent in sequenceParentOptions(step)" :key="parent">
-                    <label class="chip cursor-pointer">
-                      <input type="checkbox" :checked="(step.depends_on || []).includes(parent)"
-                             @change="toggleSequenceDependency(step, parent)"
-                             :aria-label="'depends on ' + parent" />
-                      <span x-text="parent"></span>
-                    </label>
-                  </template>
-                  <span class="text-xs text-muted" x-show="sequenceParentOptions(step).length === 0">
-                    No other steps yet
-                  </span>
+        <template x-for="group in sequenceStepGroups" :key="group.index">
+          <div :class="sequenceUsesStages ? 'card card-compact border border-slate-200' : ''"
+               :data-testid="sequenceUsesStages ? 'sequence-stage-' + group.index : null">
+            <template x-if="sequenceUsesStages">
+              <div class="mb-3">
+                <div class="flex flex-wrap items-end gap-3">
+                  <span class="font-medium text-sm" x-text="'Stage ' + (group.index + 1)"></span>
+                  <label class="field mb-0">
+                    <span class="field-label">Run steps</span>
+                    <select class="field-input" :data-testid="'sequence-stage-mode-' + group.index"
+                            :value="group.mode"
+                            @change="setSequenceStageMode(group.index, $event.target.value)"
+                            aria-label="stage mode">
+                      <option value="serial">One after another</option>
+                      <option value="parallel">In parallel</option>
+                    </select>
+                  </label>
+                  <label class="field mb-0" x-show="group.index > 0">
+                    <span class="field-label">Start this stage when</span>
+                    <select class="field-input" :data-testid="'sequence-stage-rule-' + group.index"
+                            :value="sequenceStageRule(group.index)"
+                            @change="setSequenceStageRule(group.index, $event.target.value)"
+                            aria-label="stage start rule">
+                      <option value="all_success">All previous steps passed</option>
+                      <option value="all_done">All previous steps finished, whatever the outcome</option>
+                      <option value="any_success">At least one previous step passed</option>
+                      <option value="all_failed">All previous steps failed</option>
+                    </select>
+                  </label>
+                  <div class="ml-auto flex gap-1">
+                    <button class="btn btn-ghost btn-xs" :data-testid="'sequence-stage-up-' + group.index"
+                            :disabled="group.index === 0" @click="moveSequenceStage(group.index, -1)">Up</button>
+                    <button class="btn btn-ghost btn-xs" :data-testid="'sequence-stage-down-' + group.index"
+                            :disabled="group.index === sequenceStageModes.length - 1"
+                            @click="moveSequenceStage(group.index, 1)">Down</button>
+                    <button class="btn btn-ghost btn-xs" :data-testid="'sequence-stage-remove-' + group.index"
+                            :disabled="sequenceStageModes.length === 1"
+                            @click="removeSequenceStage(group.index)">Remove stage</button>
+                  </div>
                 </div>
+                <p class="text-xs text-muted mt-2" x-show="group.index > 0">
+                  A previous step that never ran (blocked or cancelled) stops this stage under any rule. A slow step does not count as passed, and a failure set to "carry on" still counts as failed.
+                </p>
               </div>
-              <label class="field" x-show="(step.depends_on || []).length > 0">
-                <span class="field-label">Run this step when</span>
-                <select class="field-input" :data-testid="'sequence-step-trigger-' + index"
-                        x-model="step.trigger_rule" @change="validateSequenceSteps()"
-                        aria-label="trigger rule">
-                  <option value="all_success">All parents succeeded</option>
-                  <option value="all_done">All parents finished, whatever the outcome</option>
-                  <option value="any_success">At least one parent succeeded</option>
-                  <option value="all_failed">All parents failed</option>
-                </select>
-              </label>
-            </div>
-
-            <details class="mt-2">
-              <summary class="text-sm cursor-pointer">Advanced</summary>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
-                <label class="field-inline">
-                  <input type="checkbox" x-model="step.hold_after" aria-label="hold after this step" />
-                  <span>Hold after this step</span>
-                </label>
-                <label class="field">
-                  <span class="field-label">Wait before this step (seconds)</span>
-                  <input type="number" min="0" class="field-input" x-model.number="step.wait_seconds"
-                         aria-label="wait seconds" />
-                </label>
-                <label class="field">
-                  <span class="field-label">Retries on error</span>
-                  <input type="number" min="0" max="10" class="field-input"
-                         :data-testid="'sequence-step-retries-' + index"
-                         x-model.number="step.max_retries" placeholder="Inherit from run settings"
-                         aria-label="max retries" />
-                </label>
-                <label class="field">
-                  <span class="field-label">Delay between retries (seconds)</span>
-                  <input type="number" min="0" class="field-input"
-                         x-model.number="step.retry_delay_seconds" placeholder="Inherit from run settings"
-                         aria-label="retry delay seconds" />
-                </label>
-                <label class="field">
-                  <span class="field-label">If this step fails</span>
-                  <select class="field-input" :data-testid="'sequence-step-onfailure-' + index"
-                          x-model="step.on_failure" aria-label="on failure">
-                    <option value="skip_downstream">Carry on — dependent steps decide for themselves</option>
-                    <option value="continue">Carry on and don't count this failure against the run</option>
-                    <option value="stop">Stop the whole run</option>
-                  </select>
-                </label>
-              </div>
-              <p class="text-xs text-muted mt-2">
-                Only errors are retried. A failed data comparison is a real result, so re-running it cannot change the outcome.
-              </p>
-            </details>
-
-            <template x-for="issue in sequenceIssuesFor(step.step_id)" :key="issue.field + issue.message">
-              <div class="text-xs text-danger mt-1" x-text="issue.message"></div>
             </template>
 
-            <div class="mt-2 text-right">
-              <button class="btn btn-ghost btn-xs" :data-testid="'sequence-step-remove-' + index"
-                      @click="removeSequenceStep(index)">Remove step</button>
+            <div class="space-y-3">
+              <template x-for="step in group.steps" :key="sequenceSteps.indexOf(step)">
+                <div class="card card-compact">
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <label class="field">
+                      <span class="field-label">Job</span>
+                      <select class="field-input" :data-testid="'sequence-step-job-' + sequenceSteps.indexOf(step)"
+                              x-model="step.job_name" @change="onSequenceJobPicked(step)"
+                              aria-label="step job">
+                        <option value="">Select a job…</option>
+                        <template x-for="job in jobs" :key="job.name">
+                          <option :value="job.name" x-text="job.name"></option>
+                        </template>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">Step id</span>
+                      <input class="field-input" :data-testid="'sequence-step-id-' + sequenceSteps.indexOf(step)"
+                             x-model="step.step_id" @input="validateSequenceSteps()"
+                             aria-label="step id" />
+                    </label>
+                    <div class="field" x-show="sequenceAdvancedGraph">
+                      <span class="field-label">Runs after</span>
+                      <div class="flex flex-wrap gap-2" :data-testid="'sequence-step-deps-' + sequenceSteps.indexOf(step)">
+                        <template x-for="parent in sequenceParentOptions(step)" :key="parent">
+                          <label class="chip cursor-pointer">
+                            <input type="checkbox" :checked="(step.depends_on || []).includes(parent)"
+                                   @change="toggleSequenceDependency(step, parent)"
+                                   :aria-label="'depends on ' + parent" />
+                            <span x-text="parent"></span>
+                          </label>
+                        </template>
+                        <span class="text-xs text-muted" x-show="sequenceParentOptions(step).length === 0">
+                          No other steps yet
+                        </span>
+                      </div>
+                    </div>
+                    <label class="field" x-show="sequenceStepShowsRule(step)">
+                      <span class="field-label">Run this step when</span>
+                      <select class="field-input" :data-testid="'sequence-step-trigger-' + sequenceSteps.indexOf(step)"
+                              x-model="step.trigger_rule" @change="validateSequenceSteps()"
+                              aria-label="trigger rule">
+                        <option value="all_success">All parents succeeded</option>
+                        <option value="all_done">All parents finished, whatever the outcome</option>
+                        <option value="any_success">At least one parent succeeded</option>
+                        <option value="all_failed">All parents failed</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <details class="mt-2">
+                    <summary class="text-sm cursor-pointer">Advanced</summary>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                      <label class="field-inline">
+                        <input type="checkbox" x-model="step.hold_after" aria-label="hold after this step" />
+                        <span>Hold after this step</span>
+                      </label>
+                      <label class="field">
+                        <span class="field-label">Wait before this step (seconds)</span>
+                        <input type="number" min="0" class="field-input" x-model.number="step.wait_seconds"
+                               aria-label="wait seconds" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">Retries on error</span>
+                        <input type="number" min="0" max="10" class="field-input"
+                               :data-testid="'sequence-step-retries-' + sequenceSteps.indexOf(step)"
+                               x-model.number="step.max_retries" placeholder="Inherit from run settings"
+                               aria-label="max retries" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">Delay between retries (seconds)</span>
+                        <input type="number" min="0" class="field-input"
+                               x-model.number="step.retry_delay_seconds" placeholder="Inherit from run settings"
+                               aria-label="retry delay seconds" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">If this step fails</span>
+                        <select class="field-input" :data-testid="'sequence-step-onfailure-' + sequenceSteps.indexOf(step)"
+                                x-model="step.on_failure" aria-label="on failure">
+                          <option value="skip_downstream">Carry on — dependent steps decide for themselves</option>
+                          <option value="continue">Carry on and don't count this failure against the run</option>
+                          <option value="stop">Stop the whole run</option>
+                        </select>
+                      </label>
+                    </div>
+                    <p class="text-xs text-muted mt-2">
+                      Only errors are retried. A failed data comparison is a real result, so re-running it cannot change the outcome.
+                    </p>
+                  </details>
+
+                  <template x-for="issue in sequenceIssuesFor(step.step_id)" :key="issue.field + issue.message">
+                    <div class="text-xs text-danger mt-1" x-text="issue.message"></div>
+                  </template>
+
+                  <div class="mt-2 text-right">
+                    <button class="btn btn-ghost btn-xs" :data-testid="'sequence-step-remove-' + sequenceSteps.indexOf(step)"
+                            @click="removeSequenceStep(sequenceSteps.indexOf(step))">Remove step</button>
+                  </div>
+                </div>
+              </template>
             </div>
+
+            <button class="btn btn-secondary btn-sm mt-3" x-show="sequenceUsesStages"
+                    :data-testid="'sequence-stage-add-step-' + group.index"
+                    @click="addSequenceStep(group.index)">Add step to stage</button>
           </div>
         </template>
       </div>
 
       <button class="btn btn-secondary btn-sm mt-3" data-testid="sequence-add-step"
-              @click="addSequenceStep()">Add step</button>
+              x-show="!sequenceUsesStages" @click="addSequenceStep()">Add step</button>
+      <button class="btn btn-secondary btn-sm mt-3" data-testid="sequence-add-stage"
+              x-show="sequenceUsesStages" @click="addSequenceStage()">Add stage</button>
 
       <template x-for="issue in sequenceGlobalIssues" :key="issue.field + issue.message">
         <div class="text-sm text-danger mt-2" data-testid="sequence-global-error" x-text="issue.message"></div>
@@ -3466,10 +3568,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <template x-for="level in sequenceLevels" :key="level.index">
             <div class="flex items-center gap-2">
               <span class="text-xs text-muted w-16" x-text="'level ' + (level.index + 1)"></span>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <template x-for="step in level.steps" :key="step.step_id">
                   <span class="chip" x-text="step.step_id"></span>
                 </template>
+                <span class="text-xs text-muted" x-show="level.steps.length > 1"
+                      :data-testid="'sequence-preview-together-' + level.index">run together</span>
               </div>
             </div>
           </template>
@@ -3509,6 +3613,12 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <label class="field-label">Variable overrides (optional, one per line "name=value")</label>
           <textarea x-model="launchSequenceModal.variableOverridesRaw" rows="2" class="field-input font-mono text-xs" placeholder="run_date=2026-09-08" data-testid="launch-sequence-variable-overrides-textarea"></textarea>
           <p class="text-xs text-muted mt-1">Overrides the Config-stored value for this run only. Leave blank to use the Config's value.</p>
+        </div>
+        <div>
+          <label class="field-label">Max parallel jobs (optional)</label>
+          <input type="number" min="1" x-model.number="launchSequenceModal.max_workers" class="field-input"
+                 :placeholder="launchSequenceModal.default_max_workers" data-testid="launch-sequence-max-workers" />
+          <p class="text-xs text-muted mt-1">Applies to this run only. Use 1 to run one step at a time. Leave blank to use the sequence's value.</p>
         </div>
         <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" class="rounded" x-model="launchSequenceModal.repeat_enabled" data-testid="sequence-repeat-toggle" /> Repeat execution</label>
         <div x-show="launchSequenceModal.repeat_enabled" class="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
