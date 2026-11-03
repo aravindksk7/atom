@@ -30,7 +30,6 @@
       source_env: 'dev',
       target_env: 'prod',
       config_id: '',
-      execution_mode: 'parallel',
       max_workers: 4,
       max_duration_seconds: 0,
       float_tolerance: '1e-9',
@@ -871,7 +870,6 @@
     _runSettingsPayload() {
       const s = this.launchSettings;
       return {
-        execution_mode: s.execution_mode,
         max_workers: Number(s.max_workers),
         max_duration_seconds: Number(s.max_duration_seconds),
         float_tolerance: s.float_tolerance,

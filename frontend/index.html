@@ -1332,12 +1332,13 @@
     <div class="settings-group">
       <div class="settings-group-label">Execution</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div>
-          <label  class="field-label" for="a11y-launch-execution-mode">Execution Mode</label>
-          <select x-model="launchSettings.execution_mode" class="field-input field-select" id="a11y-launch-execution-mode">
-            <option value="parallel">Parallel</option>
-            <option value="sequential">Sequential</option>
-          </select>
+        <div data-testid="launch-order-note">
+          <span class="field-label">Job order</span>
+          <p class="text-xs text-muted mt-1">
+            Jobs run in the listed order, one at a time. To run jobs in parallel, use a
+            <button type="button" class="underline" data-testid="launch-order-sequences-link"
+                    @click="currentView='sequences'">saved sequence</button>.
+          </p>
         </div>
         <div>
           <label  class="field-label" for="a11y-launch-max-workers">Max Workers</label>

@@ -1242,7 +1242,11 @@ function _appRaw() {
         const raw = localStorage.getItem('etl_session_settings');
         if (!raw) return;
         const settings = JSON.parse(raw);
-        if (settings.launchSettings) Object.assign(this.launchSettings, settings.launchSettings);
+        if (settings.launchSettings) {
+          // Saved before the Execution Mode control was removed.
+          delete settings.launchSettings.execution_mode;
+          Object.assign(this.launchSettings, settings.launchSettings);
+        }
         if (settings.compareSubTab !== undefined) this.compareSubTab = settings.compareSubTab;
         if (settings.reconMode !== undefined) this.reconMode = settings.reconMode;
         if (settings.boSourceAType !== undefined) this.boSourceAType = settings.boSourceAType;

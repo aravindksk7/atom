@@ -187,7 +187,7 @@
         },
         {
           title: 'Choose and tune Data Quality rules',
-          text: 'Stack built-in rules such as not_null, unique, min_row_count, max_row_count, match_regex, completeness_ratio, outlier_zscore, distribution_ks_test, and custom_sql. Pair rule severity and thresholds with parallel/sequential execution, retries, float tolerance, NULL semantics, hash precheck, chunk size, and schema mismatch policy.',
+          text: 'Stack built-in rules such as not_null, unique, min_row_count, max_row_count, match_regex, completeness_ratio, outlier_zscore, distribution_ks_test, and custom_sql. Pair rule severity and thresholds with retries, float tolerance, NULL semantics, hash precheck, chunk size, and schema mismatch policy.',
           where: 'Launch -> Job Editor -> DQ Rules and Run Settings',
           when: 'Enforcing completeness, uniqueness, validity, statistical stability, or domain-specific SQL assertions.',
           uiMockup: { title: 'DQ rule builder', elements: [

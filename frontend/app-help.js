@@ -22,7 +22,7 @@
     },
     maxWorkers: {
       title: 'Max Workers',
-      content: 'Maximum number of parallel test execution threads. Higher values speed up large test suites but increase database load.',
+      content: 'Maximum number of threads used for concurrent work inside a run, such as file pairs in a multi-file job. Jobs in the list still run one at a time. To run jobs in parallel, use a saved sequence, which has its own Max parallel jobs setting.',
     },
     compareTemplate: {
       title: 'Compare Templates',
