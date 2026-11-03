@@ -190,14 +190,19 @@ def _step_refs_from_rows(rows: list[RunStep]) -> list[SequenceStepRef]:
     """Build refs from rows in step_index order, restoring old chains.
 
     A row whose depends_on is NULL was recorded before that column existed, when
-    every run executed as a chain, so it depends on the row before it. New rows
-    always store a list, and [] means a real root.
+    every run executed as a chain, so it depends on the row before it. Such a row
+    holds the migration's default rule rather than the one its chain ran with: a
+    chain step with no condition ran after any parent (see normalize_to_dag). New
+    rows always store a list, and [] means a real root.
     """
     refs: list[SequenceStepRef] = []
     for row in rows:
         ref = _step_ref_from_row(row)
         if row.depends_on is None and refs:
-            ref = ref.model_copy(update={"depends_on": [refs[-1].step_id]})
+            update: dict[str, Any] = {"depends_on": [refs[-1].step_id]}
+            if ref.condition is None:
+                update["trigger_rule"] = "all_done"
+            ref = ref.model_copy(update=update)
         refs.append(ref)
     return refs
 

@@ -382,6 +382,39 @@ def test_restart_seeds_rows_without_a_step_id_by_their_generated_id(shared_db, m
     assert set(plan.seeded_outcomes) == {"step-0"}
 
 
+def test_restart_of_an_old_chain_runs_the_step_after_a_slow_one(shared_db):
+    from api.services.run_restart import restart_run
+
+    db = shared_db
+    _make_job(db, "ja")
+    _make_job(db, "jb")
+    _make_recorded_run(db, [
+        ("step_a", "ja", "SLOW", null()),
+        ("step_b", "jb", "FAILED", null()),
+    ])
+
+    plan = restart_run(db, "old")
+    _execute(db, plan)
+
+    assert RunStepRepository(db).get_step_by_step_id(plan.run_id, "step_b").status == "PASSED"
+
+
+def test_restart_of_an_old_chain_keeps_the_rule_of_a_step_with_a_condition(db):
+    from api.services.run_restart import restart_run
+
+    RunRepository(db).create_run("old", "dev", "prod", {"run_settings": {}})
+    RunRepository(db).update_run_status("old", "BLOCKED")
+    db.add(RunStep(run_id="old", job_name="ja", step_index=0, status="PASSED", step_id="a", depends_on=null()))
+    db.add(RunStep(
+        run_id="old", job_name="jb", step_index=1, status="FAILED", step_id="b", depends_on=null(),
+        condition={"require_status": ["PASSED"]},
+    ))
+    db.commit()
+
+    plan = restart_run(db, "old")
+    assert plan.steps[1].trigger_rule == "all_success"
+
+
 def test_restart_keeps_explicit_empty_edges_as_roots(db):
     from api.services.run_restart import restart_run
 
