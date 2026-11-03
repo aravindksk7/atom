@@ -1,0 +1,12 @@
+.git
+.claude
+.kilo
+node_modules
+**/__pycache__
+.pytest_cache
+.hypothesis
+playwright-report
+test-results
+logs
+reports
+*.db

@@ -1,0 +1,14 @@
+# Test-only image: the repo has no application image. Source is bind-mounted by
+# docker-compose.test.yml, so code edits do not need a rebuild.
+FROM python:3.12-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unixodbc nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt package.json package-lock.json ./
+RUN pip install --no-cache-dir -r requirements.txt typer
+RUN npm ci
+RUN node node_modules/@playwright/test/cli.js install --with-deps chromium

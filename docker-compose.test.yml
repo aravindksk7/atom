@@ -1,0 +1,59 @@
+# All test runs go through this file. Nothing publishes a host port, so runs
+# cannot collide with Windows excluded port ranges or a local dev server.
+name: atom-test
+
+x-test-base: &test-base
+  build:
+    context: .
+    dockerfile: Dockerfile.test
+  image: atom-test:local
+  working_dir: /app
+  volumes:
+    - .:/app
+    # Anonymous volume: keeps the image's Linux node_modules over the bind mount.
+    - /app/node_modules
+
+services:
+  test-py:
+    <<: *test-base
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Keep SQLite off the Windows bind mount, where file locking is unreliable.
+      ETL_DATABASE_URL: sqlite:////tmp/etl_test.db
+    command: python -m pytest tests/unit tests/integration -q
+
+  test-py-postgres:
+    <<: *test-base
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      ETL_DATABASE_URL: sqlite:////tmp/etl_test.db
+      HYBRID_TEST_DATABASE_URL: postgresql+psycopg://atom:atom_test@postgres:5432/atom_test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m pytest tests/integration/test_sequence_hybrid_flow.py -v
+
+  test-e2e:
+    <<: *test-base
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+    # playwright.config.ts starts uvicorn inside this container on port 8055 with
+    # a throwaway SQLite database.
+    command: node node_modules/@playwright/test/cli.js test
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: atom_test
+      POSTGRES_DB: atom_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom -d atom_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
