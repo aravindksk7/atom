@@ -301,7 +301,9 @@ def _do_launch_sequence(
         )
     target_env = body.target_env or resolved.defaults.target_env or ""
     config_id = body.config_id if body.config_id is not None else resolved.defaults.config_id
-    run_settings = resolved.defaults.run_settings or {}
+    run_settings = dict(resolved.defaults.run_settings or {})
+    if body.max_workers is not None:
+        run_settings["max_workers"] = body.max_workers
 
     job_sequence = resolved.as_linear_steps()
     jobs_by_name = {j.name: j for j in JobRepository(db).list()}

@@ -460,3 +460,45 @@ def test_job_dependency_between_siblings_is_rejected_on_save(client):
     ]})
     assert resp.status_code == 422
     assert "depends on 'load_orders'" in resp.json()["detail"][0]["message"]
+
+
+def _launched_settings(client, monkeypatch, defaults, launch):
+    captured = {}
+    monkeypatch.setattr(
+        "api.routes.sequences._execute_run",
+        lambda run_id, steps, source, target, settings, snapshot: captured.update(
+            settings=settings, snapshot=snapshot, steps=steps,
+        ),
+    )
+    seq_id = client.post("/api/sequences", json={
+        "name": "workers", "steps": CHAIN, "defaults": defaults,
+    }).json()["id"]
+    resp = client.post(f"/api/sequences/{seq_id}/launch", json={
+        "source_env": "dev", "target_env": "prod", **launch,
+    })
+    assert resp.status_code == 202, resp.text
+    return captured
+
+
+def test_sequence_default_max_workers_applies(client, monkeypatch):
+    got = _launched_settings(client, monkeypatch, {"run_settings": {"max_workers": 7}}, {})
+    assert got["settings"].max_workers == 7
+
+
+def test_launch_override_wins_and_keeps_other_settings(client, monkeypatch):
+    got = _launched_settings(
+        client, monkeypatch,
+        {"run_settings": {"max_workers": 7, "max_retries": 2}},
+        {"max_workers": 1},
+    )
+    assert got["settings"].max_workers == 1
+    assert got["settings"].max_retries == 2
+    assert got["snapshot"]["run_settings"]["max_workers"] == 1
+
+
+def test_launch_override_rejects_zero(client):
+    seq_id = _create(client).json()["id"]
+    resp = client.post(f"/api/sequences/{seq_id}/launch", json={
+        "source_env": "dev", "target_env": "prod", "max_workers": 0,
+    })
+    assert resp.status_code == 422
