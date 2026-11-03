@@ -2113,6 +2113,291 @@ git commit -F <file>   # fix(dag): count crashed and missing steps as errors
 
 ---
 
+### Task 9b: Restart option to re-run downstream steps
+
+**Files:**
+- Modify: `api/schemas.py` (add `RunRestartRequest` next to `RunStatusOut`)
+- Modify: `api/services/run_restart.py` (`restart_run`, new helper)
+- Modify: `api/routes/runs.py` (`restart_failed_run`)
+- Modify: `frontend/features/history.js` (`restartRun`), `frontend/partials/tab-history.html`, `frontend/help-content.js`, `frontend/index.html` (generated)
+- Test: `tests/unit/test_run_restart.py`, `tests/unit/test_runs_dag_api.py`
+
+- [ ] **Step 1: Write the failing service tests** (append to `tests/unit/test_run_restart.py`)
+
+```python
+def _make_group_run(db):
+    """a -> (m1 failed, m2 passed) -> next passed -> last passed, plus an unrelated root."""
+    repo = RunRepository(db)
+    repo.create_run("group", "dev", "prod", {"run_settings": {}})
+    repo.update_run_status("group", "FAILED")
+    steps = [
+        SequenceStepRef(step_id="a", job_name="a"),
+        SequenceStepRef(step_id="m1", job_name="m1", depends_on=["a"]),
+        SequenceStepRef(step_id="m2", job_name="m2", depends_on=["a"]),
+        SequenceStepRef(step_id="next", job_name="next", depends_on=["m1", "m2"], trigger_rule="all_done"),
+        SequenceStepRef(step_id="last", job_name="last", depends_on=["next"]),
+        SequenceStepRef(step_id="other", job_name="other"),
+    ]
+    step_repo = RunStepRepository(db)
+    step_repo.materialize_steps("group", steps)
+    for index, status in enumerate(["PASSED", "FAILED", "PASSED", "PASSED", "PASSED", "PASSED"]):
+        step_repo.update_status("group", index, status)
+
+
+def _statuses_of(db, run_id):
+    return {s.step_id: s.status for s in RunStepRepository(db).list_steps(run_id)}
+
+
+def test_restart_by_default_carries_over_steps_after_the_failed_one(db):
+    from api.services.run_restart import restart_run
+
+    _make_group_run(db)
+    plan = restart_run(db, "group")
+
+    assert set(plan.seeded_outcomes) == {"a", "m2", "next", "last", "other"}
+    assert _statuses_of(db, plan.run_id)["m1"] == "PENDING"
+    assert _statuses_of(db, plan.run_id)["next"] == "PASSED"
+
+
+def test_rerun_downstream_reruns_everything_after_a_rerun_step(db):
+    from api.services.run_restart import restart_run
+
+    _make_group_run(db)
+    plan = restart_run(db, "group", rerun_downstream=True)
+
+    # m2 and other have no ancestor running again, so they stay carried over.
+    assert set(plan.seeded_outcomes) == {"a", "m2", "other"}
+    assert [s.name for s in plan.carried_over_states] == ["a", "m2", "other"]
+    assert _statuses_of(db, plan.run_id) == {
+        "a": "PASSED", "m1": "PENDING", "m2": "PASSED",
+        "next": "PENDING", "last": "PENDING", "other": "PASSED",
+    }
+    carried = {s.step_id: s.carried_over for s in RunStepRepository(db).list_steps(plan.run_id)}
+    assert carried["next"] is False and carried["a"] is True
+
+
+def test_rerun_downstream_on_a_chain_with_a_blocked_tail_changes_nothing(db):
+    from api.services.run_restart import restart_run
+
+    _make_failed_run(db)
+    plan = restart_run(db, "original", rerun_downstream=True)
+
+    assert set(plan.seeded_outcomes) == {"extract"}
+```
+
+- [ ] **Step 2: Write the failing route tests** (append to `tests/unit/test_runs_dag_api.py`, reusing how the file's existing restart test at line 101 builds `failed-run` and its fixtures)
+
+```python
+def test_restart_accepts_no_body_and_defaults_to_not_rerunning_downstream(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "api.routes.runs.restart_run",
+        lambda db, run_id, rerun_downstream=False: seen.update(flag=rerun_downstream) or _raise_not_found(),
+    )
+    assert client.post("/api/runs/any/restart").status_code == 404
+    assert seen["flag"] is False
+
+
+def test_restart_passes_rerun_downstream_through(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "api.routes.runs.restart_run",
+        lambda db, run_id, rerun_downstream=False: seen.update(flag=rerun_downstream) or _raise_not_found(),
+    )
+    resp = client.post("/api/runs/any/restart", json={"rerun_downstream": True})
+    assert resp.status_code == 404
+    assert seen["flag"] is True
+
+
+def test_restart_rejects_unknown_fields(client):
+    assert client.post("/api/runs/any/restart", json={"nope": True}).status_code == 422
+
+
+def _raise_not_found():
+    from api.services.run_restart import RestartNotFound
+    raise RestartNotFound("Run not found")
+```
+
+- [ ] **Step 3: Run to verify they fail**
+
+Run: `docker compose -f docker-compose.test.yml run --rm test-py python -m pytest tests/unit/test_run_restart.py tests/unit/test_runs_dag_api.py -v`
+Expected: the `rerun_downstream` tests FAIL with `TypeError` on the unexpected keyword, or get a passing 404 without the flag being seen. `test_restart_by_default_...` passes, and it guards today's behaviour.
+
+- [ ] **Step 4: Add the helper and the parameter in `api/services/run_restart.py`**
+
+Add above `restart_run`:
+
+```python
+def _step_ids_to_rerun(rows: list[RunStep], refs: list[SequenceStepRef], rerun_downstream: bool) -> set[str]:
+    """Steps the restart runs again: anything unfinished, plus optionally what follows it."""
+    rerun = {ref.step_id for row, ref in zip(rows, refs) if row.status not in CARRIED_OVER_STATUSES}
+    if not rerun_downstream:
+        return rerun
+    children: dict[str, list[str]] = {}
+    for ref in refs:
+        for parent in ref.depends_on:
+            children.setdefault(parent, []).append(ref.step_id)
+    stack = list(rerun)
+    while stack:
+        for child in children.get(stack.pop(), []):
+            if child not in rerun:
+                rerun.add(child)
+                stack.append(child)
+    return rerun
+```
+
+Change the signature:
+
+```python
+def restart_run(db: Session, original_run_id: str, rerun_downstream: bool = False) -> RestartPlan:
+```
+
+After `steps = _step_refs_from_rows(original_steps)`:
+
+```python
+    rerun = _step_ids_to_rerun(original_steps, steps, rerun_downstream)
+```
+
+In the carried-over loop, replace the status check:
+
+```python
+    for original_step, step_ref in zip(original_steps, steps):
+        if step_ref.step_id in rerun:
+            continue
+```
+
+Leave the "nothing to restart" check as it is: a fully passed run has nothing to start from, with or without the option.
+
+- [ ] **Step 5: Add the request model in `api/schemas.py`, above `class RunStatusOut`**
+
+```python
+class RunRestartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Also run passed steps that follow a step running again. Off by default,
+    # because it repeats their side effects.
+    rerun_downstream: bool = False
+```
+
+- [ ] **Step 6: Use it in `restart_failed_run`, in `api/routes/runs.py`**
+
+Add `RunRestartRequest` to the file's `api.schemas` import, then:
+
+```python
+@router.post("/{run_id}/restart", response_model=RunStatusOut, status_code=202)
+def restart_failed_run(
+    run_id: str, background_tasks: BackgroundTasks, request: Request,
+    body: RunRestartRequest | None = None, db: Session = Depends(get_session),
+):
+    rerun_downstream = bool(body and body.rerun_downstream)
+    try:
+        plan = restart_run(db, run_id, rerun_downstream=rerun_downstream)
+```
+
+and add the flag to the audit detail:
+
+```python
+        {"restarted_from_run_id": plan.restarted_from_run_id, "rerun_downstream": rerun_downstream},
+```
+
+- [ ] **Step 7: Run to verify they pass**
+
+Run: `docker compose -f docker-compose.test.yml run --rm test-py python -m pytest tests/unit/test_run_restart.py tests/unit/test_runs_dag_api.py -v`
+Expected: PASS.
+
+- [ ] **Step 8: Add the UI control**
+
+In `frontend/features/history.js`, add state next to the other history state:
+
+```javascript
+    restartRerunDownstream: false,   // applies to the run on screen; reset when another is viewed
+```
+
+Set `this.restartRerunDownstream = false;` as the first line of `viewRunDetail`'s `try` block, and replace the POST in `restartRun`:
+
+```javascript
+        const body = this.restartRerunDownstream ? { rerun_downstream: true } : undefined;
+        const restarted = await api('POST', `/api/runs/${runId}/restart`, body);
+```
+
+In `frontend/partials/tab-history.html`, directly after the `Restart from failure` button:
+
+```html
+            <label x-show="canRestartRun(selectedRun)" class="flex items-center gap-1 text-xs text-slate-500 cursor-pointer"
+                   title="Passed steps that come after a re-run step run again too. This repeats their side effects, such as file transfers.">
+              <input type="checkbox" class="rounded" x-model="restartRerunDownstream"
+                     data-testid="history-restart-rerun-downstream" />
+              Also re-run later steps
+            </label>
+```
+
+In `frontend/help-content.js`, append to the `Restart from failure` `text` (line 769):
+
+```
+ Passed steps that ran after a failed one stay carried over; tick Also re-run later steps, or send {"rerun_downstream": true}, to run them again, which repeats their side effects.
+```
+
+Regenerate: `docker compose -f docker-compose.test.yml run --rm test-py node scripts/build-html.js`
+
+- [ ] **Step 9: Check `history.js` with a unit test**
+
+Create `tests/unit/test_restart_rerun_downstream.js`:
+
+```javascript
+'use strict';
+// Restart sends the option only when ticked, so the default request stays bodyless.
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.join(__dirname, '..', '..');
+const history = fs.readFileSync(path.join(ROOT, 'frontend', 'features', 'history.js'), 'utf8');
+const partial = fs.readFileSync(path.join(ROOT, 'frontend', 'partials', 'tab-history.html'), 'utf8');
+
+assert.ok(history.includes('this.restartRerunDownstream ? { rerun_downstream: true } : undefined'));
+assert.ok(history.includes('this.restartRerunDownstream = false;'));
+assert.ok(partial.includes('data-testid="history-restart-rerun-downstream"'));
+console.log('ok - restart option is wired');
+```
+
+Create `tests/unit/test_restart_rerun_downstream.py`:
+
+```python
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+
+SPEC = Path(__file__).with_suffix(".js")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_restart_rerun_downstream_wiring():
+    proc = subprocess.run(
+        [shutil.which("node"), str(SPEC)],
+        capture_output=True,
+        text=True,
+        cwd=str(SPEC.parents[2]),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+```
+
+Run: `docker compose -f docker-compose.test.yml run --rm test-py python -m pytest tests/unit/test_restart_rerun_downstream.py -v`
+Expected: PASS.
+
+- [ ] **Step 10: Commit**
+
+```powershell
+git add api/schemas.py api/services/run_restart.py api/routes/runs.py frontend/features/history.js frontend/partials/tab-history.html frontend/help-content.js frontend/index.html tests/unit/test_run_restart.py tests/unit/test_runs_dag_api.py tests/unit/test_restart_rerun_downstream.js tests/unit/test_restart_rerun_downstream.py
+git commit -F <file>   # feat(restart): add an option to re-run steps after a re-run step
+```
+
+Task 10 and Task 14 cover this end to end; see their steps marked "rerun_downstream".
+
+---
+
 ### Task 10: Hybrid flow end to end through the API
 
 **Files:**
@@ -2397,6 +2682,34 @@ def test_restart_keeps_edges_and_max_workers(client, factory, record):
     assert steps["m1"].depends_on == ["a"]
     assert steps["a"].carried_over is True
     assert snapshot["run_settings"]["max_workers"] == 3
+
+
+def test_rerun_downstream_runs_later_steps_again(client, factory, record):
+    # rerun_downstream: without the option `next` is carried over and never sees
+    # the failed member's new result. With it, `next` runs again and `other` does not.
+    recorder = record()
+    run_id = _launch(client, [
+        {"mode": "parallel", "steps": [_step("m1", "bad"), _step("m2", "good")]},
+        {"mode": "serial", "steps": [_step("next", "reconcile", trigger_rule="all_done")]},
+    ])
+    assert _statuses(factory, run_id)["next"] == "PASSED"
+
+    recorder.events.clear()
+    resp = client.post(f"/api/runs/{run_id}/restart")
+    assert resp.status_code == 202, resp.text
+    assert recorder.events == ["enter:bad", "exit:bad"]
+
+    recorder.events.clear()
+    resp = client.post(f"/api/runs/{run_id}/restart", json={"rerun_downstream": True})
+    assert resp.status_code == 202, resp.text
+    new_run_id = resp.json()["run_id"]
+
+    assert "enter:reconcile" in recorder.events
+    assert "enter:good" not in recorder.events
+    with factory() as db:
+        steps = {s.step_id: s for s in RunStepRepository(db).list_steps(new_run_id)}
+    assert steps["m2"].carried_over is True
+    assert steps["next"].carried_over is False
 ```
 
 - [ ] **Step 2: Run on SQLite**
@@ -3626,6 +3939,48 @@ test.describe('Sequence flow modes', () => {
     }
   });
 
+  // rerun_downstream: the checkbox reaches the API only when ticked. The run is
+  // stubbed because this checks the control, and the behaviour is proved in
+  // tests/integration/test_sequence_hybrid_flow.py.
+  test('the History restart control sends rerun_downstream only when ticked', async ({ authedPage: page }) => {
+    const runId = '00000000-0000-0000-0000-000000000060';
+    const bodies: (string | null)[] = [];
+    const run = {
+      run_id: runId, status: 'FAILED', source_env: 'dev', target_env: 'dev',
+      total_tests: 2, passed: 1, failed: 1, slow: 0, error: 0, results: [],
+    };
+    await page.route(`**/api/runs/${runId}`, (route) => route.fulfill({ json: run }));
+    await page.route(`**/api/runs/${runId}/steps`, (route) => route.fulfill({
+      json: [{ step_id: 'a', step_index: 0, job_name: 'a', status: 'FAILED', depends_on: [] }],
+    }));
+    await page.route(`**/api/runs/${runId}/restart`, async (route) => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: null });
+      bodies.push(route.request().postData());
+      return route.fulfill({ status: 404, json: { detail: 'stubbed' } });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'History' }).click();
+    await page.evaluate((id) => {
+      const root = document.querySelector('[x-data]') as any;
+      return (window as any).Alpine.$data(root).viewRunDetail(id);
+    }, runId);
+
+    const restart = page.getByRole('button', { name: 'Restart from failure' });
+    await expect(restart).toBeVisible();
+    const option = page.getByTestId('history-restart-rerun-downstream');
+    await expect(option).not.toBeChecked();
+
+    await restart.click();
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toBeFalsy();
+
+    await option.check();
+    await restart.click();
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(JSON.parse(bodies[1]!)).toEqual({ rerun_downstream: true });
+  });
+
   test('the Launch tab explains job order instead of offering a mode', async ({ authedPage: page }) => {
     await page.goto('/');
     await page.getByTestId('nav-tab-jobs').click();
@@ -3697,6 +4052,8 @@ The next stage starts according to its first steps' `trigger_rule`, by default `
 | One `FAILED` or `ERROR` | Blocked | Runs | Runs if another `PASSED` |
 | One `SLOW` or hold-skipped | Blocked | Runs | Runs if another `PASSED` |
 | One never ran (blocked or cancelled) | Blocked | Blocked | Blocked |
+
+**Restart from failure** skips steps that passed and runs the rest. A passed step that ran after a failed one, under `all_done` or `any_success`, stays carried over, so it does not see the new result. To run those again too, tick **Also re-run later steps**, or send `{"rerun_downstream": true}` to `POST /api/runs/{id}/restart`. This repeats their side effects, such as file transfers, so it is off by default.
 
 A plain job list on the Launch tab always runs in order, one job at a time, and carries on after a failure. A serial sequence defaults to stopping at the first failure.
 

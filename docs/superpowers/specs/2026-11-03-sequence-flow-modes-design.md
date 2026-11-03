@@ -284,6 +284,16 @@ without a `condition` gets `all_done` and carries on, while a serial flow defaul
 `all_success`, so later steps are blocked after the first failed step. A serial step
 can select `all_done` to carry on.
 
+## Restart with downstream steps
+
+Restart carries over every step that passed, including a step that ran after a failed one under `all_done` or `any_success`. Only the failed step runs again, so that later step's result can be stale. An opt-in option covers this.
+
+- `POST /api/runs/{run_id}/restart` accepts an optional body `{"rerun_downstream": true}`. With no body, or `false`, restart behaves as it does today.
+- When it is on, a step that would be carried over runs again if any of its ancestors is running again. Passed steps with no such ancestor stay carried over, including other members of a parallel group.
+- It is off by default, because running a passed step again repeats its side effects, such as a file transfer.
+- The History restart control adds an "Also re-run later steps" checkbox with a note about repeated side effects. It starts unchecked for each run viewed.
+- The mark-passed route does not get this option. It stays a statement that a step succeeded, and it restarts with the default behaviour.
+
 ## Behaviour changes
 
 1. An existing sequence with job-level dependent jobs as parallel siblings now fails
