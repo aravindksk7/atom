@@ -166,7 +166,11 @@ def test_get_missing_version_returns_404(client):
 def test_validate_endpoint_reports_order_when_valid(client):
     resp = client.post("/api/sequences/validate", json={"steps": CHAIN})
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "errors": [], "order": ["load", "recon"]}
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["errors"] == []
+    assert body["order"] == ["load", "recon"]
+    assert body["flow_mode"] == "serial"
 
 
 def test_validate_endpoint_reports_errors_without_persisting(client):
@@ -312,3 +316,147 @@ def test_launch_dual_env_job_without_target_fails_clearly(client):
     assert resp.status_code == 422
     assert "load_orders" in resp.json()["detail"]
     assert "target_env" in resp.json()["detail"]
+
+
+HYBRID_STAGES = [
+    {"mode": "serial", "steps": [{"step_id": "a", "job_name": "load_orders"}]},
+    {"mode": "parallel", "steps": [
+        {"step_id": "b", "job_name": "orders_recon"},
+        {"step_id": "c", "job_name": "load_orders"},
+    ]},
+    {"mode": "serial", "steps": [{"step_id": "d", "job_name": "orders_recon"}]},
+]
+
+
+def _edges(steps):
+    return {s["step_id"]: s["depends_on"] for s in steps}
+
+
+def test_create_with_stages_stores_compiled_edges(client):
+    resp = client.post("/api/sequences", json={"name": "hybrid", "stages": HYBRID_STAGES})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["step_count"] == 4
+
+    version = client.get(f"/api/sequences/{resp.json()['id']}").json()["versions"][0]
+    assert _edges(version["steps"]) == {"a": [], "b": ["a"], "c": ["a"], "d": ["b", "c"]}
+    assert version["flow_mode"] == "custom"
+    assert [s["mode"] for s in version["stages"]] == ["serial", "parallel", "serial"]
+
+
+def test_create_with_flow_mode(client):
+    for mode, expected in (("serial", {"a": [], "b": ["a"]}), ("parallel", {"a": [], "b": []})):
+        resp = client.post("/api/sequences", json={
+            "name": f"flat-{mode}", "flow_mode": mode,
+            "steps": [
+                {"step_id": "a", "job_name": "load_orders"},
+                {"step_id": "b", "job_name": "orders_recon"},
+            ],
+        })
+        assert resp.status_code == 201, resp.text
+        version = client.get(f"/api/sequences/{resp.json()['id']}").json()["versions"][0]
+        assert _edges(version["steps"]) == expected
+        assert version["flow_mode"] == mode
+
+
+def test_stage_step_with_depends_on_is_rejected(client):
+    resp = client.post("/api/sequences", json={"name": "bad", "stages": [
+        {"mode": "serial", "steps": [{"step_id": "a", "job_name": "load_orders", "depends_on": []}]},
+    ]})
+    assert resp.status_code == 422
+
+
+def test_stage_issue_uses_the_sequence_issue_shape(client):
+    resp = client.post("/api/sequences", json={"name": "bad", "stages": [
+        {"mode": "serial", "steps": [{"step_id": "a", "job_name": "ghost"}]},
+    ]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["field"] == "job_name"
+
+
+def test_root_all_failed_in_stages_is_rejected(client):
+    resp = client.post("/api/sequences", json={"name": "bad", "stages": [
+        {"mode": "serial", "steps": [
+            {"step_id": "a", "job_name": "load_orders", "trigger_rule": "all_failed"},
+        ]},
+    ]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["field"] == "trigger_rule"
+
+
+def test_new_version_accepts_stages(client):
+    seq_id = _create(client).json()["id"]
+    resp = client.post(f"/api/sequences/{seq_id}/versions", json={"stages": HYBRID_STAGES})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["flow_mode"] == "custom"
+    assert _edges(resp.json()["steps"])["d"] == ["b", "c"]
+
+
+def test_existing_steps_payload_derives_its_flow(client):
+    seq_id = _create(client).json()["id"]
+    version = client.get(f"/api/sequences/{seq_id}").json()["versions"][0]
+    assert version["flow_mode"] == "serial"
+    assert [s["mode"] for s in version["stages"]] == ["serial"]
+
+
+def test_graph_that_is_not_stage_shaped_has_no_stages(client):
+    seq_id = _create(client, steps=[
+        {"step_id": "a", "job_name": "load_orders", "depends_on": []},
+        {"step_id": "b", "job_name": "orders_recon", "depends_on": ["a"]},
+        {"step_id": "c", "job_name": "load_orders", "depends_on": []},
+        {"step_id": "d", "job_name": "orders_recon", "depends_on": ["c"]},
+    ]).json()["id"]
+    version = client.get(f"/api/sequences/{seq_id}").json()["versions"][0]
+    assert version["flow_mode"] == "custom"
+    assert version["stages"] is None
+
+
+def test_validate_returns_compiled_flow(client):
+    body = client.post("/api/sequences/validate", json={"stages": HYBRID_STAGES}).json()
+    assert body["ok"] is True
+    assert body["order"] == ["a", "b", "c", "d"]
+    assert _edges(body["steps"])["d"] == ["b", "c"]
+    assert body["flow_mode"] == "custom"
+    assert len(body["stages"]) == 3
+
+
+def test_validate_of_nothing_is_not_ok(client):
+    body = client.post("/api/sequences/validate", json={}).json()
+    assert body["ok"] is False
+    assert body["errors"][0]["field"] == "steps"
+
+
+def test_invalid_run_settings_are_rejected_on_save(client):
+    resp = client.post("/api/sequences", json={
+        "name": "bad-settings", "steps": CHAIN,
+        "defaults": {"run_settings": {"max_workers": 0}},
+    })
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["field"] == "run_settings"
+
+    seq_id = _create(client).json()["id"]
+    resp = client.post(f"/api/sequences/{seq_id}/versions", json={
+        "steps": CHAIN, "defaults": {"run_settings": {"not_a_setting": 1}},
+    })
+    assert resp.status_code == 422
+
+
+def test_job_dependency_between_siblings_is_rejected_on_save(client):
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import JobRepository
+
+    with _db_module.SessionLocal() as db:
+        JobRepository(db).create({
+            "name": "needs_load", "description": "", "tags": [],
+            "job_type": "reconciliation", "query": "SELECT 1",
+            "key_columns": ["id"], "exclude_columns": [],
+            "params": {"depends_on": ["load_orders"]}, "enabled": True,
+        })
+
+    resp = client.post("/api/sequences", json={"name": "sib", "stages": [
+        {"mode": "parallel", "steps": [
+            {"step_id": "a", "job_name": "load_orders"},
+            {"step_id": "b", "job_name": "needs_load"},
+        ]},
+    ]})
+    assert resp.status_code == 422
+    assert "depends on 'load_orders'" in resp.json()["detail"][0]["message"]

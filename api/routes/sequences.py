@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_session
@@ -16,9 +17,12 @@ from api.schemas import (
     RunStatusOut,
     RunTrigger,
     RunBatchOut,
+    RunSettings,
+    SequenceDefaults,
     SequenceLaunchRequest,
     SequenceBatchLaunchRequest,
     SequenceRef,
+    SequenceStepRef,
     SequenceUsageOut,
     SequenceValidateRequest,
     SequenceValidateResponse,
@@ -31,6 +35,8 @@ from api.services.sequence_preconditions import check_for_session as check_preco
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from api.services.sequence_validation import (
     SequenceCycleError,
+    derive_flow,
+    steps_from_input,
     topological_order,
     validate_steps,
 )
@@ -46,10 +52,33 @@ def _known_job_names(db: Session) -> set[str]:
     return {j.name for j in JobRepository(db).list() if j.enabled}
 
 
-def _check_or_422(db: Session, steps, preconditions) -> None:
-    errors = validate_steps(steps, _known_job_names(db))
+def _job_depends_on(db: Session) -> dict[str, list[str]]:
+    return {j.name: (j.params or {}).get("depends_on") or [] for j in JobRepository(db).list()}
+
+
+def _issues_for(db: Session, body) -> tuple[list, list[dict]]:
+    steps, issues = steps_from_input(body)
+    return steps, issues + validate_steps(steps, _known_job_names(db), _job_depends_on(db))
+
+
+def _steps_or_422(db: Session, body) -> list:
+    steps, errors = _issues_for(db, body)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
+    return steps
+
+
+def _check_defaults_or_422(defaults: SequenceDefaults | None) -> None:
+    # Checked here rather than on SequenceDefaults: that model also parses stored
+    # versions, and an old invalid value must not break reading or launching them.
+    if defaults is None:
+        return
+    try:
+        RunSettings(**defaults.run_settings)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=[
+            {"step_id": None, "field": "run_settings", "message": str(exc)},
+        ]) from exc
 
 
 def _dump(models) -> list:
@@ -57,12 +86,16 @@ def _dump(models) -> list:
 
 
 def _version_out(version) -> ExecutionSequenceVersionOut:
+    steps = [SequenceStepRef.model_validate(s) for s in (version.steps_json or [])]
+    flow_mode, stages = derive_flow(steps)
     return ExecutionSequenceVersionOut(
         version_number=version.version_number,
-        steps=version.steps_json or [],
+        steps=steps,
         preconditions=version.preconditions_json,
         defaults=version.defaults_json or {},
         created_at=version.created_at,
+        flow_mode=flow_mode,
+        stages=stages,
     )
 
 
@@ -114,16 +147,17 @@ def create_sequence(
         raise HTTPException(
             status_code=409, detail="An execution sequence with this name already exists"
         )
-    _check_or_422(db, body.steps, body.preconditions)
+    steps = _steps_or_422(db, body)
+    _check_defaults_or_422(body.defaults)
     sequence = repo.create(
         name=body.name, description=body.description, tags=body.tags,
-        steps=_dump(body.steps),
+        steps=_dump(steps),
         preconditions=body.preconditions.model_dump() if body.preconditions else None,
         defaults=body.defaults.model_dump(),
     )
     AuditService(db).log(
         request, "sequence.created", "execution_sequence", sequence.id,
-        {"name": sequence.name, "step_count": len(body.steps)},
+        {"name": sequence.name, "step_count": len(steps)},
     )
     return _sequence_out(sequence)
 
@@ -131,16 +165,21 @@ def create_sequence(
 # Registered before /{sequence_id} so "validate" is never read as an id.
 @router.post("/validate", response_model=SequenceValidateResponse)
 def validate_sequence(body: SequenceValidateRequest, db: Session = Depends(get_session)):
-    errors = validate_steps(body.steps, _known_job_names(db))
+    steps, errors = _issues_for(db, body)
+    flow_mode, stages = derive_flow(steps)
     if errors:
-        return SequenceValidateResponse(ok=False, errors=errors, order=[])
+        return SequenceValidateResponse(
+            ok=False, errors=errors, order=[], steps=steps, flow_mode=flow_mode, stages=stages,
+        )
     try:
-        order = topological_order(body.steps)
+        order = topological_order(steps)
     except SequenceCycleError as exc:  # pragma: no cover — validate_steps catches this first
         return SequenceValidateResponse(
             ok=False, errors=[{"step_id": None, "field": "depends_on", "message": str(exc)}], order=[]
         )
-    return SequenceValidateResponse(ok=True, errors=[], order=order)
+    return SequenceValidateResponse(
+        ok=True, errors=[], order=order, steps=steps, flow_mode=flow_mode, stages=stages,
+    )
 
 
 @router.get("/{sequence_id}", response_model=ExecutionSequenceDetailOut)
@@ -192,9 +231,10 @@ def create_sequence_version(
     db: Session = Depends(get_session),
 ):
     _get_or_404(db, sequence_id)
-    _check_or_422(db, body.steps, body.preconditions)
+    steps = _steps_or_422(db, body)
+    _check_defaults_or_422(body.defaults)
     version = ExecutionSequenceRepository(db).create_new_version(
-        sequence_id, steps=_dump(body.steps),
+        sequence_id, steps=_dump(steps),
         preconditions=body.preconditions.model_dump() if body.preconditions else None,
         defaults=body.defaults.model_dump() if body.defaults is not None else None,
     )
