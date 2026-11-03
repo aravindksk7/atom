@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import threading
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import pandas as pd
 from fastapi import HTTPException
@@ -198,13 +198,33 @@ def normalize_to_dag(job_sequence: list) -> list["SequenceStepRef"]:
     return normalized
 
 
+def _recover_from_poll_failure(rollback: Callable[[], None], what: str) -> None:
+    """Log a failed poll and reset the session, so the next poll can try again.
+
+    A poll runs every few seconds while steps are in flight, and a transient
+    database failure there must not abort the run and strand those steps.
+    """
+    logger.warning("%s failed; will try again on the next poll", what, exc_info=True)
+    try:
+        rollback()
+    except Exception:
+        logger.warning("Rollback after a failed poll also failed", exc_info=True)
+
+
 class _StepRepoAdapter:
     """Translates the coordinator's step_id vocabulary to run_steps rows."""
 
-    def __init__(self, step_repo: RunStepRepository, run_id: str, lock: threading.Lock | None = None) -> None:
+    def __init__(
+        self,
+        step_repo: RunStepRepository,
+        run_id: str,
+        lock: threading.Lock | None = None,
+        rollback: Callable[[], None] = lambda: None,
+    ) -> None:
         self._repo = step_repo
         self._run_id = run_id
         self._lock = lock or threading.Lock()
+        self._rollback = rollback
 
     def set_status(self, step_id: str, status: str, **kwargs) -> None:
         with self._lock:
@@ -212,7 +232,11 @@ class _StepRepoAdapter:
 
     def get_release(self, step_id: str) -> str | None:
         with self._lock:
-            return self._repo.get_release_by_step_id(self._run_id, step_id)
+            try:
+                return self._repo.get_release_by_step_id(self._run_id, step_id)
+            except Exception:
+                _recover_from_poll_failure(self._rollback, f"Release poll for step '{step_id}'")
+                return None
 
 
 class RunExecutor:
@@ -357,9 +381,9 @@ class RunExecutor:
 
         return DagExecutor(
             steps=self._dag_steps,
-            step_repo=_StepRepoAdapter(step_repo, self._run_id, self._db_lock),
+            step_repo=_StepRepoAdapter(step_repo, self._run_id, self._db_lock, rollback=self._db.rollback),
             run_step=lambda step: self._run_dag_step(step, jobs_index),
-            is_cancel_requested=lambda: self._run_repo.is_cancel_requested(self._run_id),
+            is_cancel_requested=self._poll_cancel_requested,
             on_held=lambda step: self._on_step_held(step_repo, step),
             # Sequential mode pins the pool to one worker; the graph is still
             # walked topologically.
@@ -367,12 +391,31 @@ class RunExecutor:
             hold_poll_interval=HOLD_POLL_INTERVAL_SECONDS,
             hold_timeout=HOLD_TIMEOUT_SECONDS,
             blocked_step_status="CANCELLED" if self._legacy_chain else "BLOCKED",
-            expire_all=self._db.expire_all,
+            expire_all=self._poll_expire_all,
             default_max_retries=self._settings.max_retries,
             default_retry_delay_seconds=self._settings.retry_delay_seconds,
             retry_on=list(self._settings.retry_on or []),
             seeded=self._seeded_outcomes,
         )
+
+    # DagExecutor calls the next two with no lock held, and also calls the first
+    # from worker threads, so they take the coordinator session's lock themselves.
+    # Nothing that already holds the lock may call them: it is not reentrant.
+
+    def _poll_cancel_requested(self) -> bool:
+        with self._db_lock:
+            try:
+                return self._run_repo.is_cancel_requested(self._run_id)
+            except Exception:
+                _recover_from_poll_failure(self._db.rollback, "Cancel poll")
+                return False
+
+    def _poll_expire_all(self) -> None:
+        with self._db_lock:
+            try:
+                self._db.expire_all()
+            except Exception:
+                _recover_from_poll_failure(self._db.rollback, "Session refresh")
 
     def _run_dag_step(self, step, jobs_index: dict):
         from api.services.dag_executor import StepOutcome
