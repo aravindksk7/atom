@@ -536,3 +536,39 @@ def test_inline_step_exception_is_recorded():
 def test_clean_run_is_not_flagged_as_crashed():
     ex, _ = _executor([SequenceStepRef(step_id="only", job_name="j")], _ok())
     assert ex.run().step_crashed is False
+
+
+def test_zero_hold_poll_interval_does_not_busy_spin():
+    from api.services.dag_executor import StepOutcome
+
+    polls = []
+
+    def run_step(step):
+        time.sleep(0.1)
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    # Two ready steps, so they go to the pool and the coordinator waits on them.
+    steps = [SequenceStepRef(step_id=f"s{i}", job_name="j") for i in range(2)]
+    ex, _ = _executor(
+        steps, run_step, hold_poll_interval=0,
+        is_cancel_requested=lambda: polls.append(1) or False,
+    )
+    ex.run()
+
+    # About 10 at the floor of 0.01s; an unfloored loop makes thousands.
+    assert len(polls) <= 50
+
+
+def test_zero_hold_poll_interval_still_sleeps_while_only_holds_remain():
+    sleeps = []
+    steps = [SequenceStepRef(step_id="held", job_name="j", hold_after=True)]
+    repo = FakeStepRepo()
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        repo.releases["held"] = "approve"
+
+    ex, _ = _executor(steps, _ok(), step_repo=repo, hold_poll_interval=0, sleep=sleep)
+    ex.run()
+
+    assert sleeps == [0.01]

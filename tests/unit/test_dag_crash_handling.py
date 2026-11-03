@@ -191,3 +191,23 @@ def test_coordinator_session_polls_hold_the_lock(monkeypatch):
 
     assert locked == [True, True]
     assert not executor._db_lock.locked()
+
+
+def test_crash_with_on_failure_stop_makes_the_run_error_not_cancelled(monkeypatch):
+    db = _session()
+    _make_job(db, "job_a")
+
+    def explode(self, step, jobs_index):
+        raise RuntimeError("coordinator backstop")
+
+    monkeypatch.setattr(RunExecutor, "_run_dag_step", explode)
+    run = _run(db, "run-stop", [
+        SequenceStepRef(step_id="a", job_name="job_a", on_failure="stop"),
+        SequenceStepRef(step_id="b", job_name="job_a", depends_on=["a"]),
+    ])
+
+    assert run.status == "ERROR"
+    assert run.error == 1
+    assert {s.step_id: s.status for s in RunStepRepository(db).list_steps("run-stop")} == {
+        "a": "ERROR", "b": "CANCELLED",
+    }

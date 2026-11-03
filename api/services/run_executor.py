@@ -310,15 +310,17 @@ class RunExecutor:
                 if self._carried_over_states:
                     outcome.states = self._carried_over_states + outcome.states
 
-                if outcome.cancelled:
+                # A crash comes first: on_failure="stop" also sets cancelled, and
+                # that must not hide it.
+                if outcome.step_crashed:
+                    # Caught below, which records the run as ERROR.
+                    raise RuntimeError("A sequence step crashed; see the step statuses")
+                elif outcome.cancelled:
                     self._run_repo.update_run_status(
                         self._run_id, "CANCELLED",
                         completed_at=datetime.now(timezone.utc),
                     )
                     self._fire_webhooks("CANCELLED")
-                elif outcome.step_crashed:
-                    # Caught below, which records the run as ERROR.
-                    raise RuntimeError("A sequence step crashed; see the step statuses")
                 elif outcome.blocked:
                     self._write_metrics(outcome.results)
                     self._run_repo.update_run_status(

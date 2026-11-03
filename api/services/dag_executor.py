@@ -27,6 +27,10 @@ FAILURE_STATUSES = frozenset({"FAILED", "ERROR"})
 # and is accepted only so the setting stays forward-compatible.
 RETRYABLE_STATUS_BY_TOKEN = {"error": frozenset({"ERROR"}), "timeout": frozenset()}
 
+# Each pass of the scheduling loop reads the database, so a zero poll interval
+# must not turn the loop into a busy spin.
+MIN_HOLD_POLL_SECONDS = 0.01
+
 
 @dataclass(frozen=True)
 class StepOutcome:
@@ -75,7 +79,7 @@ class DagExecutor:
         self._is_cancelled = is_cancel_requested
         self._on_held = on_held
         self._max_workers = max(1, int(max_workers))
-        self._hold_poll = hold_poll_interval
+        self._hold_poll = max(hold_poll_interval, MIN_HOLD_POLL_SECONDS)
         self._hold_timeout = hold_timeout
         self._blocked_step_status = blocked_step_status
         self._expire_all = expire_all or (lambda: None)
