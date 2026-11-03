@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -11,12 +12,17 @@ from typing import Any
 
 def json_safe(value: Any) -> Any:
     """Return a JSON-serializable representation of common framework values."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, datetime | date):
-        return value.isoformat()
+        # pd.NaT is a datetime subclass, and the only one unequal to itself.
+        return None if value != value else value.isoformat()
     if isinstance(value, Decimal):
-        return float(value)
+        return float(value) if value.is_finite() else None
+    if isinstance(value, bytes | bytearray | memoryview):
+        return bytes(value).hex()
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Path):
@@ -31,6 +37,12 @@ def json_safe(value: Any) -> Any:
     try:
         import numpy as np
 
+        # .item() turns nanosecond precision into a bare integer.
+        if isinstance(value, np.datetime64 | np.timedelta64):
+            import pandas as pd
+
+            converted = pd.Timestamp(value) if isinstance(value, np.datetime64) else pd.Timedelta(value)
+            return json_safe(converted)
         if isinstance(value, np.generic):
             return json_safe(value.item())
         if isinstance(value, np.ndarray):
@@ -51,6 +63,11 @@ def json_safe(value: Any) -> Any:
         pass
 
     return str(value)
+
+
+def safe_json_dumps(value: Any) -> str:
+    """Encode any framework value as strict JSON, for use as an engine's json_serializer."""
+    return json.dumps(json_safe(value))
 
 
 def csv_safe(value: Any) -> str:

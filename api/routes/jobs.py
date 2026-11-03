@@ -130,7 +130,7 @@ def _job_to_data(job: JobDefinition) -> dict:
     data = job.model_dump(exclude={"rules", "depends_on", "pass_condition"})
     params = dict(data.get("params") or {})
     if job.rules:
-        params["rules"] = [r.model_dump() for r in job.rules]
+        params["rules"] = [r.model_dump(mode="json") for r in job.rules]
     if job.depends_on:
         params["depends_on"] = list(job.depends_on)
     if job.pass_condition:

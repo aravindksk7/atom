@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.query_utils import apply_pagination
+from etl_framework.utils.serialization import json_safe
 from etl_framework.repository.models import (
     SavedConfig, SavedJob, TestRun, TestResult, MismatchDetail,
     ApiToken, NotificationHook, NotificationDelivery, ScheduledRun, JobLineageEdge, AuditEvent,
@@ -574,7 +575,7 @@ class RunRepository:
             [
                 {
                     "test_result_id": test_result_id,
-                    "key_values": m.key_values,
+                    "key_values": json_safe(m.key_values),
                     "column_name": m.column_name,
                     "source_value": str(m.source_value) if m.source_value is not None else None,
                     "target_value": str(m.target_value) if m.target_value is not None else None,

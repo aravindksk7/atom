@@ -415,7 +415,10 @@ TRIAGE_FIELDS = (
 
 def _triage_token(value: Any) -> str:
     """One key component rendered so a value read back from a CSV still matches the
-    JSON-stored one -- pandas hands back 9.0 where the run stored 9."""
+    JSON-stored one -- pandas hands back 9.0 where the run stored 9, and rows stored
+    before null keys were normalised still hold NaN where a recompute now has None."""
+    if isinstance(value, float) and value != value:
+        return str(None)
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)

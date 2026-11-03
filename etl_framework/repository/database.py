@@ -4,6 +4,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
+from etl_framework.utils.serialization import safe_json_dumps
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_SQLITE_PATH = _REPO_ROOT / "etl_framework.db"
@@ -14,6 +15,7 @@ DATABASE_URL = os.environ.get(
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    json_serializer=safe_json_dumps,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

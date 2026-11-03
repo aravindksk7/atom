@@ -5,11 +5,25 @@ from datetime import datetime, timezone
 from typing import Any
 
 from etl_framework.reconciliation.models import MismatchRecord
+from etl_framework.utils.serialization import json_safe
+
+
+def _freeze(value: Any) -> Any:
+    """Make a JSON-safe value hashable, keeping 9 and 9.0 equal."""
+    if isinstance(value, dict):
+        return tuple(sorted((k, _freeze(v)) for k, v in value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze(v) for v in value)
+    return value
 
 
 def _mismatch_key(m: MismatchRecord) -> tuple:
-    """Stable hashable key for a mismatch: (frozen key_values, column_name, mismatch_type)."""
-    return (tuple(sorted(m.key_values.items())), m.column_name, m.mismatch_type)
+    """Stable hashable key for a mismatch: (frozen key_values, column_name, mismatch_type).
+
+    Keys go through json_safe so a fresh row value matches its stored form, and a
+    null key (NaN, which never equals itself) matches across runs.
+    """
+    return (_freeze(json_safe(m.key_values)), m.column_name, m.mismatch_type)
 
 
 @dataclass

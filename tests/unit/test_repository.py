@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 from datetime import datetime, timezone
 from sqlalchemy import create_engine
@@ -322,6 +323,51 @@ def test_list_mismatches_prioritizes_missing_rows(db):
     assert rows[0].mismatch_type == "missing_in_target"
     assert rows[0].key_values == {"id": 3}
     assert rows[1].mismatch_type == "value_diff"
+
+
+@pytest.mark.parametrize(
+    "key_value",
+    [
+        pd.Timestamp("2026-10-06 10:15:00+0000", tz="UTC"),
+        datetime(2026, 10, 6, 10, 15, tzinfo=timezone.utc),
+    ],
+    ids=["pandas_timestamp", "datetime"],
+)
+def test_add_mismatch_details_stores_datetime_keys_as_iso(db, key_value):
+    from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+    from etl_framework.runner.state import TestStatus
+
+    repo = RunRepository(db)
+    repo.create_run(run_id="run-mm-dt", source_env="dev", target_env="prod")
+    result = ReconciliationResult(
+        query_name="curves",
+        source_env="dev",
+        target_env="prod",
+        source_row_count=1,
+        target_row_count=0,
+        matched_count=0,
+        missing_in_target_count=1,
+        missing_in_source_count=0,
+        value_mismatch_count=0,
+        mismatches=[],
+        status=TestStatus.FAILED,
+        executed_at=datetime.now(timezone.utc),
+        duration_seconds=1.0,
+    )
+    test_result = repo.add_test_result("run-mm-dt", result)
+    repo.add_mismatch_details(test_result.id, [
+        MismatchRecord(
+            key_values={"curve_id": 9501, "curve_date": key_value},
+            column_name="<row>",
+            source_value="present",
+            target_value="missing",
+            mismatch_type="missing_in_target",
+        ),
+    ])
+
+    rows = repo.list_mismatches(test_result.id, limit=1)
+
+    assert rows[0].key_values == {"curve_id": 9501, "curve_date": "2026-10-06T10:15:00+00:00"}
 
 
 def test_run_complete_updates_counters(db):
