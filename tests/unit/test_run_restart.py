@@ -427,3 +427,76 @@ def test_restart_keeps_explicit_empty_edges_as_roots(db):
     assert [(s.step_id, s.depends_on) for s in plan.steps] == [
         ("step_a", []), ("step_b", []),
     ]
+
+
+def _make_group_run(db):
+    """a -> (m1 failed, m2 passed) -> next passed -> last passed, plus an unrelated root."""
+    repo = RunRepository(db)
+    repo.create_run("group", "dev", "prod", {"run_settings": {}})
+    repo.update_run_status("group", "FAILED")
+    steps = [
+        SequenceStepRef(step_id="a", job_name="a"),
+        SequenceStepRef(step_id="m1", job_name="m1", depends_on=["a"]),
+        SequenceStepRef(step_id="m2", job_name="m2", depends_on=["a"]),
+        SequenceStepRef(step_id="next", job_name="next", depends_on=["m1", "m2"], trigger_rule="all_done"),
+        SequenceStepRef(step_id="last", job_name="last", depends_on=["next"]),
+        SequenceStepRef(step_id="other", job_name="other"),
+    ]
+    step_repo = RunStepRepository(db)
+    step_repo.materialize_steps("group", steps)
+    for index, status in enumerate(["PASSED", "FAILED", "PASSED", "PASSED", "PASSED", "PASSED"]):
+        step_repo.update_status("group", index, status)
+
+
+def _statuses_of(db, run_id):
+    return {s.step_id: s.status for s in RunStepRepository(db).list_steps(run_id)}
+
+
+def test_rerun_downstream_follows_the_restored_chain_of_an_old_run(db):
+    from api.services.run_restart import restart_run
+
+    _make_recorded_run(db, [
+        (None, "ja", "PASSED", null()),
+        (None, "jb", "FAILED", null()),
+        (None, "jc", "PASSED", null()),
+    ])
+
+    assert set(restart_run(db, "old").seeded_outcomes) == {"step-0", "step-2"}
+    assert set(restart_run(db, "old", rerun_downstream=True).seeded_outcomes) == {"step-0"}
+
+
+def test_restart_by_default_carries_over_steps_after_the_failed_one(db):
+    from api.services.run_restart import restart_run
+
+    _make_group_run(db)
+    plan = restart_run(db, "group")
+
+    assert set(plan.seeded_outcomes) == {"a", "m2", "next", "last", "other"}
+    assert _statuses_of(db, plan.run_id)["m1"] == "PENDING"
+    assert _statuses_of(db, plan.run_id)["next"] == "PASSED"
+
+
+def test_rerun_downstream_reruns_everything_after_a_rerun_step(db):
+    from api.services.run_restart import restart_run
+
+    _make_group_run(db)
+    plan = restart_run(db, "group", rerun_downstream=True)
+
+    # m2 and other have no ancestor running again, so they stay carried over.
+    assert set(plan.seeded_outcomes) == {"a", "m2", "other"}
+    assert [s.name for s in plan.carried_over_states] == ["a", "m2", "other"]
+    assert _statuses_of(db, plan.run_id) == {
+        "a": "PASSED", "m1": "PENDING", "m2": "PASSED",
+        "next": "PENDING", "last": "PENDING", "other": "PASSED",
+    }
+    carried = {s.step_id: s.carried_over for s in RunStepRepository(db).list_steps(plan.run_id)}
+    assert carried["next"] is False and carried["a"] is True
+
+
+def test_rerun_downstream_on_a_chain_with_a_blocked_tail_changes_nothing(db):
+    from api.services.run_restart import restart_run
+
+    _make_failed_run(db)
+    plan = restart_run(db, "original", rerun_downstream=True)
+
+    assert set(plan.seeded_outcomes) == {"extract"}

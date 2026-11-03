@@ -766,7 +766,7 @@
         },
         {
           title: 'Restart from failure',
-          text: 'Restart from failure creates a new run, carries passed steps forward, and executes failed, blocked, cancelled, or never-run steps. It is available only for eligible terminal runs and preserves the original run as immutable evidence.',
+          text: 'Restart from failure creates a new run, carries passed steps forward, and executes failed, blocked, cancelled, or never-run steps. It is available only for eligible terminal runs and preserves the original run as immutable evidence. Passed steps that ran after a failed one stay carried over; tick Also re-run later steps, or send {"rerun_downstream": true}, to run them again, which repeats their side effects.',
           where: 'History -> failed run -> Restart from failure',
           when: 'Recovering after a transient dependency failure without repeating successful work.',
           uiMockup: { title: 'Recovery run', badge: 'Eligible', elements: [

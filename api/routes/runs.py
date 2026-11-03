@@ -45,6 +45,7 @@ from api.schemas import (
     RunDetailOut,
     RunMismatchInsightsOut,
     RunProgressOut,
+    RunRestartRequest,
     RunStatusOut,
     RunStepOut,
     RunStepMarkPassedRequest,
@@ -534,10 +535,12 @@ def cancel_run(run_id: str, db: Session = Depends(get_session)):
 
 @router.post("/{run_id}/restart", response_model=RunStatusOut, status_code=202)
 def restart_failed_run(
-    run_id: str, background_tasks: BackgroundTasks, request: Request, db: Session = Depends(get_session),
+    run_id: str, background_tasks: BackgroundTasks, request: Request,
+    body: RunRestartRequest | None = None, db: Session = Depends(get_session),
 ):
+    rerun_downstream = bool(body and body.rerun_downstream)
     try:
-        plan = restart_run(db, run_id)
+        plan = restart_run(db, run_id, rerun_downstream=rerun_downstream)
     except RestartNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RestartError as exc:
@@ -545,7 +548,7 @@ def restart_failed_run(
     new_run = RunRepository(db).get_run(plan.run_id)
     AuditService(db).log(
         request, "run.restarted", "run", plan.run_id,
-        {"restarted_from_run_id": plan.restarted_from_run_id},
+        {"restarted_from_run_id": plan.restarted_from_run_id, "rerun_downstream": rerun_downstream},
     )
     background_tasks.add_task(
         _execute_run,

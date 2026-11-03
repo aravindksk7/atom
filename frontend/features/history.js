@@ -12,6 +12,7 @@
     // -----------------------------------------------------------
     runs: [],
     selectedRun: null,
+    restartRerunDownstream: false,   // applies to the run on screen; reset when another is viewed
     markPassedModal: { show: false, busy: false, runId: '', stepId: '', jobName: '', status: '', releasedBy: '', note: '' },
     chartInstance: null,
     historyFilterStatus: '',
@@ -143,6 +144,7 @@
 
     async viewRunDetail(runId) {
       try {
+        this.restartRerunDownstream = false;
         this.selectedRun = await api('GET', `/api/runs/${runId}`);
         this.selectedRun.steps = await api('GET', `/api/runs/${runId}/steps`);
         const restart = await api('GET', `/api/runs/${runId}/restart`);
@@ -161,7 +163,8 @@
 
     async restartRun(runId) {
       try {
-        const restarted = await api('POST', `/api/runs/${runId}/restart`);
+        const body = this.restartRerunDownstream ? { rerun_downstream: true } : undefined;
+        const restarted = await api('POST', `/api/runs/${runId}/restart`, body);
         await this.loadRuns();
         await this.viewRunDetail(restarted.run_id);
         this.toast('success', 'Restart queued', `New run ${restarted.run_id.substring(0, 8)}… started`);

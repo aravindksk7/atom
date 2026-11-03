@@ -47,7 +47,25 @@ class RestartPlan:
     seeded_outcomes: dict[str, ParentOutcome]
 
 
-def restart_run(db: Session, original_run_id: str) -> RestartPlan:
+def _step_ids_to_rerun(rows: list[RunStep], refs: list[SequenceStepRef], rerun_downstream: bool) -> set[str]:
+    """Steps the restart runs again: anything unfinished, plus optionally what follows it."""
+    rerun = {ref.step_id for row, ref in zip(rows, refs) if row.status not in CARRIED_OVER_STATUSES}
+    if not rerun_downstream:
+        return rerun
+    children: dict[str, list[str]] = {}
+    for ref in refs:
+        for parent in ref.depends_on:
+            children.setdefault(parent, []).append(ref.step_id)
+    stack = list(rerun)
+    while stack:
+        for child in children.get(stack.pop(), []):
+            if child not in rerun:
+                rerun.add(child)
+                stack.append(child)
+    return rerun
+
+
+def restart_run(db: Session, original_run_id: str, rerun_downstream: bool = False) -> RestartPlan:
     run_repo = RunRepository(db)
     original = run_repo.get_run(original_run_id)
     if original is None:
@@ -62,6 +80,7 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
         raise RestartError("selection already has an active run.")
 
     steps = _step_refs_from_rows(original_steps)
+    rerun = _step_ids_to_rerun(original_steps, steps, rerun_downstream)
     config_snapshot = dict(original.config_snapshot or {})
     new_run_id = str(uuid.uuid4())
     run_repo.create_run(
@@ -84,7 +103,7 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
     carried_states: list[TestCaseState] = []
     seeded: dict[str, ParentOutcome] = {}
     for original_step, step_ref in zip(original_steps, steps):
-        if original_step.status not in CARRIED_OVER_STATUSES:
+        if step_ref.step_id in rerun:
             continue
         original_result = result_for_step.get(original_step.step_index)
         copied_result = (

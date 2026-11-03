@@ -74,6 +74,12 @@
             <button x-show="canRestartRun(selectedRun)"
                     @click="restartRun(selectedRun.run_id)"
                     class="text-rose-500 hover:underline text-xs">Restart from failure</button>
+            <label x-show="canRestartRun(selectedRun)" class="flex items-center gap-1 text-xs text-slate-500 cursor-pointer"
+                   title="Passed steps that come after a re-run step run again too. This repeats their side effects, such as file transfers.">
+              <input type="checkbox" class="rounded" x-model="restartRerunDownstream"
+                     data-testid="history-restart-rerun-downstream" />
+              Also re-run later steps
+            </label>
           </div>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">

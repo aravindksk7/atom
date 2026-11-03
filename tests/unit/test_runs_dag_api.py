@@ -117,3 +117,33 @@ def test_restart_route_returns_422_for_unrestartable_run(client):
     resp = client.post("/api/runs/run-dag/restart")
 
     assert resp.status_code == 422
+
+
+def test_restart_accepts_no_body_and_defaults_to_not_rerunning_downstream(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "api.routes.runs.restart_run",
+        lambda db, run_id, rerun_downstream=False: seen.update(flag=rerun_downstream) or _raise_not_found(),
+    )
+    assert client.post("/api/runs/any/restart").status_code == 404
+    assert seen["flag"] is False
+
+
+def test_restart_passes_rerun_downstream_through(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "api.routes.runs.restart_run",
+        lambda db, run_id, rerun_downstream=False: seen.update(flag=rerun_downstream) or _raise_not_found(),
+    )
+    resp = client.post("/api/runs/any/restart", json={"rerun_downstream": True})
+    assert resp.status_code == 404
+    assert seen["flag"] is True
+
+
+def test_restart_rejects_unknown_fields(client):
+    assert client.post("/api/runs/any/restart", json={"nope": True}).status_code == 422
+
+
+def _raise_not_found():
+    from api.services.run_restart import RestartNotFound
+    raise RestartNotFound("Run not found")

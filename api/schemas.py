@@ -593,6 +593,14 @@ class RunTrigger(BaseModel):
         return self
 
 
+class RunRestartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Also run passed steps that follow a step running again. Off by default,
+    # because it repeats their side effects.
+    rerun_downstream: bool = False
+
+
 class RunStatusOut(BaseModel):
     run_id: str
     # Human-readable handle derived from the run ("file compare · dev → prod ·
