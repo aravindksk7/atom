@@ -277,7 +277,7 @@ class RunExecutor:
             try:
                 self._apply_health_gate()
                 jobs_index = self._build_jobs_index()
-                self._validate_dependencies(steps, jobs_index)
+                self._validate_dependencies(jobs_index)
                 step_repo = RunStepRepository(self._db)
                 if not step_repo.list_steps(self._run_id):
                     step_repo.materialize_steps(self._run_id, self._dag_steps)
@@ -462,27 +462,20 @@ class RunExecutor:
         except Exception:
             pass
 
-    def _validate_dependencies(
-        self, steps: list[SequenceStep], jobs_index: dict[str, JobDefinition]
-    ) -> None:
-        """Fail fast when the user-ordered sequence contradicts depends_on.
+    def _validate_dependencies(self, jobs_index: dict[str, JobDefinition]) -> None:
+        """Fail fast when a step could run before a job it depends on.
 
         Only dependencies that are themselves part of the sequence are
         enforced; external depends_on entries are informational.
         """
-        position = {s.job_name: i for i, s in enumerate(steps)}
-        for i, s in enumerate(steps):
-            job = jobs_index.get(s.job_name)
-            if job is None:
-                continue
-            for dep in job.depends_on:
-                dep_pos = position.get(dep)
-                if dep_pos is not None and dep_pos > i:
-                    raise ValueError(
-                        f"Job '{s.job_name}' depends on '{dep}' but is sequenced "
-                        f"before it (position {i} vs {dep_pos}). Reorder the "
-                        f"job sequence so dependencies run first."
-                    )
+        from api.services.sequence_validation import job_dependency_violations
+
+        job_depends_on = {name: list(job.depends_on) for name, job in jobs_index.items()}
+        for step, dep in job_dependency_violations(self._dag_steps, job_depends_on):
+            raise ValueError(
+                f"Job '{step.job_name}' depends on '{dep}' but step '{step.step_id}' does "
+                f"not run after it. Add the dependency so '{dep}' runs first."
+            )
 
     def _apply_health_gate(self) -> None:
         if not self._settings.health_check:

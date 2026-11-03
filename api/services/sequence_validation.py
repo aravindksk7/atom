@@ -138,8 +138,46 @@ def derive_flow(steps: list["SequenceStepRef"]) -> tuple[str, list["SequenceStag
     return (stages[0].mode if len(stages) == 1 else "custom"), stages
 
 
+def job_dependency_violations(
+    steps: list["SequenceStepRef"], job_depends_on: dict[str, list[str]]
+) -> list[tuple["SequenceStepRef", str]]:
+    """Find (step, dependency) pairs where a job-level dependency has no ancestor.
+
+    Only dependencies that are themselves in the sequence are enforced; others are
+    informational. The steps must already be known to form a valid graph.
+    """
+    by_id = {s.step_id: s for s in steps}
+    in_sequence = {s.job_name for s in steps}
+
+    def ancestor_jobs(step) -> set[str]:
+        jobs: set[str] = set()
+        seen: set[str] = set()
+        stack = list(step.depends_on)
+        while stack:
+            current = stack.pop()
+            if current in seen or current not in by_id:
+                continue
+            seen.add(current)
+            jobs.add(by_id[current].job_name)
+            stack.extend(by_id[current].depends_on)
+        return jobs
+
+    violations = []
+    for step in steps:
+        wanted = [
+            dep for dep in job_depends_on.get(step.job_name, [])
+            if dep in in_sequence and dep != step.job_name
+        ]
+        if wanted:
+            ancestors = ancestor_jobs(step)
+            violations.extend((step, dep) for dep in wanted if dep not in ancestors)
+    return violations
+
+
 def validate_steps(
-    steps: list["SequenceStepRef"], known_job_names: Iterable[str]
+    steps: list["SequenceStepRef"],
+    known_job_names: Iterable[str],
+    job_depends_on: dict[str, list[str]] | None = None,
 ) -> list[dict]:
     """Return a list of issues; an empty list means the sequence is valid."""
     known = set(known_job_names)
@@ -174,5 +212,13 @@ def validate_steps(
             topological_order(steps)
         except SequenceCycleError as exc:
             errors.append(_issue(None, "depends_on", str(exc).replace("Dependency cycle", "Dependency cycle detected")))
+
+    if not errors and job_depends_on:
+        for step, dep in job_dependency_violations(steps, job_depends_on):
+            errors.append(_issue(
+                step.step_id, "depends_on",
+                f"Job '{step.job_name}' depends on '{dep}' but step '{step.step_id}' does not run "
+                f"after it. Add the dependency so '{dep}' runs first.",
+            ))
 
     return errors

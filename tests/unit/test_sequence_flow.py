@@ -149,3 +149,57 @@ def test_root_step_cannot_use_all_failed_in_compiled_input():
 def test_root_all_failed_is_not_flagged_for_raw_steps():
     raw = SequenceStepRef(step_id="a", job_name="j", trigger_rule="all_failed")
     assert steps_from_input(SequenceFlowInput(steps=[raw]))[1] == []
+
+
+def _job_step(step_id, job, *parents):
+    return SequenceStepRef(step_id=step_id, job_name=job, depends_on=list(parents))
+
+
+def test_job_dependency_between_siblings_is_a_violation():
+    from api.services.sequence_validation import job_dependency_violations
+
+    steps = [_job_step("a", "loader"), _job_step("b", "recon")]
+    found = job_dependency_violations(steps, {"recon": ["loader"]})
+    assert [(step.step_id, dep) for step, dep in found] == [("b", "loader")]
+
+
+def test_job_dependency_on_a_real_ancestor_is_fine():
+    from api.services.sequence_validation import job_dependency_violations
+
+    steps = [_job_step("a", "loader"), _job_step("m", "mid", "a"), _job_step("b", "recon", "m")]
+    assert job_dependency_violations(steps, {"recon": ["loader"]}) == []
+
+
+def test_job_dependency_outside_the_sequence_is_informational():
+    from api.services.sequence_validation import job_dependency_violations
+
+    assert job_dependency_violations([_job_step("b", "recon")], {"recon": ["loader"]}) == []
+
+
+def test_repeated_job_needs_an_earlier_run_of_its_dependency():
+    from api.services.sequence_validation import job_dependency_violations
+
+    # [A, B, A] is fine: B has an earlier A. [B, A, B] is not: the first B has none.
+    ok = [_job_step("a1", "A"), _job_step("b", "B", "a1"), _job_step("a2", "A", "b")]
+    assert job_dependency_violations(ok, {"B": ["A"]}) == []
+    bad = [_job_step("b1", "B"), _job_step("a", "A", "b1"), _job_step("b2", "B", "a")]
+    assert [s.step_id for s, _ in job_dependency_violations(bad, {"B": ["A"]})] == ["b1"]
+
+
+def test_validate_steps_reports_job_dependency_issue():
+    from api.services.sequence_validation import validate_steps
+
+    steps = [_job_step("a", "loader"), _job_step("b", "recon")]
+    errors = validate_steps(steps, ["loader", "recon"], {"recon": ["loader"]})
+    assert errors == [{
+        "step_id": "b", "field": "depends_on",
+        "message": "Job 'recon' depends on 'loader' but step 'b' does not run after it. "
+                   "Add the dependency so 'loader' runs first.",
+    }]
+
+
+def test_validate_steps_without_job_dependencies_is_unchanged():
+    from api.services.sequence_validation import validate_steps
+
+    steps = [_job_step("a", "loader"), _job_step("b", "recon")]
+    assert validate_steps(steps, ["loader", "recon"]) == []

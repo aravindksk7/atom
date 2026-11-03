@@ -226,3 +226,46 @@ def test_sequence_ignores_depends_on_absent_from_sequence():
 
     run = RunRepository(db).get_run("run-d3")
     assert run.status == "PASSED"
+
+
+def test_job_dependency_between_parallel_siblings_errors_before_any_step():
+    from api.schemas import SequenceStepRef
+
+    db = _session()
+    RunRepository(db).create_run("run-sib", "dev", "prod", {})
+    _make_job_with_deps(db, "loader", [])
+    _make_job_with_deps(db, "recon", ["loader"])
+
+    RunExecutor(
+        db=db, run_id="run-sib", source_env="dev", target_env="prod",
+        job_sequence=[
+            SequenceStepRef(step_id="a", job_name="loader"),
+            SequenceStepRef(step_id="b", job_name="recon"),
+        ],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    run = RunRepository(db).get_run("run-sib")
+    assert run.status == "ERROR"
+    assert "depends on 'loader'" in run.results[0].error_message
+    assert RunStepRepository(db).list_steps("run-sib") == []
+
+
+def test_job_dependency_satisfied_by_an_edge_runs():
+    from api.schemas import SequenceStepRef
+
+    db = _session()
+    RunRepository(db).create_run("run-edge", "dev", "prod", {})
+    _make_job_with_deps(db, "loader", [])
+    _make_job_with_deps(db, "recon", ["loader"])
+
+    RunExecutor(
+        db=db, run_id="run-edge", source_env="dev", target_env="prod",
+        job_sequence=[
+            SequenceStepRef(step_id="a", job_name="loader"),
+            SequenceStepRef(step_id="b", job_name="recon", depends_on=["a"]),
+        ],
+        run_settings=RunSettings(metrics_enabled=False),
+    ).execute()
+
+    assert RunRepository(db).get_run("run-edge").status == "PASSED"
