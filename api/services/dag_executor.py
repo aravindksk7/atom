@@ -43,6 +43,7 @@ class DagOutcome:
     results: list = field(default_factory=list)
     cancelled: bool = False
     blocked: bool = False
+    step_crashed: bool = False  # a step raised instead of returning an outcome
 
 
 class DagExecutor:
@@ -148,7 +149,7 @@ class DagExecutor:
                     done, _ = wait(list(in_flight), timeout=self._hold_poll, return_when=FIRST_COMPLETED)
                     for future in done:
                         step_id = in_flight.pop(future)
-                        self._finish(step_id, future.result())
+                        self._finish(step_id, self._result_of(future))
             return self._outcome
         finally:
             if pool is not None:
@@ -211,7 +212,22 @@ class DagExecutor:
     def _execute(self, step_id: str):
         self._pending.remove(step_id)
         self._mark(step_id, "RUNNING")
-        return self._run_one(step_id)
+        try:
+            return self._run_one(step_id)
+        except Exception:
+            return self._crashed()
+
+    def _crashed(self) -> StepOutcome:
+        # There is no job here to build a state from, so the caller is told
+        # through the flag that the run cannot count as clean.
+        self._outcome.step_crashed = True
+        return StepOutcome(status="ERROR", result=None, state=None)
+
+    def _result_of(self, future) -> StepOutcome:
+        try:
+            return future.result()
+        except Exception:
+            return self._crashed()
 
     def _run_one(self, step_id: str) -> StepOutcome:
         step = self._by_id[step_id]
@@ -325,10 +341,7 @@ class DagExecutor:
     def _drain(self, in_flight: dict) -> None:
         for future in list(in_flight):
             step_id = in_flight.pop(future)
-            try:
-                self._finish(step_id, future.result())
-            except Exception:
-                self._settle(step_id, "ERROR")
+            self._finish(step_id, self._result_of(future))
 
     def _mark(self, step_id: str, status: str) -> None:
         self._repo.set_status(step_id, status)

@@ -292,6 +292,9 @@ class RunExecutor:
                         completed_at=datetime.now(timezone.utc),
                     )
                     self._fire_webhooks("CANCELLED")
+                elif outcome.step_crashed:
+                    # Caught below, which records the run as ERROR.
+                    raise RuntimeError("A sequence step crashed; see the step statuses")
                 elif outcome.blocked:
                     self._write_metrics(outcome.results)
                     self._run_repo.update_run_status(
@@ -374,10 +377,6 @@ class RunExecutor:
     def _run_dag_step(self, step, jobs_index: dict):
         from api.services.dag_executor import StepOutcome
 
-        job_def = jobs_index.get(step.job_name)
-        if job_def is None:
-            return StepOutcome(status="ERROR", result=None, state=None)
-
         if self._worker_session_factory is None:
             self._worker_session_factory = sessionmaker(
                 bind=self._db.get_bind(),
@@ -399,11 +398,26 @@ class RunExecutor:
         # same job resumes nothing from this one.
         worker._file_transfer_resume = self._file_transfer_resume.setdefault(step.step_id, {})
         try:
+            job_def = jobs_index.get(step.job_name)
+            if job_def is None:
+                raise ValueError(f"Job '{step.job_name}' not found")
             case_fn = worker._build_case(job_def)
             state = TestRunner(max_workers=1).run([(job_def.name, case_fn)])[0]
             results = worker._persist_states([state])
             status = state.status.value if hasattr(state.status, "value") else str(state.status)
             return StepOutcome(status=status, result=results[0] if results else None, state=state)
+        except Exception as exc:
+            logger.exception("Step '%s' failed outside its job", step.step_id)
+            state = TestCaseState(
+                name=step.job_name, test_type="reconciliation",
+                status=TestStatus.ERROR, error_message=str(exc),
+            )
+            try:
+                worker_db.rollback()
+                worker._persist_error(step.job_name, exc)
+            except Exception:
+                logger.exception("Could not record the error for step '%s'", step.step_id)
+            return StepOutcome(status="ERROR", result=None, state=state)
         finally:
             worker_db.close()
 

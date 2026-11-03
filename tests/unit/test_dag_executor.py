@@ -490,3 +490,42 @@ def test_slow_parent_only_satisfies_rules_that_ignore_status(rule, child_status)
     ex.run()
 
     assert repo.status["child"] == child_status
+
+
+def test_pool_step_exception_does_not_lose_other_steps():
+    from api.services.dag_executor import StepOutcome
+
+    def run_step(step):
+        if step.step_id == "boom":
+            raise RuntimeError("boom")
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    steps = [
+        SequenceStepRef(step_id="boom", job_name="j"),
+        SequenceStepRef(step_id="ok", job_name="j"),
+        SequenceStepRef(step_id="after_ok", job_name="j", depends_on=["ok"]),
+        SequenceStepRef(step_id="after_boom", job_name="j", depends_on=["boom"]),
+    ]
+    ex, repo = _executor(steps, run_step)
+    outcome = ex.run()
+
+    assert outcome.step_crashed is True
+    assert repo.status == {
+        "boom": "ERROR", "ok": "PASSED", "after_ok": "PASSED", "after_boom": "BLOCKED",
+    }
+
+
+def test_inline_step_exception_is_recorded():
+    def run_step(step):
+        raise RuntimeError("boom")
+
+    ex, repo = _executor([SequenceStepRef(step_id="only", job_name="j")], run_step)
+    outcome = ex.run()
+
+    assert outcome.step_crashed is True
+    assert repo.status == {"only": "ERROR"}
+
+
+def test_clean_run_is_not_flagged_as_crashed():
+    ex, _ = _executor([SequenceStepRef(step_id="only", job_name="j")], _ok())
+    assert ex.run().step_crashed is False
