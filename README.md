@@ -1817,6 +1817,45 @@ $scheduleBody = @{
 Invoke-RestMethod -Method Post -Uri "$base/api/schedules" -Headers $h -ContentType "application/json" -Body $scheduleBody
 ```
 
+### Serial, parallel, and hybrid sequences
+
+A saved sequence runs as serial, parallel, or a mix of stages. In the editor, choose **Serial**, **Parallel**, or **Custom stages**. **Advanced graph** edits the dependencies directly for any shape.
+
+The API takes the same choices, and everything is stored as `depends_on`:
+
+```json
+{
+  "name": "nightly",
+  "stages": [
+    {"mode": "serial",   "steps": [{"step_id": "extract", "job_name": "extract"}]},
+    {"mode": "parallel", "steps": [{"step_id": "load_x", "job_name": "load_x"},
+                                   {"step_id": "load_y", "job_name": "load_y"}]},
+    {"mode": "serial",   "steps": [{"step_id": "publish", "job_name": "publish"}]}
+  ],
+  "defaults": {"run_settings": {"max_workers": 4}}
+}
+```
+
+- For a flat list, send `steps` with `"flow_mode": "serial"` or `"parallel"`. Without `flow_mode`, `steps` keep their own `depends_on`.
+- GET and validate responses return the derived `flow_mode` and `stages`. `stages` is `null` for a graph that does not fit stages.
+- `POST /api/sequences/{id}/launch` accepts `max_workers` for one run. `1` runs one step at a time.
+- A selection that references a sequence uses its own run settings, not the sequence's.
+
+The next stage starts according to its first steps' `trigger_rule`, by default `all_success`:
+
+| Previous stage | `all_success` | `all_done` | `any_success` |
+|---|---|---|---|
+| All `PASSED` | Runs | Runs | Runs |
+| One `FAILED` or `ERROR` | Blocked | Runs | Runs if another `PASSED` |
+| One `SLOW` or hold-skipped | Blocked | Runs | Runs if another `PASSED` |
+| One never ran (blocked or cancelled) | Blocked | Blocked | Blocked |
+
+**Restart from failure** skips steps that passed and runs the rest. A passed step that ran after a failed one, under `all_done` or `any_success`, stays carried over, so it does not see the new result. To run those again too, tick **Also re-run later steps**, or send `{"rerun_downstream": true}` to `POST /api/runs/{id}/restart`. This repeats their side effects, such as file transfers, so it is off by default.
+
+A plain job list on the Launch tab always runs in order, one job at a time, and carries on after a failure. A serial sequence defaults to stopping at the first failure.
+
+If a job lists another job in the sequence under `depends_on`, the step running it must come after a step running that job. This is checked when saving and at launch.
+
 Evaluate a job gate after a run has completed:
 
 ```powershell
@@ -4034,6 +4073,18 @@ Run integration tests:
 ```powershell
 python -m pytest tests/integration/ -q
 ```
+
+Run the test suites in Docker:
+
+```powershell
+docker compose -f docker-compose.test.yml build test-py
+docker compose -f docker-compose.test.yml run --rm test-py
+docker compose -f docker-compose.test.yml run --rm test-e2e
+docker compose -f docker-compose.test.yml run --rm test-py-postgres
+docker compose -f docker-compose.test.yml down -v
+```
+
+The source is bind-mounted, so code changes need no rebuild. Rebuild after changing `requirements.txt` or `package-lock.json`. Tests known to fail in this environment are listed in `docs/superpowers/plans/2026-11-03-docker-test-baseline.md`.
 
 Run the live SQL Server integration test with Docker Compose:
 

@@ -376,7 +376,7 @@
       id: 'sequences',
       category: 'Execution',
       title: 'Execution Sequences (DAGs)',
-      intro: 'Model dependencies visually, validate acyclic topology, run independent branches in parallel, and recover without rerunning passed nodes.',
+      intro: 'Run jobs serially, in parallel, or in stages that hand over from one to the next. Choose a flow in the sequence editor, or use Advanced graph to model any dependencies. Validate acyclic topology and recover without rerunning passed nodes.',
       steps: [
         {
           title: 'Design and launch a topological DAG',
