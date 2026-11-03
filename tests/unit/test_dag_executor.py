@@ -363,3 +363,130 @@ def test_seeded_slow_parent_unblocks_child_with_matching_condition():
 
     assert seen == ["child"]
     assert repo.status == {"child": "PASSED"}
+
+
+import time
+
+
+def _wait_until(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def test_release_takes_effect_while_another_branch_runs():
+    from api.services.dag_executor import StepOutcome
+
+    repo = FakeStepRepo()
+    child_ran = threading.Event()
+    seen = {}
+
+    def run_step(step):
+        if step.step_id == "slow":
+            # The hold is released only after the coordinator is parked on this
+            # step, and this step does not finish until the released child ran.
+            assert _wait_until(lambda: repo.status.get("held") == "HELD")
+            repo.releases["held"] = "approve"
+            seen["child_ran_during_slow"] = child_ran.wait(timeout=3)
+        elif step.step_id == "child":
+            child_ran.set()
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    steps = [
+        SequenceStepRef(step_id="held", job_name="j", hold_after=True),
+        SequenceStepRef(step_id="slow", job_name="j"),
+        SequenceStepRef(step_id="child", job_name="j", depends_on=["held"]),
+    ]
+    ex, _ = _executor(steps, run_step, step_repo=repo, hold_poll_interval=0.01)
+    ex.run()
+
+    assert seen["child_ran_during_slow"] is True
+
+
+def test_lone_ready_step_does_not_stop_hold_polling():
+    from api.services.dag_executor import StepOutcome
+
+    repo = FakeStepRepo()
+    child_ran = threading.Event()
+    seen = {}
+
+    def run_step(step):
+        if step.step_id == "first":
+            # Finish only once 'held' is parked, so 'later' becomes the only
+            # ready step with nothing in flight.
+            assert _wait_until(lambda: repo.status.get("held") == "HELD")
+        elif step.step_id == "later":
+            repo.releases["held"] = "approve"
+            seen["child_ran_during_later"] = child_ran.wait(timeout=3)
+        elif step.step_id == "child":
+            child_ran.set()
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    steps = [
+        SequenceStepRef(step_id="first", job_name="j"),
+        SequenceStepRef(step_id="held", job_name="j", hold_after=True),
+        SequenceStepRef(step_id="later", job_name="j", depends_on=["first"]),
+        SequenceStepRef(step_id="child", job_name="j", depends_on=["held"]),
+    ]
+    ex, _ = _executor(steps, run_step, step_repo=repo, hold_poll_interval=0.01)
+    ex.run()
+
+    assert seen["child_ran_during_later"] is True
+
+
+@pytest.mark.parametrize("max_workers", [1, 2])
+def test_steps_are_only_marked_running_when_a_worker_is_free(max_workers):
+    from api.services.dag_executor import StepOutcome
+
+    repo = FakeStepRepo()
+    running_counts = []
+
+    def run_step(step):
+        running_counts.append(sum(1 for s in list(repo.status.values()) if s == "RUNNING"))
+        time.sleep(0.02)
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    steps = [SequenceStepRef(step_id=f"s{i}", job_name="j") for i in range(5)]
+    ex, _ = _executor(steps, run_step, step_repo=repo, max_workers=max_workers)
+    ex.run()
+
+    assert len(running_counts) == 5
+    assert max(running_counts) <= max_workers
+    assert all(status == "PASSED" for status in repo.status.values())
+
+
+def test_group_runs_concurrently_up_to_max_workers():
+    from api.services.dag_executor import StepOutcome
+
+    barrier = threading.Barrier(3)
+
+    def run_step(step):
+        barrier.wait(timeout=5)
+        return StepOutcome(status="PASSED", result=_Result(), state=None)
+
+    steps = [SequenceStepRef(step_id=f"s{i}", job_name="j") for i in range(3)]
+    ex, repo = _executor(steps, run_step, max_workers=3)
+    ex.run()
+
+    assert set(repo.status.values()) == {"PASSED"}
+
+
+@pytest.mark.parametrize("rule,child_status", [("all_success", "BLOCKED"), ("all_done", "PASSED")])
+def test_slow_parent_only_satisfies_rules_that_ignore_status(rule, child_status):
+    from api.services.dag_executor import StepOutcome
+
+    def run_step(step):
+        status = "SLOW" if step.step_id == "parent" else "PASSED"
+        return StepOutcome(status=status, result=_Result(status), state=None)
+
+    steps = [
+        SequenceStepRef(step_id="parent", job_name="j"),
+        SequenceStepRef(step_id="child", job_name="j", depends_on=["parent"], trigger_rule=rule),
+    ]
+    ex, repo = _executor(steps, run_step)
+    ex.run()
+
+    assert repo.status["child"] == child_status

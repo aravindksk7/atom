@@ -127,11 +127,15 @@ class DagExecutor:
 
                 # A single ready step with nothing in flight runs inline. That is
                 # every chain, and it keeps legacy sequences off the pool entirely.
-                if len(ready) == 1 and not in_flight:
+                # A held branch needs polling while this step runs, so it goes to
+                # the pool instead.
+                if len(ready) == 1 and not in_flight and not self._held:
                     self._finish(ready[0], self._execute(ready[0]))
                     continue
 
-                for step_id in ready:
+                # Only take what a worker can start now. The rest stay pending, so
+                # they are not reported as RUNNING while they wait for a slot.
+                for step_id in ready[:self._max_workers - len(in_flight)]:
                     if pool is None:
                         pool = ThreadPoolExecutor(max_workers=self._max_workers)
                     self._pending.remove(step_id)
@@ -139,7 +143,9 @@ class DagExecutor:
                     in_flight[pool.submit(self._run_one, step_id)] = step_id
 
                 if in_flight:
-                    done, _ = wait(list(in_flight), return_when=FIRST_COMPLETED)
+                    # The timeout returns to the loop so holds are polled while
+                    # another branch is still running.
+                    done, _ = wait(list(in_flight), timeout=self._hold_poll, return_when=FIRST_COMPLETED)
                     for future in done:
                         step_id = in_flight.pop(future)
                         self._finish(step_id, future.result())
