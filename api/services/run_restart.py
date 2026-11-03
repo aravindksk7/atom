@@ -61,7 +61,7 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
     if original.selection_id and run_repo.has_active_run_for_selection(original.selection_id):
         raise RestartError("selection already has an active run.")
 
-    steps = [_step_ref_from_row(step) for step in original_steps]
+    steps = _step_refs_from_rows(original_steps)
     config_snapshot = dict(original.config_snapshot or {})
     new_run_id = str(uuid.uuid4())
     run_repo.create_run(
@@ -183,6 +183,22 @@ def _results_by_step(db: Session, run_id: str, steps: list[RunStep]) -> dict[int
         if rank < len(candidates):
             mapped[step.step_index] = candidates[rank]
     return mapped
+
+
+def _step_refs_from_rows(rows: list[RunStep]) -> list[SequenceStepRef]:
+    """Build refs from rows in step_index order, restoring old chains.
+
+    A row whose depends_on is NULL was recorded before that column existed, when
+    every run executed as a chain, so it depends on the row before it. New rows
+    always store a list, and [] means a real root.
+    """
+    refs: list[SequenceStepRef] = []
+    for row in rows:
+        ref = _step_ref_from_row(row)
+        if row.depends_on is None and refs:
+            ref = ref.model_copy(update={"depends_on": [refs[-1].step_id]})
+        refs.append(ref)
+    return refs
 
 
 def _step_ref_from_row(step: RunStep) -> SequenceStepRef:

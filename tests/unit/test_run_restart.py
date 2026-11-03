@@ -1,14 +1,15 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, null
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 from api.schemas import SequenceStepRef
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.database import Base
-from etl_framework.repository.models import MismatchDetail, TestResult
-from etl_framework.repository.repository import RunRepository, RunStepRepository
+from etl_framework.repository.models import MismatchDetail, RunStep, TestResult
+from etl_framework.repository.repository import JobRepository, RunRepository, RunStepRepository
 from etl_framework.runner.state import TestStatus
 
 
@@ -259,3 +260,108 @@ def test_mark_passed_on_last_failed_step_marks_without_restarting(db):
     assert plan is None
     assert RunStepRepository(db).get_step_by_step_id("seq", "ds_load").status == "APPROVED"
     assert RunRepository(db).find_restart_for_run("seq") is None
+
+
+def _make_recorded_run(db, rows):
+    """A finished run whose rows are written directly, as a migrated database holds them."""
+    RunRepository(db).create_run("old", "dev", "prod", {"run_settings": {"metrics_enabled": False}})
+    RunRepository(db).update_run_status("old", "BLOCKED")
+    for index, (step_id, job_name, status, depends_on) in enumerate(rows):
+        db.add(RunStep(
+            run_id="old", job_name=job_name, step_index=index, status=status,
+            step_id=step_id, depends_on=depends_on,
+        ))
+    db.commit()
+
+
+def _make_job(db, name, depends_on=()):
+    JobRepository(db).create({
+        "name": name, "description": name, "tags": [],
+        "job_type": "reconciliation", "query": f"SELECT * FROM {name}",
+        "key_columns": ["id"], "exclude_columns": [],
+        "source_env": None, "target_env": None,
+        "params": {
+            "source_rows": [{"id": 1}], "target_rows": [{"id": 1}],
+            "depends_on": list(depends_on),
+        },
+        "enabled": True,
+    })
+
+
+def _execute(db, plan):
+    from api.services.run_executor import RunExecutor
+
+    RunExecutor(
+        db=db, run_id=plan.run_id, source_env="dev", target_env="prod",
+        job_sequence=plan.steps, run_settings=plan.run_settings,
+        config_snapshot=plan.config_snapshot,
+        carried_over_states=plan.carried_over_states,
+        seeded_outcomes=plan.seeded_outcomes,
+    ).execute()
+    db.expire_all()
+
+
+@pytest.fixture
+def shared_db():
+    """For tests that execute a run: jobs run on their own thread, and the default
+    in-memory pool would give that thread a separate, empty database."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+
+
+def test_restart_restores_the_chain_for_rows_without_edges(shared_db):
+    from api.services.run_restart import restart_run
+
+    db = shared_db
+    _make_job(db, "ja")
+    _make_job(db, "jb", depends_on=["ja"])
+    # null() writes SQL NULL, which is what the column holds after the migration.
+    _make_recorded_run(db, [
+        ("step_a", "ja", "PASSED", null()),
+        ("step_b", "jb", "FAILED", null()),
+    ])
+
+    plan = restart_run(db, "old")
+
+    _execute(db, plan)
+    run = RunRepository(db).get_run(plan.run_id)
+    messages = [r.error_message or "" for r in run.results]
+    assert not any("does not run after" in m for m in messages), messages
+    assert run.status == "PASSED"
+    assert [(s.step_id, s.depends_on) for s in plan.steps] == [
+        ("step_a", []), ("step_b", ["step_a"]),
+    ]
+
+
+def test_restart_chains_to_the_generated_id_when_step_id_is_also_missing(db):
+    from api.services.run_restart import restart_run
+
+    _make_recorded_run(db, [
+        (None, "ja", "PASSED", null()),
+        (None, "jb", "FAILED", null()),
+    ])
+
+    plan = restart_run(db, "old")
+    assert [(s.step_id, s.depends_on) for s in plan.steps] == [
+        ("step-0", []), ("step-1", ["step-0"]),
+    ]
+
+
+def test_restart_keeps_explicit_empty_edges_as_roots(db):
+    from api.services.run_restart import restart_run
+
+    _make_recorded_run(db, [
+        ("step_a", "ja", "PASSED", []),
+        ("step_b", "jb", "FAILED", []),
+    ])
+
+    plan = restart_run(db, "old")
+    assert [(s.step_id, s.depends_on) for s in plan.steps] == [
+        ("step_a", []), ("step_b", []),
+    ]
