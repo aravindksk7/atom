@@ -41,6 +41,7 @@ class SequenceRecoveryPage {
 
   async createOrderedSequence(name: string, jobs: string[]) {
     await this.page.getByTestId('sequence-new-btn').click();
+    await this.page.getByTestId('sequence-advanced-graph').check();
     await this.page.getByTestId('sequence-name-input').fill(name);
     await this.page.getByTestId('sequence-step-job-0').selectOption(jobs[0]);
     await this.page.getByTestId('sequence-step-id-0').fill('data_ingestion');

@@ -54,6 +54,7 @@ test.describe('Execution sequences — validate race', () => {
 
     await page.getByTestId('sequence-new-btn').click();
     await page.getByTestId('sequence-name-input').fill('e2e-race-pipeline');
+    await page.getByTestId('sequence-advanced-graph').check();
 
     // Step 0: the root, no deps.
     await page.getByTestId('sequence-step-job-0').selectOption(jobNames[0]);
@@ -108,6 +109,7 @@ test.describe('Execution sequences — validate race', () => {
     await page.getByRole('button', { name: 'Sequences' }).click();
     await page.getByTestId('sequence-new-btn').click();
     await page.getByTestId('sequence-name-input').fill('e2e-race-cycle');
+    await page.getByTestId('sequence-advanced-graph').check();
 
     await page.getByTestId('sequence-step-job-0').selectOption(jobNames[0]);
 

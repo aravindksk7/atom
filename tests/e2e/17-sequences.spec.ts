@@ -42,6 +42,7 @@ test.describe('Execution sequences', () => {
 
     await page.getByTestId('sequence-new-btn').click();
     await page.getByTestId('sequence-name-input').fill('e2e-pipeline');
+    await page.getByTestId('sequence-advanced-graph').check();
 
     // Step 1 — the root.
     await page.getByTestId('sequence-step-job-0').selectOption(firstJobName);
@@ -78,6 +79,7 @@ test.describe('Execution sequences', () => {
     await page.getByRole('button', { name: 'Sequences' }).click();
     await page.getByTestId('sequence-new-btn').click();
     await page.getByTestId('sequence-name-input').fill('e2e-cycle');
+    await page.getByTestId('sequence-advanced-graph').check();
 
     await page.getByTestId('sequence-step-job-0').selectOption(firstJobName);
     await page.getByTestId('sequence-step-id-0').fill('a');

@@ -21,15 +21,15 @@ test.describe('37 session settings persistence', () => {
       await authedPage.locator('#a11y-launch-target-env').selectOption('prod');
       await authedPage.locator('#a11y-launch-saved-config').selectOption(String(cfg.id));
       await authedPage.locator('#a11y-launch-source-connection').selectOption('beta');
-      await authedPage.locator('#a11y-launch-execution-mode').selectOption('sequential');
+      await authedPage.locator('#a11y-launch-max-workers').fill('9');
 
       // localStorage writes happen in a $watch effect — let it flush before reload.
       await expect
         .poll(() => authedPage.evaluate(() => {
           const raw = localStorage.getItem('etl_session_settings');
-          return raw ? JSON.parse(raw).launchSettings.execution_mode : null;
+          return raw ? String(JSON.parse(raw).launchSettings.max_workers) : null;
         }))
-        .toBe('sequential');
+        .toBe('9');
 
       await authedPage.reload();
       await expect(authedPage.locator('[data-testid="auth-status-connected"]')).toBeVisible();
@@ -39,7 +39,7 @@ test.describe('37 session settings persistence', () => {
       await expect(authedPage.locator('#a11y-launch-target-env')).toHaveValue('prod');
       await expect(authedPage.locator('#a11y-launch-saved-config')).toHaveValue(String(cfg.id));
       await expect(authedPage.locator('#a11y-launch-source-connection')).toHaveValue('beta');
-      await expect(authedPage.locator('#a11y-launch-execution-mode')).toHaveValue('sequential');
+      await expect(authedPage.locator('#a11y-launch-max-workers')).toHaveValue('9');
     } finally {
       await deleteConfig(ctx, cfg.id);
       await ctx.dispose();
