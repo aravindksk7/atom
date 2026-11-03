@@ -19,6 +19,15 @@
       sequenceIssues: [],              // [{step_id, field, message}]
       sequenceOrder: [],               // topological step_id order when valid
       sequenceSaving: false,
+      // Flow editing. Steps stay one flat list in stage order; in Custom each
+      // carries a client-only _stage index that is stripped before sending.
+      sequenceFlow: 'serial',          // 'serial' | 'parallel' | 'custom'
+      sequenceAdvancedGraph: false,    // edit raw depends_on instead of a flow
+      sequenceStageModes: ['serial'],  // mode of each stage, by index
+      sequenceCompiledSteps: [],       // steps with edges, as returned by validate
+      sequenceDerived: null,           // { flow_mode, stages } from validate
+      sequenceBaseDefaults: {},        // latest version's defaults, merged on save
+      sequenceMaxWorkers: '',          // blank means no stored max_workers
       _sequenceValidateToken: 0,       // guards against out-of-order validate responses
 
       // Preconditions are edited as a flat form and converted on save, because
@@ -47,11 +56,46 @@
         return this.sequenceIssues.filter((i) => !i.step_id);
       },
 
+      get sequenceUsesStages() {
+        return !this.sequenceAdvancedGraph && this.sequenceFlow === 'custom';
+      },
+
+      // The groups the editor renders: one per stage, or one holding every step.
+      get sequenceStepGroups() {
+        if (!this.sequenceUsesStages) {
+          return [{ index: 0, mode: null, steps: this.sequenceSteps }];
+        }
+        return this.sequenceStageModes.map((mode, index) => ({
+          index, mode, steps: this.sequenceSteps.filter((s) => s._stage === index),
+        }));
+      },
+
+      get sequencePinnedSequential() {
+        const settings = this.sequenceBaseDefaults.run_settings || {};
+        return settings.execution_mode === 'sequential';
+      },
+
+      get selectedSequenceFlowLabel() {
+        const versions = (this.selectedSequence && this.selectedSequence.versions) || [];
+        const latest = versions[versions.length - 1];
+        const labels = { serial: 'Serial', parallel: 'Parallel', custom: 'Custom' };
+        return latest ? labels[latest.flow_mode] || 'Custom' : '';
+      },
+
+      sequenceStepShowsRule(step) {
+        if (this.sequenceAdvancedGraph) return (step.depends_on || []).length > 0;
+        if (this.sequenceFlow === 'parallel') return false;
+        if (this.sequenceFlow === 'serial') return this.sequenceSteps[0] !== step;
+        const group = this.sequenceStepGroups[step._stage];
+        return Boolean(group) && group.mode === 'serial' && group.steps[0] !== step;
+      },
+
       // Steps grouped by dependency depth, for the read-only graph preview.
       get sequenceLevels() {
+        const steps = this.sequenceCompiledSteps.length ? this.sequenceCompiledSteps : this.sequenceSteps;
         const depth = {};
         const byId = {};
-        for (const s of this.sequenceSteps) byId[s.step_id] = s;
+        for (const s of steps) byId[s.step_id] = s;
         const resolveDepth = (id, seen) => {
           if (depth[id] !== undefined) return depth[id];
           if (seen.has(id)) return 0;              // cycle: validation reports it
@@ -65,7 +109,7 @@
           return value;
         };
         const levels = [];
-        for (const s of this.sequenceSteps) {
+        for (const s of steps) {
           const d = resolveDepth(s.step_id, new Set());
           (levels[d] = levels[d] || []).push(s);
         }
@@ -163,10 +207,17 @@
       openSequenceCreate() {
         this.sequenceEditorMode = 'create';
         this.sequenceMeta = { name: '', description: '', tags_raw: '' };
+        this.sequenceFlow = 'serial';
+        this.sequenceAdvancedGraph = false;
+        this.sequenceStageModes = ['serial'];
         this.sequenceSteps = [this.newSequenceStep()];
         this.sequencePreconditions = this.emptyPreconditions();
+        this.sequenceBaseDefaults = {};
+        this.sequenceMaxWorkers = '';
         this.sequenceIssues = [];
         this.sequenceOrder = [];
+        this.sequenceCompiledSteps = [];
+        this.sequenceDerived = null;
         this.sequenceEditorOpen = true;
       },
 
@@ -179,15 +230,131 @@
           description: this.selectedSequence.description,
           tags_raw: (this.selectedSequence.tags || []).join(', '),
         };
-        this.sequenceSteps = JSON.parse(JSON.stringify(latest ? latest.steps : []));
+        this.loadSequenceFlow(latest || { steps: [], stages: null });
         this.sequencePreconditions = this.loadPreconditionsForm(latest ? latest.preconditions : null);
+        this.sequenceBaseDefaults = (latest && latest.defaults) || {};
+        const workers = (this.sequenceBaseDefaults.run_settings || {}).max_workers;
+        this.sequenceMaxWorkers = workers === undefined ? '' : workers;
         this.sequenceIssues = [];
         this.sequenceOrder = [];
+        this.sequenceCompiledSteps = [];
+        this.sequenceDerived = null;
         this.sequenceEditorOpen = true;
       },
 
-      addSequenceStep() {
-        this.sequenceSteps.push(this.newSequenceStep());
+      _applySequenceStages(flowMode, stages) {
+        this.sequenceFlow = flowMode;
+        this.sequenceAdvancedGraph = false;
+        this.sequenceStageModes = stages.map((stage) => stage.mode);
+        this.sequenceSteps = stages.flatMap((stage, index) => stage.steps.map((step) => ({
+          ...JSON.parse(JSON.stringify(step)), depends_on: [], _stage: index,
+        })));
+      },
+
+      loadSequenceFlow(version) {
+        if (version.stages) {
+          this._applySequenceStages(version.flow_mode, version.stages);
+          return;
+        }
+        this.sequenceFlow = 'custom';
+        this.sequenceAdvancedGraph = true;
+        this.sequenceStageModes = ['serial'];
+        this.sequenceSteps = JSON.parse(JSON.stringify(version.steps || []));
+      },
+
+      setSequenceFlow(flow) {
+        if (flow === 'custom' && this.sequenceFlow !== 'custom') {
+          this.sequenceStageModes = [this.sequenceFlow === 'parallel' ? 'parallel' : 'serial'];
+          for (const step of this.sequenceSteps) step._stage = 0;
+        }
+        this.sequenceFlow = flow;
+        this.validateSequenceSteps();
+      },
+
+      // Returns whether the switch happened, so the checkbox can snap back.
+      setSequenceAdvancedGraph(on) {
+        if (on) {
+          const edges = {};
+          for (const s of this.sequenceCompiledSteps) edges[s.step_id] = s.depends_on || [];
+          for (const step of this.sequenceSteps) step.depends_on = [...(edges[step.step_id] || [])];
+          this.sequenceAdvancedGraph = true;
+        } else if (this.sequenceDerived && this.sequenceDerived.stages) {
+          this._applySequenceStages(this.sequenceDerived.flow_mode, this.sequenceDerived.stages);
+        } else {
+          if (!confirm('This graph does not fit serial or staged flows. Switching will replace its dependencies with a serial flow. Continue?')) {
+            return false;
+          }
+          this.sequenceAdvancedGraph = false;
+          this.sequenceFlow = 'serial';
+          this.sequenceStageModes = ['serial'];
+          for (const step of this.sequenceSteps) {
+            step.depends_on = [];
+            step._stage = 0;
+          }
+        }
+        this.validateSequenceSteps();
+        return true;
+      },
+
+      // ===== STAGES =====
+      addSequenceStage() {
+        this.sequenceStageModes.push('serial');
+        this.addSequenceStep(this.sequenceStageModes.length - 1);
+      },
+
+      removeSequenceStage(index) {
+        this.sequenceStageModes.splice(index, 1);
+        this.sequenceSteps = this.sequenceSteps.filter((s) => s._stage !== index);
+        for (const step of this.sequenceSteps) {
+          if (step._stage > index) step._stage -= 1;
+        }
+        this.validateSequenceSteps();
+      },
+
+      moveSequenceStage(index, delta) {
+        const target = index + delta;
+        if (target < 0 || target >= this.sequenceStageModes.length) return;
+        const modes = this.sequenceStageModes;
+        [modes[index], modes[target]] = [modes[target], modes[index]];
+        for (const step of this.sequenceSteps) {
+          if (step._stage === index) step._stage = target;
+          else if (step._stage === target) step._stage = index;
+        }
+        // Array.prototype.sort is stable, so order inside a stage is kept.
+        this.sequenceSteps.sort((a, b) => a._stage - b._stage);
+        this.validateSequenceSteps();
+      },
+
+      setSequenceStageMode(index, mode) {
+        this.sequenceStageModes[index] = mode;
+        this.validateSequenceSteps();
+      },
+
+      _sequenceStageEntrySteps(index) {
+        const steps = this.sequenceSteps.filter((s) => s._stage === index);
+        return this.sequenceStageModes[index] === 'parallel' ? steps : steps.slice(0, 1);
+      },
+
+      sequenceStageRule(index) {
+        const entry = this._sequenceStageEntrySteps(index)[0];
+        return (entry && entry.trigger_rule) || 'all_success';
+      },
+
+      setSequenceStageRule(index, rule) {
+        for (const step of this._sequenceStageEntrySteps(index)) step.trigger_rule = rule;
+        this.validateSequenceSteps();
+      },
+
+      addSequenceStep(stageIndex = 0) {
+        const step = this.newSequenceStep();
+        step._stage = stageIndex;
+        if (this.sequenceUsesStages) {
+          // Insert after the stage's last step, to keep the flat list in stage order.
+          const before = this.sequenceSteps.filter((s) => s._stage <= stageIndex).length;
+          this.sequenceSteps.splice(before, 0, step);
+        } else {
+          this.sequenceSteps.push(step);
+        }
         this.validateSequenceSteps();
       },
 
@@ -222,6 +389,40 @@
         this.validateSequenceSteps();
       },
 
+      _sequenceStepPayload(step, keepEdges) {
+        const { _stage, depends_on, ...rest } = step;
+        return keepEdges ? { ...rest, depends_on: depends_on || [] } : rest;
+      },
+
+      // The API rejects depends_on alongside a flow, so only raw graphs send it.
+      buildSequenceFlowInput() {
+        if (this.sequenceAdvancedGraph) {
+          return { steps: this.sequenceSteps.map((s) => this._sequenceStepPayload(s, true)) };
+        }
+        if (this.sequenceFlow === 'custom') {
+          return {
+            stages: this.sequenceStepGroups
+              .filter((group) => group.steps.length)
+              .map((group) => ({
+                mode: group.mode,
+                steps: group.steps.map((s) => this._sequenceStepPayload(s, false)),
+              })),
+          };
+        }
+        return {
+          flow_mode: this.sequenceFlow,
+          steps: this.sequenceSteps.map((s) => this._sequenceStepPayload(s, false)),
+        };
+      },
+
+      buildSequenceDefaults() {
+        const runSettings = { ...(this.sequenceBaseDefaults.run_settings || {}) };
+        const workers = this.sequenceMaxWorkers;
+        if (workers === '' || workers === null || workers === undefined) delete runSettings.max_workers;
+        else runSettings.max_workers = Number(workers);
+        return { ...this.sequenceBaseDefaults, run_settings: runSettings };
+      },
+
       async validateSequenceSteps() {
         // Every step/dependency edit fires a new validate call without
         // waiting for the previous one. With many steps, a user wiring up
@@ -233,16 +434,18 @@
         // non-empty and silently block Save).
         const token = ++this._sequenceValidateToken;
         try {
-          const result = await api('POST', '/api/sequences/validate', {
-            steps: this.sequenceSteps,
-          });
+          const result = await api('POST', '/api/sequences/validate', this.buildSequenceFlowInput());
           if (token !== this._sequenceValidateToken) return;
           this.sequenceIssues = result.errors || [];
           this.sequenceOrder = result.order || [];
+          this.sequenceCompiledSteps = result.steps || [];
+          this.sequenceDerived = { flow_mode: result.flow_mode, stages: result.stages };
         } catch {
           if (token !== this._sequenceValidateToken) return;
           this.sequenceIssues = [];
           this.sequenceOrder = [];
+          this.sequenceCompiledSteps = [];
+          this.sequenceDerived = null;
         }
       },
 
@@ -267,15 +470,17 @@
               name: this.sequenceMeta.name,
               description: this.sequenceMeta.description,
               tags,
-              steps: this.sequenceSteps,
+              ...this.buildSequenceFlowInput(),
               preconditions,
+              defaults: this.buildSequenceDefaults(),
             });
             await this.loadSequences();
             await this.selectSequence(created);
           } else {
             await api('POST', `/api/sequences/${this.selectedSequence.id}/versions`, {
-              steps: this.sequenceSteps,
+              ...this.buildSequenceFlowInput(),
               preconditions,
+              defaults: this.buildSequenceDefaults(),
             });
             await this.loadSequences();
             await this.selectSequence(this.selectedSequence);
@@ -327,6 +532,8 @@
           batch_step_days: 1,
           batch_weekend_policy: 'skip',
           batch_stop_on_failure: false,
+          max_workers: '',
+          default_max_workers: (defaults.run_settings || {}).max_workers || 4,
         };
         if (!this.customVariables?.length && this.loadCustomVariables) this.loadCustomVariables();
         this.showLaunchSequenceModal = true;
@@ -335,6 +542,9 @@
       async launchSequence() {
         const m = this.launchSequenceModal;
         const body = { source_env: m.source_env, target_env: m.target_env || '' };
+        if (m.max_workers !== '' && m.max_workers !== null && m.max_workers !== undefined) {
+          body.max_workers = Number(m.max_workers);
+        }
         const variable_overrides = {};
         (m.variableOverridesRaw || '').split('\n').forEach((line) => {
           const idx = line.indexOf('=');
