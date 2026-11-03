@@ -377,6 +377,13 @@ def _wait_until(predicate, timeout=5.0):
     return False
 
 
+# A real clock and a hold timeout. An assert failing inside run_step only makes
+# that step ERROR, so without these a release that never comes would hang the test.
+_REAL_TIME_HOLD = {
+    "hold_poll_interval": 0.01, "clock": time.monotonic, "sleep": time.sleep, "hold_timeout": 5.0,
+}
+
+
 def test_release_takes_effect_while_another_branch_runs():
     from api.services.dag_executor import StepOutcome
 
@@ -400,7 +407,7 @@ def test_release_takes_effect_while_another_branch_runs():
         SequenceStepRef(step_id="slow", job_name="j"),
         SequenceStepRef(step_id="child", job_name="j", depends_on=["held"]),
     ]
-    ex, _ = _executor(steps, run_step, step_repo=repo, hold_poll_interval=0.01)
+    ex, _ = _executor(steps, run_step, step_repo=repo, **_REAL_TIME_HOLD)
     ex.run()
 
     assert seen["child_ran_during_slow"] is True
@@ -431,7 +438,7 @@ def test_lone_ready_step_does_not_stop_hold_polling():
         SequenceStepRef(step_id="later", job_name="j", depends_on=["first"]),
         SequenceStepRef(step_id="child", job_name="j", depends_on=["held"]),
     ]
-    ex, _ = _executor(steps, run_step, step_repo=repo, hold_poll_interval=0.01)
+    ex, _ = _executor(steps, run_step, step_repo=repo, **_REAL_TIME_HOLD)
     ex.run()
 
     assert seen["child_ran_during_later"] is True
