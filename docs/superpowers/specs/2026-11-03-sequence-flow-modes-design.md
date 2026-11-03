@@ -59,7 +59,9 @@ scheduler, restart, schedules, and monitor continue to consume the same step lis
 
 `ExecutionSequenceCreate`, `ExecutionSequenceVersionCreate`, and
 `SequenceValidateRequest` accept exactly one of `steps` or `stages`. Sending both
-or neither returns 422.
+returns 422. Sending neither returns 422 from create and new-version, and `ok: false`
+with a "at least one step" issue from validate, because the editor validates empty
+drafts.
 
 ```json
 {
@@ -170,7 +172,7 @@ resolved steps for these selections when the schedule is saved.
 
 Sequence editor (`frontend/features/sequences.js`, `frontend/partials/tab-sequences.html`):
 
-- A Flow selector offers Serial, Parallel, and Custom.
+- A Flow selector offers Serial, Parallel, and Custom. A new sequence starts on Serial.
 - Serial and Parallel show the flat step list. Serial shows each step's trigger rule
   except the first. The current template hides that rule when `depends_on` is empty,
   which would hide it for every step before compilation, so the condition changes.
