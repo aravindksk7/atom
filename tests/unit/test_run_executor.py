@@ -327,8 +327,8 @@ def test_run_executor_multiple_jobs_mixed_outcomes():
     assert run.total_tests == 2
 
 
-def test_run_executor_empty_job_sequence_completes_as_passed():
-    """A sequence that matches no known jobs finishes PASSED with 0 tests."""
+def test_run_executor_job_that_does_not_exist_makes_the_run_error():
+    """A step whose job does not exist counts as an error in the run's totals."""
     db = _session()
     RunRepository(db).create_run("run-008", "dev", "prod", {})
 
@@ -342,8 +342,9 @@ def test_run_executor_empty_job_sequence_completes_as_passed():
     ).execute()
 
     run = RunRepository(db).get_run("run-008")
-    assert run.status == "PASSED"
-    assert run.total_tests == 0
+    assert run.status == "ERROR"
+    assert run.total_tests == 1
+    assert run.error == 1
 
 
 def test_run_executor_parallel_mode_completes_all_jobs():
