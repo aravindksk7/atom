@@ -28,7 +28,7 @@ def _make_client(monkeypatch):
         with Session(engine) as s:
             yield s
 
-    app.dependency_overrides[get_db] = override
+    monkeypatch.setitem(app.dependency_overrides, get_db, override)
     with Session(engine) as db:
         raw, _ = TokenRepository(db).create("test")
     return TestClient(app, headers={"Authorization": f"Bearer {raw}"}), engine
