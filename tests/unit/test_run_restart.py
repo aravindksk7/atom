@@ -353,6 +353,35 @@ def test_restart_chains_to_the_generated_id_when_step_id_is_also_missing(db):
     ]
 
 
+def test_restart_seeds_rows_without_a_step_id_by_their_generated_id(shared_db, monkeypatch):
+    from api.services.run_executor import RunExecutor
+    from api.services.run_restart import restart_run
+
+    db = shared_db
+    _make_job(db, "ja")
+    _make_job(db, "jb", depends_on=["ja"])
+    _make_recorded_run(db, [
+        (None, "ja", "PASSED", null()),
+        (None, "jb", "FAILED", null()),
+    ])
+
+    plan = restart_run(db, "old")
+
+    built = []
+    real_build_case = RunExecutor._build_case
+
+    def recording_build_case(self, job):
+        built.append(job.name)
+        return real_build_case(self, job)
+
+    monkeypatch.setattr(RunExecutor, "_build_case", recording_build_case)
+    _execute(db, plan)
+
+    assert built == ["jb"]
+    assert RunRepository(db).get_run(plan.run_id).status == "PASSED"
+    assert set(plan.seeded_outcomes) == {"step-0"}
+
+
 def test_restart_keeps_explicit_empty_edges_as_roots(db):
     from api.services.run_restart import restart_run
 

@@ -83,7 +83,7 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
     result_for_step = _results_by_step(db, original_run_id, original_steps)
     carried_states: list[TestCaseState] = []
     seeded: dict[str, ParentOutcome] = {}
-    for original_step in original_steps:
+    for original_step, step_ref in zip(original_steps, steps):
         if original_step.status not in CARRIED_OVER_STATUSES:
             continue
         original_result = result_for_step.get(original_step.step_index)
@@ -100,7 +100,8 @@ def restart_run(db: Session, original_run_id: str) -> RestartPlan:
         )
         state = TestCaseState(name=original_step.job_name, test_type="reconciliation", status=_test_status(status))
         carried_states.append(state)
-        seeded[original_step.step_id] = ParentOutcome(status=status, result=copied_result)
+        # The ref's id, since an old row's own step_id can be NULL.
+        seeded[step_ref.step_id] = ParentOutcome(status=status, result=copied_result)
 
     settings_data = config_snapshot.get("run_settings") if isinstance(config_snapshot, dict) else None
     run_settings = RunSettings(**settings_data) if isinstance(settings_data, dict) else RunSettings()
