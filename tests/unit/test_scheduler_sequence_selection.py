@@ -127,6 +127,8 @@ def test_unresolvable_sequence_records_a_skip(client, engine, monkeypatch):
         assert db.query(TestRun).count() == 0
     assert len(skips) == 1
     assert "load_orders" in (skips[0].error_summary or "")
+    assert skips[0].status == "ERROR"
+    assert skips[0].exit_code == 1
 
 
 def test_unmet_precondition_records_a_skip(client, engine, monkeypatch):
@@ -143,6 +145,28 @@ def test_unmet_precondition_records_a_skip(client, engine, monkeypatch):
         skips = [e for e in db.query(SchedulerTelemetryEvent).all() if e.event_state == "skipped"]
     assert len(skips) == 1
     assert "never_ran" in (skips[0].error_summary or "")
+    assert skips[0].status == "CANCELLED"
+
+
+def test_active_run_on_the_selection_records_a_blocked_skip(client, engine, monkeypatch):
+    from etl_framework.repository.repository import RunRepository
+
+    executed = []
+    monkeypatch.setattr("api.routes.runs._execute_run", lambda **kw: executed.append(kw))
+
+    selection_id = _selection(client)
+    schedule_id = _schedule(client, selection_id).json()["id"]
+    with Session(engine) as db:
+        RunRepository(db).create_run("active-run", "dev", "prod", selection_id=selection_id)
+    _fire(schedule_id)
+
+    assert executed == []
+    with Session(engine) as db:
+        skips = [e for e in db.query(SchedulerTelemetryEvent).all() if e.event_state == "skipped"]
+        assert db.query(TestRun).count() == 1
+    assert len(skips) == 1
+    assert skips[0].status == "BLOCKED"
+    assert "active run" in (skips[0].error_summary or "")
 
 
 def test_saving_validates_the_resolved_steps(client, engine):

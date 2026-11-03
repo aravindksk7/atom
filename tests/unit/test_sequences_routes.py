@@ -496,6 +496,63 @@ def test_launch_override_wins_and_keeps_other_settings(client, monkeypatch):
     assert got["snapshot"]["run_settings"]["max_workers"] == 1
 
 
+def test_sequential_mode_pins_one_worker_despite_a_launch_override(client, monkeypatch):
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import RunStepRepository
+    from api.services.run_executor import RunExecutor
+
+    got = _launched_settings(
+        client, monkeypatch,
+        {"run_settings": {"execution_mode": "sequential", "max_workers": 7}},
+        {"max_workers": 3},
+    )
+    assert got["settings"].execution_mode == "sequential"
+    assert got["settings"].max_workers == 3
+
+    captured = {}
+    monkeypatch.setattr("api.services.dag_executor.DagExecutor", lambda **kw: captured.update(kw))
+    with _db_module.SessionLocal() as db:
+        RunExecutor(
+            db=db, run_id="any", source_env="dev", target_env="prod",
+            job_sequence=[], run_settings=got["settings"],
+        )._build_dag_executor(RunStepRepository(db), {})
+    assert captured["max_workers"] == 1
+
+
+def test_launch_batch_passes_max_workers_to_each_iteration(client, monkeypatch):
+    from etl_framework.repository import database as _db_module
+    from etl_framework.repository.repository import CustomVariableRepository, RunRepository
+
+    # The route binds SessionLocal when it is imported, so the fixture's patch of
+    # the database module does not reach run_batch. Without this it would use the
+    # real engine, where run_batches may not exist.
+    factory = _db_module.SessionLocal
+    monkeypatch.setattr("api.routes.sequences.SessionLocal", factory)
+
+    captured = []
+
+    def fake_execute(run_id, steps, source, target, settings, snapshot):
+        captured.append(settings.max_workers)
+        # run_batch waits for each iteration to reach a terminal status.
+        with factory() as db:
+            RunRepository(db).update_run_status(run_id, "PASSED")
+
+    monkeypatch.setattr("api.routes.sequences._execute_run", fake_execute)
+
+    with factory() as db:
+        CustomVariableRepository(db).create("business_date", "date", "today", "")
+    created = _create(client).json()
+    resp = client.post(f"/api/sequences/{created['id']}/launch-batch", json={
+        "source_env": "dev", "target_env": "qa", "max_workers": 3,
+        "batch": {
+            "variable_name": "business_date", "start_value": "2026-09-11",
+            "iterations": 2, "step_days": 1, "weekend_policy": "ignore",
+        },
+    })
+    assert resp.status_code == 202, resp.text
+    assert captured == [3, 3]
+
+
 def test_launch_override_rejects_zero(client):
     seq_id = _create(client).json()["id"]
     resp = client.post(f"/api/sequences/{seq_id}/launch", json={
