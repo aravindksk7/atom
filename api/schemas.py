@@ -313,18 +313,12 @@ class SequenceStep(BaseModel):
 # Saved execution sequences
 # ---------------------------------------------------------------------------
 
-class SequenceStepRef(BaseModel):
-    """A step inside a saved sequence.
-
-    step_id is separate from job_name because a DAG may run the same job more
-    than once (a reconciliation before a load and again after it), so job_name
-    cannot anchor a dependency edge.
-    """
+class SequenceStageStep(BaseModel):
+    """A step as written inside a stage, where the stage supplies the edges."""
     model_config = ConfigDict(extra="forbid")
 
     step_id: str = Field(min_length=1, max_length=255)
     job_name: str = Field(min_length=1)
-    depends_on: list[str] = Field(default_factory=list)
     trigger_rule: Literal["all_success", "all_done", "any_success", "all_failed"] = "all_success"
     hold_after: bool = False
     condition: StepCondition | None = None
@@ -332,6 +326,44 @@ class SequenceStepRef(BaseModel):
     max_retries: int | None = Field(default=None, ge=0, le=10)
     retry_delay_seconds: float | None = Field(default=None, ge=0)
     on_failure: Literal["stop", "continue", "skip_downstream"] = "skip_downstream"
+
+
+class SequenceStepRef(SequenceStageStep):
+    """A step inside a saved sequence.
+
+    step_id is separate from job_name because a DAG may run the same job more
+    than once (a reconciliation before a load and again after it), so job_name
+    cannot anchor a dependency edge.
+    """
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class SequenceStage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["serial", "parallel"]
+    steps: list[SequenceStageStep] = Field(min_length=1)
+
+
+class SequenceFlowInput(BaseModel):
+    """The ways a caller can describe a sequence's steps.
+
+    Stages and flow_mode are compiled to depends_on before anything is stored.
+    """
+    steps: list[SequenceStepRef] = Field(default_factory=list)
+    stages: list[SequenceStage] | None = None
+    flow_mode: Literal["serial", "parallel"] | None = None
+
+    @model_validator(mode="after")
+    def check_flow_input(self) -> "SequenceFlowInput":
+        if self.stages is not None:
+            if self.steps or self.flow_mode:
+                raise ValueError("Provide either stages or steps/flow_mode, not both")
+            if not self.stages:
+                raise ValueError("stages must contain at least one stage")
+        if self.flow_mode and any(step.depends_on for step in self.steps):
+            raise ValueError("depends_on cannot be combined with flow_mode")
+        return self
 
 
 class TimeWindow(BaseModel):
@@ -390,6 +422,7 @@ class SequenceLaunchRequest(BaseModel):
     version: int | None = None          # pin a sequence_version; None = latest
     ci_context: dict[str, Any] | None = None
     variable_overrides: dict[str, str] = Field(default_factory=dict)
+    max_workers: int | None = Field(default=None, ge=1)   # overrides the sequence default for this run
 
 
 class BatchOptions(BaseModel):
@@ -417,13 +450,14 @@ class ExecutionSequenceVersionOut(BaseModel):
     preconditions: SequencePrecondition | None = None
     defaults: SequenceDefaults = Field(default_factory=SequenceDefaults)
     created_at: datetime
+    flow_mode: Literal["serial", "parallel", "custom"] = "custom"
+    stages: list[SequenceStage] | None = None
 
 
-class ExecutionSequenceCreate(BaseModel):
+class ExecutionSequenceCreate(SequenceFlowInput):
     name: str = Field(min_length=1)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    steps: list[SequenceStepRef] = Field(default_factory=list)
     preconditions: SequencePrecondition | None = None
     defaults: SequenceDefaults = Field(default_factory=SequenceDefaults)
 
@@ -436,8 +470,7 @@ class ExecutionSequenceUpdate(BaseModel):
     archived: bool | None = None
 
 
-class ExecutionSequenceVersionCreate(BaseModel):
-    steps: list[SequenceStepRef]
+class ExecutionSequenceVersionCreate(SequenceFlowInput):
     preconditions: SequencePrecondition | None = None
     defaults: SequenceDefaults | None = None
 
@@ -458,8 +491,7 @@ class ExecutionSequenceDetailOut(ExecutionSequenceOut):
     versions: list[ExecutionSequenceVersionOut]
 
 
-class SequenceValidateRequest(BaseModel):
-    steps: list[SequenceStepRef]
+class SequenceValidateRequest(SequenceFlowInput):
     preconditions: SequencePrecondition | None = None
 
 
@@ -467,6 +499,9 @@ class SequenceValidateResponse(BaseModel):
     ok: bool
     errors: list[SequenceValidationIssue] = Field(default_factory=list)
     order: list[str] = Field(default_factory=list)
+    steps: list[SequenceStepRef] = Field(default_factory=list)
+    flow_mode: Literal["serial", "parallel", "custom"] = "custom"
+    stages: list[SequenceStage] | None = None
 
 
 class SequenceUsageRef(BaseModel):
