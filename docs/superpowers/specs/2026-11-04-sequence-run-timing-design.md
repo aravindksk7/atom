@@ -57,7 +57,7 @@ Step timestamps are set in one place, `RunStepRepository.update_status`.
 | Step start | First change to RUNNING sets `started_at`. Retries never reset it |
 | Step end | First change away from RUNNING sets `finished_at`. Later changes (release, mark-passed) don't move it |
 | Step runtime | `finished_at − started_at`. Includes `wait_seconds` and retries |
-| Hold time | Separate from runtime. Runs from `held_at` to `released_at`. If the hold ended without `released_at` (timeout), it ends at the run's `completed_at`. While held, it runs to now |
+| Hold time | Separate from runtime. Runs from `held_at` to `released_at`. If the hold ended without `released_at` (timeout), it ends at the run's `completed_at`. A hold never extends past a finished run's `completed_at`; if a finished run has neither, the hold is not measured. While held in a live run, it runs to now |
 | Blocked, or cancelled before start | No times and no Gantt bar. Shown as not run |
 | Carried over from a restart | No times and no Gantt bar. Shown as carried over |
 | Step still RUNNING in a finished run (crash) | End taken from the run's `completed_at`. Shown as interrupted |
@@ -68,6 +68,7 @@ Step timestamps are set in one place, `RunStepRepository.update_status`.
 - `elapsed_seconds` = `completed_at − started_at`, or to now while the run is live. Time queued before start is excluded. Null if the run hasn't started, or if it's finished without `completed_at`.
 - `held_seconds` = time spent on holds, with overlapping parallel holds merged.
 - `active_seconds` = elapsed − held.
+- `jobs_done` counts steps that finished with a result or were carried over; steps that never ran or were interrupted are left out.
 - A restarted run reports its own time only.
 
 Times stored without a timezone (SQLite) are read as UTC.

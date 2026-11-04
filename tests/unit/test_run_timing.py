@@ -277,3 +277,110 @@ def test_load_timing_context_reads_job_types_and_skips_unknown_jobs():
     context = load_timing_context(db, ["known", "deleted"])
     assert context.job_types == {"known": "bo_report"}
     assert context.estimates == {}
+
+
+# --- review fixes ---------------------------------------------------------
+
+def _doc(run_obj, steps):
+    return build_run_timing(run_obj, steps, {}, {}, at(100))
+
+
+def test_jobs_done_excludes_blocked_steps():
+    steps = [step("PASSED", started=0, finished=5, step_id=f"p{i}", step_index=i) for i in range(2)]
+    steps += [step("BLOCKED", step_id=f"b{i}", step_index=2 + i) for i in range(4)]
+    doc = _doc(run("BLOCKED", T0, at(60)), steps)
+    assert (doc["jobs_done"], doc["jobs_total"]) == (2, 6)
+
+
+def test_jobs_done_excludes_interrupted_and_pending_in_error_run():
+    steps = [
+        step("PASSED", started=0, finished=5, step_id="a"),
+        step("RUNNING", started=5, step_id="b", step_index=1),
+        step("PENDING", step_id="c", step_index=2),
+    ]
+    assert _doc(run("ERROR", T0, at(60)), steps)["jobs_done"] == 1
+
+
+def test_jobs_done_counts_carried_over():
+    steps = [step("PASSED", carried_over=True), step("PENDING", step_id="b", step_index=1)]
+    assert _doc(run(), steps)["jobs_done"] == 1
+
+
+def test_hold_released_after_run_end_is_clipped():
+    steps = [step("PASSED", held_at=at(10), released_at=at(500))]
+    result = build_run_elapsed(run("PASSED", T0, at(30)), steps, at(999))
+    assert result["held_seconds"] == 20.0
+    doc = timing_of(steps[0], run("PASSED", T0, at(30)), now_seconds=999)
+    assert doc["hold_ended_at"] == "2026-11-04T09:00:30+00:00"
+    assert doc["held_seconds"] == 20.0
+
+
+def test_hold_in_terminal_run_without_end_is_not_measurable_and_does_not_grow():
+    the_step = step("CANCELLED", held_at=at(10))
+    finished = run("CANCELLED", T0, None)
+    early = timing_of(the_step, finished, now_seconds=50)
+    late = timing_of(the_step, finished, now_seconds=5000)
+    assert early["held_seconds"] == late["held_seconds"] == 0.0
+    assert early["hold_ended_at"] is None and late["hold_ended_at"] is None
+    assert build_run_elapsed(finished, [the_step], at(5000))["held_seconds"] == 0.0
+
+
+def test_timing_recorded_true_for_live_run_with_nothing_started():
+    doc = _doc(run(), [step("PENDING")])
+    assert doc["timing_recorded"] is True
+
+
+def test_timing_recorded_true_for_restart_with_only_carried_steps():
+    doc = _doc(run("PASSED", T0, at(60)), [step("PASSED", carried_over=True)])
+    assert doc["timing_recorded"] is True
+
+
+def test_timing_recorded_true_for_run_without_steps():
+    assert _doc(run(), [])["timing_recorded"] is True
+
+
+def test_estimate_left_out_when_median_rounds_to_zero():
+    db = _db()
+    _results(db, "job", [("PASSED", 0.04)] * 3)
+    assert estimate_durations(db, ["job"]) == {}
+
+
+def test_aware_non_utc_times_are_reported_in_utc():
+    from datetime import timezone as tz
+    ist = tz(timedelta(hours=5, minutes=30))
+    the_run = run("PASSED", T0.astimezone(ist), at(60).astimezone(ist))
+    doc = build_run_timing(the_run, [], {}, {}, at(90).astimezone(ist))
+    assert doc["started_at"] == "2026-11-04T09:00:00+00:00"
+    assert doc["server_time"] == "2026-11-04T09:01:30+00:00"
+    assert doc["elapsed_seconds"] == 60.0
+
+
+def test_timing_for_run_with_real_rows():
+    from api.schemas import SequenceStepRef
+    from api.services.run_timing import timing_for_run
+    from etl_framework.repository.repository import RunRepository, RunStepRepository
+
+    db = _db()
+    runs = RunRepository(db)
+    runs.create_run("r1", "dev", "prod", {})
+    steps_repo = RunStepRepository(db)
+    steps_repo.materialize_steps("r1", [SequenceStepRef(step_id="a", job_name="job_a")])
+    steps_repo.set_status_by_step_id("r1", "a", "RUNNING")
+    steps_repo.set_status_by_step_id("r1", "a", "PASSED")
+    run_row = runs.update_run_status("r1", "PASSED", started_at=T0, completed_at=at(60))
+    steps = steps_repo.list_steps("r1")
+
+    doc = timing_for_run(db, run_row, steps)
+    assert doc["run_id"] == "r1"
+    assert doc["status"] == "PASSED"
+    assert doc["started_at"].endswith("+00:00")
+    assert doc["completed_at"].endswith("+00:00")
+    assert doc["server_time"].endswith("+00:00")
+    assert doc["elapsed_seconds"] == 60.0
+    assert doc["jobs_total"] == 1 and doc["jobs_done"] == 1
+    assert doc["timing_recorded"] is True
+    only = doc["steps"][0]
+    assert (only["step_id"], only["step_index"], only["job_name"]) == ("a", 0, "job_a")
+    assert (only["attempt"], only["status"]) == (0, "PASSED")
+    assert only["started_at"].endswith("+00:00") and only["finished_at"].endswith("+00:00")
+    assert only["progress"]["state"] == "done"

@@ -34,6 +34,7 @@ def init_db() -> None:
     _ensure_file_server_columns(engine)
     _ensure_export_job_columns(engine)
     _ensure_run_timing_columns(engine)
+    _ensure_test_results_query_index(engine)
     _backfill_schedule_selections(engine)
 
 
@@ -115,6 +116,24 @@ def _ensure_run_timing_columns(bind) -> None:
         _backfill_run_sequence_ids(bind)
     with bind.begin() as conn:
         ensure_index(conn, _SEQUENCE_INDEX, f"CREATE INDEX {_SEQUENCE_INDEX} ON test_runs (sequence_id)")
+
+
+_RESULTS_QUERY_INDEX = "ix_test_results_query_name_id"
+
+
+def _ensure_test_results_query_index(bind) -> None:
+    """Index test_results (query_name, id) on existing databases.
+
+    Without it the estimate lookup scans the whole table for jobs with little
+    history. Own short transaction: building the index can take a while.
+    """
+    if "test_results" not in set(inspect(bind).get_table_names()):
+        return
+    with bind.begin() as conn:
+        ensure_index(
+            conn, _RESULTS_QUERY_INDEX,
+            f"CREATE INDEX {_RESULTS_QUERY_INDEX} ON test_results (query_name, id)",
+        )
 
 
 def _backfill_run_sequence_ids(bind) -> None:

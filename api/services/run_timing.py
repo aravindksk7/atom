@@ -21,9 +21,9 @@ _ESTIMATE_MIN_RESULTS = 3
 _ESTIMATE_STATUSES = ("PASSED", "FAILED", "SLOW")
 _MAX_RUNNING_PERCENT = 95
 _NOT_RUN_STATUSES = frozenset({"BLOCKED", "CANCELLED", "SKIPPED"})
-_UNFINISHED_STATES = frozenset({
-    "queued", "running", "over_estimate", "running_unknown", "held",
-})
+# Steps that finished with a result or were carried over. Never-run and
+# interrupted steps are not counted as done.
+_COMPLETED_STATES = frozenset({"done", "not_recorded", "carried_over"})
 
 _JOB_FAMILIES = {
     "reconciliation": "reconciliation",
@@ -64,7 +64,9 @@ def job_family(job_type: str | None) -> str:
 def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -79,10 +81,21 @@ def _seconds(start: datetime | None, end: datetime | None) -> float | None:
 
 
 def _hold_interval(step: Any, run: Any, now: datetime) -> tuple[datetime, datetime] | None:
+    """A hold never extends past a finished run and never grows with the clock after it."""
     start = _utc(step.held_at)
     if start is None:
         return None
-    end = _utc(step.released_at) or _utc(run.completed_at) or now
+    released = _utc(step.released_at)
+    if run.status in TERMINAL_STATUSES:
+        completed = _utc(run.completed_at)
+        if released is not None and completed is not None:
+            end = min(released, completed)
+        else:
+            end = released or completed
+        if end is None:
+            return None
+    else:
+        end = released or now
     return start, max(start, end)
 
 
@@ -205,8 +218,8 @@ def build_run_timing(
         "completed_at": _iso(run.completed_at),
         **build_run_elapsed(run, steps, now),
         "jobs_total": len(step_docs),
-        "jobs_done": sum(1 for s in step_docs if s["progress"]["state"] not in _UNFINISHED_STATES),
-        "timing_recorded": any(s.started_at is not None for s in steps),
+        "jobs_done": sum(1 for s in step_docs if s["progress"]["state"] in _COMPLETED_STATES),
+        "timing_recorded": not any(s["progress"]["state"] == "not_recorded" for s in step_docs),
         "steps": step_docs,
     }
 
@@ -227,7 +240,10 @@ def estimate_durations(db: Session, job_names: Iterable[str]) -> dict[str, float
             .all()
         )
         if len(rows) >= _ESTIMATE_MIN_RESULTS:
-            estimates[name] = round(statistics.median(row[0] for row in rows), 1)
+            median = round(statistics.median(row[0] for row in rows), 1)
+            # A median that rounds to 0 would put every run over its estimate.
+            if median > 0:
+                estimates[name] = median
     return estimates
 
 

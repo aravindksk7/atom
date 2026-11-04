@@ -189,6 +189,8 @@ class TestRun(Base):
 
 class TestResult(Base):
     __tablename__ = "test_results"
+    # Run timing looks up a job's latest results by name, newest first.
+    __table_args__ = (Index("ix_test_results_query_name_id", "query_name", "id"),)
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(String(36), ForeignKey("test_runs.run_id", ondelete="CASCADE"),

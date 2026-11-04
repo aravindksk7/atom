@@ -290,3 +290,32 @@ def test_crash_after_first_batch_keeps_committed_rows(monkeypatch):
     assert rows["seq"] == 99
     assert [rows[f"b{n}"] for n in range(4)] == [100, 101, 102, 103]
     assert "ix_test_runs_sequence_id" in {i["name"] for i in inspect(engine).get_indexes("test_runs")}
+
+
+def test_upgrade_adds_results_index_and_is_repeatable():
+    from etl_framework.repository.database import _ensure_test_results_query_index
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE test_results (id INTEGER PRIMARY KEY, query_name VARCHAR(255))"))
+    _ensure_test_results_query_index(engine)
+    _ensure_test_results_query_index(engine)
+    indexes = {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("test_results")}
+    assert indexes["ix_test_results_query_name_id"] == ["query_name", "id"]
+
+
+def test_results_index_skips_a_database_without_the_table():
+    from etl_framework.repository.database import _ensure_test_results_query_index
+
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
+    _ensure_test_results_query_index(engine)
+
+
+def test_new_database_defines_the_results_index():
+    db = _session()
+    names = {i["name"] for i in inspect(db.get_bind()).get_indexes("test_results")}
+    assert "ix_test_results_query_name_id" in names
