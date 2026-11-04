@@ -54,7 +54,33 @@ def _blocked_run(engine, run_id="blocked-run"):
 
 
 def test_blocked_run_ends_the_stream(client, engine):
+    import threading
+
     _blocked_run(engine)
-    with client.stream("GET", "/api/runs/blocked-run/stream") as response:
-        body = response.read().decode()
-    assert "event: done" in body
+    box: dict = {}
+
+    def read_stream():
+        with client.stream("GET", "/api/runs/blocked-run/stream") as response:
+            box["body"] = response.read().decode()
+
+    # The stream loops forever if BLOCKED is not terminal, so bound the read.
+    thread = threading.Thread(target=read_stream, daemon=True)
+    thread.start()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "stream never ended for a BLOCKED run"
+    done = box["body"].split("event: done", 1)[1]
+    assert '"status": "BLOCKED"' in done
+
+
+def test_status_endpoint_reports_blocked_when_the_finished_steps_passed(client, engine):
+    from etl_framework.repository.models import TestResult
+
+    _blocked_run(engine, "blocked-with-pass")
+    with Session(engine) as db:
+        db.add(TestResult(run_id="blocked-with-pass", query_name="q_a", status="PASSED"))
+        db.commit()
+
+    response = client.get("/api/runs/blocked-with-pass/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "BLOCKED"

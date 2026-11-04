@@ -486,4 +486,6 @@ def test_run_stops_waiting_for_a_blocked_run_and_exits_failed(fake_client):
     result = runner.invoke(app, BASE_ARGS + [
         "run", "3", "--source-env", "dev", "--poll-interval", "0", "--timeout", "1",
     ])
+    # A deliberate exit raises SystemExit; anything else would be a crash that also reads as 1.
+    assert isinstance(result.exception, SystemExit)
     assert result.exit_code == 1

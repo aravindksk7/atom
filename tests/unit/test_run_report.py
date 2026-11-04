@@ -114,3 +114,15 @@ def test_snapshot_preserves_multi_file_pair_breakdown():
 
     assert snapshot.results[0].file_pairs[1]["key"] == {"region": "west"}
     assert snapshot.results[0].file_pairs[1]["status"] == "FAILED"
+
+
+def test_snapshot_status_keeps_blocked_even_when_every_recorded_result_passed():
+    from api.services.run_report import ReportResult, _snapshot_status
+
+    passed = ReportResult(
+        id=1, query_name="q", status="PASSED", effective_status="PASSED",
+        duration_seconds=0.0, source_row_count=0, target_row_count=0,
+        value_mismatch_count=0, missing_in_target_count=0, missing_in_source_count=0,
+    )
+    # The blocked step wrote no result row, so only the passing step is visible.
+    assert _snapshot_status("BLOCKED", [passed]) == "BLOCKED"
