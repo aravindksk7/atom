@@ -274,3 +274,48 @@ def test_sequence_runs_rejects_bad_limit_and_unknown_sequence(client, engine):
     sequence_id = _sequence(engine)
     assert client.get(f"/api/sequences/{sequence_id}/runs?limit=201").status_code == 422
     assert client.get("/api/sequences/999999/runs").status_code == 404
+
+
+def test_stream_reloads_the_timing_context_when_steps_appear(client, engine, monkeypatch):
+    import threading
+    import time
+
+    from api.routes import runs as runs_module
+    from etl_framework.repository.models import SavedJob, TestResult, TestRun
+    from etl_framework.repository.repository import RunRepository, RunStepRepository
+
+    with Session(engine) as db:
+        db.add(SavedJob(name="job_a", job_type="bo_report"))
+        db.add(TestRun(run_id="history", status="PASSED"))
+        for _ in range(3):
+            db.add(TestResult(run_id="history", query_name="job_a", status="PASSED", duration_seconds=40.0))
+        db.commit()
+        RunRepository(db).create_run("late", "dev", "prod", {})
+
+    calls = []
+    real = runs_module.load_timing_context
+
+    def counting(db, names):
+        calls.append(sorted(names))
+        return real(db, names)
+
+    monkeypatch.setattr(runs_module, "load_timing_context", counting)
+
+    def materialize_later():
+        time.sleep(1.5)
+        with Session(engine) as db:
+            RunStepRepository(db).materialize_steps("late", [SequenceStepRef(step_id="a", job_name="job_a")])
+            RunStepRepository(db).set_status_by_step_id("late", "a", "RUNNING")
+            RunRepository(db).update_run_status("late", "RUNNING", started_at=T0)
+        time.sleep(2.5)
+        with Session(engine) as db:
+            RunRepository(db).update_run_status("late", "PASSED", completed_at=datetime.now(timezone.utc))
+
+    threading.Thread(target=materialize_later, daemon=True).start()
+    events = _events(_read_stream(client, "late"))
+    steps = [p["timing"]["steps"][0] for _, p in events if p["timing"] and p["timing"]["steps"]]
+    assert steps, "no payload carried a step"
+    assert steps[-1]["job_type"] == "bo_report"
+    assert steps[-1]["job_family"] == "sap"
+    assert steps[-1]["estimate_seconds"] == 40.0
+    assert calls == [[], ["job_a"]]

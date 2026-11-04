@@ -1483,14 +1483,8 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
     async def events():
         last_payload = ""
         step_repo = RunStepRepository(db)
-        # Job types and estimates don't change during a run: load them once, off
-        # the event loop. If the load fails the stream goes on with timing: null.
         timing_context = None
-        try:
-            names = [s.job_name for s in await run_in_threadpool(step_repo.list_steps, run_id)]
-            timing_context = await run_in_threadpool(load_timing_context, db, names)
-        except Exception:
-            logger.exception("Could not load timing context for run %s", run_id)
+        context_names: frozenset | None = None
         while True:
             db.expire_all()  # force re-fetch; identity map caches stale status without this
             run = repo.get_run(run_id)
@@ -1513,6 +1507,17 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                 if s.status == "RUNNING":
                     current_step = s.step_index
 
+            # Steps are materialized when execution starts, so the job set can
+            # grow after the stream opens. Reload once per distinct set, off the
+            # event loop, and remember the set even when the load failed.
+            names = frozenset(s.job_name for s in steps)
+            if names != context_names:
+                context_names = names
+                timing_context = None
+                try:
+                    timing_context = await run_in_threadpool(load_timing_context, db, sorted(names))
+                except Exception:
+                    logger.exception("Could not load timing context for run %s", run_id)
             timing = None
             if timing_context is not None:
                 try:
