@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -11,6 +12,7 @@ from typer.testing import CliRunner
 from etl_framework.cli import render
 from etl_framework.cli.client import AtomConnectionError, AtomNotFoundError
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
 BASE_ARGS = ["--api-url", "http://atom.test", "--token", "t0k3n"]
 
@@ -45,8 +47,6 @@ class FakeClient:
         result = self.responses.get(path, AtomNotFoundError(f"no fake for {path}"))
         if isinstance(result, Exception):
             raise result
-        if isinstance(result, list) and result and isinstance(result[0], dict) and "__seq__" in result[0]:
-            return result.pop(0)["__seq__"] if len(result) > 1 else result[0]["__seq__"]
         return result
 
     def post_json(self, path, payload):
@@ -80,7 +80,8 @@ def test_timing_table_shows_job_type_status_and_runtime():
     ]))
     assert "recon" in table and "reconciliation" in table and "FAILED" in table
     assert "3m 02s" in table
-    assert "2" in table
+    recon_row = next(line for line in table.splitlines() if line.startswith("recon"))
+    assert recon_row.split()[-1] == "2"
     assert "publish" in table and "BLOCKED" in table
 
 
@@ -128,6 +129,47 @@ def test_times_are_shown_in_utc():
     assert render.fmt_time(None) == "-"
 
 
+@pytest.mark.parametrize("seconds,text", [
+    (59.9, "1m 00s"), (3599.5, "1h 00m 00s"), (float("nan"), "-"), (float("inf"), "-"),
+    (float("-inf"), "-"), ("abc", "-"), (-5, "0s"), (-0.4, "0s"), ("12", "12s"),
+])
+def test_fmt_seconds_never_raises(seconds, text):
+    assert render.fmt_seconds(seconds) == text
+
+
+@pytest.mark.parametrize("value", ["garbage", "2026-13-45", 12345])
+def test_fmt_time_returns_raw_for_unparsable(value):
+    assert render.fmt_time(value) == str(value)
+
+
+def test_tables_keep_numeric_looking_text_exact():
+    table = render.timing_table(timing([
+        step("001", "PASSED", "done", 100, "PASSED", runtime=1.0),
+        step("1e3", "PASSED", "done", 100, "PASSED", runtime=1.0),
+    ]))
+    rows = [line.split()[0] for line in table.splitlines()[2:]]
+    assert rows == ["001", "1e3"]
+    runs = render.sequence_runs_table([{"run_id": "0042", "status": "PASSED"}])
+    assert runs.splitlines()[2].split()[0] == "0042"
+
+
+def test_timing_table_tolerates_null_steps():
+    doc = timing()
+    doc["steps"] = None
+    assert "job" in render.timing_table(doc)
+
+
+def test_timing_and_sequence_runs_quote_path_segments(fake_client):
+    from etl_framework.cli.app import app
+
+    client = fake_client({})
+    runner.invoke(app, BASE_ARGS + ["timing", "a/b"])
+    assert client.calls == ["/api/runs/a%2Fb/timing"]
+    client = fake_client({"/api/sequences": [{"id": 7, "name": "a/b"}]})
+    runner.invoke(app, BASE_ARGS + ["sequence-runs", "a/b"])
+    assert "/api/sequences/7/runs?limit=20" in client.calls
+
+
 def test_timing_command(fake_client):
     from etl_framework.cli.app import app
 
@@ -163,12 +205,12 @@ def test_sequence_runs_by_name(fake_client):
     from etl_framework.cli.app import app
 
     client = fake_client({
-        "/api/sequences": [{"__seq__": [{"id": 7, "name": "nightly"}]}],
-        "/api/sequences/7/runs?limit=5": [{"__seq__": [{
+        "/api/sequences": [{"id": 7, "name": "nightly"}],
+        "/api/sequences/7/runs?limit=5": [{
             "run_id": "r-9", "status": "PASSED", "started_at": "2026-11-04T09:00:00+00:00",
             "completed_at": "2026-11-04T09:01:00+00:00", "elapsed_seconds": 60.0,
             "held_seconds": 0.0, "active_seconds": 60.0,
-        }]}],
+        }],
     })
     result = runner.invoke(app, BASE_ARGS + ["sequence-runs", "nightly", "--limit", "5"])
     assert result.exit_code == 0
@@ -199,7 +241,7 @@ def test_sequence_runs_ambiguous_name_exits_3(fake_client):
     assert runner.invoke(app, BASE_ARGS + ["sequence-runs", "dup"]).exit_code == 3
 
 
-def test_sequence_runs_json_is_single_document_and_errors_go_to_stderr(fake_client):
+def test_sequence_runs_json_output_and_error_path(fake_client, capsys):
     from etl_framework.cli.app import app
 
     rows = [{"run_id": "r-9", "status": "PASSED", "started_at": None, "completed_at": None,
@@ -211,6 +253,12 @@ def test_sequence_runs_json_is_single_document_and_errors_go_to_stderr(fake_clie
     fake_client({"/api/sequences/7/runs?limit=20": rows})
     text = runner.invoke(app, BASE_ARGS + ["sequence-runs", "7"])
     assert text.exit_code == 0 and "r-9" in text.output
+    # JSON mode keeps stdout empty on failure; the error is a JSON document on stderr
+    fake_client({})
+    failed = runner.invoke(app, BASE_ARGS + ["--output", "json", "sequence-runs", "7"])
+    assert failed.exit_code == 4
+    assert failed.stdout == ""
+    assert json.loads(failed.stderr)["exit_code"] == 4
 
 
 def test_sequence_runs_rejects_limit_out_of_range(fake_client):
@@ -221,7 +269,7 @@ def test_sequence_runs_rejects_limit_out_of_range(fake_client):
     assert runner.invoke(app, BASE_ARGS + ["sequence-runs", "7", "--limit", "0"]).exit_code != 0
 
 
-def test_tables_print_under_cp1252_without_color(monkeypatch):
+def test_tables_print_under_cp1252_without_color():
     """Piped output on a Windows console encoding must not raise."""
     code = (
         "from etl_framework.cli import render\n"
@@ -232,7 +280,8 @@ def test_tables_print_under_cp1252_without_color(monkeypatch):
         "print(render.sequence_runs_table([{'run_id': 'r', 'status': 'PASSED'}]))\n"
     )
     env = {**__import__("os").environ, "PYTHONIOENCODING": "cp1252", "NO_COLOR": "1"}
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, timeout=60)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, timeout=60,
+                          cwd=REPO_ROOT)
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
     proc.stdout.decode("ascii")
     assert b"\x1b[" not in proc.stdout

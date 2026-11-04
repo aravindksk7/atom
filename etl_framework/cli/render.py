@@ -1,6 +1,7 @@
 """Human-readable output formatting for the atom CLI."""
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 from tabulate import tabulate
@@ -35,9 +36,13 @@ def run_summary(status: dict, exit_code: int) -> str:
 
 
 def fmt_seconds(seconds: float | None) -> str:
-    if seconds is None:
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
         return "-"
-    total = int(round(seconds))
+    if not math.isfinite(value):
+        return "-"
+    total = max(0, int(round(value)))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:
@@ -51,10 +56,13 @@ def fmt_time(value: str | None) -> str:
     """Show an API timestamp in UTC; the API stores and returns UTC."""
     if not value:
         return "-"
-    moment = datetime.fromisoformat(value)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    try:
+        moment = datetime.fromisoformat(value)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    except (TypeError, ValueError, OverflowError):
+        return str(value)
 
 
 def timing_table(timing: dict) -> str:
@@ -62,10 +70,10 @@ def timing_table(timing: dict) -> str:
         [s.get("job_name"), s.get("job_type") or "-",
          (s.get("progress") or {}).get("label") or s.get("status") or "-",
          fmt_seconds(s.get("runtime_seconds")), s.get("attempt") or "-"]
-        for s in timing.get("steps", [])
+        for s in timing.get("steps") or []
     ]
     return tabulate(rows, headers=["job", "type", "status", "runtime", "tries"],
-                    tablefmt="simple")
+                    tablefmt="simple", disable_numparse=True)
 
 
 def timing_summary(timing: dict) -> str:
@@ -90,4 +98,5 @@ def sequence_runs_table(items: list[dict]) -> str:
         for r in items
     ]
     return tabulate(rows, headers=["run_id", "status", "started", "ended",
-                                   "elapsed", "held"], tablefmt="simple")
+                                   "elapsed", "held"], tablefmt="simple",
+                   disable_numparse=True)

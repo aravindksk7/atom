@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import typer
 
@@ -261,7 +262,7 @@ def timing(
     """Show start, end, elapsed time and each job's runtime for a run."""
     client, output = ctx.obj["client"], ctx.obj["output"]
     try:
-        document = client.get_json(f"/api/runs/{run_id}/timing")
+        document = client.get_json(f"/api/runs/{quote(run_id, safe='')}/timing")
     except AtomNotFoundError as exc:
         raise _fail(output, EXIT_NOT_FOUND, str(exc))
     except (AtomConnectionError, AtomAuthError) as exc:
@@ -278,7 +279,7 @@ def timing(
 @app.command("sequence-runs")
 def sequence_runs(
     ctx: typer.Context,
-    sequence: str = typer.Argument(..., help="Sequence id or exact name"),
+    sequence: str = typer.Argument(..., help="Sequence id or exact name (an all-digit value is treated as an id)"),
     limit: int = typer.Option(20, "--limit", min=1, max=200,
                               help="Maximum runs to show (1-200)"),
 ) -> None:
