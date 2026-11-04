@@ -21,6 +21,7 @@ x-seed-env: &seed-env
   DEMO_DATA_ROOT: /demo-data
   DEMO_S3_ENDPOINT: http://s3-sim:4566
   DEMO_S3_BUCKET: prod-baselines
+  DEMO_S3_PUBLISHED_BUCKET: published-outputs
   DEMO_S3_KEY: demo-s3-access
   DEMO_S3_SECRET: demo-s3-secret
   DEMO_POSTGRES_DSN: postgresql://atom:demo_only@postgres:5432/qa
@@ -55,8 +56,6 @@ services:
         condition: service_healthy
       crushftp-sim:
         condition: service_started
-      mailpit:
-        condition: service_started
 
   seed:
     <<: *atom-image
@@ -84,6 +83,17 @@ services:
     depends_on:
       atom:
         condition: service_healthy
+      gitlab-sim:
+        condition: service_started
+
+  # Labelled as simulated on its own page. Runs ATOM's real scripts/ci/run-atom-target.sh.
+  gitlab-sim:
+    <<: *atom-image
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      ATOM_API_URL: http://atom:8055
+    command: python demo/mocks/gitlab_ci_sim.py
 
   sapds:
     build:
@@ -172,9 +182,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
-
-  mailpit:
-    image: axllent/mailpit:v1.21
 
 volumes:
   demo-data:

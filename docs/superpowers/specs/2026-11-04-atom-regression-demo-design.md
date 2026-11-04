@@ -1,210 +1,141 @@
 # ATOM Regression Demo Runner: Design
 
-**Date:** 2026-11-04
-**Status:** Approved in brainstorming, pending written-spec review
+**Date:** 2026-11-04, revised 2026-11-05
+**Status:** Implemented. `demo/README.md` is the operating guide.
+
+The first version ran about 100 ETLs and ended with a summary email. The user's revised brief replaced
+that with the seven parts below: about 25 execution jobs of mixed types, about 10 reconciliation jobs,
+series, parallel and hybrid flows, restart from failure, CI/CD, and a timeline synced to the video. The
+email is not in the revised brief, so it was removed.
 
 ## Goal
 
-Record a narrated video of ATOM running one end-to-end regression for a chosen
-business date:
+Record a narrated video of ATOM running one end-to-end regression for a chosen business date.
 
-Business Date → 4 ETL sets → ~100 ETLs → output files → reconciliation → impact
-validation → BO reports → consolidated result → summary email.
-
-A Playwright script drives the real ATOM UI at presentation pace, highlights each
-element before acting on it, and uses its step comments as the narration script.
+A Playwright script drives the real ATOM UI at presentation pace. It highlights each element before
+acting on it, shows a banner naming the current step, and uses its step comments as the narration.
 
 ## Decisions
 
 | Topic | Decision |
 |---|---|
-| Realism | Real ATOM API, UI, database and comparison engine. Only external systems are simulated. |
-| Run style | A live run on seeded data, not a replay and not browser-stubbed API calls. |
-| Expected vs unexpected | Reviewer decision on screen: filter Differences by column and bulk-accept with a note. No rules engine is added. |
-| Email | The existing email notification hook sends a text summary to a recipient list. The report is not attached or linked. |
-| Outcome | The run finds real exceptions and ends FAILED, with evidence. |
+| Realism | Real ATOM API, UI, orchestration, restart and comparison engine. Only external systems are simulated. |
+| Run style | Live runs on seeded data, not a replay and not browser-stubbed API calls. |
+| Expected vs unexpected | Reviewer decision on screen: search Differences for the field and bulk-accept with a note. No rules engine is added. |
+| Outcome | A run stops on an unintended failure, is restarted, and ends FAILED on real data exceptions. |
 | ATOM product code | No changes. |
+| Timeline | Generated from each take, so its timecodes always match that take's video. |
 
-The opening caption states: "Demo environment: Oracle, CrushFTP, AWS S3 and SAP
-are simulated."
+The opening title card states that Oracle, CrushFTP, AWS S3, SAP and GitLab are simulated.
 
 ## Architecture
 
-`docker-compose.demo.yml` is separate from the test and integration compose files.
-It publishes no host ports except an optional one for watching the app, so it cannot
-hit Windows excluded port ranges.
+`docker-compose.demo.yml` is separate from the test and integration compose files. It publishes no host
+ports, so it cannot hit Windows excluded port ranges.
 
 | Service | Image or source | Role |
 |---|---|---|
 | `atom` | `Dockerfile.test`, uvicorn | Real ATOM API and UI |
-| `demo-runner` | `Dockerfile.test` | Seeding and Playwright recording |
+| `atom-db` | `postgres:16` | ATOM's own repository (SQLite locked under load and returned 500s) |
+| `seed` | `Dockerfile.test` | Generates files, tables and baselines |
+| `demo-runner` | `Dockerfile.test` | Seeds ATOM through its API and records with Playwright |
 | `sapds` | `docker/sapds-mock` | SAP Data Services, runs the ETLs |
 | `sapbo` | `docker/sapbo-mock` | SAP BusinessObjects reports |
 | `postgres` | `postgres:16` | Real Postgres data source |
-| `oracle-sim` | `postgres:16` | Simulated Oracle: Oracle-style names, connection `ORACLE_PROD`, `db_type: postgresql` |
-| `crushftp-sim` | Wrapper around `tests/helpers/fake_crushftp.py` | Simulated CrushFTP holding the Production flat file |
-| `s3-sim` | `floci/floci` | Simulated AWS S3 holding Production CSV/XML baselines (`minio/minio` could not be pulled) |
-| `atom-db` | `postgres:16` | ATOM's own repository (SQLite locked under a 100-step run and returned 500s) |
-| `mailpit` | `axllent/mailpit` | Catches the summary email and shows it in an inbox |
-
-A shared volume holds ETL output files, readable by `atom` through
-`SERVER_FILE_ALLOWED_DIRS`.
-
-### Files
-
-```
-docker-compose.demo.yml
-demo/
-  README.md                     how to record, change pace, find the video
-  playwright.demo.config.ts     1920x1080, video on, no webServer
-  atom-regression.demo.ts       the narrated script
-  helpers/presenter.ts          spotlight, pace, typing, cursor, captions
-  seed/generate_data.py         deterministic files, tables and report baselines
-  seed/seed_atom.ts             creates ATOM objects through the API
-  mocks/crushftp_sim.py         runs FakeCrushFtp as a seeded network service
-  output/                       video and evidence (gitignored)
-docker/sapds-mock/server.py     additive change, see below
-```
+| `oracle-sim` | `postgres:16` | Simulated Oracle: Oracle-style names, config `ORACLE_PROD`, `db_type: postgresql` |
+| `crushftp-sim` | `demo/mocks/crushftp_sim.py` around `tests/helpers/fake_crushftp.py` | Simulated CrushFTP |
+| `s3-sim` | `floci/floci` | Simulated AWS S3 (`minio/minio` could not be pulled) |
+| `gitlab-sim` | `demo/mocks/gitlab_ci_sim.py` | Simulated GitLab runner, labelled as simulated on its page. Runs the real `scripts/ci/run-atom-target.sh` |
 
 ### Change to the SAP DS mock
 
-`SCHEDULABLE_JOBS` is hardcoded to two jobs. Add two optional environment variables:
+Optional environment variables add a configurable job list and copy each job's template files into a
+folder named from the business date it received. A wrong date therefore produces unmatched file pairs, so
+the date check is real. With none of them set, the mock behaves as it did before.
 
-- `SAPDS_MOCK_JOBS_FILE`: JSON map of job name to terminal status, merged over the
-  defaults.
-- `SAPDS_MOCK_OUTPUT_DIR`: on success, copy the ETL's generated files into a folder
-  named from the business date the mock received.
+## The sequence
 
-A wrong date therefore produces unmatched file pairs, so the date check is real. With
-neither variable set, the mock behaves as it does today.
+35 jobs in nine stages. `demo/README.md` lists each job.
 
-## Seeded data
-
-`generate_data.py` is deterministic for a given business date.
-
-- 100 ETLs, 25 per set, named like `SET1_ETL_001`.
-- 104 file pairs (64 CSV, 40 XML), because 4 ETLs produce two files.
-- Non-impacted fields are identical on both sides unless listed below.
-
-| Seed | Location | Expected result |
+| Stage | Mode | Jobs |
 |---|---|---|
-| `fee_amount` changed on purpose | ~40 files, plus Oracle vs Postgres | Expected difference, accepted on screen |
-| Missing record | 1 CSV | Exception |
-| Additional record | 1 CSV | Exception |
-| Wrong `notional` | 1 XML | Exception |
-| Wrong `notional` | 1 Oracle vs Postgres row | Exception |
-| Row missing from Postgres | Postgres vs flat file | Exception |
-| ETL failure | `SET3_ETL_075`, status `Error` | Failed step identified; its baseline shows as an unmatched pair |
-| Wrong business-critical total | 1 of 3 BO reports | Exception |
+| Set 1 | Series | CrushFTP file watcher, CrushFTP fetch, 3 ETLs, validation |
+| Set 2 | Parallel | 6 ETLs |
+| Set 2 validation | Series | Validation |
+| Set 3 start | Series | 1 ETL |
+| Set 3 middle | Parallel | 3 ETLs |
+| Set 3 end | Series | 1 ETL, validation |
+| Set 4 | Series | 4 ETLs, publish to AWS S3, validate the upload |
+| Reconcile | Parallel | 7 file and database comparisons |
+| BO | Series, starts on `all_done` | 3 BO comparisons |
 
-## ATOM setup
+BO starts on `all_done` because a data difference is a real result and must not stop later comparisons.
+Within BO, each report waits for the one before it, so the late file blocks the report after it.
 
-`seed_atom.ts` runs before recording, using the API. It creates:
+### Pacing the run to the narration
 
-- The DS, BO, Postgres and `ORACLE_PROD` connections.
-- CrushFTP and S3 file-server profiles.
-- 100 `ds_job` jobs with fast polling, passing the business date as a DS global variable.
-- The jobs listed below, and the sequence that orders them.
-- SMTP settings pointing at `mailpit`.
-- An email hook on `run.failed` with a template showing date and counts, sent to the
-  demo recipient list.
+- The Set 1 file watcher waits for an arrival signal, and the script delivers it once the presenter is on
+  the Monitor. This holds the run until the narration reaches it.
+- Parallel ETLs run longer than serial ones, so several show RUNNING at the same moment. The Monitor
+  refreshes a few seconds behind the API, so the highlight waits until the screen shows them running.
 
-### Sequence stages
+### Unintended failure and restart
 
-| # | Stage | Mode | Start rule | Steps |
-|---|---|---|---|---|
-| 1 | Set 1 | Serial | n/a | 25 `ds_job` |
-| 2 | Set 2 | Serial | All passed | 25 `ds_job` |
-| 3 | Set 3 | Serial | All passed | 25 `ds_job`; the failing ETL is last |
-| 4 | Set 4 | Serial | `all_done` | 25 `ds_job` |
-| 5 | Fetch | Serial | `all_done` | `file_transfer` from CrushFTP to local |
-| 6 | Reconcile | Parallel | `all_done` | See jobs below |
-| 7 | BO | Parallel | `all_done` | 3 `bo_live` reconciliation jobs |
+The Production copy of the Daily Sales report is withheld in `bo-late/`, so its job errors and the next
+report is blocked. The script delivers the file, then presses Restart from failure. ATOM creates a new
+linked run, carries over the 29 steps that passed, and re-runs the other 6.
 
-The failing ETL is last in Set 3 because a step that never ran stops later stages under
-every start rule. Failing mid-set would block the rest of the run.
-
-### Reconcile jobs
-
-| Job | Type | Test side | Production side |
-|---|---|---|---|
-| CSV outputs | `reconciliation`, `source_mode: multi_file`, `unmatched_policy: warn` | Local ETL output | S3 baseline |
-| XML outputs | Same | Local ETL output | S3 baseline |
-| Oracle vs Postgres | `compare`, `compare_type: sql` | Postgres SQL | `ORACLE_PROD` SQL |
-| Postgres vs flat file | `compare`, `compare_type: matrix` | Postgres SQL | File fetched from CrushFTP |
-
-Each multi-file job produces one aggregate result with per-pair detail, so one column
-filter can accept across all of its pairs.
+Comparisons that found differences count as failed, so they run again and find the same differences. This
+is why the review happens after the restart, on the run that will be kept.
 
 ## Video flow
 
-Every step has a narration comment above it, and every element is highlighted before use.
-
-1. **Configure:** show the caption, open the sequence, show its stages, open Run sequence,
-   and type `run_date=<business date>`.
-2. **Execute:** launch and watch the Monitor move through Sets 1 to 4, then call out the
-   failed ETL and its error.
-3. **Reconcile:** show the CrushFTP fetch step, then the CSV, XML and database results,
-   the per-pair breakdown, and one mismatch opened to show Test vs Production.
-4. **Validate:** in Differences, filter to `fee_amount` and bulk-accept with a note on each
-   affected result. Show the exceptions that stay open: missing record, additional record
-   and wrong value. Then show the BO total difference.
-5. **Report:** show the consolidated run and HTML report, then open the summary email in
-   Mailpit with its recipient list.
-
-## Presenter helpers
-
-- `spotlight(locator)`: applies `outline: 3px solid #FF3366; outline-offset: 2px;
-  background: rgba(255, 51, 102, 0.1);`, holds it, and removes it after the action.
-- `pace(kind)`: waits 1.5 to 2.5 seconds, scaled by `DEMO_PACE`.
-- `typeLikeHuman(locator, text)`: uses `pressSequentially` with a delay.
-- `clickDemo`, `selectDemo`, `typeDemo`: wrap move cursor, spotlight, act and clear.
-- Fake cursor: an injected element that glides to each target, because Playwright video
-  doesn't show the real pointer.
-- `chapter(title)`: shows a caption banner for each of the five chapters.
+| Part | Content |
+|---|---|
+| 1. Configure | Sequence, stage modes, execution preview, business date |
+| 2. Execute | 25 jobs live: series, parallel, hybrid, S3 publish |
+| 3. Reconcile | 10 comparisons, and their results in History |
+| 4. Restart | The failure, the delivered file, continuing from the failure |
+| 5. Validate | Accept `fee_amount` on each affected result, and 6 exceptions stay open |
+| 6. Report | Consolidated report |
+| 7. CI/CD | Generated GitLab job, simulated pipeline, CI Runs tab |
 
 ## Validation and error handling
 
-The script asserts each validation point as it runs:
+The script asserts each validation point, and a failed assertion fails the take:
 
-- **Correct ETLs:** 100 steps ran, with the expected names.
-- **Correct sequence:** step start times follow the stage order.
-- **Correct date:** the mock's record of received variables shows the chosen date for every ETL.
-- **Completion:** 99 ETLs succeeded and `SET3_ETL_075` failed.
-- **Reconciliation:** exception counts match the seed table.
-- **Outcome:** the run ends FAILED, and the email reached Mailpit with the expected recipients.
+- **Correct ETLs:** the SAP DS mock's own log holds exactly the 18 ETLs.
+- **Correct sequence:** in that log, every set finished before the next began.
+- **Correct date:** every ETL received the business date.
+- **Flow:** one job at a time in Set 1, all 6 together in Set 2, and all 3 together in the middle of Set 3.
+- **Failure:** the late-file job errored, and the next report was blocked.
+- **Restart:** no ETL ran twice, 29 steps were carried over, and the blocked report ran.
+- **Numbers narrated aloud:** 35 jobs, 30 passed, 5 failed, 6 open exceptions.
+- **Pipeline:** a real ATOM run finished with verdict FAILED and exit code 1, so the pipeline failed for the
+  reason the narration gives.
 
-A failed assertion fails the take and keeps its video and trace, so a bad take can't pass
-silently. Seeding fails fast with a clear message if a service isn't ready. `video: 'on'`
-is used, so successful takes are always kept.
+## Timeline
 
-## Testing
-
-- Unit tests for `generate_data.py`: deterministic output, and the seed table is honoured.
-- Tests for the DS mock's new variables; existing mock integration tests keep passing.
-- `DEMO_PACE=0` runs the full script quickly as a smoke test before recording.
-- A final full-speed take is watched and its duration recorded.
+`demo/helpers/timeline.ts` writes `demo/output/timeline.md` after each take. It takes timecodes from the
+presenter's step calls and narration from the script's `STEP` comments, so there is one source of truth.
 
 ## Limits
 
-- ATOM's Oracle driver and SQL dialect are not exercised, because `ORACLE_PROD` is Postgres.
-  The config screen stays out of the video, and the opening caption discloses the simulation.
-- Accepting differences is a human decision, not automatic categorisation. Narration should
-  say so.
-- The email is a summary and doesn't include the accepted-difference breakdown.
-- A take is about 14 minutes, about 3 of them the real-time ETL stage. See `demo/README.md`.
+See "Limits" in `demo/README.md`.
 
-## Verified during implementation
+## Findings in ATOM
 
-- `run_date` reaches `ds_job` variables, SQL, S3 and CrushFTP paths, and BO prompts.
-- Accepted differences leave the run FAILED while exceptions remain.
-- Bulk accept honours the search filter. The script searches for `fee_amount`, because the column
-  dropdown is empty for multi-file results.
-- The Differences "Open" metric counts the whole run, not the selected test.
+Seen while building this. None were changed, as they are out of scope.
 
-## Out of scope
-
-- Expected-change rules or automatic categorisation.
-- Attaching or linking the report in email.
-- Audio, editing or voiceover.
-- Any change to the uncommitted difference-export work in the working tree.
+1. The Differences column dropdown is empty for multi-file results, because they carry no `column_stats`.
+2. The Differences "Open" and "Accepted" metrics count the whole run, not the selected test.
+3. The execution order preview stays empty when the sequence editor opens, until the first edit.
+4. The Monitor shows `? → ?` for environments, and a total that grows as steps finish rather than the
+   sequence's full size.
+5. History shows `? → ?` for environments on sequence runs in the same way.
+6. The multi-file Files column repeats itself: "63 file(s) across 63 file(s) across 63 pair(s)".
+7. SQLite returned `database is locked` 500s to status polling during a long run.
+8. Matrix compare SQL sources ignore `config_id` and use ATOM's own database unless given a connection
+   string. This can silently query the wrong database.
+9. Some UI actions took tens of seconds while recording, such as opening the launch modal and working in
+   Differences. The cause wasn't identified, and it may be specific to headless recording in Docker.

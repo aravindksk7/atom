@@ -14,6 +14,10 @@ validation point.
 
 **Spec:** `docs/superpowers/specs/2026-11-04-atom-regression-demo-design.md`
 
+**Status:** Executed, then revised on 2026-11-05 when the brief changed to about 25 execution jobs, about
+10 reconciliation jobs, restart from failure, CI/CD and a synced timeline. The tasks below record the first
+build. The spec describes the final design.
+
 ## Facts from reading the code
 
 These replace the assumptions the spec listed for verification.
