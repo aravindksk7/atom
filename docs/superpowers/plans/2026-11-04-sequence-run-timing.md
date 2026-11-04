@@ -1743,7 +1743,7 @@ git commit -m "feat(cli): add run timing and sequence history commands"
 - Modify: `etl_framework/cli/app.py:90-99`, `etl_framework/cli/app.py:194-205`
 - Test: `tests/unit/test_cli_progress.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/unit/test_cli_progress.py`:
 
@@ -1864,12 +1864,12 @@ def test_run_json_against_older_server_has_null_times(fake_client):
     assert json.loads(result.output)["elapsed_seconds"] is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_cli_progress.py -q -p no:cacheprovider`
 Expected: FAIL with `ModuleNotFoundError: No module named 'etl_framework.cli.progress'`.
 
-- [ ] **Step 3: Write the displays**
+- [x] **Step 3: Write the displays**
 
 Create `etl_framework/cli/progress.py`:
 
@@ -2024,7 +2024,7 @@ class LiveProgress(_Display):
             self._live.stop()
 ```
 
-- [ ] **Step 4: Use the displays in `atom run`**
+- [x] **Step 4: Use the displays in `atom run`**
 
 In `etl_framework/cli/app.py`, add imports:
 
@@ -2112,12 +2112,12 @@ In the `run` command, replace the block from `status = _wait_for_run(...)` throu
 
 Leave the `raise typer.Exit(code)` line that follows in place.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_cli_progress.py tests/unit/test_cli_app.py tests/unit/test_cli_render.py -q -p no:cacheprovider`
 Expected: PASS. If an existing `test_cli_app.py` test asserts an exact `calls` list, add `/api/runs/.../timing` to the expected calls only where the assertion is about request order, not about behavior.
 
-- [ ] **Step 6: Look at the bars in a real terminal**
+- [x] **Step 6: Look at the bars in a real terminal**
 
 Run in a real terminal against a local API:
 
@@ -2127,7 +2127,7 @@ C:\Python314\python.exe -m etl_framework.cli.app --api-url http://localhost:8000
 
 Expected: colored bars redraw in place, then disappear and leave the table, `Started / Ended / Elapsed` line and summary line. If the module has no `__main__` entry, use the `atom` script defined in `pyproject.toml`. Then set `$env:NO_COLOR = '1'`, rerun, and confirm the bars have no color.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add etl_framework/cli/progress.py etl_framework/cli/app.py tests/unit/test_cli_progress.py
@@ -2143,7 +2143,7 @@ git commit -m "feat(cli): show live job progress and timing in atom run"
 - Modify: `frontend/app.js` (`FEATURE_SLICES`), `frontend/index.template.html:556`
 - Test: `tests/unit/test_run_timing_frontend.js`, `tests/unit/test_run_timing_frontend.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_run_timing_frontend.py`:
 
@@ -2355,12 +2355,12 @@ main().catch((error) => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_frontend.py -q -p no:cacheprovider`
 Expected: FAIL with `Cannot find module` for `run-timing.js`.
 
-- [ ] **Step 3: Write the slice**
+- [x] **Step 3: Write the slice**
 
 Create `frontend/features/run-timing.js`:
 
@@ -2538,7 +2538,7 @@ Create `frontend/features/run-timing.js`:
 })(window);
 ```
 
-- [ ] **Step 4: Register the slice**
+- [x] **Step 4: Register the slice**
 
 In `frontend/app.js`, add `ETL_FEATURE_RUN_TIMING()` to the `FEATURE_SLICES` array, directly after `ETL_FEATURE_MONITOR()`.
 
@@ -2548,13 +2548,13 @@ In `frontend/index.template.html`, after line 556 (`<script src="features/monito
     <script src="features/run-timing.js"></script>
 ```
 
-- [ ] **Step 5: Build and run tests**
+- [x] **Step 5: Build and run tests**
 
 Run: `node scripts/build-html.js`
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_frontend.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/features/run-timing.js frontend/app.js frontend/index.template.html frontend/index.html tests/unit/test_run_timing_frontend.py tests/unit/test_run_timing_frontend.js
