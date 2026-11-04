@@ -319,3 +319,43 @@ def test_new_database_defines_the_results_index():
     db = _session()
     names = {i["name"] for i in inspect(db.get_bind()).get_indexes("test_results")}
     assert "ix_test_results_query_name_id" in names
+
+
+def test_dag_executor_records_overlapping_times_for_parallel_steps():
+    import threading
+
+    from api.services.dag_executor import DagExecutor, StepOutcome
+
+    db = _session()
+    RunRepository(db).create_run("par", "dev", "prod", {})
+    steps = [
+        SequenceStepRef(step_id="left", job_name="a"),
+        SequenceStepRef(step_id="right", job_name="b"),
+    ]
+    step_repo = RunStepRepository(db)
+    step_repo.materialize_steps("par", steps)
+
+    both_running = threading.Barrier(2, timeout=10)
+    lock = threading.Lock()
+
+    class Adapter:
+        def set_status(self, step_id, status, **kwargs):
+            with lock:
+                step_repo.set_status_by_step_id("par", step_id, status, **kwargs)
+
+        def get_release(self, step_id):
+            return "approve"
+
+    def run_step(step):
+        both_running.wait()
+        return StepOutcome(status="PASSED")
+
+    DagExecutor(
+        steps=steps, step_repo=Adapter(), run_step=run_step,
+        is_cancel_requested=lambda: False, max_workers=2,
+    ).run()
+
+    left = step_repo.get_step_by_step_id("par", "left")
+    right = step_repo.get_step_by_step_id("par", "right")
+    assert left.started_at <= right.finished_at
+    assert right.started_at <= left.finished_at

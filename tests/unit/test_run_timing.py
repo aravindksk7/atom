@@ -335,6 +335,18 @@ def test_timing_recorded_true_for_restart_with_only_carried_steps():
     assert doc["timing_recorded"] is True
 
 
+def test_timing_recorded_false_for_old_crashed_run_with_no_step_times():
+    steps = [step("RUNNING", step_id="a"), step("PENDING", step_id="b", step_index=1)]
+    doc = _doc(run("ERROR", T0, at(60)), steps)
+    assert doc["steps"][0]["progress"]["state"] == "interrupted"
+    assert doc["timing_recorded"] is False
+
+
+def test_timing_recorded_true_when_interrupted_step_has_a_start():
+    doc = _doc(run("ERROR", T0, at(60)), [step("RUNNING", started=10)])
+    assert doc["timing_recorded"] is True
+
+
 def test_timing_recorded_true_for_run_without_steps():
     assert _doc(run(), [])["timing_recorded"] is True
 

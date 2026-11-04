@@ -4,6 +4,7 @@ import csv
 import asyncio
 import io
 import json
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, FileResponse, HTMLResponse, JSONResponse, StreamingResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -47,6 +49,7 @@ from api.schemas import (
     RunProgressOut,
     RunRestartRequest,
     RunStatusOut,
+    RunTimingOut,
     RunStepOut,
     RunStepMarkPassedRequest,
     RunStepReleaseRequest,
@@ -59,6 +62,7 @@ from api.schemas import (
 from api.services.ci_runs_reporting import CiRunsFilters, CiRunsReportingService
 from api.services.job_env_validation import validate_env_requirements
 from api.services.run_executor import RunExecutor
+from api.services.run_timing import load_timing_context, timing_for_run
 from api.services.pytest_runner import PytestRunExecutor
 from etl_framework.repository.repository import (
     ConfigRepository,
@@ -106,6 +110,7 @@ from etl_framework.repository.models import TERMINAL_STATUSES as _TERMINAL
 from etl_framework.runner.job_validation import validate_job_definition
 
 router = APIRouter(tags=["runs"])
+logger = logging.getLogger(__name__)
 
 
 _TREND_CACHE_TTL_SECONDS = 30
@@ -807,6 +812,14 @@ def get_run_progress(run_id: str, db: Session = Depends(get_session)):
     )
 
 
+@router.get("/{run_id}/timing", response_model=RunTimingOut)
+def get_run_timing(run_id: str, db: Session = Depends(get_session)):
+    run = RunRepository(db).get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return timing_for_run(db, run, RunStepRepository(db).list_steps(run_id))
+
+
 @router.get("/{run_id}/results/{result_id}/mismatches", response_model=list[MismatchOut])
 def list_result_mismatches(
     run_id: str,
@@ -1470,6 +1483,14 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
     async def events():
         last_payload = ""
         step_repo = RunStepRepository(db)
+        # Job types and estimates don't change during a run: load them once, off
+        # the event loop. If the load fails the stream goes on with timing: null.
+        timing_context = None
+        try:
+            names = [s.job_name for s in await run_in_threadpool(step_repo.list_steps, run_id)]
+            timing_context = await run_in_threadpool(load_timing_context, db, names)
+        except Exception:
+            logger.exception("Could not load timing context for run %s", run_id)
         while True:
             db.expire_all()  # force re-fetch; identity map caches stale status without this
             run = repo.get_run(run_id)
@@ -1492,6 +1513,14 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                 if s.status == "RUNNING":
                     current_step = s.step_index
 
+            timing = None
+            if timing_context is not None:
+                try:
+                    timing = timing_for_run(db, run, steps, timing_context)
+                except Exception:
+                    # Progress display must never take the stream down.
+                    logger.exception("Could not build timing for run %s", run_id)
+
             payload = {
                 "run_id": run.run_id,
                 "status": run.status,
@@ -1505,6 +1534,7 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                     {"step_id": s.step_id, "status": s.status, "attempt": s.attempt or 0}
                     for s in steps
                 ],
+                "timing": timing,
             }
             payload_text = json.dumps(payload, default=str)
             if payload_text != last_payload:

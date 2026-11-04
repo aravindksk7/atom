@@ -219,7 +219,12 @@ def build_run_timing(
         **build_run_elapsed(run, steps, now),
         "jobs_total": len(step_docs),
         "jobs_done": sum(1 for s in step_docs if s["progress"]["state"] in _COMPLETED_STATES),
-        "timing_recorded": not any(s["progress"]["state"] == "not_recorded" for s in step_docs),
+        # An interrupted step with no start is a run from before times were kept.
+        "timing_recorded": not any(
+            s["progress"]["state"] == "not_recorded"
+            or (s["progress"]["state"] == "interrupted" and s["started_at"] is None)
+            for s in step_docs
+        ),
         "steps": step_docs,
     }
 
