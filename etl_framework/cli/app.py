@@ -8,7 +8,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import quote
 
 import typer
@@ -21,6 +21,7 @@ from etl_framework.cli.client import (
     AtomConnectionError,
     AtomNotFoundError,
 )
+from etl_framework.cli.progress import LiveProgress, PlainProgress
 
 EXIT_PASSED = 0
 EXIT_FAILED = 1
@@ -35,6 +36,9 @@ EXIT_TIMEOUT = 6
 TERMINAL_STATUSES = frozenset(
     {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED", "BLOCKED"}
 )
+
+# Bars need to move, so an interactive terminal polls at least this often.
+LIVE_POLL_SECONDS = 2.0
 
 app = typer.Typer(help="Atom CI/CD command line client", no_args_is_help=True)
 
@@ -89,15 +93,38 @@ def _resolve_target(client: AtomClient, target_type: str, target: str) -> int:
 
 
 def _wait_for_run(client: AtomClient, run_id: str,
-                  timeout: float, poll_interval: float) -> dict:
+                  timeout: float, poll_interval: float,
+                  on_tick: Optional[Callable[[], None]] = None) -> dict:
     deadline = time.monotonic() + timeout
     while True:
+        if on_tick is not None:
+            on_tick()
         status = client.get_json(f"/api/runs/{run_id}/status")
         if status.get("status") in TERMINAL_STATUSES:
             return status
         if time.monotonic() >= deadline:
             raise WaitTimeoutError(run_id)
         time.sleep(poll_interval)
+
+
+def _wait_with_progress(client: AtomClient, run_id: str, timeout: float,
+                        poll_interval: float, output: str) -> dict:
+    if output == "json":
+        return _wait_for_run(client, run_id, timeout, poll_interval)
+    if sys.stdout.isatty():
+        with LiveProgress(client, run_id) as display:
+            return _wait_for_run(client, run_id, timeout,
+                                  min(poll_interval, LIVE_POLL_SECONDS), display.update)
+    with PlainProgress(client, run_id) as display:
+        return _wait_for_run(client, run_id, timeout, poll_interval, display.update)
+
+
+def _final_timing(client: AtomClient, run_id: str) -> Optional[dict]:
+    """Timing for the final report, or None. Never affects the gate result."""
+    try:
+        return client.get_json(f"/api/runs/{run_id}/timing")
+    except (AtomAPIError, AtomAuthError, AtomConnectionError, AtomNotFoundError):
+        return None
 
 
 def _gate_exit_code(status: dict) -> int:
@@ -193,16 +220,26 @@ def run(
         if no_wait:
             print(json.dumps({"run_id": run_id}) if output == "json" else run_id)
             raise typer.Exit(EXIT_PASSED)
-        status = _wait_for_run(client, run_id, timeout, poll_interval)
+        status = _wait_with_progress(client, run_id, timeout, poll_interval, output)
         _write_artifacts(client, run_id, junit_out, json_out, html_out)
         code = _gate_exit_code(status)
+        final_timing = _final_timing(client, run_id)
         if output == "json":
+            times = final_timing or {}
             print(json.dumps({
                 "run_id": run_id, "verdict": status.get("status"),
                 "exit_code": code, "passed": status.get("passed"),
                 "failed": status.get("failed"), "error": status.get("error"),
+                "started_at": times.get("started_at"),
+                "completed_at": times.get("completed_at"),
+                "elapsed_seconds": times.get("elapsed_seconds"),
+                "held_seconds": times.get("held_seconds"),
+                "active_seconds": times.get("active_seconds"),
             }))
         else:
+            if final_timing is not None:
+                print(render.timing_table(final_timing))
+                print(render.timing_summary(final_timing))
             print(render.run_summary(status, code))
         raise typer.Exit(code)
     except WaitTimeoutError as exc:

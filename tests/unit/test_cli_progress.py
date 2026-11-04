@@ -47,6 +47,8 @@ class FakeClient:
         result = self.responses.get(path, AtomNotFoundError(f"no fake for {path}"))
         if isinstance(result, Exception):
             raise result
+        if isinstance(result, list) and result and isinstance(result[0], dict) and "__seq__" in result[0]:
+            return result.pop(0)["__seq__"] if len(result) > 1 else result[0]["__seq__"]
         return result
 
     def post_json(self, path, payload):
@@ -285,3 +287,119 @@ def test_tables_print_under_cp1252_without_color():
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
     proc.stdout.decode("ascii")
     assert b"\x1b[" not in proc.stdout
+
+
+def test_plain_progress_prints_one_line_per_status_change(capsys):
+    from etl_framework.cli.progress import PlainProgress
+
+    docs = [
+        timing([step("a", "RUNNING", "running_unknown", None, "running", runtime=1.0)], "RUNNING"),
+        timing([step("a", "RUNNING", "running_unknown", None, "running", runtime=2.0)], "RUNNING"),
+        timing([step("a", "PASSED", "done", 100, "PASSED", runtime=3.0)], "RUNNING"),
+    ]
+    client = FakeClient({"/api/runs/r-1/timing": [{"__seq__": d} for d in docs]})
+    display = PlainProgress(client, "r-1")
+    for _ in docs:
+        display.update()
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 2
+    assert "a" in out[0] and "RUNNING" in out[0]
+    assert "PASSED" in out[1] and "3s" in out[1]
+    assert "\x1b" not in "".join(out)
+
+
+@pytest.mark.parametrize("error", [AtomNotFoundError("old"), AtomConnectionError("down")])
+def test_progress_ignores_timing_errors(capsys, error):
+    from etl_framework.cli.progress import PlainProgress
+
+    client = FakeClient({"/api/runs/r-1/timing": error})
+    PlainProgress(client, "r-1").update()
+    assert capsys.readouterr().out == ""
+
+
+def test_not_found_stops_asking_for_timing():
+    from etl_framework.cli.progress import PlainProgress
+
+    client = FakeClient({})
+    display = PlainProgress(client, "r-1")
+    display.update()
+    display.update()
+    assert client.calls == ["/api/runs/r-1/timing"]
+
+
+def test_live_bars_show_each_state():
+    from io import StringIO
+
+    from rich.console import Console
+
+    from etl_framework.cli.progress import bars
+
+    doc = timing([
+        step("done_job", "PASSED", "done", 100, "PASSED", runtime=5.0),
+        step("run_job", "RUNNING", "running", 62, "62%", runtime=217.0, estimate=350.0),
+        step("slow_job", "RUNNING", "over_estimate", 95, "over estimate", runtime=400.0, estimate=240.0),
+        step("new_job", "RUNNING", "running_unknown", None, "running", runtime=9.0),
+        step("wait_job", "PENDING", "queued", 0, "queued"),
+    ], "RUNNING")
+    stream = StringIO()
+    Console(file=stream, width=120, force_terminal=False).print(bars(doc))
+    text = stream.getvalue()
+    for expected in ("done_job", "PASSED", "62%", "3m 37s / ~5m 50s", "over estimate", "queued"):
+        assert expected in text
+
+
+def _launch_responses(status="PASSED", timing_doc=None):
+    responses = {
+        "/api/selections/3/launch": {"run_id": "r-1"},
+        "/api/runs/r-1/status": {
+            "run_id": "r-1", "status": status, "passed": 1, "failed": 0, "error": 0,
+        },
+    }
+    if timing_doc is not None:
+        responses["/api/runs/r-1/timing"] = timing_doc
+    return responses
+
+
+RUN_ARGS = ["run", "3", "--source-env", "dev", "--poll-interval", "0", "--timeout", "1"]
+
+
+def test_run_prints_table_and_times_when_not_a_terminal(fake_client):
+    from etl_framework.cli.app import app
+
+    doc = timing([step("a", "PASSED", "done", 100, "PASSED", runtime=5.0)])
+    fake_client(_launch_responses(timing_doc=doc))
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 0
+    assert "Elapsed" in result.output
+    assert "run=r-1" in result.output
+    assert "\x1b[" not in result.output
+
+
+def test_run_against_older_server_still_gates(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses())
+    result = runner.invoke(app, BASE_ARGS + RUN_ARGS)
+    assert result.exit_code == 0
+    assert "Elapsed" not in result.output
+    assert "run=r-1" in result.output
+
+
+def test_run_json_is_one_document_with_times(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses(timing_doc=timing()))
+    result = runner.invoke(app, BASE_ARGS + ["--output", "json"] + RUN_ARGS)
+    body = json.loads(result.output)
+    assert body["elapsed_seconds"] == 600.0
+    assert body["held_seconds"] == 30.0
+    assert body["started_at"] == "2026-11-04T09:00:00+00:00"
+    assert body["verdict"] == "PASSED"
+
+
+def test_run_json_against_older_server_has_null_times(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client(_launch_responses())
+    result = runner.invoke(app, BASE_ARGS + ["--output", "json"] + RUN_ARGS)
+    assert json.loads(result.output)["elapsed_seconds"] is None
