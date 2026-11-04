@@ -254,6 +254,52 @@ def report(
 
 
 @app.command()
+def timing(
+    ctx: typer.Context,
+    run_id: str = typer.Argument(..., help="Run id to show"),
+) -> None:
+    """Show start, end, elapsed time and each job's runtime for a run."""
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        document = client.get_json(f"/api/runs/{run_id}/timing")
+    except AtomNotFoundError as exc:
+        raise _fail(output, EXIT_NOT_FOUND, str(exc))
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(document, default=str))
+    else:
+        print(render.timing_table(document))
+        print(render.timing_summary(document))
+
+
+@app.command("sequence-runs")
+def sequence_runs(
+    ctx: typer.Context,
+    sequence: str = typer.Argument(..., help="Sequence id or exact name"),
+    limit: int = typer.Option(20, "--limit", min=1, max=200,
+                              help="Maximum runs to show (1-200)"),
+) -> None:
+    """Show start, end and elapsed time for each run of a sequence."""
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        sequence_id = _resolve_target(client, "sequence", sequence)
+        rows = client.get_json(f"/api/sequences/{sequence_id}/runs?limit={limit}")
+    except AtomNotFoundError as exc:
+        raise _fail(output, EXIT_NOT_FOUND, str(exc))
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(rows, default=str))
+    else:
+        print(render.sequence_runs_table(rows))
+
+
+@app.command()
 def selections(ctx: typer.Context) -> None:
     """List job selections."""
     client, output = ctx.obj["client"], ctx.obj["output"]
