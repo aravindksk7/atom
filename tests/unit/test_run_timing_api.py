@@ -143,6 +143,18 @@ def _read_stream(client, run_id, timeout=30):
     return box["body"]
 
 
+def _wait_for(predicate, timeout=20.0):
+    """Poll for a real signal from the stream instead of sleeping a fixed time."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def _events(body):
     out = []
     for block in body.split("\n\n"):
@@ -206,23 +218,29 @@ def test_stream_survives_a_timing_build_failure(client, engine, monkeypatch):
 
 def test_live_stream_ticks_and_loads_the_context_once(client, engine, monkeypatch):
     import threading
-    import time
 
     from api.routes import runs as runs_module
     from etl_framework.repository.repository import RunRepository
 
     calls = []
+    ticks = []
     real = runs_module.load_timing_context
+    real_timing = runs_module.timing_for_run
 
     def counting(*args, **kwargs):
         calls.append(1)
         return real(*args, **kwargs)
 
+    def counting_timing(*args, **kwargs):
+        ticks.append(1)
+        return real_timing(*args, **kwargs)
+
     monkeypatch.setattr(runs_module, "load_timing_context", counting)
+    monkeypatch.setattr(runs_module, "timing_for_run", counting_timing)
     _live_run(engine)
 
     def finish_later():
-        time.sleep(2.5)
+        _wait_for(lambda: len(ticks) >= 3)
         with Session(engine) as db:
             RunRepository(db).update_run_status(
                 "live", "PASSED", completed_at=datetime.now(timezone.utc),
@@ -278,7 +296,6 @@ def test_sequence_runs_rejects_bad_limit_and_unknown_sequence(client, engine):
 
 def test_stream_reloads_the_timing_context_when_steps_appear(client, engine, monkeypatch):
     import threading
-    import time
 
     from api.routes import runs as runs_module
     from etl_framework.repository.models import SavedJob, TestResult, TestRun
@@ -293,21 +310,29 @@ def test_stream_reloads_the_timing_context_when_steps_appear(client, engine, mon
         RunRepository(db).create_run("late", "dev", "prod", {})
 
     calls = []
+    ticks = []
     real = runs_module.load_timing_context
+    real_timing = runs_module.timing_for_run
 
     def counting(db, names):
         calls.append(sorted(names))
         return real(db, names)
 
+    def counting_timing(*args, **kwargs):
+        ticks.append(1)
+        return real_timing(*args, **kwargs)
+
     monkeypatch.setattr(runs_module, "load_timing_context", counting)
+    monkeypatch.setattr(runs_module, "timing_for_run", counting_timing)
 
     def materialize_later():
-        time.sleep(1.5)
+        _wait_for(lambda: len(ticks) >= 1)  # the stream is open and has seen no steps
         with Session(engine) as db:
             RunStepRepository(db).materialize_steps("late", [SequenceStepRef(step_id="a", job_name="job_a")])
             RunStepRepository(db).set_status_by_step_id("late", "a", "RUNNING")
             RunRepository(db).update_run_status("late", "RUNNING", started_at=T0)
-        time.sleep(2.5)
+        seen = len(ticks)
+        _wait_for(lambda: len(calls) >= 2 and len(ticks) >= seen + 2)
         with Session(engine) as db:
             RunRepository(db).update_run_status("late", "PASSED", completed_at=datetime.now(timezone.utc))
 
@@ -319,3 +344,87 @@ def test_stream_reloads_the_timing_context_when_steps_appear(client, engine, mon
     assert steps[-1]["job_family"] == "sap"
     assert steps[-1]["estimate_seconds"] == 40.0
     assert calls == [[], ["job_a"]]
+
+
+def _count_rollbacks(monkeypatch):
+    rollbacks = []
+    real = Session.rollback
+
+    def spy(self):
+        rollbacks.append(1)
+        return real(self)
+
+    monkeypatch.setattr(Session, "rollback", spy)
+    return rollbacks
+
+
+def test_context_load_failure_rolls_back_and_the_stream_keeps_going(client, engine, monkeypatch):
+    from api.routes import runs as runs_module
+
+    rollbacks = _count_rollbacks(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no context")
+
+    monkeypatch.setattr(runs_module, "load_timing_context", boom)
+    _blocked_run(engine, "rb-load")
+    events = _events(_read_stream(client, "rb-load"))
+    assert rollbacks, "the failed load left the transaction open"
+    assert events[-1][0] == "done"
+    assert events[-1][1]["timing"] is None
+
+
+def test_timing_build_failure_rolls_back_and_the_stream_keeps_going(client, engine, monkeypatch):
+    from api.routes import runs as runs_module
+
+    rollbacks = _count_rollbacks(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no timing")
+
+    monkeypatch.setattr(runs_module, "timing_for_run", boom)
+    _blocked_run(engine, "rb-build")
+    events = _events(_read_stream(client, "rb-build"))
+    assert rollbacks, "the failed build left the transaction open"
+    assert events[-1][0] == "done"
+    assert events[-1][1]["timing"] is None
+
+
+def test_sequence_runs_query_count_does_not_grow_with_the_run_count(client, engine):
+    from sqlalchemy import event
+
+    from etl_framework.repository.repository import RunRepository, RunStepRepository
+
+    sequence_id = _sequence(engine)
+
+    def add_runs(prefix, count):
+        with Session(engine) as db:
+            for i in range(count):
+                run_id = f"{prefix}{i}"
+                RunRepository(db).create_run(run_id, "dev", "prod", {"sequence": {"id": sequence_id}})
+                RunStepRepository(db).materialize_steps(run_id, [
+                    SequenceStepRef(step_id=f"s{n}", job_name=f"j{n}") for n in range(3)
+                ])
+                RunRepository(db).update_run_status(
+                    run_id, "PASSED", started_at=T0, completed_at=T0 + timedelta(seconds=10),
+                )
+
+    def statements():
+        seen = []
+
+        def listener(conn, cursor, statement, *args):
+            seen.append(statement)
+
+        event.listen(engine, "before_cursor_execute", listener)
+        try:
+            assert client.get(f"/api/sequences/{sequence_id}/runs").status_code == 200
+        finally:
+            event.remove(engine, "before_cursor_execute", listener)
+        return len(seen)
+
+    add_runs("a", 1)
+    statements()  # warm-up: the first request does one-off token and schema work
+    few = statements()
+    add_runs("b", 4)
+    many = statements()
+    assert many == few

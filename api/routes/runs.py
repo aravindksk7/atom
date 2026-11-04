@@ -1474,6 +1474,14 @@ def get_trends(
     return payload
 
 
+def _rollback_quietly(db: Session) -> None:
+    """Clear an aborted transaction (Postgres) so the stream's next query works."""
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Could not roll back after a timing error")
+
+
 @router.get("/{run_id}/stream")
 async def stream_run(run_id: str, db: Session = Depends(get_session)):
     repo = RunRepository(db)
@@ -1518,6 +1526,7 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                     timing_context = await run_in_threadpool(load_timing_context, db, sorted(names))
                 except Exception:
                     logger.exception("Could not load timing context for run %s", run_id)
+                    _rollback_quietly(db)
             timing = None
             if timing_context is not None:
                 try:
@@ -1525,6 +1534,7 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
                 except Exception:
                     # Progress display must never take the stream down.
                     logger.exception("Could not build timing for run %s", run_id)
+                    _rollback_quietly(db)
 
             payload = {
                 "run_id": run.run_id,

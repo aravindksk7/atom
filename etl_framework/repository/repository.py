@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal
 from sqlalchemy import String, case, cast, func, insert, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository.database import sequence_id_from_snapshot
@@ -445,8 +445,10 @@ class RunRepository:
     def list_runs_for_sequence(
         self, sequence_id: int, limit: int = 20, offset: int = 0
     ) -> list[TestRun]:
+        # The caller reads only the hold columns of each run's steps.
         return (
             self._db.query(TestRun)
+            .options(selectinload(TestRun.steps).load_only(RunStep.held_at, RunStep.released_at))
             .filter(TestRun.sequence_id == sequence_id)
             .order_by(TestRun.id.desc())
             .offset(offset)
