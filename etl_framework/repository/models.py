@@ -11,7 +11,7 @@ def _utcnow() -> datetime:
 
 
 TERMINAL_STATUSES: frozenset[str] = frozenset(
-    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
+    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED", "BLOCKED"}
 )
 
 

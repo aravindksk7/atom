@@ -32,7 +32,7 @@ EXIT_TIMEOUT = 6
 # Mirror of etl_framework.repository.models.TERMINAL_STATUSES (CLI is HTTP-only,
 # so it must not import the models module).
 TERMINAL_STATUSES = frozenset(
-    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
+    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED", "BLOCKED"}
 )
 
 app = typer.Typer(help="Atom CI/CD command line client", no_args_is_help=True)
@@ -104,7 +104,8 @@ def _gate_exit_code(status: dict) -> int:
         return EXIT_CANCELLED
     if (status.get("error") or 0) > 0 or status.get("status") == "ERROR":
         return EXIT_ERROR
-    if (status.get("failed") or 0) > 0 or status.get("status") == "FAILED":
+    # A blocked run did not run everything it was asked to, so it can't pass a gate.
+    if (status.get("failed") or 0) > 0 or status.get("status") in ("FAILED", "BLOCKED"):
         return EXIT_FAILED
     return EXIT_PASSED
 

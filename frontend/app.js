@@ -3,7 +3,7 @@
 const API = window.ETL_API_BASE || '';
 const APP_CONFIG = window.ETL_APP_CONFIG || {};
 const isTerminalStatusValue = APP_CONFIG.isTerminalStatusValue || ((status) =>
-  ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase()));
+  ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED'].includes(String(status || '').toUpperCase()));
 const highlightMatch = APP_CONFIG.highlightMatch || ((text, query) => {
   const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   if (!query.trim()) return safe;

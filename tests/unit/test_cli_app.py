@@ -472,3 +472,18 @@ def test_run_rejects_malformed_var():
         ])
     assert client.get_json.call_count == 0
     assert result.exit_code == 2
+
+
+def test_run_stops_waiting_for_a_blocked_run_and_exits_failed(fake_client):
+    from etl_framework.cli.app import app
+
+    fake_client({
+        ("POST", "/api/selections/3/launch"): {"run_id": "r-1"},
+        ("GET", "/api/runs/r-1/status"): {
+            "run_id": "r-1", "status": "BLOCKED", "passed": 1, "failed": 0, "error": 0,
+        },
+    })
+    result = runner.invoke(app, BASE_ARGS + [
+        "run", "3", "--source-env", "dev", "--poll-interval", "0", "--timeout", "1",
+    ])
+    assert result.exit_code == 1
