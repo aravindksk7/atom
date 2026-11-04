@@ -1,7 +1,8 @@
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
-from sqlalchemy import DateTime, create_engine, inspect
+from sqlalchemy import DateTime, create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
 from etl_framework.utils.serialization import safe_json_dumps
@@ -32,6 +33,7 @@ def init_db() -> None:
     _ensure_contract_columns(engine)
     _ensure_file_server_columns(engine)
     _ensure_export_job_columns(engine)
+    _ensure_run_timing_columns(engine)
     _backfill_schedule_selections(engine)
 
 
@@ -75,6 +77,46 @@ def _ensure_export_job_columns(bind) -> None:
         return
     with bind.begin() as conn:
         ensure_column(conn, "difference_export_jobs", "heartbeat_at", _export_heartbeat_column_ddl(bind.dialect))
+
+
+def _ensure_run_timing_columns(bind) -> None:
+    """Add step times and sequence_id on existing databases.
+
+    Not SQLite-gated: /timing and the stream read these columns on every
+    dialect. The datetime type comes from the dialect because Postgres has no
+    DATETIME. Old runs get sequence_id from their snapshot only when the column
+    is first added, so later starts never overwrite anything.
+    """
+    tables = set(inspect(bind).get_table_names())
+    if not {"test_runs", "run_steps"}.issubset(tables):
+        return
+    datetime_type = DateTime(timezone=True).compile(dialect=bind.dialect)
+    with bind.begin() as conn:
+        ensure_column(conn, "run_steps", "started_at", f"ALTER TABLE run_steps ADD COLUMN started_at {datetime_type}")
+        ensure_column(conn, "run_steps", "finished_at", f"ALTER TABLE run_steps ADD COLUMN finished_at {datetime_type}")
+        added = ensure_column(conn, "test_runs", "sequence_id", "ALTER TABLE test_runs ADD COLUMN sequence_id INTEGER")
+        ensure_index(conn, "ix_test_runs_sequence_id", "CREATE INDEX ix_test_runs_sequence_id ON test_runs (sequence_id)")
+        if added:
+            _backfill_run_sequence_ids(conn)
+
+
+def _backfill_run_sequence_ids(conn) -> None:
+    rows = conn.execute(
+        text("SELECT id, config_snapshot FROM test_runs WHERE config_snapshot IS NOT NULL")
+    ).fetchall()
+    for row_id, snapshot in rows:
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except ValueError:
+                continue
+        sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
+        sequence_id = sequence.get("id") if isinstance(sequence, dict) else None
+        if sequence_id is not None:
+            conn.execute(
+                text("UPDATE test_runs SET sequence_id = :sequence_id WHERE id = :row_id"),
+                {"sequence_id": sequence_id, "row_id": row_id},
+            )
 
 
 def _ensure_compare_columns(bind) -> None:

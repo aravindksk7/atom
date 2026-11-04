@@ -536,6 +536,8 @@ class RunStepOut(BaseModel):
     release_note: str | None = None
     release_action: str | None = None
     carried_over: bool = False
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

@@ -157,6 +157,7 @@ class TestRun(Base):
     ci_context = Column(JSON, nullable=True)
     restarted_from_run_id = Column(String(36), nullable=True, index=True)
     run_batch_id = Column(String(36), ForeignKey("run_batches.batch_id", ondelete="SET NULL"), nullable=True, index=True)
+    sequence_id = Column(Integer, nullable=True, index=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
@@ -532,6 +533,8 @@ class RunStep(Base):
     release_note = Column(Text, nullable=True)
     release_action = Column(String(20), nullable=True)
     carried_over = Column(Boolean, nullable=False, default=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
     run = relationship("TestRun", back_populates="steps")
 

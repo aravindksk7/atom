@@ -400,6 +400,11 @@ class JobSelectionRepository:
         return dict(rows)
 
 
+def _sequence_id_from_snapshot(config_snapshot: dict | None) -> int | None:
+    sequence = (config_snapshot or {}).get("sequence")
+    return sequence.get("id") if isinstance(sequence, dict) else None
+
+
 class RunRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -431,6 +436,7 @@ class RunRepository:
             ci_context=ci_context,
             run_batch_id=run_batch_id,
             restarted_from_run_id=restarted_from_run_id,
+            sequence_id=_sequence_id_from_snapshot(config_snapshot),
         )
         self._db.add(run)
         self._db.commit()
@@ -439,6 +445,18 @@ class RunRepository:
 
     def get_run(self, run_id: str) -> TestRun | None:
         return self._db.query(TestRun).filter(TestRun.run_id == run_id).first()
+
+    def list_runs_for_sequence(
+        self, sequence_id: int, limit: int = 20, offset: int = 0
+    ) -> list[TestRun]:
+        return (
+            self._db.query(TestRun)
+            .filter(TestRun.sequence_id == sequence_id)
+            .order_by(TestRun.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
     def find_restart_for_run(self, original_run_id: str) -> TestRun | None:
         return (
@@ -1731,6 +1749,11 @@ class RunStepRepository:
         step = self.get_step(run_id, step_index)
         if step is None:
             return None
+        now = datetime.now(timezone.utc)
+        if status == "RUNNING" and step.started_at is None:
+            step.started_at = now
+        if step.status == "RUNNING" and status != "RUNNING" and step.finished_at is None:
+            step.finished_at = now
         step.status = status
         for k, v in kwargs.items():
             setattr(step, k, v)
