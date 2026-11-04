@@ -60,7 +60,7 @@
 - Modify: `frontend/app-config.js:2`, `frontend/app.js:5-6`
 - Test: `tests/unit/test_run_timing_api.py`, `tests/unit/test_cli_app.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_run_timing_api.py`:
 
@@ -145,14 +145,14 @@ def test_run_stops_waiting_for_a_blocked_run_and_exits_failed(fake_client):
     assert result.exit_code == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_cli_app.py::test_run_stops_waiting_for_a_blocked_run_and_exits_failed -q -p no:cacheprovider`
 Expected: FAIL, exit code 6 (timeout) instead of 1.
 
 Don't run the stream test unfixed. It loops forever while the bug exists. The fix in Step 3 is what makes it end.
 
-- [ ] **Step 3: Add BLOCKED everywhere**
+- [x] **Step 3: Add BLOCKED everywhere**
 
 In `etl_framework/repository/models.py`:
 
@@ -197,19 +197,19 @@ const isTerminalStatusValue = APP_CONFIG.isTerminalStatusValue || ((status) =>
   ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED'].includes(String(status || '').toUpperCase()));
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_api.py tests/unit/test_cli_app.py -q -p no:cacheprovider --timeout=120`
 Expected: PASS. If `--timeout` is rejected because `pytest-timeout` isn't installed, drop that flag.
 
-- [ ] **Step 5: Run the full unit suite to catch side effects**
+- [x] **Step 5: Run the full unit suite to catch side effects**
 
 `TERMINAL_STATUSES` is read by `batch_launch`, `run_report` and `request_cancel`.
 
 Run: `C:\Python314\python.exe -m pytest tests/unit -q -p no:cacheprovider -n 4`
 Expected: no new failures. If a test asserts the old behavior (for example, that a blocked run isn't terminal), confirm it describes the bug rather than a requirement, and update it. Stop and report if a test shows `BLOCKED` runs were deliberately treated as unfinished.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add etl_framework/repository/models.py etl_framework/cli/app.py frontend/app-config.js frontend/app.js tests/unit/test_run_timing_api.py tests/unit/test_cli_app.py
@@ -226,7 +226,7 @@ git commit -m "fix(runs): treat BLOCKED as a finished run"
 - Modify: `api/schemas.py:518-540`
 - Test: `tests/unit/test_run_timing_repository.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_run_timing_repository.py`:
 
@@ -380,12 +380,12 @@ def test_upgrade_adds_columns_and_backfills_once():
     assert value == 99
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_repository.py -q -p no:cacheprovider`
 Expected: FAIL with `AttributeError` on `started_at`, and an import error for `_ensure_run_timing_columns`.
 
-- [ ] **Step 3: Add the model columns**
+- [x] **Step 3: Add the model columns**
 
 In `etl_framework/repository/models.py`, after `run_batch_id` on `TestRun`:
 
@@ -400,7 +400,7 @@ After `carried_over` on `RunStep`:
     finished_at = Column(DateTime(timezone=True), nullable=True)
 ```
 
-- [ ] **Step 4: Stamp times and set sequence_id**
+- [x] **Step 4: Stamp times and set sequence_id**
 
 In `etl_framework/repository/repository.py`, replace `update_status`:
 
@@ -454,7 +454,7 @@ Add this method to `RunRepository`, after `get_run`:
         )
 ```
 
-- [ ] **Step 5: Upgrade existing databases**
+- [x] **Step 5: Upgrade existing databases**
 
 In `etl_framework/repository/database.py`, change the top imports:
 
@@ -519,7 +519,7 @@ Change the SQLAlchemy import in the same file:
 from sqlalchemy import DateTime, create_engine, inspect, text
 ```
 
-- [ ] **Step 6: Expose the times on RunStepOut**
+- [x] **Step 6: Expose the times on RunStepOut**
 
 In `api/schemas.py`, after `carried_over: bool = False` in `RunStepOut`:
 
@@ -528,12 +528,12 @@ In `api/schemas.py`, after `carried_over: bool = False` in `RunStepOut`:
     finished_at: datetime | None = None
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_repository.py tests/unit/test_run_steps.py tests/unit/test_dag_run_steps.py tests/unit/test_dag_executor.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add etl_framework/repository/models.py etl_framework/repository/repository.py etl_framework/repository/database.py api/schemas.py tests/unit/test_run_timing_repository.py
@@ -548,7 +548,7 @@ git commit -m "feat(runs): record when each sequence step starts and ends"
 - Create: `api/services/run_timing.py`
 - Test: `tests/unit/test_run_timing.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_run_timing.py`:
 
@@ -834,12 +834,12 @@ def test_load_timing_context_reads_job_types_and_skips_unknown_jobs():
     assert context.estimates == {}
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing.py -q -p no:cacheprovider`
 Expected: FAIL with `ModuleNotFoundError: No module named 'api.services.run_timing'`.
 
-- [ ] **Step 3: Write the service**
+- [x] **Step 3: Write the service**
 
 Create `api/services/run_timing.py`:
 
@@ -1098,12 +1098,12 @@ def timing_for_run(
     )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/services/run_timing.py tests/unit/test_run_timing.py
@@ -1120,7 +1120,7 @@ git commit -m "feat(runs): add run timing and the job progress rule"
 - Modify: `api/routes/sequences.py`
 - Test: `tests/unit/test_run_timing_api.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/unit/test_run_timing_api.py`:
 
@@ -1229,18 +1229,18 @@ def test_sequence_runs_rejects_bad_limit_and_unknown_sequence(client, engine):
     assert client.get("/api/sequences/999999/runs").status_code == 404
 ```
 
-- [ ] **Step 2: Check the sequence test helper against the model**
+- [x] **Step 2: Check the sequence test helper against the model**
 
 Run: `C:\Python314\python.exe -c "from etl_framework.repository.models import ExecutionSequence as E; print([c.name for c in E.__table__.columns if not c.nullable and c.default is None and c.server_default is None])"`
 
 If this prints columns other than `id` and `name`, set them in `_sequence`. If the class lives elsewhere, the import fails: find it with `Grep` for `class ExecutionSequence\b` and fix the import.
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_api.py -q -p no:cacheprovider`
 Expected: new tests FAIL with 404s or `AttributeError` on `load_timing_context`. `test_blocked_run_ends_the_stream` still passes.
 
-- [ ] **Step 4: Add the schemas**
+- [x] **Step 4: Add the schemas**
 
 In `api/schemas.py`, after `RunProgressOut`:
 
@@ -1297,7 +1297,7 @@ class SequenceRunTimingOut(BaseModel):
     active_seconds: float | None = None
 ```
 
-- [ ] **Step 5: Add `/timing` and extend `/stream`**
+- [x] **Step 5: Add `/timing` and extend `/stream`**
 
 In `api/routes/runs.py`, add `RunTimingOut` to the existing `from api.schemas import (...)` block, and add:
 
@@ -1346,7 +1346,7 @@ Add this key to `payload`, after `"steps"`:
 
 Confirm `logger` exists at module level in `runs.py`. If it doesn't, add `logger = logging.getLogger(__name__)` with `import logging`.
 
-- [ ] **Step 6: Add the sequence history endpoint**
+- [x] **Step 6: Add the sequence history endpoint**
 
 In `api/routes/sequences.py`, add `SequenceRunTimingOut` to the `from api.schemas import (...)` block, and add:
 
@@ -1380,12 +1380,12 @@ def list_sequence_runs(
     ]
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_api.py tests/unit/test_runs_dag_api.py tests/unit/test_runs_extensions.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 8: Prove real execution records overlapping times**
+- [x] **Step 8: Prove real execution records overlapping times**
 
 Append to `tests/unit/test_run_timing_repository.py`:
 
@@ -1433,7 +1433,7 @@ def test_dag_executor_records_overlapping_times_for_parallel_steps():
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_repository.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add api/schemas.py api/routes/runs.py api/routes/sequences.py tests/unit/test_run_timing_api.py tests/unit/test_run_timing_repository.py
@@ -1449,7 +1449,7 @@ git commit -m "feat(api): expose run timing and each sequence's run history"
 - Modify: `pyproject.toml`, `requirements.txt`
 - Test: `tests/unit/test_cli_progress.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/unit/test_cli_progress.py`:
 
@@ -1592,12 +1592,12 @@ def test_sequence_runs_by_name(fake_client):
     assert "/api/sequences/7/runs?limit=5" in client.calls
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_cli_progress.py -q -p no:cacheprovider`
 Expected: FAIL with `AttributeError: module 'etl_framework.cli.render' has no attribute 'fmt_seconds'`.
 
-- [ ] **Step 3: Add the rendering functions**
+- [x] **Step 3: Add the rendering functions**
 
 In `etl_framework/cli/render.py`, change the imports:
 
@@ -1661,7 +1661,7 @@ def sequence_runs_table(items: list[dict]) -> str:
                                    "elapsed", "held"], tablefmt="simple")
 ```
 
-- [ ] **Step 4: Add the commands**
+- [x] **Step 4: Add the commands**
 
 In `etl_framework/cli/app.py`, add after the `report` command, before the next `@app.command()`:
 
@@ -1708,7 +1708,7 @@ def sequence_runs(
     print(json.dumps(rows) if output == "json" else render.sequence_runs_table(rows))
 ```
 
-- [ ] **Step 5: Add rich as an explicit dependency**
+- [x] **Step 5: Add rich as an explicit dependency**
 
 In `pyproject.toml`, after `"typer>=0.12",`:
 
@@ -1722,12 +1722,12 @@ In `requirements.txt`, after `tabulate>=0.9`:
 rich>=13
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_cli_progress.py tests/unit/test_cli_render.py tests/unit/test_cli_app.py -q -p no:cacheprovider`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add etl_framework/cli/render.py etl_framework/cli/app.py pyproject.toml requirements.txt tests/unit/test_cli_progress.py
