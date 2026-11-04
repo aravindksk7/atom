@@ -22,7 +22,7 @@
 
   <div class="space-y-4">
     <template x-for="run in activeRuns" :key="run.run_id">
-      <div class="card" :data-testid="'monitor-run-' + run.run_id">
+      <div class="card" :data-testid="'monitor-run-' + run.run_id" x-init="loadRunTiming(run.run_id)">
         <div class="flex items-start justify-between mb-4">
           <div>
             <div class="flex items-center gap-2">
@@ -51,10 +51,60 @@
           </div>
         </div>
 
-        <!-- Progress bar -->
-        <div class="progress-track mb-4">
-          <div class="progress-fill" :style="'width:' + runProgress(run) + '%'"></div>
-        </div>
+        <!-- Runs with steps get per-job progress; others keep the single bar. -->
+        <template x-if="!runTimings[run.run_id] || !runTimings[run.run_id].steps.length">
+          <div class="progress-track mb-4">
+            <div class="progress-fill" :style="'width:' + runProgress(run) + '%'"></div>
+          </div>
+        </template>
+        <template x-for="timing in [runTimings[run.run_id]].filter((t) => t && t.steps.length)" :key="run.run_id">
+          <div class="mb-4" data-testid="run-timing">
+            <div class="rt-summary">
+              <div class="text-xs text-muted">
+                <span>Started </span><span data-testid="run-started" x-text="fmtDate(timing.started_at)"></span>
+                <span> · Ended </span><span data-testid="run-ended" x-text="fmtDate(timing.completed_at)"></span>
+                <span x-show="timing.held_seconds > 0" x-text="' · Held ' + fmtSeconds(timing.held_seconds)"></span>
+              </div>
+              <div class="text-right">
+                <div class="rt-elapsed" data-testid="run-elapsed" x-text="fmtSeconds(timing.elapsed_seconds)"></div>
+                <div class="text-xs text-muted" x-text="timing.jobs_done + ' of ' + timing.jobs_total + ' jobs done'"></div>
+              </div>
+            </div>
+            <div class="rt-tabs" role="tablist">
+              <button type="button" role="tab" class="rt-tab" :class="runTimingTab(run) === 'progress' && 'is-on'"
+                      :aria-selected="runTimingTab(run) === 'progress'" @click="setRunTimingTab(run.run_id, 'progress')"
+                      data-testid="run-tab-progress">Progress</button>
+              <button type="button" role="tab" class="rt-tab" :class="runTimingTab(run) === 'timeline' && 'is-on'"
+                      :aria-selected="runTimingTab(run) === 'timeline'" @click="setRunTimingTab(run.run_id, 'timeline')"
+                      data-testid="run-tab-timeline">Timeline</button>
+            </div>
+            <div x-show="runTimingTab(run) === 'progress'" data-testid="run-progress-rows">
+              <template x-for="step in timing.steps" :key="step.step_index">
+                <div class="rt-progress-row" :data-testid="'monitor-step-' + (step.step_id || step.step_index)">
+                  <div class="rt-job-name">
+                    <span class="rt-job-title" x-text="step.job_name"></span>
+                    <span class="rt-job-sub" x-text="step.job_type || 'unknown'"></span>
+                  </div>
+                  <div class="rt-bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                       :aria-valuenow="step.progress.percent === null ? null : step.progress.percent"
+                       :aria-label="step.job_name + ': ' + step.progress.label">
+                    <template x-if="step.progress.state !== 'queued' && step.progress.state !== 'not_run'">
+                      <div class="rt-bar-fill" :class="progressBarClass(step)" :style="'width:' + progressBarWidth(step)"
+                           x-text="step.progress.percent === null ? '' : step.progress.label"></div>
+                    </template>
+                  </div>
+                  <div class="rt-runtime" x-text="runtimeText(step)"></div>
+                  <template x-if="step.progress.state === 'held'">
+                    <button @click="openStepRelease(run.run_id, step.step_index)" class="btn-primary btn-sm text-xs py-1 px-3">Release</button>
+                  </template>
+                </div>
+              </template>
+            </div>
+            <div x-show="runTimingTab(run) === 'timeline'">
+              <!-- SHARED: shared/run-gantt.html -->
+            </div>
+          </div>
+        </template>
 
         <!-- Stat mini-cards -->
         <div class="grid-stat">
@@ -76,43 +126,6 @@
           </div>
         </div>
 
-        <!-- Step timeline (shown when run has step data) -->
-        <template x-if="runStepsCache[run.run_id] && runStepsCache[run.run_id].length > 0">
-          <div class="mt-4">
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Steps</div>
-            <div class="space-y-1.5">
-              <template x-for="step in runStepsCache[run.run_id]" :key="step.step_index">
-                <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
-                  <span class="text-xs font-bold text-slate-400 w-5 text-center" x-text="step.step_index + 1"></span>
-                  <span class="flex-1 text-sm font-medium text-slate-700" x-text="step.job_name"></span>
-                  <span class="badge text-xs" :class="stepStatusBadgeClass(step.status)" x-text="step.status"></span>
-                  <template x-if="step.status === 'HELD'">
-                    <button @click="openStepRelease(run.run_id, step.step_index)" class="btn-primary btn-sm text-xs py-1 px-3">Release</button>
-                  </template>
-                </div>
-              </template>
-            </div>
-            <div class="mt-3" data-testid="monitor-step-timeline">
-              <div class="field-label">Step timeline</div>
-              <template x-for="level in monitorStepLevels(runStepsCache[run.run_id])" :key="level.index">
-                <div class="flex items-start gap-3 py-1">
-                  <span class="text-xs text-muted w-16 pt-1" x-text="'level ' + (level.index + 1)"></span>
-                  <div class="flex flex-wrap gap-2">
-                    <template x-for="step in level.steps" :key="step.step_id || step.step_index">
-                      <div class="chip flex items-center gap-2"
-                           :data-testid="'monitor-step-' + (step.step_id || step.step_index)">
-                        <span x-text="step.step_id || step.job_name"></span>
-                        <span :class="monitorStepBadgeClass(step.status)" x-text="step.status"></span>
-                        <span class="text-xs text-muted" x-show="(step.attempt || 0) > 1"
-                              x-text="'try ' + step.attempt"></span>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </div>
-        </template>
 
         <!-- HELD alert -->
         <template x-if="run._progress && run._progress.held_step != null">

@@ -2520,3 +2520,26 @@ mark.q-hit { background: rgba(255,179,0,0.32); color: inherit; border-radius: 2p
   .md\:grid-cols-4,
   .md\:grid-cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Run timing: per-job progress bars and Gantt */
+.rt-summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+.rt-elapsed { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rt-tabs { display: flex; gap: 0.25rem; margin-bottom: 0.75rem; border-bottom: 1px solid rgba(148, 163, 184, 0.3); }
+.rt-tab { padding: 0.25rem 0.75rem; font-size: 0.75rem; color: inherit; opacity: 0.7; border-bottom: 2px solid transparent; }
+.rt.tab.is-on { opacity: 1; font-weight: 700; color: var(--accent); border-bottom-color: var(--accent); }
+.rt-progress-row { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr minmax(6rem, auto) auto; align-items: center; gap: 0.75rem; padding: 0.25rem 0; }
+.rt-job-name { min-width: 0; }
+.rt-job-title { display: block; font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-job-sub { display: block; font-size: 0.6875rem; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-bar-track { height: 1rem; border-radius: 9999px; overflow: hidden; background: rgba(148, 163, 184, 0.2); }
+.rt-bar-fill { height: 100%; min-width: 2.25rem; border-radius: 9999px; color: #fff; font-size: 0.625rem; line-height: 1rem; text-align: center; white-space: nowrap; overflow: hidden; transition: width 0.8s linear; }
+.rt-runtime { font-size: 0.75rem; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rt-stripe { background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.28) 0 6px, transparent 6px 12px); background-size: 17px 17px; animation: rt-stripe-move 1s linear infinite; }
+@keyframes rt-stripe-move { to { background-position: 17px 0; } }
+@media (prefers-reduced-motion: reduce) { .rt-stripe { animation: none; } .rt-bar-fill { transition: none; } }
+.rt-toggle { display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.5rem; }
+.rt-toggle-btn { padding: 0.125rem 0.5rem; font-size: 0.6875rem; border-radius: 0.25rem; background: rgba(148, 163, 184, 0.2); color: inherit; }
+.rt-toggle-btn.is-on { background: var(--accent); color: #fff; }
+.rt-gantt-axis, .rt-gantt-row { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr minmax(6rem, auto); align-items: center; gap: 0.75rem; }
+.rt-gantt-axis { font-size: 0.6875rem; opacity: 0.7; padding-bottom: 0.25rem; border-bottom: 1px solid rgba(148, 163, 184, 0.2); }
+.rt-gantt-ticks { font-size: 0.6875rem; }
