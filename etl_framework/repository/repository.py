@@ -7,6 +7,7 @@ from sqlalchemy import String, case, cast, func, insert, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.repository.database import sequence_id_from_snapshot
 from etl_framework.repository.query_utils import apply_pagination
 from etl_framework.utils.serialization import json_safe
 from etl_framework.repository.models import (
@@ -400,11 +401,6 @@ class JobSelectionRepository:
         return dict(rows)
 
 
-def _sequence_id_from_snapshot(config_snapshot: dict | None) -> int | None:
-    sequence = (config_snapshot or {}).get("sequence")
-    return sequence.get("id") if isinstance(sequence, dict) else None
-
-
 class RunRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -436,7 +432,7 @@ class RunRepository:
             ci_context=ci_context,
             run_batch_id=run_batch_id,
             restarted_from_run_id=restarted_from_run_id,
-            sequence_id=_sequence_id_from_snapshot(config_snapshot),
+            sequence_id=sequence_id_from_snapshot(config_snapshot),
         )
         self._db.add(run)
         self._db.commit()

@@ -79,44 +79,70 @@ def _ensure_export_job_columns(bind) -> None:
         ensure_column(conn, "difference_export_jobs", "heartbeat_at", _export_heartbeat_column_ddl(bind.dialect))
 
 
+_SEQUENCE_INDEX = "ix_test_runs_sequence_id"
+_SEQUENCE_BACKFILL_BATCH = 500
+
+
+def sequence_id_from_snapshot(snapshot) -> int | None:
+    """The sequence id in a run's config snapshot, or None unless it is a real int."""
+    sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
+    value = sequence.get("id") if isinstance(sequence, dict) else None
+    return value if type(value) is int else None
+
+
 def _ensure_run_timing_columns(bind) -> None:
     """Add step times and sequence_id on existing databases.
 
     Not SQLite-gated: /timing and the stream read these columns on every
     dialect. The datetime type comes from the dialect because Postgres has no
-    DATETIME. Old runs get sequence_id from their snapshot only when the column
-    is first added, so later starts never overwrite anything.
+    DATETIME. The sequence_id index is the completion marker: it is created
+    last, so a crash mid-backfill (SQLite commits ALTER at once) reruns the
+    backfill next start. Batches keep memory bounded and locks short.
     """
     tables = set(inspect(bind).get_table_names())
     if not {"test_runs", "run_steps"}.issubset(tables):
         return
+    needs_backfill = _SEQUENCE_INDEX not in {
+        index["name"] for index in inspect(bind).get_indexes("test_runs")
+    }
     datetime_type = DateTime(timezone=True).compile(dialect=bind.dialect)
     with bind.begin() as conn:
         ensure_column(conn, "run_steps", "started_at", f"ALTER TABLE run_steps ADD COLUMN started_at {datetime_type}")
         ensure_column(conn, "run_steps", "finished_at", f"ALTER TABLE run_steps ADD COLUMN finished_at {datetime_type}")
-        added = ensure_column(conn, "test_runs", "sequence_id", "ALTER TABLE test_runs ADD COLUMN sequence_id INTEGER")
-        ensure_index(conn, "ix_test_runs_sequence_id", "CREATE INDEX ix_test_runs_sequence_id ON test_runs (sequence_id)")
-        if added:
-            _backfill_run_sequence_ids(conn)
+        ensure_column(conn, "test_runs", "sequence_id", "ALTER TABLE test_runs ADD COLUMN sequence_id INTEGER")
+    if needs_backfill:
+        _backfill_run_sequence_ids(bind)
+    with bind.begin() as conn:
+        ensure_index(conn, _SEQUENCE_INDEX, f"CREATE INDEX {_SEQUENCE_INDEX} ON test_runs (sequence_id)")
 
 
-def _backfill_run_sequence_ids(conn) -> None:
-    rows = conn.execute(
-        text("SELECT id, config_snapshot FROM test_runs WHERE config_snapshot IS NOT NULL")
-    ).fetchall()
-    for row_id, snapshot in rows:
-        if isinstance(snapshot, str):
-            try:
-                snapshot = json.loads(snapshot)
-            except ValueError:
-                continue
-        sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
-        sequence_id = sequence.get("id") if isinstance(sequence, dict) else None
-        if sequence_id is not None:
-            conn.execute(
-                text("UPDATE test_runs SET sequence_id = :sequence_id WHERE id = :row_id"),
-                {"sequence_id": sequence_id, "row_id": row_id},
-            )
+def _backfill_run_sequence_ids(bind) -> None:
+    last_id = 0
+    while True:
+        with bind.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, config_snapshot FROM test_runs "
+                    "WHERE id > :last AND sequence_id IS NULL AND config_snapshot IS NOT NULL "
+                    "ORDER BY id LIMIT :batch"
+                ),
+                {"last": last_id, "batch": _SEQUENCE_BACKFILL_BATCH},
+            ).fetchall()
+            for row_id, snapshot in rows:
+                last_id = row_id
+                if isinstance(snapshot, str):
+                    try:
+                        snapshot = json.loads(snapshot)
+                    except ValueError:
+                        continue
+                sequence_id = sequence_id_from_snapshot(snapshot)
+                if sequence_id is not None:
+                    conn.execute(
+                        text("UPDATE test_runs SET sequence_id = :sequence_id WHERE id = :row_id"),
+                        {"sequence_id": sequence_id, "row_id": row_id},
+                    )
+        if not rows:
+            return
 
 
 def _ensure_compare_columns(bind) -> None:

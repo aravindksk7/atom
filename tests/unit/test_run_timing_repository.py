@@ -1,6 +1,10 @@
 """Step timestamps, sequence_id and the upgrade of existing databases."""
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+
+import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -145,3 +149,106 @@ def test_upgrade_adds_columns_and_backfills_once():
     with engine.connect() as conn:
         value = conn.execute(text("SELECT sequence_id FROM test_runs WHERE run_id = 'seq'")).scalar()
     assert value == 99
+
+
+def test_second_running_pass_does_not_move_the_end():
+    db = _session()
+    repo = _step(db)
+    repo.set_status_by_step_id("r1", "a", "RUNNING")
+    repo.set_status_by_step_id("r1", "a", "HELD")
+    step = repo.get_step_by_step_id("r1", "a")
+    step.finished_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    db.commit()
+    db.refresh(step)
+    first_end = step.finished_at
+
+    repo.set_status_by_step_id("r1", "a", "RUNNING")
+    repo.set_status_by_step_id("r1", "a", "PASSED")
+    assert repo.get_step_by_step_id("r1", "a").finished_at == first_end
+
+
+@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5])
+def test_create_run_ignores_non_integer_sequence_id(bad):
+    db = _session()
+    run = RunRepository(db).create_run("rb", "dev", "prod", {"sequence": {"id": bad}})
+    assert run.sequence_id is None
+
+
+@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5])
+def test_backfill_skips_non_integer_sequence_id(bad):
+    from etl_framework.repository.database import _ensure_run_timing_columns
+
+    engine = _old_database()
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO test_runs (run_id, config_snapshot) VALUES ('junk', :s)"),
+            {"s": json.dumps({"sequence": {"id": bad}})},
+        )
+    _ensure_run_timing_columns(engine)
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT run_id, sequence_id FROM test_runs")).fetchall())
+    assert rows == {"seq": 5, "plain": None, "bad": None, "none": None, "junk": None}
+
+
+def test_backfill_handles_json_null_snapshot():
+    from etl_framework.repository.database import _ensure_run_timing_columns
+
+    engine = _old_database()
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO test_runs (run_id, config_snapshot) VALUES ('jnull', 'null')"))
+    _ensure_run_timing_columns(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT sequence_id FROM test_runs WHERE run_id='jnull'")).scalar() is None
+
+
+def test_backfill_reruns_after_a_crash_midway(monkeypatch):
+    import etl_framework.repository.database as database
+
+    engine = _old_database()
+    real = database._backfill_run_sequence_ids
+
+    def boom(bind):
+        raise RuntimeError("crash")
+
+    monkeypatch.setattr(database, "_backfill_run_sequence_ids", boom)
+    with pytest.raises(RuntimeError):
+        database._ensure_run_timing_columns(engine)
+    # The column survived the crash, but the index (the marker) did not.
+    assert "sequence_id" in {c["name"] for c in inspect(engine).get_columns("test_runs")}
+
+    monkeypatch.setattr(database, "_backfill_run_sequence_ids", real)
+    database._ensure_run_timing_columns(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT sequence_id FROM test_runs WHERE run_id='seq'")).scalar() == 5
+
+
+def test_backfill_covers_more_rows_than_one_batch(monkeypatch):
+    import etl_framework.repository.database as database
+
+    monkeypatch.setattr(database, "_SEQUENCE_BACKFILL_BATCH", 2)
+    engine = _old_database()
+    with engine.begin() as conn:
+        for n in range(6):
+            conn.execute(
+                text("INSERT INTO test_runs (run_id, config_snapshot) VALUES (:r, :s)"),
+                {"r": f"b{n}", "s": json.dumps({"sequence": {"id": 100 + n}})},
+            )
+    database._ensure_run_timing_columns(engine)
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT run_id, sequence_id FROM test_runs")).fetchall())
+    assert [rows[f"b{n}"] for n in range(6)] == [100 + n for n in range(6)]
+    assert rows["seq"] == 5
+
+
+def test_fresh_database_skips_the_backfill(monkeypatch):
+    import etl_framework.repository.database as database
+
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+
+    def boom(bind):
+        raise AssertionError("backfill ran on a fresh database")
+
+    monkeypatch.setattr(database, "_backfill_run_sequence_ids", boom)
+    database._ensure_run_timing_columns(engine)
