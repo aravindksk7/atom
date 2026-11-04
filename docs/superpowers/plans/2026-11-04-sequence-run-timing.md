@@ -2571,7 +2571,7 @@ git commit -m "feat(ui): add run timing and Gantt layout logic"
 - Modify: `frontend/partials/tab-monitor.html`, `frontend/features/monitor.js`, `frontend/styles.css`
 - Modify: `tests/e2e/60-sequence-flow-modes.spec.ts:91-129`
 
-- [ ] **Step 1: Add shared partial support to the build**
+- [x] **Step 1: Add shared partial support to the build**
 
 In `scripts/build-html.js`, after `const INCLUDE_SNIFF_RE = /^<!-- INCLUDE:/;`:
 
@@ -2593,7 +2593,7 @@ Change the partial read inside `build()`:
     return expandShared(fs.readFileSync(partialPath, 'utf8')).replace(/\r?\n$/, '');
 ```
 
-- [ ] **Step 2: Write the shared Gantt markup**
+- [x] **Step 2: Write the shared Gantt markup**
 
 Create `frontend/partials/shared/run-gantt.html`. It expects a `timing` variable in Alpine scope:
 
@@ -2655,7 +2655,7 @@ Create `frontend/partials/shared/run-gantt.html`. It expects a `timing` variable
 </div>
 ```
 
-- [ ] **Step 3: Replace the run card contents**
+- [x] **Step 3: Replace the run card contents**
 
 In `frontend/partials/tab-monitor.html`, add `x-init` to the card element on line 25:
 
@@ -2724,7 +2724,7 @@ Replace lines 54-57 (the `<!-- Progress bar -->` block) with:
 
 Delete lines 79-115 (the `<!-- Step timeline (shown when run has step data) -->` block). Its contents are now in the Progress and Timeline tabs. Keep the `<!-- HELD alert -->` block.
 
-- [ ] **Step 4: Feed timing into the card**
+- [x] **Step 4: Feed timing into the card**
 
 In `frontend/features/monitor.js`, in the `progress` listener, after `const progress = JSON.parse(event.data);`:
 
@@ -2748,7 +2748,7 @@ Delete `monitorStepLevels` and `monitorStepBadgeClass` with the comment above th
 
 Keep `runProgress`: runs without steps still use it.
 
-- [ ] **Step 5: Add the styles**
+- [x] **Step 5: Add the styles**
 
 Append to `frontend/styles.css`:
 
@@ -2802,7 +2802,7 @@ Append to `frontend/styles.css`:
 }
 ```
 
-- [ ] **Step 6: Update the Monitor e2e test**
+- [x] **Step 6: Update the Monitor e2e test**
 
 In `tests/e2e/60-sequence-flow-modes.spec.ts`, rename the test on line 91 to `'the monitor shows each job's progress and a timeline'` using double quotes for the string, and replace lines 120-124:
 
@@ -2837,7 +2837,7 @@ In `tests/e2e/60-sequence-flow-modes.spec.ts`, rename the test on line 91 to `'t
 
 `createFileJob` jobs might have a type outside the reconciliation family, but the legend always lists all families, so the assertion holds.
 
-- [ ] **Step 7: Build and run the tests**
+- [x] **Step 7: Build and run the tests**
 
 Run: `node scripts/build-html.js`
 Run: `C:\Python314\python.exe -m pytest tests/unit/test_run_timing_frontend.py -q -p no:cacheprovider`
@@ -2846,7 +2846,7 @@ Expected: PASS.
 Run: `node node_modules/@playwright/test/cli.js test tests/e2e/60-sequence-flow-modes.spec.ts -g "progress and a timeline"`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scripts/build-html.js frontend/partials/shared/run-gantt.html frontend/partials/tab-monitor.html frontend/features/monitor.js frontend/styles.css frontend/index.html tests/e2e/60-sequence-flow-modes.spec.ts
