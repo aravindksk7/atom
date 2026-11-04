@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from api.schemas import (
     BOCompareRequest,
     DifferenceExportStatusOut,
+    JobDefinition,
     MatrixCompareRequest,
     ReconFileCompareRequest,
     RunSettings,
@@ -27,6 +28,7 @@ from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
 from api.services.run_executor import RunExecutor
 from api.services.run_label import report_name_base_for, short_run_id
+from api.services.variable_resolution import substitute_in_job
 from etl_framework.config.models import resolve_connection
 from etl_framework.db.engine import DBEngine
 from etl_framework.reconciliation.compare_utils import (
@@ -68,6 +70,13 @@ DIFFERENCE_FIELDS = [
     "relative_delta",
 ]
 EXPORT_ROOT = Path("reports/exports")
+
+# Rows that describe a job rather than a difference, so a job an export cannot show
+# is named in the file instead of being left out of it.
+JOB_ERROR_TYPE = "job_error"
+EXPORT_INCOMPLETE_TYPE = "export_incomplete"
+JOB_NOTE_TYPES = frozenset({JOB_ERROR_TYPE, EXPORT_INCOMPLETE_TYPE})
+JOB_NOTE_COLUMN = "<job>"
 
 
 def _utcnow() -> datetime:
@@ -264,23 +273,72 @@ def write_stored_differences(db: Session, run: TestRun, fmt: str) -> tuple[Path,
     path = export_dir(run.run_id) / export_filename(run, fmt, f"stored_{uuid.uuid4().hex[:8]}")
     with DifferenceWriter(path, fmt) as writer:
         for result in run.results:
-            for mismatch in (
-                db.query(MismatchDetail)
-                .filter(MismatchDetail.test_result_id == result.id)
-                .order_by(MismatchDetail.id)
-                .yield_per(1000)
-            ):
-                writer.write({
-                    "test_name": result.query_name,
-                    "key_values": mismatch.key_values or {},
-                    "column_name": mismatch.column_name or "",
-                    "source_value": mismatch.source_value,
-                    "target_value": mismatch.target_value,
-                    "mismatch_type": mismatch.mismatch_type or "",
-                    "delta": mismatch.delta,
-                    "relative_delta": mismatch.relative_delta,
-                })
+            _write_stored_result_rows(db, result, writer)
+            if result.status == "ERROR":
+                _write_job_error(result, writer)
         return path, writer.row_count
+
+
+def _write_stored_result_rows(db: Session, result: TestResult, writer: DifferenceWriter) -> int:
+    written = 0
+    for mismatch in (
+        db.query(MismatchDetail)
+        .filter(MismatchDetail.test_result_id == result.id)
+        .order_by(MismatchDetail.id)
+        .yield_per(1000)
+    ):
+        writer.write({
+            "test_name": result.query_name,
+            "key_values": mismatch.key_values or {},
+            "column_name": mismatch.column_name or "",
+            "source_value": mismatch.source_value,
+            "target_value": mismatch.target_value,
+            "mismatch_type": mismatch.mismatch_type or "",
+            "delta": mismatch.delta,
+            "relative_delta": mismatch.relative_delta,
+        })
+        written += 1
+    return written
+
+
+def _write_job_note(writer: DifferenceWriter, test_name: str, mismatch_type: str, message: str) -> None:
+    writer.write({
+        "test_name": test_name,
+        "key_values": {},
+        "column_name": JOB_NOTE_COLUMN,
+        "source_value": message,
+        "target_value": None,
+        "mismatch_type": mismatch_type,
+    })
+
+
+def _write_job_error(result: TestResult, writer: DifferenceWriter) -> None:
+    _write_job_note(
+        writer,
+        result.query_name,
+        JOB_ERROR_TYPE,
+        result.error_message or "The job ended in an error and compared no rows.",
+    )
+
+
+def _write_stored_rows_for_unrebuilt_job(
+    db: Session,
+    result: TestResult | None,
+    writer: DifferenceWriter,
+) -> None:
+    """A job the export cannot run again still found its differences, and the run
+    stored them up to its row cap -- show those, and say so when they are not all."""
+    if result is None or not result.total_issues:
+        return
+    written = _write_stored_result_rows(db, result, writer)
+    if written < result.total_issues:
+        _write_job_note(
+            writer,
+            result.query_name,
+            EXPORT_INCOMPLETE_TYPE,
+            f"Showing {written} of {result.total_issues} differences: this job cannot be "
+            "run again for an export, so only the rows stored by the run are available.",
+        )
 
 
 def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[DifferenceExportJob, bool]:
@@ -306,7 +364,12 @@ def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[Diff
         .order_by(DifferenceExportJob.completed_at.desc())
         .first()
     )
-    if completed is not None and completed.artifact_path and Path(completed.artifact_path).exists():
+    if (
+        completed is not None
+        and completed.artifact_path
+        and Path(completed.artifact_path).exists()
+        and int(completed.row_count or 0) >= _minimum_export_rows(db, run_id)
+    ):
         return completed, False
     job = DifferenceExportJob(
         export_id=str(uuid.uuid4()),
@@ -320,6 +383,13 @@ def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[Diff
     db.commit()
     db.refresh(job)
     return job, True
+
+
+def _minimum_export_rows(db: Session, run_id: str) -> int:
+    """Rows a finished export of this run should hold. One with fewer -- say a blank
+    file written before a job type could be rebuilt -- is built again, not served."""
+    results = db.query(TestResult).filter(TestResult.run_id == run_id).all()
+    return sum(1 if result.status == "ERROR" else result.total_issues for result in results)
 
 
 def export_status_out(job: DifferenceExportJob) -> DifferenceExportStatusOut:
@@ -492,7 +562,9 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
     snapshot = build_run_report_snapshot(run, include_mismatches=False)
     for result in snapshot.results:
         result.mismatches = rows_by_test.get(result.query_name, [])
-        result.total_issues_override = len(result.mismatches)
+        result.total_issues_override = sum(
+            1 for row in result.mismatches if row["mismatch_type"] not in JOB_NOTE_TYPES
+        )
 
     generator = ReportGenerator(output_dir=str(path.parent), timezone=_current_app_timezone())
     generator.generate(snapshot, filename=path.name)
@@ -662,18 +734,20 @@ def _write_matrix_compare(db: Session, payload: dict[str, Any], writer: Differen
 
 def _write_compare_job(
     db: Session,
-    saved: SavedJob,
+    job: JobDefinition,
     writer: DifferenceWriter,
     settings: RunSettings | None = None,
-) -> None:
+) -> bool:
     """Recompute a job saved via the Compare tab's "Save as Job" button
     (job_type == 'compare') from its own params, the same way a
     'compare_request_type'-tagged ad-hoc run does. Job-executed compare runs
     never get that snapshot key set (only the ad-hoc /api/compare/* endpoints
     do), so without this the caller's job_type == 'reconciliation' filter
     would silently drop the job and export zero rows for it.
+
+    Returns False when the job has no tabular difference set to rebuild.
     """
-    params = saved.params or {}
+    params = job.params or {}
     compare_type = params.get("compare_type")
     payload = dict(params.get("request") or {})
     svc = CompareService(db, ConfigRepository(db))
@@ -697,7 +771,7 @@ def _write_compare_job(
         if not (isinstance(source_a, pd.DataFrame) and isinstance(source_b, pd.DataFrame)):
             # Report-shaped (HTML/stored-run stats) sources compare test-by-test,
             # not row-by-row -- there is no tabular difference set to add here.
-            return
+            return False
         df_a, df_b = source_a, source_b
         options = req.advanced
     elif compare_type == "matrix":
@@ -712,17 +786,24 @@ def _write_compare_job(
         df_a = extract_data_source(req.source_a.model_dump(), db)
         df_b = extract_data_source(req.source_b.model_dump(), db)
         options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
+    elif compare_type == "sql":
+        req = SQLCompareRequest(**payload)
+        if not use_live:
+            raise ValueError("compare jobs with SQL sources require live connections to be enabled")
+        df_a, df_b = svc._load_sql_frames(req)
+        options = req.advanced
     else:
-        return
+        return False
     _write_tabular_differences(
         df_a,
         df_b,
         key_columns=req.key_columns or [],
         exclude_columns=req.exclude_columns or [],
         options=options,
-        test_name=saved.name,
+        test_name=job.name,
         writer=writer,
     )
+    return True
 
 
 def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWriter) -> None:
@@ -739,18 +820,38 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         run_settings=settings,
         config_snapshot=snapshot,
     )
+    variables = snapshot.get("variables") or {}
+    results_by_job = {result.query_name: result for result in run.results}
+    # A job that errored found no differences, so running it now could only report
+    # rows the run never did.
+    errored_jobs = {result.query_name for result in run.results if result.status == "ERROR"}
+    for result in run.results:
+        if result.status == "ERROR":
+            _write_job_error(result, writer)
     for item in job_names:
         job_name = item.get("job_name") if isinstance(item, dict) else str(item)
+        if job_name in errored_jobs:
+            continue
+        result = results_by_job.get(job_name)
+        if result is not None and not result.total_issues:
+            # The run found nothing here. Querying again costs time on every source
+            # and can only add rows from data that drifted since.
+            continue
         saved = db.query(SavedJob).filter(SavedJob.name == job_name).first()
         if saved is None:
+            _write_stored_rows_for_unrebuilt_job(db, result, writer)
             continue
-        if saved.job_type == "compare":
-            _write_compare_job(db, saved, writer, settings=settings)
+        if saved.job_type not in ("compare", "reconciliation"):
+            _write_stored_rows_for_unrebuilt_job(db, result, writer)
             continue
-        if saved.job_type != "reconciliation":
+        # The same values the run itself used, so the rebuild reads the same data.
+        job = substitute_in_job(executor._job_to_definition(saved), variables)
+        if job.job_type == "compare":
+            if not _write_compare_job(db, job, writer, settings=settings):
+                _write_stored_rows_for_unrebuilt_job(db, result, writer)
             continue
-        job = executor._job_to_definition(saved)
         if job.params.get("source_mode") == "bo_live":
+            _write_stored_rows_for_unrebuilt_job(db, result, writer)
             continue
         if job.params.get("source_mode") == "multi_file":
             _write_multi_file_reconciliation_job(db, job, settings, writer, snapshot)

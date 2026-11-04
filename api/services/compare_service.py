@@ -577,6 +577,21 @@ class CompareService:
 
     def compare_sql(self, req: SQLCompareRequest) -> "ReconciliationResult":
         """Run both queries against their configs and reconcile; returns ONE result."""
+        df_a, df_b = self._load_sql_frames(req)
+
+        recon_req = ReconFileCompareRequest(
+            file_a_path="__sql__",
+            file_b_path="__sql__",
+            label_a=req.label_a,
+            label_b=req.label_b,
+            key_columns=req.key_columns or None,
+            exclude_columns=req.exclude_columns,
+            advanced=req.advanced,
+        )
+        return self._tabular_file_result(recon_req, df_a, df_b)
+
+    def _load_sql_frames(self, req: SQLCompareRequest) -> tuple["pd.DataFrame", "pd.DataFrame"]:
+        """Run both read-only queries and return frames whose column case agrees."""
         from etl_framework.db.engine import DBEngine
         from etl_framework.config.models import resolve_connection
         from etl_framework.db.sql_utils import is_read_only_sql
@@ -609,17 +624,7 @@ class CompareService:
         # Oracle's SQLAlchemy dialect lower-cases all-uppercase result names.
         df_a = _align_column_case(df_a, key_cols + list(df_b.columns))
         df_b = _align_column_case(df_b, key_cols + list(df_a.columns))
-
-        recon_req = ReconFileCompareRequest(
-            file_a_path="__sql__",
-            file_b_path="__sql__",
-            label_a=req.label_a,
-            label_b=req.label_b,
-            key_columns=req.key_columns or None,
-            exclude_columns=req.exclude_columns,
-            advanced=req.advanced,
-        )
-        return self._tabular_file_result(recon_req, df_a, df_b)
+        return df_a, df_b
 
     def run_sql_comparison(self, req: SQLCompareRequest, run_id: str) -> None:
         """Execute two SQL queries against their respective DB configs and diff the results."""

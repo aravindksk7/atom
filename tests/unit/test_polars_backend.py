@@ -21,6 +21,78 @@ def _backend(key_columns: list[str] | None = None, **kwargs) -> PolarsBackend:
 
 
 # ---------------------------------------------------------------------------
+# Join keys whose types differ between the two sides
+# ---------------------------------------------------------------------------
+
+def _counts(result) -> tuple[int, int, int]:
+    return result.matched_count, result.missing_in_target_count, result.missing_in_source_count
+
+
+def test_int_key_joins_a_whole_valued_float_key():
+    source = pd.DataFrame({"curve_id": [1, 2], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [1.0, 2.0], "val": ["a", "c"]})
+
+    result = _backend(["curve_id"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (2, 0, 0)
+    assert result.value_mismatch_count == 1
+    assert result.mismatches[0].key_values == {"curve_id": 2}
+    assert isinstance(result.mismatches[0].key_values["curve_id"], int)
+
+
+def test_float_key_on_the_source_side_joins_an_int_key():
+    source = pd.DataFrame({"curve_id": [1.0, 2.0], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [1, 2], "val": ["a", "b"]})
+
+    result = _backend(["curve_id"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (2, 0, 0)
+
+
+def test_null_in_a_float_key_is_a_missing_row_not_an_error():
+    source = pd.DataFrame({"curve_id": [1, 2], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [1.0, float("nan")], "val": ["a", "b"]})
+
+    result = _backend(["curve_id"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (1, 1, 1)
+
+
+def test_fractional_float_key_matches_only_equal_values():
+    source = pd.DataFrame({"curve_id": [1, 2], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [1.5, 2.0], "val": ["a", "b"]})
+
+    result = _backend(["curve_id"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (1, 1, 1)
+
+
+def test_large_int_keys_stay_distinct_against_a_whole_valued_float_key():
+    source = pd.DataFrame({"curve_id": [2**53, 2**53 + 1], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [float(2**53)], "val": ["a"]})
+
+    result = _backend(["curve_id"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (1, 1, 0)
+
+
+def test_int_keys_of_different_widths_join():
+    source = pd.DataFrame({"curve_id": pd.Series([1, 2], dtype="int32"), "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": pd.Series([1, 2], dtype="int64"), "val": ["a", "b"]})
+
+    assert _counts(_backend(["curve_id"]).compare_with_counts(source, target)) == (2, 0, 0)
+
+
+def test_only_the_mismatched_key_of_a_composite_key_changes():
+    source = pd.DataFrame({"curve_id": [1, 2], "region": ["eu", "us"], "val": ["a", "b"]})
+    target = pd.DataFrame({"curve_id": [1.0, 2.0], "region": ["eu", "us"], "val": ["a", "b"]})
+
+    result = _backend(["curve_id", "region"]).compare_with_counts(source, target)
+
+    assert _counts(result) == (2, 0, 0)
+
+
+# ---------------------------------------------------------------------------
 # Basic match / mismatch detection
 # ---------------------------------------------------------------------------
 

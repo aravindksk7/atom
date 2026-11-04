@@ -250,10 +250,12 @@ def test_write_reconciliation_run_skips_bo_live_job_instead_of_self_comparing(tm
     assert "bo_live_job" not in calls
     assert "normal_job" in calls
 
+    # Its stored rows are all it can show, and the file says that some are absent.
     lines = out_path.read_text(encoding="utf-8").strip().splitlines()
-    assert row_count == len(lines) == 1
-    row = json.loads(lines[0])
-    assert row["test_name"] == "normal_job"
+    assert row_count == len(lines) == 2
+    rows = {json.loads(line)["test_name"]: json.loads(line) for line in lines}
+    assert rows["normal_job"]["mismatch_type"] == "value_diff"
+    assert rows["bo_live_job"]["mismatch_type"] == de.EXPORT_INCOMPLETE_TYPE
 
 
 def test_write_reconciliation_run_recomputes_a_compare_job_instead_of_skipping_it(tmp_path, monkeypatch):

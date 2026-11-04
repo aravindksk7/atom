@@ -45,6 +45,7 @@ class PolarsBackend:
 
         src = pl.from_pandas(df_source).with_columns(pl.lit(True).alias("__in_src__"))
         tgt = pl.from_pandas(df_target).with_columns(pl.lit(True).alias("__in_tgt__"))
+        src, tgt = self._align_key_types(src, tgt)
 
         joined = src.join(tgt, on=self._key_columns, how="full", coalesce=True, suffix="_tgt")
         in_src = pl.col("__in_src__").fill_null(False)
@@ -123,6 +124,32 @@ class PolarsBackend:
                 {str(col): int(matched_count) for col in value_cols},
             ),
         )
+
+    def _align_key_types(self, src, tgt):
+        """Give int and float join keys one type, because a Polars join refuses the
+        pair where a pandas merge accepts it. The same key commonly loads as int on
+        one side and float on the other: a NUMERIC column arrives as Decimal and is
+        normalised to float64, and a key column holding NULLs loads as float64.
+        """
+        for key in self._key_columns:
+            src_type, tgt_type = src.schema[key], tgt.schema[key]
+            if src_type.is_integer() and tgt_type.is_float():
+                float_side = tgt[key]
+            elif src_type.is_float() and tgt_type.is_integer():
+                float_side = src[key]
+            else:
+                continue
+            common = pl.Int64 if self._holds_only_whole_numbers(float_side) else pl.Float64
+            src = src.with_columns(pl.col(key).cast(common))
+            tgt = tgt.with_columns(pl.col(key).cast(common))
+        return src, tgt
+
+    @staticmethod
+    def _holds_only_whole_numbers(series) -> bool:
+        """Casting to float instead would merge int keys above 2**53 into one value,
+        so a float column is read as int whenever that loses nothing."""
+        values = series.drop_nulls()
+        return bool(((values == values.floor()) & (values.abs() < 2.0**63)).all())
 
     def _append_missing_records(
         self,
