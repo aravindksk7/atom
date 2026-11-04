@@ -167,14 +167,14 @@ def test_second_running_pass_does_not_move_the_end():
     assert repo.get_step_by_step_id("r1", "a").finished_at == first_end
 
 
-@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5])
+@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5, 99999999999, 2**70, 0, -5])
 def test_create_run_ignores_non_integer_sequence_id(bad):
     db = _session()
     run = RunRepository(db).create_run("rb", "dev", "prod", {"sequence": {"id": bad}})
     assert run.sequence_id is None
 
 
-@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5])
+@pytest.mark.parametrize("bad", ["abc", {"a": 1}, True, 7.5, 99999999999, 2**70, 0, -5])
 def test_backfill_skips_non_integer_sequence_id(bad):
     from etl_framework.repository.database import _ensure_run_timing_columns
 
@@ -252,3 +252,41 @@ def test_fresh_database_skips_the_backfill(monkeypatch):
 
     monkeypatch.setattr(database, "_backfill_run_sequence_ids", boom)
     database._ensure_run_timing_columns(engine)
+
+
+def test_crash_after_first_batch_keeps_committed_rows(monkeypatch):
+    from sqlalchemy import event
+
+    import etl_framework.repository.database as database
+
+    monkeypatch.setattr(database, "_SEQUENCE_BACKFILL_BATCH", 2)
+    engine = _old_database()
+    with engine.begin() as conn:
+        for n in range(4):
+            conn.execute(
+                text("INSERT INTO test_runs (run_id, config_snapshot) VALUES (:r, :s)"),
+                {"r": f"b{n}", "s": json.dumps({"sequence": {"id": 100 + n}})},
+            )
+
+    seen = {"batches": 0}
+
+    def fail_on_second_batch(conn, cursor, statement, *args):
+        if "FROM test_runs" in statement and "LIMIT" in statement:
+            seen["batches"] += 1
+            if seen["batches"] == 2:
+                raise RuntimeError("crash")
+
+    event.listen(engine, "before_cursor_execute", fail_on_second_batch)
+    with pytest.raises(RuntimeError):
+        database._ensure_run_timing_columns(engine)
+    event.remove(engine, "before_cursor_execute", fail_on_second_batch)
+
+    with engine.begin() as conn:  # a value the first batch committed
+        conn.execute(text("UPDATE test_runs SET sequence_id = 99 WHERE run_id = 'seq'"))
+    database._ensure_run_timing_columns(engine)
+
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT run_id, sequence_id FROM test_runs")).fetchall())
+    assert rows["seq"] == 99
+    assert [rows[f"b{n}"] for n in range(4)] == [100, 101, 102, 103]
+    assert "ix_test_runs_sequence_id" in {i["name"] for i in inspect(engine).get_indexes("test_runs")}

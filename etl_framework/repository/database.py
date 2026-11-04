@@ -81,13 +81,14 @@ def _ensure_export_job_columns(bind) -> None:
 
 _SEQUENCE_INDEX = "ix_test_runs_sequence_id"
 _SEQUENCE_BACKFILL_BATCH = 500
+_MAX_SEQUENCE_ID = 2**31 - 1  # the INTEGER column's limit
 
 
 def sequence_id_from_snapshot(snapshot) -> int | None:
-    """The sequence id in a run's config snapshot, or None unless it is a real int."""
+    """The sequence id in a run's config snapshot, or None unless it is a positive int that fits the column."""
     sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
     value = sequence.get("id") if isinstance(sequence, dict) else None
-    return value if type(value) is int else None
+    return value if type(value) is int and 1 <= value <= _MAX_SEQUENCE_ID else None
 
 
 def _ensure_run_timing_columns(bind) -> None:
