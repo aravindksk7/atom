@@ -37,3 +37,6 @@ tests/e2e/.admin-token.json
 docs/*
 !docs/superpowers
 upgrade.md
+
+# ATOM regression demo recordings
+demo/output/

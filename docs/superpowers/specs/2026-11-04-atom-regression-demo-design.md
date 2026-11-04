@@ -36,14 +36,15 @@ hit Windows excluded port ranges.
 
 | Service | Image or source | Role |
 |---|---|---|
-| `atom` | `Dockerfile.test`, uvicorn, throwaway SQLite | Real ATOM API and UI |
+| `atom` | `Dockerfile.test`, uvicorn | Real ATOM API and UI |
 | `demo-runner` | `Dockerfile.test` | Seeding and Playwright recording |
 | `sapds` | `docker/sapds-mock` | SAP Data Services, runs the ETLs |
 | `sapbo` | `docker/sapbo-mock` | SAP BusinessObjects reports |
 | `postgres` | `postgres:16` | Real Postgres data source |
 | `oracle-sim` | `postgres:16` | Simulated Oracle: Oracle-style names, connection `ORACLE_PROD`, `db_type: postgresql` |
 | `crushftp-sim` | Wrapper around `tests/helpers/fake_crushftp.py` | Simulated CrushFTP holding the Production flat file |
-| `s3-sim` | `minio/minio` | Simulated AWS S3 holding Production CSV/XML baselines |
+| `s3-sim` | `floci/floci` | Simulated AWS S3 holding Production CSV/XML baselines (`minio/minio` could not be pulled) |
+| `atom-db` | `postgres:16` | ATOM's own repository (SQLite locked under a 100-step run and returned 500s) |
 | `mailpit` | `axllent/mailpit` | Catches the summary email and shows it in an inbox |
 
 A shared volume holds ETL output files, readable by `atom` through
@@ -118,7 +119,7 @@ neither variable set, the mock behaves as it does today.
 | 4 | Set 4 | Serial | `all_done` | 25 `ds_job` |
 | 5 | Fetch | Serial | `all_done` | `file_transfer` from CrushFTP to local |
 | 6 | Reconcile | Parallel | `all_done` | See jobs below |
-| 7 | BO | Serial | `all_done` | 3 `bo_live` reconciliation jobs |
+| 7 | BO | Parallel | `all_done` | 3 `bo_live` reconciliation jobs |
 
 The failing ETL is last in Set 3 because a step that never ran stops later stages under
 every start rule. Failing mid-set would block the rest of the run.
@@ -129,7 +130,7 @@ every start rule. Failing mid-set would block the rest of the run.
 |---|---|---|---|
 | CSV outputs | `reconciliation`, `source_mode: multi_file`, `unmatched_policy: warn` | Local ETL output | S3 baseline |
 | XML outputs | Same | Local ETL output | S3 baseline |
-| Oracle vs Postgres | `compare`, `compare_type: matrix` | Postgres SQL | `ORACLE_PROD` SQL |
+| Oracle vs Postgres | `compare`, `compare_type: sql` | Postgres SQL | `ORACLE_PROD` SQL |
 | Postgres vs flat file | `compare`, `compare_type: matrix` | Postgres SQL | File fetched from CrushFTP |
 
 Each multi-file job produces one aggregate result with per-pair detail, so one column
@@ -191,20 +192,15 @@ is used, so successful takes are always kept.
 - Accepting differences is a human decision, not automatic categorisation. Narration should
   say so.
 - The email is a summary and doesn't include the accepted-difference breakdown.
-- Estimated length is 12 to 15 minutes, to be measured on the first take.
+- A take is about 14 minutes, about 3 of them the real-time ETL stage. See `demo/README.md`.
 
-## To verify during implementation
+## Verified during implementation
 
-Each item has a fallback or needs a design update if it proves false.
-
-1. `run_date` substitutes into `ds_job` variables, matrix SQL, and S3 and CrushFTP paths.
-2. Accepted differences leave a run FAILED while exceptions remain, including on `compare` jobs.
-3. The Differences bulk accept honours the column filter.
-4. The CrushFTP profile accepts an HTTP endpoint, and `FakeCrushFtp` supports the
-   `file_transfer` download.
-5. `multi_file` jobs can read one side locally and the other from S3.
-6. The hook fires and renders correctly for a run ending FAILED.
-7. Monitor stays readable with 100+ steps at 1920x1080.
+- `run_date` reaches `ds_job` variables, SQL, S3 and CrushFTP paths, and BO prompts.
+- Accepted differences leave the run FAILED while exceptions remain.
+- Bulk accept honours the search filter. The script searches for `fee_amount`, because the column
+  dropdown is empty for multi-file results.
+- The Differences "Open" metric counts the whole run, not the selected test.
 
 ## Out of scope
 

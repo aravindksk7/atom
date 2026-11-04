@@ -1,0 +1,180 @@
+# Records the ATOM regression demo video. See demo/README.md.
+#
+# ATOM itself is real. Oracle, CrushFTP, AWS S3 and SAP are simulated. No host
+# ports are published, so this cannot collide with Windows excluded port ranges
+# or with a local dev server.
+name: atom-demo
+
+x-atom-image: &atom-image
+  build:
+    context: .
+    dockerfile: Dockerfile.test
+  image: atom-test:local
+  working_dir: /app
+  volumes:
+    - .:/app
+    # Keeps the image's Linux node_modules over the bind mount.
+    - /app/node_modules
+    - demo-data:/demo-data
+
+x-seed-env: &seed-env
+  DEMO_DATA_ROOT: /demo-data
+  DEMO_S3_ENDPOINT: http://s3-sim:4566
+  DEMO_S3_BUCKET: prod-baselines
+  DEMO_S3_KEY: demo-s3-access
+  DEMO_S3_SECRET: demo-s3-secret
+  DEMO_POSTGRES_DSN: postgresql://atom:demo_only@postgres:5432/qa
+  DEMO_ORACLE_SIM_DSN: postgresql://atom:demo_only@oracle-sim:5432/prod
+
+services:
+  atom:
+    <<: *atom-image
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Not SQLite: its write lock returned 500s to the UI during a 100-step run.
+      ETL_DATABASE_URL: postgresql+psycopg://atom:demo_only@atom-db:5432/atom
+      SERVER_FILE_ALLOWED_DIRS: /demo-data
+      # The CrushFTP simulator serves plain HTTP. For local Docker only.
+      CRUSHFTP_ALLOW_INSECURE_HTTP: "1"
+    # A longer keep-alive than uvicorn's 5s, so polling doesn't race a closing connection.
+    command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8055 --timeout-keep-alive 120
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8055/api/health', timeout=2).read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    depends_on:
+      atom-db:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+      sapds:
+        condition: service_healthy
+      sapbo:
+        condition: service_healthy
+      crushftp-sim:
+        condition: service_started
+      mailpit:
+        condition: service_started
+
+  seed:
+    <<: *atom-image
+    environment:
+      <<: *seed-env
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: python demo/seed/generate_data.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+      oracle-sim:
+        condition: service_healthy
+      s3-sim:
+        condition: service_started
+
+  demo-runner:
+    <<: *atom-image
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      DEMO_BASE_URL: http://atom:8055
+      DEMO_PACE: ${DEMO_PACE:-1}
+    command: node node_modules/@playwright/test/cli.js test --config demo/playwright.demo.config.ts
+    depends_on:
+      atom:
+        condition: service_healthy
+
+  sapds:
+    build:
+      context: ./docker/sapds-mock
+    image: atom-sapds-mock:latest
+    environment:
+      SAPDS_MOCK_USER: administrator
+      SAPDS_MOCK_PASSWORD: Password1
+      SAPDS_MOCK_CMS_SYSTEM: mock-cms
+      SAPDS_MOCK_JOBS_FILE: /demo-data/sapds-jobs.json
+      SAPDS_MOCK_TEMPLATE_DIR: /demo-data/templates
+      SAPDS_MOCK_OUTPUT_DIR: /demo-data/out
+    volumes:
+      - demo-data:/demo-data
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  sapbo:
+    build:
+      context: ./docker/sapbo-mock
+    image: atom-sapbo-mock:latest
+    environment:
+      SAPBO_MOCK_USER: administrator
+      SAPBO_MOCK_PASSWORD: Password1
+
+  crushftp-sim:
+    <<: *atom-image
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      CRUSHFTP_SIM_USER: atom
+      CRUSHFTP_SIM_PASSWORD: demo_only
+      CRUSHFTP_SIM_ROOT: /demo-data/crushftp
+    command: python demo/mocks/crushftp_sim.py
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  # The AWS emulator docker-compose.integration.yml already uses.
+  s3-sim:
+    image: floci/floci:latest
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+
+  # ATOM's own repository, separate from the data it compares.
+  atom-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: demo_only
+      POSTGRES_DB: atom
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom -d atom"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: demo_only
+      POSTGRES_DB: qa
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom -d qa"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Stands in for an Oracle database: see the limits in demo/README.md.
+  oracle-sim:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: demo_only
+      POSTGRES_DB: prod
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom -d prod"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+
+volumes:
+  demo-data:

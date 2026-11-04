@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import ssl
 import uuid
 from html import escape, unescape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -29,16 +31,66 @@ SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 # real server does not consistently capitalize status strings); "Error" on
 # the failure path exercises the client's case-insensitive matching from the
 # other direction.
-SCHEDULABLE_JOBS = {
+DEFAULT_SCHEDULABLE_JOBS = {
     "DS_NIGHTLY_LOAD": "succeeded",
     "DS_BAD_LOAD": "Error",
 }
 JOB_POLLS_TO_TERMINAL = 2
 
+# Optional, used by docker-compose.demo.yml. With none of these set the mock
+# behaves exactly as it always has.
+JOBS_FILE = os.getenv("SAPDS_MOCK_JOBS_FILE", "")
+TEMPLATE_DIR = os.getenv("SAPDS_MOCK_TEMPLATE_DIR", "")
+OUTPUT_DIR = os.getenv("SAPDS_MOCK_OUTPUT_DIR", "")
+OUTPUT_DATE_VAR = os.getenv("SAPDS_MOCK_OUTPUT_DATE_VAR", "G_BUSINESS_DATE")
+
+_SAFE_DATE_FOLDER_RE = re.compile(r"^[0-9A-Za-z-]+$")
+
+
+def load_schedulable_jobs(jobs_file: str | None) -> dict[str, str]:
+    """The built-in jobs, plus any named in a JSON {job name: terminal status} file."""
+    jobs = dict(DEFAULT_SCHEDULABLE_JOBS)
+    if jobs_file:
+        jobs.update(json.loads(Path(jobs_file).read_text(encoding="utf-8")))
+    return jobs
+
+
+def publish_job_outputs(
+    job_name: str,
+    variables: dict[str, str],
+    *,
+    template_dir: str,
+    output_dir: str,
+    date_var: str,
+) -> list[str]:
+    """Stand in for an ETL writing its output: copy the job's template files into
+    a folder named after the business date the job received. A job given the
+    wrong date therefore writes to the wrong place, as a real one would."""
+    business_date = variables.get(date_var, "")
+    if not template_dir or not output_dir or not _SAFE_DATE_FOLDER_RE.match(business_date):
+        return []
+    source = Path(template_dir) / job_name
+    if not source.is_dir():
+        return []
+    destination = Path(output_dir) / business_date
+    destination.mkdir(parents=True, exist_ok=True)
+    published = []
+    for path in sorted(source.iterdir()):
+        target = destination / path.name
+        shutil.copyfile(path, target)
+        published.append(str(target))
+    return published
+
+
+SCHEDULABLE_JOBS = load_schedulable_jobs(JOBS_FILE)
+
 # SessionID -> True, for currently "logged on" sessions.
 _SESSIONS: set[str] = set()
 # run id -> {"job_name": str, "polls_seen": int, "variables": dict[str, str]}
 _JOB_RUNS: dict[str, dict] = {}
+# Every Run_Batch_Job in arrival order, for GET /debug/runs. Separate from
+# _JOB_RUNS because a short run id can repeat, which would overwrite an entry.
+_RUN_LOG: list[dict] = []
 # Most recently triggered run id, so a test that doesn't otherwise learn the DS-side
 # rid (atom's own run API doesn't surface it -- see RunExecutor._build_case_ds_job)
 # can still inspect the last Run_Batch_Job call via GET /debug/last-run.
@@ -200,6 +252,9 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
                 {"run_id": _LAST_RUN_ID, "job_name": run["job_name"], "variables": run.get("variables", {})},
             )
             return
+        if path == "/debug/runs":
+            self._send_json(HTTPStatus.OK, _RUN_LOG)
+            return
         if path.startswith("/debug/runs/"):
             run_id = path[len("/debug/runs/"):]
             run = _JOB_RUNS.get(run_id)
@@ -287,6 +342,7 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
             "variables": variables,
         }
         _LAST_RUN_ID = run_id
+        _RUN_LOG.append({"job_name": job_name, "variables": variables})
         self._send_result(
             HTTPStatus.OK,
             f'<BatchJobResponse xmlns="{DS_NS}"><pid>1</pid><cid>1</cid>'
@@ -315,6 +371,12 @@ class SAPDSMockHandler(BaseHTTPRequestHandler):
             status = "Running"
         else:
             status = SCHEDULABLE_JOBS[run["job_name"]]
+            if status.lower() == "succeeded" and not run.get("outputs_published"):
+                run["outputs_published"] = True
+                publish_job_outputs(
+                    run["job_name"], run.get("variables", {}),
+                    template_dir=TEMPLATE_DIR, output_dir=OUTPUT_DIR, date_var=OUTPUT_DATE_VAR,
+                )
         self._send_result(
             HTTPStatus.OK,
             f'<batchJobStatusResponse xmlns="{DS_NS}"><returnCode>0</returnCode>'
