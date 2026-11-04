@@ -1031,8 +1031,10 @@ def test_write_reconciliation_run_saved_matrix_job_respects_use_live_connections
     out_path = tmp_path / "matrix_gated_diffs.jsonl"
     with _db_module.SessionLocal() as db:
         run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
-        with pytest.raises(ValueError, match="require live connections"):
-            de.write_recomputed_differences(db, run, "json", out_path)
+        de.write_recomputed_differences(db, run, "json", out_path)
+    row = json.loads(out_path.read_text(encoding="utf-8").strip())
+    assert row["mismatch_type"] == de.EXPORT_INCOMPLETE_TYPE
+    assert "require live connections" in row["source_value"]
 
 
 def test_write_reconciliation_run_saved_bo_job_respects_use_live_connections_gate(tmp_path, monkeypatch):
@@ -1098,6 +1100,8 @@ def test_write_reconciliation_run_saved_bo_job_respects_use_live_connections_gat
     out_path = tmp_path / "bo_gated_diffs.jsonl"
     with _db_module.SessionLocal() as db:
         run = db.query(TestRun).filter(TestRun.run_id == run_id).first()
-        with pytest.raises(ValueError, match="require live connections"):
-            de.write_recomputed_differences(db, run, "json", out_path)
+        de.write_recomputed_differences(db, run, "json", out_path)
+    row = json.loads(out_path.read_text(encoding="utf-8").strip())
+    assert row["mismatch_type"] == de.EXPORT_INCOMPLETE_TYPE
+    assert "require live connections" in row["source_value"]
 

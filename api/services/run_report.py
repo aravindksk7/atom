@@ -178,6 +178,7 @@ class RunReportSnapshot:
     has_result_rows: bool
     file_name_a: str | None = None
     file_name_b: str | None = None
+    rebuilt_at: datetime | None = None
 
     @property
     def run_label(self) -> str:

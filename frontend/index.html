@@ -3900,6 +3900,33 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <p x-show="canRestartRun(selectedRun) && restartRerunDownstream" x-cloak class="basis-full text-xs text-slate-500"
                data-testid="history-restart-rerun-downstream-note">Passed steps after a re-run step run again, repeating side effects such as file transfers.</p>
           </div>
+          <template x-for="panel in exportPanels(selectedRun.run_id)" :key="panel.format">
+            <div class="pt-2 border-t border-slate-100 space-y-1" :data-testid="'export-panel-' + panel.format">
+              <div class="text-xs font-semibold" x-text="exportPanelTitle(panel)"></div>
+              <div x-show="exportJobs(panel.state).length" class="h-1.5 rounded bg-slate-200 overflow-hidden"
+                   role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                   :aria-valuenow="exportPercent(panel.state)" aria-label="Export progress"
+                   data-testid="export-progress-bar">
+                <div class="h-full bg-indigo-500 transition-all" :style="'width:' + exportPercent(panel.state) + '%'"></div>
+              </div>
+              <ul x-show="isDifferenceExportBusy(selectedRun.run_id, panel.format)" class="text-xs space-y-0.5 max-h-48 overflow-y-auto">
+                <template x-for="(job, index) in exportJobs(panel.state)" :key="index">
+                  <li class="flex gap-2" data-testid="export-job-row">
+                    <span aria-hidden="true" x-text="exportJobIcon(job)"></span>
+                    <span class="font-mono break-all" x-text="job.name"></span>
+                    <span class="text-muted ml-auto text-right" x-text="exportJobStatus(job)"></span>
+                  </li>
+                </template>
+              </ul>
+              <p x-show="panel.state.status === 'FAILED'" class="text-xs text-rose-600" x-text="panel.state.error_message"></p>
+              <p x-show="exportRebuiltAt(panel.state) && panel.state.status !== 'FAILED'" class="text-xs text-amber-600"
+                 data-testid="export-rebuilt-notice"
+                 x-text="'Rebuilt from live data at ' + fmtDate(exportRebuiltAt(panel.state)) + '; may differ from the original run.'"></p>
+              <p x-show="exportFailedJobs(panel.state).length" class="text-xs text-rose-600"
+                 data-testid="export-gap-warning"
+                 x-text="exportFailedJobs(panel.state).length + (exportFailedJobs(panel.state).length === 1 ? ' job' : ' jobs') + ' could not be rebuilt and show only stored rows. Click the export again to retry.'"></p>
+            </div>
+          </template>
           <div class="pt-2 border-t border-slate-100 space-y-2">
             <button @click="setBaseline(selectedRun.run_id)" class="btn-secondary btn-sm text-xs w-full">
               ★ Pin as Baseline

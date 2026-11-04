@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,14 +23,13 @@ from api.schemas import (
     RunSettings,
     SQLCompareRequest,
 )
-from api.services.compare_service import CompareService, _load_in_chunks
+from api.services.compare_service import CompareService
+from api.services.export_progress import ExportHeartbeat, ExportProgress
 from api.services.file_source import read_tabular
 from api.services.frame_engine import FrameEngine
 from api.services.run_executor import RunExecutor
 from api.services.run_label import report_name_base_for, short_run_id
 from api.services.variable_resolution import substitute_in_job
-from etl_framework.config.models import resolve_connection
-from etl_framework.db.engine import DBEngine
 from etl_framework.reconciliation.compare_utils import (
     normalize_string_columns,
     numeric_delta,
@@ -77,6 +76,12 @@ JOB_ERROR_TYPE = "job_error"
 EXPORT_INCOMPLETE_TYPE = "export_incomplete"
 JOB_NOTE_TYPES = frozenset({JOB_ERROR_TYPE, EXPORT_INCOMPLETE_TYPE})
 JOB_NOTE_COLUMN = "<job>"
+
+# Several heartbeats long, so a missed write or a busy database does not end an
+# export that is still working.
+EXPORT_STALE_AFTER = timedelta(minutes=5)
+EXPORT_STALE_MESSAGE = "Export stopped unexpectedly, try again."
+REBUILD_ERROR_MAX_CHARS = 500
 
 
 def _utcnow() -> datetime:
@@ -341,6 +346,26 @@ def _write_stored_rows_for_unrebuilt_job(
         )
 
 
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def expire_if_stale(db: Session, job: DifferenceExportJob) -> bool:
+    """End an unfinished export nothing is working on any more -- its worker was
+    restarted, say. Checked on demand, not at startup, because with several workers
+    a restarting one must not end exports the others are still running."""
+    if job.status not in ("PENDING", "RUNNING"):
+        return False
+    last_alive = _as_utc(job.heartbeat_at or job.created_at)
+    if _utcnow() - last_alive <= EXPORT_STALE_AFTER:
+        return False
+    job.status = "FAILED"
+    job.error_message = EXPORT_STALE_MESSAGE
+    job.completed_at = _utcnow()
+    db.commit()
+    return True
+
+
 def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[DifferenceExportJob, bool]:
     existing = (
         db.query(DifferenceExportJob)
@@ -352,7 +377,7 @@ def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[Diff
         .order_by(DifferenceExportJob.created_at.desc())
         .first()
     )
-    if existing is not None:
+    if existing is not None and not expire_if_stale(db, existing):
         return existing, False
     completed = (
         db.query(DifferenceExportJob)
@@ -369,6 +394,7 @@ def create_or_reuse_export_job(db: Session, run_id: str, fmt: str) -> tuple[Diff
         and completed.artifact_path
         and Path(completed.artifact_path).exists()
         and int(completed.row_count or 0) >= _minimum_export_rows(db, run_id)
+        and not (completed.metadata_json or {}).get("failed_jobs")
     ):
         return completed, False
     job = DifferenceExportJob(
@@ -411,12 +437,14 @@ def export_status_out(job: DifferenceExportJob) -> DifferenceExportStatusOut:
 
 def run_difference_export_job(export_id: str) -> None:
     db = SessionLocal()
+    progress = ExportProgress()
     try:
         job = db.query(DifferenceExportJob).filter(DifferenceExportJob.export_id == export_id).first()
         if job is None or job.status == "COMPLETED":
             return
         job.status = "RUNNING"
         job.started_at = _utcnow()
+        job.heartbeat_at = job.started_at
         job.error_message = None
         db.commit()
 
@@ -425,10 +453,11 @@ def run_difference_export_job(export_id: str) -> None:
             raise RuntimeError("Run not found")
 
         path = export_dir(job.run_id) / export_filename(run, job.format, job.export_id)
-        if job.format == "html":
-            row_count = write_full_html_report(db, run, path)
-        else:
-            row_count = write_recomputed_differences(db, run, job.format, path)
+        with ExportHeartbeat(export_id, progress, SessionLocal):
+            if job.format == "html":
+                row_count = write_full_html_report(db, run, path, progress=progress)
+            else:
+                row_count = write_recomputed_differences(db, run, job.format, path, progress=progress)
         job.status = "COMPLETED"
         job.artifact_path = str(path)
         job.row_count = row_count
@@ -437,6 +466,8 @@ def run_difference_export_job(export_id: str) -> None:
         job.metadata_json = {
             "recomputed_at": job.recomputed_at.isoformat(),
             "warning": "Sources were rebuilt at export time; live/API data may have drifted since the original run.",
+            "progress": progress.snapshot(),
+            "failed_jobs": progress.failed_jobs,
         }
         db.commit()
     except Exception as exc:
@@ -446,6 +477,7 @@ def run_difference_export_job(export_id: str) -> None:
             job.status = "FAILED"
             job.error_message = _friendly_export_error(exc)
             job.completed_at = _utcnow()
+            job.metadata_json = {"progress": progress.snapshot()}
             db.commit()
     finally:
         db.close()
@@ -457,7 +489,13 @@ def _friendly_export_error(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
-def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path) -> int:
+def write_recomputed_differences(
+    db: Session,
+    run: TestRun,
+    fmt: str,
+    path: Path,
+    progress: ExportProgress | None = None,
+) -> int:
     snapshot = run.config_snapshot or {}
     request_type = snapshot.get("compare_request_type")
     payload = snapshot.get("request") if isinstance(snapshot.get("request"), dict) else None
@@ -473,7 +511,7 @@ def write_recomputed_differences(db: Session, run: TestRun, fmt: str, path: Path
         elif request_type == "matrix":
             _write_matrix_compare(db, payload or {}, writer)
         else:
-            _write_reconciliation_run(db, run, writer)
+            _write_reconciliation_run(db, run, writer, progress or ExportProgress())
         return writer.row_count
 
 
@@ -520,7 +558,12 @@ def stored_triage_by_row(run: TestRun) -> dict[str, dict[str, Any]]:
     return triage
 
 
-def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
+def write_full_html_report(
+    db: Session,
+    run: TestRun,
+    path: Path,
+    progress: ExportProgress | None = None,
+) -> int:
     """Recompute the run's complete difference set and render it into a single,
     self-contained HTML report at `path` -- no live API calls needed to view the
     whole comparison, unlike the capped report the "Report" view/download produces.
@@ -530,7 +573,7 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
     from etl_framework.reporting.generator import ReportGenerator
 
     tmp_path = path.with_suffix(".rows.jsonl")
-    row_count = write_recomputed_differences(db, run, "json", tmp_path)
+    row_count = write_recomputed_differences(db, run, "json", tmp_path, progress=progress)
 
     triage = stored_triage_by_row(run)
     rows_by_test: dict[str, list[dict[str, Any]]] = {}
@@ -560,6 +603,7 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
     tmp_path.unlink(missing_ok=True)
 
     snapshot = build_run_report_snapshot(run, include_mismatches=False)
+    snapshot.rebuilt_at = _utcnow()
     for result in snapshot.results:
         result.mismatches = rows_by_test.get(result.query_name, [])
         result.total_issues_override = sum(
@@ -573,21 +617,7 @@ def write_full_html_report(db: Session, run: TestRun, path: Path) -> int:
 
 def _write_sql_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
     req = SQLCompareRequest(**payload)
-    cfg_repo = ConfigRepository(db)
-    cfg_a = cfg_repo.get(req.config_id_a)
-    cfg_b = cfg_repo.get(req.config_id_b)
-    if cfg_a is None or cfg_b is None:
-        raise RuntimeError("Saved SQL compare config was deleted")
-    env_a = resolve_connection(cfg_a.config_json or {}, req.connection_a, env_name=cfg_a.env_name or "")
-    env_b = resolve_connection(cfg_b.config_json or {}, req.connection_b, env_name=cfg_b.env_name or "")
-    engine_a = DBEngine(env_a)
-    engine_b = DBEngine(env_b)
-    try:
-        df_a = _load_in_chunks(engine_a, req.query_a, req.key_columns or [], req.chunk_size)
-        df_b = _load_in_chunks(engine_b, req.query_b, req.key_columns or [], req.chunk_size)
-    finally:
-        engine_a.dispose()
-        engine_b.dispose()
+    df_a, df_b = CompareService(db, ConfigRepository(db))._load_sql_frames(req)
     _write_tabular_differences(
         df_a,
         df_b,
@@ -806,9 +836,17 @@ def _write_compare_job(
     return True
 
 
-def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWriter) -> None:
+def _write_reconciliation_run(
+    db: Session,
+    run: TestRun,
+    writer: DifferenceWriter,
+    progress: ExportProgress,
+) -> None:
     snapshot = run.config_snapshot or {}
-    job_names = snapshot.get("job_sequence") or [result.query_name for result in run.results]
+    job_names = [
+        item.get("job_name") if isinstance(item, dict) else str(item)
+        for item in snapshot.get("job_sequence") or [result.query_name for result in run.results]
+    ]
     settings_data = snapshot.get("run_settings") or {}
     settings = RunSettings(**settings_data) if isinstance(settings_data, dict) else RunSettings()
     executor = RunExecutor(
@@ -820,7 +858,6 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
         run_settings=settings,
         config_snapshot=snapshot,
     )
-    variables = snapshot.get("variables") or {}
     results_by_job = {result.query_name: result for result in run.results}
     # A job that errored found no differences, so running it now could only report
     # rows the run never did.
@@ -828,46 +865,92 @@ def _write_reconciliation_run(db: Session, run: TestRun, writer: DifferenceWrite
     for result in run.results:
         if result.status == "ERROR":
             _write_job_error(result, writer)
-    for item in job_names:
-        job_name = item.get("job_name") if isinstance(item, dict) else str(item)
+
+    def needs_rebuild(job_name: str) -> bool:
         if job_name in errored_jobs:
-            continue
+            return False
         result = results_by_job.get(job_name)
-        if result is not None and not result.total_issues:
-            # The run found nothing here. Querying again costs time on every source
-            # and can only add rows from data that drifted since.
+        # The run found nothing in a job with no issues. Querying again costs time
+        # on every source and can only add rows from data that drifted since.
+        return result is None or bool(result.total_issues)
+
+    to_rebuild = [job_name for job_name in job_names if needs_rebuild(job_name)]
+    progress.set_jobs(to_rebuild)
+    for job_name in to_rebuild:
+        result = results_by_job.get(job_name)
+        progress.start(job_name)
+        rows_before = writer.row_count
+        try:
+            _rebuild_job(db, job_name, result, executor, settings, snapshot, writer)
+        except Exception as exc:
+            logger.warning("Could not rebuild job '%s' for an export", job_name, exc_info=True)
+            db.rollback()
+            _record_rebuild_failure(db, job_name, result, exc, writer.row_count - rows_before, writer, progress)
             continue
-        saved = db.query(SavedJob).filter(SavedJob.name == job_name).first()
-        if saved is None:
+        progress.finish(job_name, writer.row_count - rows_before)
+
+
+def _rebuild_job(
+    db: Session,
+    job_name: str,
+    result: TestResult | None,
+    executor: RunExecutor,
+    settings: RunSettings,
+    snapshot: dict[str, Any],
+    writer: DifferenceWriter,
+) -> None:
+    saved = db.query(SavedJob).filter(SavedJob.name == job_name).first()
+    if saved is None or saved.job_type not in ("compare", "reconciliation"):
+        _write_stored_rows_for_unrebuilt_job(db, result, writer)
+        return
+    # The same values the run itself used, so the rebuild reads the same data.
+    job = substitute_in_job(executor._job_to_definition(saved), snapshot.get("variables") or {})
+    if job.job_type == "compare":
+        if not _write_compare_job(db, job, writer, settings=settings):
             _write_stored_rows_for_unrebuilt_job(db, result, writer)
-            continue
-        if saved.job_type not in ("compare", "reconciliation"):
-            _write_stored_rows_for_unrebuilt_job(db, result, writer)
-            continue
-        # The same values the run itself used, so the rebuild reads the same data.
-        job = substitute_in_job(executor._job_to_definition(saved), variables)
-        if job.job_type == "compare":
-            if not _write_compare_job(db, job, writer, settings=settings):
-                _write_stored_rows_for_unrebuilt_job(db, result, writer)
-            continue
-        if job.params.get("source_mode") == "bo_live":
-            _write_stored_rows_for_unrebuilt_job(db, result, writer)
-            continue
-        if job.params.get("source_mode") == "multi_file":
-            _write_multi_file_reconciliation_job(db, job, settings, writer, snapshot)
-            continue
-        src_engine, tgt_engine = executor._build_engines(job)
-        df_a = src_engine.execute_query(job.query, job.params)
-        df_b = tgt_engine.execute_query(job.query, job.params)
-        _write_tabular_differences(
-            df_a,
-            df_b,
-            key_columns=job.key_columns or settings.key_columns,
-            exclude_columns=job.exclude_columns or settings.exclude_columns,
-            options=settings,
-            test_name=job.name,
-            writer=writer,
-        )
+        return
+    if job.params.get("source_mode") == "bo_live":
+        _write_stored_rows_for_unrebuilt_job(db, result, writer)
+        return
+    if job.params.get("source_mode") == "multi_file":
+        _write_multi_file_reconciliation_job(db, job, settings, writer, snapshot)
+        return
+    src_engine, tgt_engine = executor._build_engines(job)
+    df_a = src_engine.execute_query(job.query, job.params)
+    df_b = tgt_engine.execute_query(job.query, job.params)
+    _write_tabular_differences(
+        df_a,
+        df_b,
+        key_columns=job.key_columns or settings.key_columns,
+        exclude_columns=job.exclude_columns or settings.exclude_columns,
+        options=settings,
+        test_name=job.name,
+        writer=writer,
+    )
+
+
+def _record_rebuild_failure(
+    db: Session,
+    job_name: str,
+    result: TestResult | None,
+    exc: Exception,
+    rows_written: int,
+    writer: DifferenceWriter,
+    progress: ExportProgress,
+) -> None:
+    """Keep what the failed job can still show. Rows it already wrote stand, as a
+    later file pair can fail after earlier ones; adding its stored rows to them
+    would list the same differences twice."""
+    reason = _friendly_export_error(exc)[:REBUILD_ERROR_MAX_CHARS]
+    if rows_written:
+        rows = rows_written
+        message = f"Could not finish rebuilding this job: {reason} Kept the {rows_written} rows written before it failed."
+    else:
+        rows = _write_stored_result_rows(db, result, writer) if result is not None else 0
+        total = result.total_issues if result is not None else 0
+        message = f"Could not rebuild this job: {reason} Showing {rows} of {total} differences stored by the run."
+    _write_job_note(writer, job_name, EXPORT_INCOMPLETE_TYPE, message)
+    progress.fail(job_name, reason, rows=rows)
 
 
 def _write_multi_file_reconciliation_job(

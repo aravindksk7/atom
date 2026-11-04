@@ -75,7 +75,7 @@ def test_write_full_html_report_includes_rows_beyond_the_stored_cap(tmp_path, mo
 
     run_id = _create_run_with_result(total_issues=5, stored_rows=2)
 
-    def _fake_recompute(db, run, fmt, path):
+    def _fake_recompute(db, run, fmt, path, progress=None):
         rows = [
             {
                 "test_name": "orders", "key_values": json.dumps({"id": i}),
@@ -115,7 +115,7 @@ def test_write_full_html_report_key_values_round_trip_as_dict_not_double_encoded
 
     run_id = _create_run_with_result(total_issues=1, stored_rows=0)
 
-    def _fake_recompute(db, run, fmt, path):
+    def _fake_recompute(db, run, fmt, path, progress=None):
         row = {
             "test_name": "orders", "key_values": json.dumps({"id": 42}),
             "column_name": "amount", "source_value": "1", "target_value": "2",

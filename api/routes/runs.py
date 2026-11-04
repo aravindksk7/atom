@@ -81,6 +81,7 @@ from api.services.mismatch_export import (
 from api.services.difference_export import (
     accepted_counts,
     create_or_reuse_export_job,
+    expire_if_stale,
     export_filename,
     export_status_out,
     media_type_for,
@@ -1031,6 +1032,7 @@ def get_difference_export(
     )
     if job is None:
         raise HTTPException(status_code=404, detail="Export job not found")
+    expire_if_stale(db, job)
     return export_status_out(job)
 
 

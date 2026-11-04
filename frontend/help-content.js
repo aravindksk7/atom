@@ -713,7 +713,7 @@
       steps: [
         {
           title: 'Explore run history and export evidence',
-          text: 'Filter history by status, job, label, or date. Open a run to inspect results, schema history, profile-driven DQ rule suggestions, lineage, and segment drilldowns; export complete CSV evidence when needed.',
+          text: 'Filter history by status, job, label, or date. Open a run to inspect results, schema history, profile-driven DQ rule suggestions, lineage, and segment drilldowns; export complete CSV evidence when needed. All-differences exports and the Full HTML Report rebuild from live data, skip jobs that passed, and show each job\'s progress while they run. A job that cannot be rebuilt shows its stored rows with an export_incomplete row, and clicking the export again retries it.',
           where: 'History -> filters -> run detail',
           when: 'Auditing a past execution or finding recurring failure segments.',
           uiMockup: { title: 'Run history', elements: [

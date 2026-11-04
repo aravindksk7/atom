@@ -237,6 +237,9 @@
       {% if suite.file_name_a or suite.file_name_b %}
       <p><strong>Files:</strong> {{ suite.file_name_a or '—' }} &rarr; {{ suite.file_name_b or '—' }}</p>
       {% endif %}
+      {% if suite.rebuilt_at %}
+      <p id="rebuilt-notice" style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px"><strong>Rebuilt from live data</strong> at {{ suite.rebuilt_at | to_local }}; may differ from the original run.</p>
+      {% endif %}
       <hr>
     </div>
 

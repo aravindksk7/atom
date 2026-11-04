@@ -210,6 +210,7 @@
 
     // Full differences export jobs
     differenceExports: {},
+    exportClock: Date.now(),
     columnStatFilters: {},
     columnStatSort: {},
       // ===== METHODS (extracted from app.js) =====
@@ -1397,7 +1398,7 @@
         triggerDownload(blob, filename);
         this.differenceExports = { ...this.differenceExports, [key]: { status: 'DOWNLOADED' } };
       } catch (e) {
-        this.differenceExports = { ...this.differenceExports, [key]: { status: 'FAILED', error_message: e.message } };
+        this.differenceExports = { ...this.differenceExports, [key]: { ...this.differenceExports[key], status: 'FAILED', error_message: e.message } };
         this.toast('error', 'Full export failed', e.message);
       }
     },
@@ -1420,36 +1421,116 @@
         this.differenceExports = { ...this.differenceExports, [key]: job };
         await this.pollDifferenceExport(runId, job.export_id, 'html');
       } catch (e) {
-        this.differenceExports = { ...this.differenceExports, [key]: { status: 'FAILED', error_message: e.message } };
+        this.differenceExports = { ...this.differenceExports, [key]: { ...this.differenceExports[key], status: 'FAILED', error_message: e.message } };
         this.toast('error', 'Full report download failed', e.message);
       }
     },
 
     async pollDifferenceExport(runId, exportId, format) {
       const key = this.differenceExportKey(runId, format);
-      for (let attempt = 0; attempt < 240; attempt++) {
-        const status = await api('GET', `/api/runs/${runId}/exports/${exportId}`);
-        this.differenceExports = { ...this.differenceExports, [key]: status };
-        if (status.status === 'COMPLETED') {
-          const { blob, disposition } = await apiBlob(`/api/runs/${runId}/exports/${exportId}/download`);
-          const ext = format === 'parquet' ? 'parquet' : format === 'html' ? 'html' : 'csv';
-          // Rarely hit -- the server always sets Content-Disposition now (see
-          // export_filename in api/services/difference_export.py). This fallback
-          // can't compute the full report-name convention client-side (it doesn't
-          // have the run's config_snapshot/started_at loaded here), so it just
-          // avoids the old, now-inconsistent "all_differences_" prefix.
-          const fallback = `report_${runId}_${exportId}.${ext}`;
-          const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
-          triggerDownload(blob, filename);
-          this.differenceExports = { ...this.differenceExports, [key]: { ...status, status: 'DOWNLOADED' } };
-          return;
+      // An export ends in COMPLETED or FAILED, and the server fails one nothing is
+      // working on any more, so this loop needs no deadline of its own. A few failed
+      // polls in a row are tolerated so a brief API restart does not read as failure.
+      const maxFailedPolls = 5;
+      const ticker = setInterval(() => { this.exportClock = Date.now(); }, 1000);
+      let failedPolls = 0;
+      try {
+        while (true) {
+          let status;
+          try {
+            status = await api('GET', `/api/runs/${runId}/exports/${exportId}`);
+            failedPolls = 0;
+          } catch (e) {
+            failedPolls += 1;
+            if (failedPolls >= maxFailedPolls) throw e;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+          this.differenceExports = { ...this.differenceExports, [key]: status };
+          if (status.status === 'COMPLETED') {
+            const { blob, disposition } = await apiBlob(`/api/runs/${runId}/exports/${exportId}/download`);
+            const ext = format === 'parquet' ? 'parquet' : format === 'html' ? 'html' : 'csv';
+            // Rarely hit -- the server always sets Content-Disposition now (see
+            // export_filename in api/services/difference_export.py). This fallback
+            // can't compute the full report-name convention client-side (it doesn't
+            // have the run's config_snapshot/started_at loaded here), so it just
+            // avoids the old, now-inconsistent "all_differences_" prefix.
+            const fallback = `report_${runId}_${exportId}.${ext}`;
+            const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallback;
+            triggerDownload(blob, filename);
+            this.differenceExports = { ...this.differenceExports, [key]: { ...status, status: 'DOWNLOADED' } };
+            return;
+          }
+          if (status.status === 'FAILED') {
+            throw new Error(status.error_message || 'Export job failed');
+          }
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
-        if (status.status === 'FAILED') {
-          throw new Error(status.error_message || 'Export job failed');
-        }
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      } finally {
+        clearInterval(ticker);
       }
-      throw new Error('Export job timed out');
+    },
+
+    exportPanels(runId) {
+      return ['csv', 'parquet', 'html']
+        .map(format => ({ format, state: this.differenceExportState(runId, format) }))
+        .filter(panel => panel.state.export_id);
+    },
+
+    exportJobs(state) {
+      return state.metadata?.progress?.jobs || [];
+    },
+
+    exportFinishedCount(state) {
+      return this.exportJobs(state).filter(job => job.state === 'done' || job.state === 'failed').length;
+    },
+
+    exportPercent(state) {
+      const total = this.exportJobs(state).length;
+      return total ? Math.round((this.exportFinishedCount(state) / total) * 100) : 0;
+    },
+
+    exportPanelTitle(panel) {
+      const name = panel.format === 'html' ? 'Full HTML report' : `All differences ${panel.format.toUpperCase()}`;
+      const total = this.exportJobs(panel.state).length;
+      if (this.isDifferenceExportBusy(panel.state.run_id, panel.format)) {
+        if (total) return `${name}: rebuilt ${this.exportFinishedCount(panel.state)} of ${total} jobs`;
+        const started = panel.state.started_at ? Date.parse(panel.state.started_at) : this.exportClock;
+        return `${name}: rebuilding for ${this.exportDuration(this.exportClock - started)}`;
+      }
+      if (panel.state.status === 'FAILED') return `${name}: failed`;
+      return `${name}: finished`;
+    },
+
+    exportJobStatus(job) {
+      if (job.state === 'waiting') return 'waiting';
+      if (job.state === 'running') {
+        return `running for ${this.exportDuration(this.exportClock - Date.parse(job.started_at))}`;
+      }
+      const took = this.exportDuration(Date.parse(job.finished_at) - Date.parse(job.started_at));
+      const rows = `${job.rows} row${job.rows === 1 ? '' : 's'}`;
+      if (job.state === 'failed') return `Could not rebuild: ${job.error}. ${rows} exported, ${took}`;
+      return `${rows}, ${took}`;
+    },
+
+    exportJobIcon(job) {
+      return { waiting: '·', running: '⟳', done: '✓', failed: '✗' }[job.state] || '';
+    },
+
+    exportDuration(milliseconds) {
+      const seconds = Math.max(0, Math.floor((milliseconds || 0) / 1000));
+      if (seconds < 60) return `${seconds}s`;
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+      return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+    },
+
+    exportRebuiltAt(state) {
+      return state.metadata?.recomputed_at || null;
+    },
+
+    exportFailedJobs(state) {
+      return state.metadata?.failed_jobs || [];
     },
 
     };

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 from pathlib import Path
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import DateTime, create_engine, inspect
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
 from etl_framework.utils.serialization import safe_json_dumps
@@ -31,6 +31,7 @@ def init_db() -> None:
     _ensure_compare_columns(engine)
     _ensure_contract_columns(engine)
     _ensure_file_server_columns(engine)
+    _ensure_export_job_columns(engine)
     _backfill_schedule_selections(engine)
 
 
@@ -56,6 +57,24 @@ def _ensure_file_server_columns(bind) -> None:
         ensure_column(conn, "file_server_profiles", "api_key_header", "ALTER TABLE file_server_profiles ADD COLUMN api_key_header VARCHAR(255)")
         ensure_column(conn, "file_server_profiles", "api_key", "ALTER TABLE file_server_profiles ADD COLUMN api_key TEXT")
         ensure_column(conn, "file_server_profiles", "tls_ca_bundle", "ALTER TABLE file_server_profiles ADD COLUMN tls_ca_bundle TEXT")
+
+
+def _export_heartbeat_column_ddl(dialect) -> str:
+    column_type = DateTime(timezone=True).compile(dialect=dialect)
+    return f"ALTER TABLE difference_export_jobs ADD COLUMN heartbeat_at {column_type}"
+
+
+def _ensure_export_job_columns(bind) -> None:
+    """Add the heartbeat column to difference_export_jobs on existing databases.
+
+    Not SQLite-gated: every export reads this column, so a database upgraded
+    without it could not export at all. The type comes from the dialect because
+    Postgres has no DATETIME.
+    """
+    if "difference_export_jobs" not in set(inspect(bind).get_table_names()):
+        return
+    with bind.begin() as conn:
+        ensure_column(conn, "difference_export_jobs", "heartbeat_at", _export_heartbeat_column_ddl(bind.dialect))
 
 
 def _ensure_compare_columns(bind) -> None:
@@ -117,7 +136,8 @@ def _ensure_compare_columns(bind) -> None:
             "created_at DATETIME NOT NULL, "
             "started_at DATETIME, "
             "completed_at DATETIME, "
-            "recomputed_at DATETIME)"
+            "recomputed_at DATETIME, "
+            "heartbeat_at DATETIME)"
         )
         ensure_index(conn, "ix_difference_export_jobs_export_id", "CREATE UNIQUE INDEX IF NOT EXISTS ix_difference_export_jobs_export_id ON difference_export_jobs (export_id)")
         ensure_index(conn, "ix_difference_export_jobs_run_id", "CREATE INDEX IF NOT EXISTS ix_difference_export_jobs_run_id ON difference_export_jobs (run_id)")

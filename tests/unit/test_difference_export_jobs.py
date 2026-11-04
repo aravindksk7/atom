@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pandas as pd
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from api.schemas import RunSettings
 from api.services import difference_export as de
+from api.services.export_progress import ExportProgress
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.repository import database as _db_module
 from etl_framework.repository.database import Base
@@ -41,10 +41,11 @@ class _FrameDBEngine:
 @pytest.fixture(autouse=True)
 def _environment(monkeypatch, tmp_path):
     engine = create_engine(
-        "sqlite:///:memory:",
+        f"sqlite:///{(tmp_path / 'repo.db').as_posix()}",
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
+    # Creating the tables costs over a second per test on Windows with disk sync on.
+    event.listen(engine, "connect", lambda connection, _: connection.execute("PRAGMA synchronous=OFF"))
     Base.metadata.create_all(engine)
     monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
     monkeypatch.setattr(de, "SessionLocal", _db_module.SessionLocal)
@@ -53,6 +54,7 @@ def _environment(monkeypatch, tmp_path):
     _FrameDBEngine.frames = {}
     _FrameDBEngine.queries = []
     yield
+    engine.dispose()
 
 
 def _config_id(db) -> int:
@@ -177,18 +179,19 @@ def test_sql_job_recompute_aligns_column_case_like_the_live_run(tmp_path):
     assert [row["column_name"] for row in rows] == ["AMOUNT"]
 
 
-def test_sql_job_recompute_requires_live_connections(tmp_path):
+def test_sql_job_with_live_connections_off_becomes_a_note(tmp_path):
     with _db_module.SessionLocal() as db:
         _save_sql_job(db, "curves", *_differing_frames(1))
         _run(db, ["curves"], live=False)
 
-        with pytest.raises(ValueError, match="live connections"):
-            _recompute(db, tmp_path)
+        rows = _recompute(db, tmp_path)
 
+    assert [row["mismatch_type"] for row in rows] == [de.EXPORT_INCOMPLETE_TYPE]
+    assert "live connections" in rows[0]["source_value"]
     assert _FrameDBEngine.queries == []
 
 
-def test_sql_job_recompute_refuses_a_query_that_is_not_read_only(tmp_path):
+def test_sql_job_with_a_query_that_is_not_read_only_becomes_a_note(tmp_path):
     with _db_module.SessionLocal() as db:
         _save_sql_job(db, "curves", *_differing_frames(1))
         job = JobRepository(db).get("curves")
@@ -199,9 +202,10 @@ def test_sql_job_recompute_refuses_a_query_that_is_not_read_only(tmp_path):
         db.commit()
         _run(db, ["curves"])
 
-        with pytest.raises(ValueError, match="read-only"):
-            _recompute(db, tmp_path)
+        rows = _recompute(db, tmp_path)
 
+    assert [row["mismatch_type"] for row in rows] == [de.EXPORT_INCOMPLETE_TYPE]
+    assert "read-only" in rows[0]["source_value"]
     assert _FrameDBEngine.queries == []
 
 
@@ -510,3 +514,323 @@ def test_full_html_report_does_not_count_a_note_as_a_difference(tmp_path, monkey
 
     assert captured["broken"].total_issues_override == 0
     assert [row["mismatch_type"] for row in captured["broken"].mismatches] == [de.JOB_ERROR_TYPE]
+
+
+def _open_export(db, run_id: str, status: str, *, age_seconds: float, heartbeat_age: float | None = None):
+    now = datetime.now(timezone.utc)
+    job = DifferenceExportJob(
+        export_id=f"open-{status}", run_id=run_id, format="csv", status=status,
+        created_at=now - timedelta(seconds=age_seconds),
+        heartbeat_at=None if heartbeat_age is None else now - timedelta(seconds=heartbeat_age),
+    )
+    db.add(job)
+    db.commit()
+    return job
+
+
+def test_running_export_with_a_dead_heartbeat_expires():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        job = _open_export(db, run_id, "RUNNING", age_seconds=900, heartbeat_age=301)
+
+        assert de.expire_if_stale(db, job) is True
+
+        assert job.status == "FAILED"
+        assert "stopped unexpectedly" in job.error_message
+
+
+def test_running_export_with_a_fresh_heartbeat_does_not_expire():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        job = _open_export(db, run_id, "RUNNING", age_seconds=9000, heartbeat_age=10)
+
+        assert de.expire_if_stale(db, job) is False
+        assert job.status == "RUNNING"
+
+
+def test_pending_export_that_never_started_expires_from_its_creation_time():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        job = _open_export(db, run_id, "PENDING", age_seconds=301)
+
+        assert de.expire_if_stale(db, job) is True
+
+
+def test_finished_export_never_expires():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        job = _open_export(db, run_id, "COMPLETED", age_seconds=9000)
+
+        assert de.expire_if_stale(db, job) is False
+        assert job.status == "COMPLETED"
+
+
+def test_new_request_replaces_a_stuck_export():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        stuck = _open_export(db, run_id, "RUNNING", age_seconds=900, heartbeat_age=600)
+
+        job, created = de.create_or_reuse_export_job(db, run_id, "csv")
+
+        assert created is True
+        assert job.export_id != stuck.export_id
+        assert stuck.status == "FAILED"
+
+
+def test_new_request_joins_a_live_export():
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        live = _open_export(db, run_id, "RUNNING", age_seconds=900, heartbeat_age=5)
+
+        job, created = de.create_or_reuse_export_job(db, run_id, "csv")
+
+        assert created is False
+        assert job.export_id == live.export_id
+
+
+def test_export_with_a_failed_job_is_rebuilt_on_the_next_request(tmp_path):
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        _add_result(db, run_id, "curves", issues=1)
+        _completed_export(db, run_id, tmp_path / "old.csv", rows=5)
+        old = db.query(DifferenceExportJob).filter_by(export_id="old").one()
+        old.metadata_json = {"failed_jobs": ["curves"]}
+        db.commit()
+
+        _, created = de.create_or_reuse_export_job(db, run_id, "csv")
+
+    assert created is True
+
+
+def test_export_noting_only_unrebuildable_jobs_is_reused(tmp_path):
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        _add_result(db, run_id, "curves", issues=1)
+        _completed_export(db, run_id, tmp_path / "old.csv", rows=5)
+        old = db.query(DifferenceExportJob).filter_by(export_id="old").one()
+        old.metadata_json = {"failed_jobs": []}
+        db.commit()
+
+        _, created = de.create_or_reuse_export_job(db, run_id, "csv")
+
+    assert created is False
+
+
+def test_failing_job_uses_its_stored_rows_and_the_next_job_still_exports(tmp_path):
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "broken", *_differing_frames(4))
+        _save_sql_job(db, "healthy", *_differing_frames(2))
+        del _FrameDBEngine.frames["SELECT * FROM broken_a"]
+        run_id = _run(db, ["broken", "healthy"])
+        _add_result(db, run_id, "broken", issues=4, stored=1)
+        _add_result(db, run_id, "healthy", issues=2)
+        progress = ExportProgress()
+
+        path = tmp_path / "out.jsonl"
+        count = de.write_recomputed_differences(db, _get_run(db), "json", path, progress=progress)
+
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert count == len(rows)
+    broken = [row for row in rows if row["test_name"] == "broken"]
+    assert [row["mismatch_type"] for row in broken] == ["value_diff", de.EXPORT_INCOMPLETE_TYPE]
+    assert "1 of 4" in broken[-1]["source_value"]
+    assert len([row for row in rows if row["test_name"] == "healthy"]) == 2
+    assert progress.failed_jobs == ["broken"]
+    assert [job["state"] for job in progress.snapshot()["jobs"]] == ["failed", "done"]
+
+
+def test_job_failing_partway_keeps_its_rows_and_adds_no_stored_duplicates(tmp_path, monkeypatch):
+    def write_one_row_then_fail(df_source, df_target, key_columns, exclude_columns, options, test_name, writer):
+        writer.write({
+            "test_name": test_name, "key_values": {"id": 1}, "column_name": "amount",
+            "source_value": "1", "target_value": "2", "mismatch_type": "value_diff",
+        })
+        raise RuntimeError("pair 2 could not be read")
+
+    monkeypatch.setattr(de, "_write_tabular_differences", write_one_row_then_fail)
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "broken", *_differing_frames(1))
+        run_id = _run(db, ["broken"])
+        _add_result(db, run_id, "broken", issues=3, stored=3)
+
+        rows = _recompute(db, tmp_path)
+
+    assert [row["mismatch_type"] for row in rows] == ["value_diff", de.EXPORT_INCOMPLETE_TYPE]
+    assert "pair 2 could not be read" in rows[-1]["source_value"]
+
+
+def test_long_failure_reason_is_cut_to_500_characters(tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise RuntimeError("x" * 2000)
+
+    monkeypatch.setattr(de, "_write_tabular_differences", fail)
+    progress = ExportProgress()
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "broken", *_differing_frames(1))
+        run_id = _run(db, ["broken"])
+        _add_result(db, run_id, "broken", issues=1)
+
+        de.write_recomputed_differences(db, _get_run(db), "json", tmp_path / "o.jsonl", progress=progress)
+
+    assert len(progress.snapshot()["jobs"][0]["error"]) == 500
+
+
+def test_progress_lists_only_jobs_needing_a_rebuild(tmp_path):
+    progress = ExportProgress()
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "passed_job", *_differing_frames(1))
+        _save_sql_job(db, "errored_job", *_differing_frames(1))
+        _save_sql_job(db, "failed_job", *_differing_frames(3))
+        run_id = _run(db, ["passed_job", "errored_job", "failed_job"])
+        _add_result(db, run_id, "passed_job")
+        _add_error(db, run_id, "errored_job", "boom")
+        _add_result(db, run_id, "failed_job", issues=3)
+
+        de.write_recomputed_differences(db, _get_run(db), "json", tmp_path / "o.jsonl", progress=progress)
+
+    jobs = progress.snapshot()["jobs"]
+    assert [job["name"] for job in jobs] == ["failed_job"]
+    assert jobs[0]["state"] == "done"
+    assert jobs[0]["rows"] == 3
+
+
+def test_job_that_can_never_be_rebuilt_is_not_a_failed_job(tmp_path):
+    progress = ExportProgress()
+    with _db_module.SessionLocal() as db:
+        _save_job(db, "api_orders", "api_reconciliation")
+        run_id = _run(db, ["api_orders"])
+        _add_result(db, run_id, "api_orders", issues=5, stored=2)
+
+        de.write_recomputed_differences(db, _get_run(db), "json", tmp_path / "o.jsonl", progress=progress)
+
+    assert progress.failed_jobs == []
+
+
+def _export_run(db, run_id: str) -> str:
+    job, _ = de.create_or_reuse_export_job(db, run_id, "csv")
+    return job.export_id
+
+
+def _finished_export(export_id: str) -> DifferenceExportJob:
+    with _db_module.SessionLocal() as db:
+        return db.query(DifferenceExportJob).filter_by(export_id=export_id).one()
+
+
+def test_finished_export_saves_its_progress_and_failed_jobs():
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "broken", *_differing_frames(1))
+        _save_sql_job(db, "healthy", *_differing_frames(2))
+        del _FrameDBEngine.frames["SELECT * FROM broken_a"]
+        run_id = _run(db, ["broken", "healthy"])
+        _add_result(db, run_id, "broken", issues=1)
+        _add_result(db, run_id, "healthy", issues=2)
+        export_id = _export_run(db, run_id)
+
+    de.run_difference_export_job(export_id)
+
+    job = _finished_export(export_id)
+    assert job.status == "COMPLETED"
+    assert job.metadata_json["failed_jobs"] == ["broken"]
+    assert [entry["state"] for entry in job.metadata_json["progress"]["jobs"]] == ["failed", "done"]
+    assert job.metadata_json["recomputed_at"]
+    assert job.heartbeat_at is not None
+
+
+def test_export_that_starts_gets_a_heartbeat_at_once(monkeypatch):
+    seen = {}
+    original = de.write_recomputed_differences
+
+    def spy(db, run, fmt, path, progress=None):
+        with _db_module.SessionLocal() as other:
+            seen["heartbeat"] = other.query(DifferenceExportJob).one().heartbeat_at
+        return original(db, run, fmt, path, progress=progress)
+
+    monkeypatch.setattr(de, "write_recomputed_differences", spy)
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, [])
+        export_id = _export_run(db, run_id)
+
+    de.run_difference_export_job(export_id)
+
+    assert seen["heartbeat"] is not None
+
+
+def test_export_that_raises_is_failed_and_keeps_its_progress(monkeypatch):
+    def fail(db, run, fmt, path, progress=None):
+        progress.set_jobs(["a"])
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(de, "write_recomputed_differences", fail)
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, [])
+        export_id = _export_run(db, run_id)
+
+    de.run_difference_export_job(export_id)
+
+    job = _finished_export(export_id)
+    assert job.status == "FAILED"
+    assert job.error_message == "disk full"
+    assert job.metadata_json["progress"]["jobs"][0]["name"] == "a"
+
+
+def test_full_html_report_says_its_rows_were_rebuilt(tmp_path):
+    with _db_module.SessionLocal() as db:
+        _save_sql_job(db, "curves", *_differing_frames(1))
+        run_id = _run(db, ["curves"])
+        _add_result(db, run_id, "curves", issues=1)
+
+        path = tmp_path / "report.html"
+        de.write_full_html_report(db, _get_run(db), path)
+
+    html = path.read_text(encoding="utf-8")
+    assert 'id="rebuilt-notice"' in html
+    assert "may differ from the original run" in html
+
+
+def test_report_of_stored_rows_has_no_rebuilt_notice(tmp_path):
+    from api.services.run_report import build_run_report_snapshot
+    from etl_framework.reporting.generator import ReportGenerator
+
+    with _db_module.SessionLocal() as db:
+        run_id = _run(db, ["curves"])
+        _add_result(db, run_id, "curves", issues=1, stored=1)
+        snapshot = build_run_report_snapshot(_get_run(db), include_mismatches=True)
+        path = ReportGenerator(output_dir=str(tmp_path)).generate(snapshot, filename="stored.html")
+
+    assert 'id="rebuilt-notice"' not in open(path, encoding="utf-8").read()
+
+
+def _adhoc_sql_run(db, source: pd.DataFrame, target: pd.DataFrame, query_b: str = "SELECT * FROM b") -> str:
+    _FrameDBEngine.frames["SELECT * FROM a"] = source
+    _FrameDBEngine.frames[query_b] = target
+    config_id = _config_id(db)
+    RunRepository(db).create_run(
+        run_id="run-1", source_env="dev", target_env="uat",
+        config_snapshot={"compare_request_type": "sql", "request": {
+            "config_id_a": config_id, "config_id_b": config_id,
+            "query_a": "SELECT * FROM a", "query_b": query_b,
+            "key_columns": ["id"],
+        }},
+    )
+    return "run-1"
+
+
+def test_adhoc_sql_compare_export_aligns_oracle_column_case(tmp_path):
+    source = pd.DataFrame({"ID": [1], "AMOUNT": [1.0]})
+    target = pd.DataFrame({"id": [1], "amount": [2.0]})
+    with _db_module.SessionLocal() as db:
+        _adhoc_sql_run(db, source, target)
+
+        rows = _recompute(db, tmp_path)
+
+    assert [row["mismatch_type"] for row in rows] == ["value_diff"]
+
+
+def test_adhoc_sql_compare_export_refuses_a_query_that_is_not_read_only(tmp_path):
+    with _db_module.SessionLocal() as db:
+        _adhoc_sql_run(db, *_differing_frames(1), query_b="DELETE FROM b")
+
+        with pytest.raises(ValueError, match="read-only"):
+            _recompute(db, tmp_path)
+
+    assert _FrameDBEngine.queries == []
