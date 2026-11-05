@@ -8,8 +8,19 @@ global.localStorage = {
   getItem(key) { return storage.has(key) ? storage.get(key) : null; },
   setItem(key, value) { storage.set(key, String(value)); },
 };
+const TERMINAL_STATUSES = ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED'];
+const session = new Map();
+global.sessionStorage = {
+  getItem(key) { return session.has(key) ? session.get(key) : null; },
+  setItem(key, value) { session.set(key, String(value)); },
+};
+global.API = '';
+global.normalizeToken = (raw) => String(raw || '').trim();
+global.isTerminalStatusValue = (status) => TERMINAL_STATUSES.includes(status);
 require(path.join(__dirname, '..', '..', 'frontend', 'features', 'run-timing.js'));
+require(path.join(__dirname, '..', '..', 'frontend', 'features', 'monitor.js'));
 const { fmtSeconds, ganttLayout } = window.ETL_RUN_TIMING;
+const { parseSseChunk } = window.ETL_MONITOR;
 
 const T = (seconds) => new Date(Date.UTC(2026, 10, 4, 9, 0, seconds)).toISOString();
 
@@ -74,7 +85,7 @@ assert.ok(Number.isFinite(instant.rows[0].bar.width));
 // --- component ------------------------------------------------------------
 function component() {
   return Object.assign(window.ETL_FEATURE_RUN_TIMING(), {
-    isTerminalStatus: (status) => ['PASSED', 'FAILED', 'BLOCKED'].includes(status),
+    isTerminalStatus: (status) => TERMINAL_STATUSES.includes(status),
   });
 }
 
@@ -167,6 +178,619 @@ async function main() {
   assert.strictEqual(c.runTimings.r.status, 'PASSED');
   c.setRunTiming('r', null);
   assert.strictEqual(c.runTimings.r.status, 'PASSED');
+
+  testTimingFreshness();
+  await testLoadRunTimingGuard();
+  testClockLabelsUseTheAppTimezone();
+  testInterruptedAndNotRecorded();
+  testSseParser();
+  await testRunStream();
+  await testPolling();
+  await testStepsRefetch();
+  await testRelease();
+}
+
+// --- stale documents ------------------------------------------------------
+function testTimingFreshness() {
+  const c = component();
+  const doc = (seconds, status) => ({ run_id: 'r', status, server_time: T(seconds), steps: [] });
+
+  c.setRunTiming('r', doc(10, 'RUNNING'));
+  c.setRunTiming('r', doc(5, 'RUNNING'));
+  assert.strictEqual(c.runTimings.r.server_time, T(10), 'an older document must not replace a newer one');
+  c.setRunTiming('r', doc(10, 'RUNNING'));
+  c.setRunTiming('r', doc(11, 'RUNNING'));
+  assert.strictEqual(c.runTimings.r.server_time, T(11));
+
+  // The reported bug: done arrives, then a late /timing says RUNNING, for good.
+  c.setRunTiming('r', doc(20, 'PASSED'));
+  c.setRunTiming('r', doc(19, 'RUNNING'));
+  assert.strictEqual(c.runTimings.r.status, 'PASSED');
+  // /timing reads the run before it reads the clock, so a response can carry a
+  // later server_time and still describe the run as it was before it finished.
+  c.setRunTiming('r', doc(21, 'RUNNING'));
+  assert.strictEqual(c.runTimings.r.status, 'PASSED', 'a finished run must not go back to running');
+  c.setRunTiming('r', doc(22, 'PASSED'));
+  assert.strictEqual(c.runTimings.r.server_time, T(22));
+
+  // A document without a clock can't be judged stale, so it isn't dropped.
+  const other = component();
+  other.setRunTiming('o', { run_id: 'o', status: 'RUNNING', steps: [] });
+  other.setRunTiming('o', { run_id: 'o', status: 'RUNNING', server_time: T(1), steps: [] });
+  assert.strictEqual(other.runTimings.o.server_time, T(1));
+}
+
+// A promise the test settles by hand, for holding a request in flight.
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+async function testLoadRunTimingGuard() {
+  const c = component();
+  const calls = [];
+  const pending = [];
+  global.api = (method, url) => {
+    calls.push(url);
+    const d = deferred();
+    pending.push(d);
+    return d.promise;
+  };
+
+  const first = c.loadRunTiming('r');
+  c.loadRunTiming('r');
+  assert.deepStrictEqual(calls, ['/api/runs/r/timing'], 'a second load for the same run must wait its turn');
+
+  // The guard is per run.
+  const otherRun = c.loadRunTiming('s');
+  assert.deepStrictEqual(calls, ['/api/runs/r/timing', '/api/runs/s/timing']);
+
+  pending[0].resolve({ run_id: 'r', status: 'RUNNING', server_time: T(1), steps: [] });
+  await first;
+  pending[1].reject(new Error('nope'));
+  await otherRun;
+  assert.strictEqual(c.runTimings.r.server_time, T(1));
+
+  // Both finished, so both can load again, including the one that failed.
+  const again = c.loadRunTiming('r');
+  const againOther = c.loadRunTiming('s');
+  assert.strictEqual(calls.length, 4);
+
+  // A load that must see the latest state doesn't wait for one already out,
+  // and the older response can't overwrite it.
+  const forced = c.loadRunTiming('r', { force: true });
+  assert.strictEqual(calls.length, 5, 'force must not be swallowed by the guard');
+  pending[4].resolve({ run_id: 'r', status: 'RUNNING', server_time: T(9), steps: [] });
+  await forced;
+  pending[2].resolve({ run_id: 'r', status: 'RUNNING', server_time: T(5), steps: [] });
+  await again;
+  assert.strictEqual(c.runTimings.r.server_time, T(9));
+  pending[3].reject(new Error('nope'));
+  await againOther;
+}
+
+// --- clock labels ---------------------------------------------------------
+function testClockLabelsUseTheAppTimezone() {
+  const clock = (iso, timeZone) => new Date(iso).toLocaleTimeString(undefined, {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone,
+  });
+  const doc = {
+    started_at: T(0), completed_at: T(30), server_time: T(30),
+    steps: [step({ started_at: T(0), finished_at: T(30), runtime_seconds: 30 })],
+  };
+  const c = component();
+  c.appTimezone = 'Asia/Tokyo';
+  const tokyo = clock(T(0), 'Asia/Tokyo');
+  assert.strictEqual(c.ganttLayout(doc).ticks[0].label, tokyo);
+  assert.ok(c.ganttTooltip(doc.steps[0]).includes(tokyo), 'the tooltip must use the app timezone');
+
+  c.appTimezone = 'America/New_York';
+  const newYork = clock(T(0), 'America/New_York');
+  assert.notStrictEqual(tokyo, newYork);
+  assert.strictEqual(c.ganttLayout(doc).ticks[0].label, newYork);
+  assert.ok(c.ganttTooltip(doc.steps[0]).includes(newYork));
+
+  // fmtDate survives an unknown zone, so the clock labels have to as well.
+  c.appTimezone = 'Not/AZone';
+  assert.strictEqual(c.ganttLayout(doc).ticks.length, 4);
+  assert.ok(c.ganttTooltip(doc.steps[0]).includes('30s'));
+}
+
+// --- interrupted and not-recorded steps -----------------------------------
+function testInterruptedAndNotRecorded() {
+  storage.clear();
+  const c = component();
+  const interrupted = step({
+    job_name: 'crash', job_type: 'profile', job_family: 'quality', status: 'RUNNING',
+    started_at: T(0), finished_at: null, runtime_seconds: 30,
+    progress: { state: 'interrupted', percent: 100, label: 'interrupted' },
+  });
+  assert.strictEqual(c.ganttBarClass(interrupted), 'rt-s-idle', 'interrupted is grey, not running indigo');
+  assert.strictEqual(c.progressBarClass(interrupted), 'rt-s-idle');
+  assert.strictEqual(c.stepStatusLabel(interrupted), 'interrupted');
+  const tip = c.ganttTooltip(interrupted);
+  assert.ok(tip.includes('interrupted'), tip);
+  assert.ok(!tip.includes('RUNNING'), tip);
+  assert.ok(!tip.includes('to —'), tip);
+
+  // The family toggle still colors it by family.
+  c.setGanttColorBy('family');
+  assert.strictEqual(c.ganttBarClass(interrupted), 'rt-f-quality');
+  c.setGanttColorBy('status');
+
+  // A live running step keeps its indigo and its open end.
+  const running = step({
+    status: 'RUNNING', started_at: T(0), runtime_seconds: 5,
+    progress: { state: 'running', percent: 50, label: '50%' },
+  });
+  assert.strictEqual(c.ganttBarClass(running), 'rt-s-running');
+  assert.strictEqual(c.stepStatusLabel(running), 'RUNNING');
+  assert.ok(c.ganttTooltip(running).includes('RUNNING'));
+
+  // An older run's finished step keeps its status color.
+  const notRecorded = step({
+    status: 'FAILED', progress: { state: 'not_recorded', percent: 100, label: 'FAILED' },
+  });
+  assert.strictEqual(c.ganttBarClass(notRecorded), 'rt-s-failed');
+  assert.strictEqual(c.progressBarClass(notRecorded), 'rt-s-failed');
+  assert.strictEqual(c.stepStatusLabel(notRecorded), 'FAILED');
+  assert.ok(!c.ganttTooltip(notRecorded).includes('interrupted'));
+}
+
+// --- SSE parser -----------------------------------------------------------
+function parseAll(chunks) {
+  let rest = '';
+  const events = [];
+  for (const chunk of chunks) {
+    const parsed = parseSseChunk(rest, chunk);
+    events.push(...parsed.events);
+    rest = parsed.rest;
+  }
+  return { events, rest };
+}
+
+function testSseParser() {
+  const one = { event: 'progress', data: '{"a":1}' };
+  assert.deepStrictEqual(parseAll(['event: progress\ndata: {"a":1}\n\n']), { events: [one], rest: '' });
+
+  // Several events in one chunk, and an incomplete one left over.
+  assert.deepStrictEqual(
+    parseAll(['event: a\ndata: 1\n\nevent: b\ndata: 2\n\nevent: c\nda']),
+    { events: [{ event: 'a', data: '1' }, { event: 'b', data: '2' }], rest: 'event: c\nda' },
+  );
+
+  // Network chunks can split anywhere, in LF and CRLF streams alike.
+  for (const eol of ['\n', '\r\n']) {
+    const text = ['event: progress', 'data: {"a":1}', '', 'event: done', 'data: {"b":2}', '', ''].join(eol);
+    const expected = [one, { event: 'done', data: '{"b":2}' }];
+    for (let i = 1; i < text.length; i++) {
+      const got = parseAll([text.slice(0, i), text.slice(i)]);
+      assert.deepStrictEqual(got.events, expected, `split at ${i} with ${JSON.stringify(eol)}`);
+      assert.strictEqual(got.rest, '', `split at ${i} with ${JSON.stringify(eol)}`);
+    }
+    assert.deepStrictEqual(parseAll(text.split('')).events, expected);
+  }
+
+  // Multi-line data joins with a newline.
+  assert.deepStrictEqual(parseAll(['data: one\ndata: two\n\n']).events, [{ event: 'message', data: 'one\ntwo' }]);
+  assert.deepStrictEqual(parseAll(['data: one\r\ndata: two\r\n\r\n']).events, [{ event: 'message', data: 'one\ntwo' }]);
+
+  // Comments and blocks without data dispatch nothing; a comment inside an event is skipped.
+  assert.deepStrictEqual(parseAll([': keep-alive\n\n']).events, []);
+  assert.deepStrictEqual(parseAll(['event: lonely\n\n']).events, []);
+  assert.deepStrictEqual(parseAll(['event: a\n: note\ndata: 1\n\n']).events, [{ event: 'a', data: '1' }]);
+
+  // Field details from the SSE spec: one optional space, unknown fields ignored,
+  // and the event name doesn't leak into the next event.
+  assert.deepStrictEqual(parseAll(['data:1\n\n']).events, [{ event: 'message', data: '1' }]);
+  assert.deepStrictEqual(parseAll(['data:  1\n\n']).events, [{ event: 'message', data: ' 1' }]);
+  assert.deepStrictEqual(parseAll(['id: 7\nretry: 5\ndata: 1\n\n']).events, [{ event: 'message', data: '1' }]);
+  assert.deepStrictEqual(
+    parseAll(['event: a\ndata: 1\n\ndata: 2\n\n']).events,
+    [{ event: 'a', data: '1' }, { event: 'message', data: '2' }],
+  );
+}
+
+// --- run stream -----------------------------------------------------------
+// A response body the test feeds by hand. Aborting rejects the pending read, as fetch does.
+function fakeBody(signal) {
+  const encoder = new TextEncoder();
+  const queue = [];
+  let waiter = null;
+  const settle = (item) => {
+    if (waiter) {
+      const w = waiter;
+      waiter = null;
+      if (item.error) w.reject(item.error);
+      else w.resolve(item);
+    } else {
+      queue.push(item);
+    }
+  };
+  signal.addEventListener('abort', () => settle({ error: new Error('aborted') }));
+  return {
+    push(text) { settle({ done: false, value: encoder.encode(text) }); },
+    pushBytes(bytes) { settle({ done: false, value: bytes }); },
+    end() { settle({ done: true }); },
+    fail() { settle({ error: new Error('connection reset') }); },
+    getReader() {
+      return {
+        read() {
+          if (queue.length) {
+            const item = queue.shift();
+            return item.error ? Promise.reject(item.error) : Promise.resolve(item);
+          }
+          return new Promise((resolve, reject) => { waiter = { resolve, reject }; });
+        },
+      };
+    },
+  };
+}
+
+const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
+
+function installFetch(status = 200) {
+  const opened = [];
+  global.fetch = async (url, options) => {
+    const body = fakeBody(options.signal);
+    opened.push({ url, options, body });
+    return { ok: status >= 200 && status < 300, status, body };
+  };
+  return opened;
+}
+
+function monitor(extra) {
+  return Object.assign(window.ETL_FEATURE_RUN_TIMING(), window.ETL_FEATURE_MONITOR(), {
+    currentView: 'other',
+    runs: [],
+    loadRunsCalls: 0,
+    async loadRuns() { this.loadRunsCalls += 1; },
+    toast() {},
+  }, extra);
+}
+
+const sse = (event, payload) => `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+const liveRun = (id = 'r') => ({ run_id: id, status: 'RUNNING' });
+
+async function testRunStream() {
+  session.set('etl_token', 'secret-token');
+  global.api = async () => [];
+
+  // Same bearer header as api(), and the token stays out of the URL.
+  let opened = installFetch();
+  let m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  m.startRunStream(m.activeRuns[0]);
+  assert.strictEqual(opened.length, 1, 'one stream per run');
+  assert.strictEqual(opened[0].url, '/api/runs/r/stream');
+  assert.ok(!opened[0].url.includes('secret-token'));
+  assert.strictEqual(opened[0].options.headers.Authorization, 'Bearer secret-token');
+  assert.strictEqual(typeof m.runStreams.r.close, 'function');
+
+  // Not live until data arrives: a 200 with nothing behind it isn't a working stream.
+  await flush();
+  assert.strictEqual(m.isRunStreamLive('r'), false);
+
+  // Progress reaches the card, split across chunks and with held_step for the alert.
+  const payload = {
+    run_id: 'r', status: 'RUNNING', total_tests: 2, held_step: 1, steps: [],
+    timing: { run_id: 'r', status: 'RUNNING', server_time: T(1), steps: [] },
+  };
+  const text = sse('progress', payload);
+  opened[0].body.push(text.slice(0, 12));
+  opened[0].body.push(text.slice(12));
+  await flush();
+  assert.strictEqual(m.activeRuns[0]._progress.held_step, 1);
+  assert.strictEqual(m.runTimings.r.server_time, T(1));
+  assert.strictEqual(m.isRunStreamLive('r'), true);
+
+  // A multi-byte character split across chunks survives.
+  const bytes = new TextEncoder().encode(sse('progress', { ...payload, note: 'a·b', timing: null }));
+  const middle = bytes.indexOf(0xc2) + 1;
+  opened[0].body.pushBytes(bytes.slice(0, middle));
+  opened[0].body.pushBytes(bytes.slice(middle));
+  await flush();
+  assert.strictEqual(m.activeRuns[0]._progress.note, 'a·b');
+
+  // done: final timing stored, stream closed, entry gone, no reopen for a finished run.
+  opened[0].body.push(sse('done', {
+    ...payload, status: 'PASSED', held_step: null,
+    timing: { run_id: 'r', status: 'PASSED', server_time: T(2), steps: [] },
+  }));
+  await flush();
+  assert.strictEqual(m.activeRuns[0].status, 'PASSED');
+  assert.strictEqual(m.runTimings.r.status, 'PASSED');
+  assert.strictEqual(m.runStreams.r, undefined);
+  assert.ok(opened[0].options.signal.aborted, 'done must close the connection');
+  assert.strictEqual(m.loadRunsCalls, 1);
+  m.startRunStream(m.activeRuns[0]);
+  assert.strictEqual(opened.length, 1);
+
+  // done without timing still replaces a RUNNING document.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  const timingCalls = [];
+  global.api = async (method, url) => {
+    if (url.endsWith('/timing')) {
+      timingCalls.push(url);
+      return { run_id: 'r', status: 'FAILED', server_time: T(5), steps: [] };
+    }
+    return [];
+  };
+  m.setRunTiming('r', { run_id: 'r', status: 'RUNNING', server_time: T(1), steps: [] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push(sse('done', { run_id: 'r', status: 'FAILED', steps: [], timing: null }));
+  await flush();
+  assert.deepStrictEqual(timingCalls, ['/api/runs/r/timing']);
+  assert.strictEqual(m.runTimings.r.status, 'FAILED');
+  global.api = async () => [];
+
+  // Ended without done: entry removed, nothing retries until something calls start again.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.end();
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+  assert.strictEqual(m.isRunStreamLive('r'), false);
+  await flush();
+  assert.strictEqual(opened.length, 1, 'no tight retry loop');
+  m.startRunStream(m.activeRuns[0]);
+  assert.strictEqual(opened.length, 2, 'the next poll can reopen it');
+  await flush();
+
+  // The connection breaking behaves the same.
+  opened[1].body.fail();
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+  assert.strictEqual(opened.length, 2);
+
+  // A server error is not a denial, so the next poll may try again.
+  opened = installFetch(500);
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+  m.startRunStream(m.activeRuns[0]);
+  assert.strictEqual(opened.length, 2);
+  await flush();
+
+  // A bad payload ends the stream rather than leaving it half-alive.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push('event: progress\ndata: {not json\n\n');
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+
+  // 401 and 403: no retry for that run while the token stays the same.
+  for (const status of [401, 403]) {
+    opened = installFetch(status);
+    m = monitor({ activeRuns: [liveRun()] });
+    m.startRunStream(m.activeRuns[0]);
+    await flush();
+    assert.strictEqual(m.runStreams.r, undefined);
+    m.startRunStream(m.activeRuns[0]);
+    await flush();
+    assert.strictEqual(opened.length, 1, `${status} must not be retried with the same token`);
+    session.set('etl_token', `new-token-${status}`);
+    m.startRunStream(m.activeRuns[0]);
+    assert.strictEqual(opened.length, 2, 'a new token gets a new try');
+    await flush();
+    m.closeRunStream('r');
+    session.set('etl_token', 'secret-token');
+    await flush();
+  }
+
+  // closeRunStream aborts, and a closed reader can't remove the entry that replaced it.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  m.closeRunStream('r');
+  assert.ok(opened[0].options.signal.aborted);
+  assert.strictEqual(m.runStreams.r, undefined);
+  m.startRunStream(m.activeRuns[0]);
+  const replacement = m.runStreams.r;
+  assert.ok(replacement, 'a stream reopens after a close');
+  await flush();
+  assert.strictEqual(m.runStreams.r, replacement);
+  m.closeRunStream('r');
+  await flush();
+
+  // Browsers allow 6 connections per host over HTTP/1.1, so streams stop short of
+  // that and the remaining runs use the poll.
+  opened = installFetch();
+  const many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(liveRun);
+  m = monitor({ activeRuns: many });
+  many.forEach((run) => m.startRunStream(run));
+  assert.strictEqual(opened.length, 4);
+  await flush();
+  Object.keys(m.runStreams).forEach((id) => m.closeRunStream(id));
+  await flush();
+}
+
+// --- polling --------------------------------------------------------------
+function pollApi(timingDoc) {
+  const calls = [];
+  global.api = async (method, url) => {
+    calls.push(url);
+    if (url.endsWith('/status')) return { status: 'RUNNING' };
+    if (url.endsWith('/progress')) return { run_id: 'r', status: 'RUNNING', percent_complete: 10, held_step: null };
+    if (url.endsWith('/timing')) return timingDoc();
+    return [];
+  };
+  return calls;
+}
+
+async function testPolling() {
+  const timing = (status = 'RUNNING', seconds = 5) => ({ run_id: 'r', status, server_time: T(seconds), steps: [] });
+
+  // No stream: the poll is the fallback.
+  let opened = installFetch();
+  let calls = pollApi(timing);
+  let m = monitor({ activeRuns: [liveRun()] });
+  await m.pollActiveRuns();
+  assert.ok(calls.includes('/api/runs/r/timing'), 'polling is the fallback when there is no stream');
+
+  // Stream sending data: no /timing, and /progress can't wipe the stream's held_step.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push(sse('progress', { run_id: 'r', status: 'RUNNING', held_step: 1, steps: [], timing: timing('RUNNING', 1) }));
+  await flush();
+  calls = pollApi(timing);
+  await m.pollActiveRuns();
+  assert.ok(!calls.includes('/api/runs/r/timing'), 'a connected stream replaces the /timing poll');
+  assert.ok(calls.includes('/api/runs/r/status'));
+  assert.strictEqual(m.activeRuns[0]._progress.held_step, 1);
+
+  // A stream gone quiet is treated as not connected.
+  const realNow = Date.now;
+  Date.now = () => realNow() + 60_000;
+  calls = pollApi(timing);
+  await m.pollActiveRuns();
+  Date.now = realNow;
+  assert.ok(calls.includes('/api/runs/r/timing'), 'a silent stream must not stop the fallback');
+  m.closeRunStream('r');
+  await flush();
+
+  // The poll reopens a failed stream, on the Monitor view.
+  opened = installFetch();
+  calls = pollApi(timing);
+  const listed = liveRun();
+  m = monitor({ currentView: 'monitor', activeRuns: [], runs: [listed] });
+  await m.pollActiveRuns();
+  assert.strictEqual(opened.length, 1);
+  await flush();
+  opened[0].body.end();
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+  await m.pollActiveRuns();
+  assert.strictEqual(opened.length, 2);
+  m.closeRunStream('r');
+  await flush();
+
+  // The poll sees the run finish while its own /timing was read before that: the
+  // card must not be left saying RUNNING, because this run won't be polled again.
+  installFetch();
+  let served = 0;
+  global.api = async (method, url) => {
+    if (url.endsWith('/status')) return { status: 'PASSED' };
+    if (url.endsWith('/progress')) return null;
+    if (url.endsWith('/timing')) {
+      served += 1;
+      return served === 1 ? timing('RUNNING', 3) : timing('PASSED', 4);
+    }
+    return [];
+  };
+  m = monitor({ activeRuns: [liveRun()] });
+  await m.pollActiveRuns();
+  assert.strictEqual(m.activeRuns[0].status, 'PASSED');
+  assert.strictEqual(m.runTimings.r.status, 'PASSED');
+  assert.strictEqual(served, 2);
+}
+
+// --- /steps refetch -------------------------------------------------------
+async function testStepsRefetch() {
+  const tick = (seconds) => sse('progress', {
+    run_id: 'r', status: 'RUNNING', steps: [{ step_id: 'a', status: 'RUNNING' }],
+    timing: { run_id: 'r', status: 'RUNNING', server_time: T(seconds), steps: [] },
+  });
+  let calls = [];
+  const stepsCalls = () => calls.filter((url) => url.endsWith('/steps')).length;
+
+  // /steps failing: ticks don't hammer it, and the failure holds until the next poll.
+  let opened = installFetch();
+  global.api = async (method, url) => {
+    calls.push(url);
+    if (url.endsWith('/steps')) throw new Error('nope');
+    if (url.endsWith('/status')) return { status: 'RUNNING' };
+    return null;
+  };
+  let m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  for (let i = 0; i < 10; i++) {
+    opened[0].body.push(tick(i));
+    await flush();
+  }
+  assert.strictEqual(stepsCalls(), 1, `${stepsCalls()} /steps calls in 10 ticks`);
+  await m.pollActiveRuns();
+  assert.strictEqual(stepsCalls(), 2, 'the poll retries once');
+  for (let i = 10; i < 20; i++) {
+    opened[0].body.push(tick(i));
+    await flush();
+  }
+  assert.ok(stepsCalls() <= 3, `${stepsCalls()} /steps calls after the poll`);
+  m.closeRunStream('r');
+  await flush();
+
+  // Slow but healthy /steps: one request at a time, then the cache takes over.
+  calls = [];
+  opened = installFetch();
+  const held = deferred();
+  global.api = (method, url) => {
+    calls.push(url);
+    return url.endsWith('/steps') ? held.promise : Promise.resolve(null);
+  };
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  for (let i = 0; i < 5; i++) {
+    opened[0].body.push(tick(i));
+    await flush();
+  }
+  assert.strictEqual(stepsCalls(), 1, 'one /steps request in flight at a time');
+  held.resolve([{ step_id: 'a', status: 'RUNNING' }]);
+  await flush();
+  opened[0].body.push(tick(6));
+  await flush();
+  assert.strictEqual(stepsCalls(), 1, 'a filled cache needs no refetch');
+  m.closeRunStream('r');
+  await flush();
+}
+
+// --- release --------------------------------------------------------------
+async function testRelease() {
+  // A poll's /timing, read before the release, is still out when the release lands.
+  const calls = [];
+  const pendingTiming = [];
+  global.api = (method, url) => {
+    calls.push(`${method} ${url}`);
+    if (url.endsWith('/timing')) {
+      const d = deferred();
+      pendingTiming.push(d);
+      return d.promise;
+    }
+    return Promise.resolve([]);
+  };
+  const m = monitor({
+    activeRuns: [liveRun()],
+    stepReleaseModal: { show: true, runId: 'r', stepIndex: 1, releasedBy: 'me', note: 'ok', action: 'approve' },
+  });
+  const held = (seconds, state) => ({
+    run_id: 'r', status: 'RUNNING', server_time: T(seconds),
+    steps: [step({ status: state === 'held' ? 'HELD' : 'APPROVED', progress: { state, percent: 100, label: state } })],
+  });
+  m.setRunTiming('r', held(1, 'held'));
+  const pollLoad = m.loadRunTiming('r');
+  const release = m.submitStepRelease();
+  await flush();
+  assert.strictEqual(pendingTiming.length, 2, 'the release must not be dropped by the in-flight guard');
+  pendingTiming[1].resolve(held(10, 'done'));
+  await release;
+  assert.strictEqual(m.runTimings.r.steps[0].progress.state, 'done', 'Release must go away after success');
+  pendingTiming[0].resolve(held(5, 'held'));
+  await pollLoad;
+  assert.strictEqual(m.runTimings.r.steps[0].progress.state, 'done', 'the older poll must not bring Release back');
+  assert.ok(calls.includes('POST /api/runs/r/steps/1/release'));
 }
 
 main().catch((error) => {

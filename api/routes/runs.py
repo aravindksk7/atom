@@ -1475,11 +1475,14 @@ def get_trends(
 
 
 def _rollback_quietly(db: Session) -> None:
-    """Clear an aborted transaction (Postgres) so the stream's next query works."""
+    """End the session's transaction and hand its connection back to the pool.
+
+    Clears an aborted transaction (Postgres) so the stream's next query works.
+    """
     try:
         db.rollback()
     except Exception:
-        logger.exception("Could not roll back after a timing error")
+        logger.exception("Could not roll back the run stream's transaction")
 
 
 @router.get("/{run_id}/stream")
@@ -1558,6 +1561,10 @@ async def stream_run(run_id: str, db: Session = Depends(get_session)):
             if run.status in _TERMINAL:
                 yield f"event: done\ndata: {payload_text}\n\n"
                 break
+            # An open read transaction would pin a pooled connection for the whole
+            # sleep, and enough streams would starve every other request. Only reads
+            # happen here, and the next tick starts a fresh transaction.
+            _rollback_quietly(db)
             await asyncio.sleep(1)
 
     return StreamingResponse(events(), media_type="text/event-stream")

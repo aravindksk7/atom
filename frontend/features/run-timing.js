@@ -32,13 +32,17 @@
     return `${seconds}s`;
   }
 
-  function clockTime(ms) {
-    return new Date(ms).toLocaleTimeString(undefined, {
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
+  function clockTime(ms, timeZone) {
+    const options = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    try {
+      return new Date(ms).toLocaleTimeString(undefined, { ...options, timeZone: timeZone || 'UTC' });
+    } catch {
+      // Unknown zone: fall back to the browser's, as fmtDate does.
+      return new Date(ms).toLocaleTimeString(undefined, options);
+    }
   }
 
-  function ganttLayout(timing) {
+  function ganttLayout(timing, timeZone) {
     const start = Date.parse(timing.started_at);
     const rowsWithoutBars = () => (timing.steps || []).map((step) => ({ step, bar: null, hold: null }));
     if (!timing.started_at || Number.isNaN(start)) return { ticks: [], rows: rowsWithoutBars() };
@@ -54,7 +58,7 @@
     const ticks = [];
     for (let i = 0; i < TICK_COUNT; i++) {
       const fraction = i / (TICK_COUNT - 1);
-      ticks.push({ percent: fraction * 100, label: clockTime(start + span * fraction) });
+      ticks.push({ percent: fraction * 100, label: clockTime(start + span * fraction, timeZone) });
     }
     const rows = (timing.steps || []).map((step) => ({
       step,
@@ -66,8 +70,24 @@
     return { ticks, rows };
   }
 
+  function isInterrupted(step) {
+    return Boolean(step.progress) && step.progress.state === 'interrupted';
+  }
+
   function statusClass(step) {
+    // An interrupted step's status still says RUNNING, but nothing is running.
+    if (isInterrupted(step)) return 'rt-s-idle';
     return `rt-s-${STATUS_CLASSES[step.status] || 'idle'}`;
+  }
+
+  // A response read just before a run finished can reach the browser after the
+  // final document. /timing reads the run before the clock, so its server_time can
+  // be the later one too, which is why a finished run also can't go back to live.
+  // Restarting a run makes a new run_id, so this document can't legitimately do that.
+  function isStaleTiming(stored, next, isTerminal) {
+    if (!stored) return false;
+    if (isTerminal(stored.status) && !isTerminal(next.status)) return true;
+    return Date.parse(next.server_time) < Date.parse(stored.server_time);
   }
 
   function readColorBy() {
@@ -82,23 +102,38 @@
   global.ETL_RUN_TIMING = { fmtSeconds, ganttLayout };
 
   global.ETL_FEATURE_RUN_TIMING = function () {
+    // A plain closure, not component state: Alpine would otherwise track the read
+    // from the card's x-init and rerun the run list whenever this changes.
+    const timingLoads = new Set(); // run_ids with a /timing request out
+
     return {
       runTimings: {},       // { run_id: timing document }
       runTimingTabs: {},    // { run_id: 'progress' | 'timeline' }, only after a click
       ganttColorBy: readColorBy(),
 
       fmtSeconds,
-      ganttLayout,
 
-      setRunTiming(runId, timing) {
-        if (timing) this.runTimings = { ...this.runTimings, [runId]: timing };
+      ganttLayout(timing) {
+        return ganttLayout(timing, this.appTimezone);
       },
 
-      async loadRunTiming(runId) {
+      setRunTiming(runId, timing) {
+        if (!timing) return;
+        if (isStaleTiming(this.runTimings[runId], timing, (status) => this.isTerminalStatus(status))) return;
+        this.runTimings = { ...this.runTimings, [runId]: timing };
+      },
+
+      // force is for a caller that needs state newer than any request already out.
+      // The older response can't overwrite the result: see isStaleTiming.
+      async loadRunTiming(runId, { force = false } = {}) {
+        if (!force && timingLoads.has(runId)) return;
+        timingLoads.add(runId);
         try {
           this.setRunTiming(runId, await api('GET', `/api/runs/${runId}/timing`));
         } catch {
           // Older data or a passing failure: the card falls back to what it has.
+        } finally {
+          timingLoads.delete(runId);
         }
       },
 
@@ -116,7 +151,7 @@
         if (state === 'running' || state === 'running_unknown') return 'rt-s-running rt-stripe';
         if (state === 'over_estimate') return 'rt-s-slow rt-stripe';
         if (state === 'held') return 'rt-s-held';
-        if (state === 'carried_over' || state === 'interrupted') return 'rt-s-idle';
+        if (state === 'carried_over') return 'rt-s-idle';
         return statusClass(step);
       },
 
@@ -149,6 +184,10 @@
         }
       },
 
+      stepStatusLabel(step) {
+        return isInterrupted(step) ? 'interrupted' : step.status;
+      },
+
       ganttBarClass(step) {
         return this.ganttColorBy === 'family' ? `rt-f-${step.job_family}` : statusClass(step);
       },
@@ -160,11 +199,13 @@
       },
 
       ganttTooltip(step) {
-        const time = (iso) => (iso ? clockTime(Date.parse(iso)) : '—');
+        const time = (iso) => (iso ? clockTime(Date.parse(iso), this.appTimezone) : '—');
         const tries = (step.attempt || 0) > 1 ? ` · try ${step.attempt}` : '';
-        return `${step.job_name} (${step.job_type || 'unknown type'}) · ${step.status} · `
-          + `${time(step.started_at)} to ${time(step.finished_at)} · `
-          + `${fmtSeconds(step.runtime_seconds)}${tries}`;
+        const span = isInterrupted(step)
+          ? `started ${time(step.started_at)}`
+          : `${time(step.started_at)} to ${time(step.finished_at)}`;
+        return `${step.job_name} (${step.job_type || 'unknown type'}) · ${this.stepStatusLabel(step)} · `
+          + `${span} · ${fmtSeconds(step.runtime_seconds)}${tries}`;
       },
     };
   };

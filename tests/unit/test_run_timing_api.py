@@ -256,6 +256,71 @@ def test_live_stream_ticks_and_loads_the_context_once(client, engine, monkeypatc
     assert len(calls) == 1
 
 
+def test_stream_holds_no_transaction_while_it_sleeps(client, engine, monkeypatch):
+    """An open read transaction across the sleep pins a pooled connection: on
+    Postgres, 16 streams exhausted the pool and /api/health took 29 s."""
+    import asyncio
+    import threading
+
+    from api.routes import runs as runs_module
+    from etl_framework.repository.repository import RunRepository, RunStepRepository
+
+    timeline = []
+    sessions = []
+    real_rollback = Session.rollback
+    real_sleep = asyncio.sleep
+    real_expire_all = Session.expire_all
+
+    def spy_rollback(self):
+        timeline.append("rollback")
+        return real_rollback(self)
+
+    def spy_expire_all(self):
+        # Only the stream's own session calls this, once at the top of each tick.
+        if self not in sessions:
+            sessions.append(self)
+        return real_expire_all(self)
+
+    async def spy_sleep(seconds, *args, **kwargs):
+        # The stream's own sleep is the 1 second one; leave anyio's alone.
+        if seconds == 1:
+            timeline.append(("sleep", [s.in_transaction() for s in sessions]))
+        return await real_sleep(seconds, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "rollback", spy_rollback)
+    monkeypatch.setattr(Session, "expire_all", spy_expire_all)
+    monkeypatch.setattr(runs_module.asyncio, "sleep", spy_sleep)
+    _live_run(engine)
+
+    def sleeps():
+        return [i for i, entry in enumerate(timeline) if isinstance(entry, tuple)]
+
+    def change_a_step_then_finish():
+        _wait_for(lambda: len(sleeps()) >= 2)
+        with Session(engine) as db:
+            RunStepRepository(db).set_status_by_step_id("live", "a", "PASSED")
+        seen = len(sleeps())
+        _wait_for(lambda: len(sleeps()) >= seen + 2)
+        with Session(engine) as db:
+            RunRepository(db).update_run_status("live", "PASSED", completed_at=datetime.now(timezone.utc))
+
+    threading.Thread(target=change_a_step_then_finish, daemon=True).start()
+    events = _events(_read_stream(client, "live"))
+
+    indexes = sleeps()
+    assert len(indexes) >= 3
+    for index in indexes:
+        assert timeline[index - 1] == "rollback", "the rollback must come right before the sleep"
+        assert sessions and not any(timeline[index][1]), "a transaction stayed open across the sleep"
+
+    # Ending the transaction must not stop later ticks from seeing new data.
+    statuses = [p["steps"][0]["status"] for name, p in events if name == "progress"]
+    assert statuses[0] == "RUNNING"
+    assert "PASSED" in statuses
+    assert events[-1][0] == "done"
+    assert events[-1][1]["status"] == "PASSED"
+
+
 def _sequence(engine):
     from etl_framework.repository.models import ExecutionSequence
 
