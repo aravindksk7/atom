@@ -158,7 +158,7 @@ jobs:
           PIPELINE_TOKEN: ${{ steps.mint.outputs.pipeline_token }}
           RUN_ID: ${{ steps.run.outputs.run_id }}
         run: |
-          TERMINAL_STATUSES="PASSED FAILED SLOW ERROR COMPLETED"
+          TERMINAL_STATUSES="PASSED FAILED SLOW ERROR COMPLETED BLOCKED CANCELLED"
           DEADLINE=$(date -u -d '+30 minutes' '+%s')
 
           while true; do
