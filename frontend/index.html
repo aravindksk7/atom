@@ -3870,9 +3870,9 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
 
         <!-- HELD alert -->
-        <template x-if="run._progress && run._progress.held_step != null">
+        <template x-if="heldStepIndex(run) != null">
           <div class="mt-3 flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <span class="text-amber-600 font-semibold text-sm">⏸ Sequence held at step <span x-text="(run._progress.held_step + 1)"></span></span>
+            <span class="text-amber-600 font-semibold text-sm">⏸ Sequence held at step <span x-text="(heldStepIndex(run) + 1)"></span></span>
           </div>
         </template>
       </div>

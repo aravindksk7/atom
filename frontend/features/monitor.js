@@ -11,6 +11,9 @@
   // The server sends each second while it has timing, so a stream this quiet
   // isn't delivering, whatever the connection says. The poll covers for it.
   const STREAM_QUIET_MS = 10000;
+  // Past this, the stream is closed outright so its connection slot frees and the
+  // poll (and a fresh stream) take over.
+  const STREAM_CLOSE_QUIET_MS = 30000;
 
   // Pure SSE parser. Takes what was left over from the last call and the newly
   // arrived text, and returns the complete events plus the new leftover. Chunks
@@ -63,7 +66,7 @@
     // -----------------------------------------------------------
     activeRuns: [],
     pollTimer: null,
-    runStreams: {},      // { run_id: { close(), lastEventAt } }
+    runStreams: {},      // { run_id: { close(), lastEventAt, openedAt, token } }
     cancellingRuns: {},
     runStepsCache: {},   // { run_id: RunStep[] }
     stepReleaseModal: { show: false, runId: '', stepIndex: 0, releasedBy: '', note: '', action: 'approve' },
@@ -94,7 +97,7 @@
       if (deniedStreams.get(runId) === token) return;
 
       const controller = new AbortController();
-      const stream = { close: () => controller.abort(), lastEventAt: 0 };
+      const stream = { close: () => controller.abort(), lastEventAt: 0, openedAt: Date.now(), token };
       this.runStreams[runId] = stream;
       this.readRunStream(runId, stream, token, controller.signal);
     },
@@ -133,6 +136,9 @@
       } catch {
         // Closed by us, or the connection broke. Either way the poll takes over.
       } finally {
+        // An error in a handler leaves the connection open, so abort it here. Aborting
+        // a finished or already closed stream does nothing.
+        stream.close();
         // Compare the close function, not the object: Alpine hands back a proxy of
         // it. A closed stream must not remove the one that replaced it.
         if (this.runStreams[runId]?.close === stream.close) delete this.runStreams[runId];
@@ -187,6 +193,33 @@
       return Boolean(stream && stream.lastEventAt && Date.now() - stream.lastEventAt < STREAM_QUIET_MS);
     },
 
+    // The streams carry the bearer they opened with, so a token that changes or is
+    // cleared must not leave them updating under the old one.
+    closeAllRunStreams() {
+      Object.keys(this.runStreams).forEach((runId) => this.closeRunStream(runId));
+    },
+
+    // Closes a stream that is on an old token, or has said nothing for far longer
+    // than the server's one-second cadence.
+    closeStaleRunStream(runId) {
+      const stream = this.runStreams[runId];
+      if (!stream) return;
+      const token = normalizeToken(sessionStorage.getItem('etl_token'));
+      const lastHeard = Math.max(stream.lastEventAt || 0, stream.openedAt || 0);
+      if (stream.token !== token || Date.now() - lastHeard > STREAM_CLOSE_QUIET_MS) {
+        this.closeRunStream(runId);
+      }
+    },
+
+    // /progress has no held_step, so a run the stream isn't covering gets its held
+    // step from the timing document instead.
+    heldStepIndex(run) {
+      const held = run?._progress?.held_step;
+      if (held !== null && held !== undefined) return held;
+      const step = (this.runTimings[run?.run_id]?.steps || []).find((s) => s.status === 'HELD');
+      return step ? step.step_index : null;
+    },
+
     closeRunStream(runId) {
       if (this.runStreams[runId]) {
         this.runStreams[runId].close();
@@ -199,6 +232,7 @@
       for (const run of liveRuns) {
         try {
           stepsRefetchHeld.delete(run.run_id);
+          this.closeStaleRunStream(run.run_id);
           const [status, progress] = await Promise.all([
             api('GET', `/api/runs/${run.run_id}/status`),
             api('GET', `/api/runs/${run.run_id}/progress`).catch(() => null),
@@ -212,6 +246,8 @@
             // /progress has no held_step, so it must not replace what the stream sent.
             if (progress && !this.isRunStreamLive(run.run_id)) this.activeRuns[idx]._progress = progress;
           }
+          // A finished run needs no stream, and its slot goes to one that does.
+          if (this.isTerminalStatus(status.status)) this.closeRunStream(run.run_id);
           // The /timing above may predate the finish this /status reports, and a
           // finished run isn't polled again.
           if (this.isTerminalStatus(status.status) && !this.isTerminalStatus(this.runTimings[run.run_id]?.status)) {

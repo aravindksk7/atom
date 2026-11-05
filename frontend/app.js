@@ -596,6 +596,7 @@ function _appRaw() {
     handleAuthError(e) {
       if (!this.isAuthError(e)) return false;
       sessionStorage.removeItem('etl_token');
+      this.closeAllRunStreams();
       this.storedTokenValue = '';
       this.activeTokenName = '';
       this.activeTokenIsAdmin = false;
@@ -640,12 +641,14 @@ function _appRaw() {
         return;
       }
       sessionStorage.setItem('etl_token', raw);
+      this.closeAllRunStreams();
       this.storedTokenValue = raw;
       this.authPasteValue = '';
       this.authError = '';
       const valid = await this.resolveActiveTokenName({ verify: true });
       if (!valid) {
         sessionStorage.removeItem('etl_token');
+        this.closeAllRunStreams();
         this.storedTokenValue = '';
         this.authError = 'Your API token was rejected. Paste a valid raw token.';
         this.showAuthModal = true;
@@ -674,6 +677,7 @@ function _appRaw() {
         }
         if (clearInvalid) {
           sessionStorage.removeItem('etl_token');
+          this.closeAllRunStreams();
           this.storedTokenValue = '';
           this.activeTokenName = '';
           this.activeTokenIsAdmin = false;
@@ -1003,12 +1007,14 @@ function _appRaw() {
       const token = normalizeToken(raw);
       if (token) {
         sessionStorage.setItem('etl_token', token);
+        this.closeAllRunStreams();
         this.storedTokenValue = token;
         this.resolveActiveTokenName({ verify: true });
         this.loadAll();
         this.toast('success', 'Token saved', 'Will be used for all API calls');
       } else {
         sessionStorage.removeItem('etl_token');
+        this.closeAllRunStreams();
         this.storedTokenValue = '';
         this.activeTokenName = '';
         this.activeTokenIsAdmin = false;

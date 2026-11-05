@@ -192,6 +192,8 @@ async function main() {
   await testRelease();
   await testHistoryRunDetail();
   await testSelectSequence();
+  await testStreamLifecycle();
+  testHeldAlertFallback();
 }
 
 // --- stale documents ------------------------------------------------------
@@ -1011,6 +1013,123 @@ async function testSelectSequence() {
   s.openSequenceRun('r');
   assert.deepStrictEqual(entered, ['history']);
   assert.deepStrictEqual(opened, ['r']);
+}
+
+// --- stream lifecycle -----------------------------------------------------
+async function testStreamLifecycle() {
+  session.set('etl_token', 'secret-token');
+  global.api = async () => [];
+
+  // A token change closes every open stream, so none keeps the old bearer.
+  let opened = installFetch();
+  let m = monitor({ activeRuns: [liveRun('a'), liveRun('b')] });
+  m.activeRuns.forEach((run) => m.startRunStream(run));
+  await flush();
+  assert.strictEqual(typeof m.closeAllRunStreams, 'function');
+  m.closeAllRunStreams();
+  assert.ok(opened.every((o) => o.options.signal.aborted), 'every stream must be aborted');
+  assert.deepStrictEqual(Object.keys(m.runStreams), []);
+  await flush();
+
+  // The poll is a backstop: a stream opened with another token is closed.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  session.set('etl_token', 'changed-token');
+  pollApi(() => ({ run_id: 'r', status: 'RUNNING', server_time: T(5), steps: [] }));
+  await m.pollActiveRuns();
+  assert.ok(opened[0].options.signal.aborted, 'a stream on the old token must be closed');
+  session.set('etl_token', 'secret-token');
+  await flush();
+
+  // The token handlers in app.js close streams.
+  const fs = require('node:fs');
+  const appSource = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'app.js'), 'utf8');
+  for (const name of ['handleAuthError', 'setStoredToken', 'activateToken']) {
+    const found = new RegExp(`^\\s+(async )?${name}\\(`, 'm').exec(appSource);
+    assert.ok(found, `${name} not found`);
+    const body = appSource.slice(found.index, found.index + 1400);
+    assert.ok(body.includes('closeAllRunStreams()'), `${name} must close run streams`);
+  }
+
+  // A handler error aborts the connection, not just drops the entry.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push('event: progress\ndata: {not json\n\n');
+  await flush();
+  assert.strictEqual(m.runStreams.r, undefined);
+  assert.ok(opened[0].options.signal.aborted, 'an error must abort the connection');
+
+  // The poll sees the run finished: the stream is closed, freeing the slot.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push(sse('progress', { run_id: 'r', status: 'RUNNING', steps: [], timing: null }));
+  await flush();
+  global.api = async (method, url) => {
+    if (url.endsWith('/status')) return { status: 'PASSED' };
+    if (url.endsWith('/progress')) return null;
+    if (url.endsWith('/timing')) return { run_id: 'r', status: 'PASSED', server_time: T(9), steps: [] };
+    return [];
+  };
+  await m.pollActiveRuns();
+  assert.ok(opened[0].options.signal.aborted, 'a finished run must not keep its stream');
+  assert.strictEqual(m.runStreams.r, undefined);
+  await flush();
+
+  // A stream silent for 30 s is closed so the poll takes over; 11 s only stops counting as live.
+  global.api = async () => [];
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  opened[0].body.push(sse('progress', { run_id: 'r', status: 'RUNNING', steps: [], timing: null }));
+  await flush();
+  const realNow = Date.now;
+  pollApi(() => ({ run_id: 'r', status: 'RUNNING', server_time: T(5), steps: [] }));
+  Date.now = () => realNow() + 11_000;
+  await m.pollActiveRuns();
+  assert.ok(!opened[0].options.signal.aborted, 'a stream quiet for 11 s is kept');
+  Date.now = () => realNow() + 31_000;
+  await m.pollActiveRuns();
+  Date.now = realNow;
+  assert.ok(opened[0].options.signal.aborted, 'a stream quiet for 31 s must be closed');
+  assert.strictEqual(m.runStreams.r, undefined);
+  await flush();
+
+  // One that never sent anything is held to the same limit.
+  opened = installFetch();
+  m = monitor({ activeRuns: [liveRun()] });
+  m.startRunStream(m.activeRuns[0]);
+  await flush();
+  pollApi(() => ({ run_id: 'r', status: 'RUNNING', server_time: T(5), steps: [] }));
+  Date.now = () => realNow() + 31_000;
+  await m.pollActiveRuns();
+  Date.now = realNow;
+  assert.ok(opened[0].options.signal.aborted, 'a stream that never delivered must be closed');
+  await flush();
+}
+
+// --- HELD alert on the poll path ------------------------------------------
+function testHeldAlertFallback() {
+  const m = monitor({});
+  const run = { run_id: 'r', status: 'RUNNING', _progress: { held_step: null } };
+  assert.strictEqual(m.heldStepIndex(run), null);
+  m.setRunTiming('r', {
+    run_id: 'r', status: 'RUNNING', server_time: T(1),
+    steps: [step({ step_index: 0 }), step({ step_index: 2, status: 'HELD' })],
+  });
+  assert.strictEqual(m.heldStepIndex(run), 2, 'derived from the timing when /progress has none');
+  assert.strictEqual(m.heldStepIndex({ ...run, _progress: { held_step: 1 } }), 1, 'the stream value wins');
+  assert.strictEqual(m.heldStepIndex({ run_id: 'x', _progress: null }), null);
+  const html = require('node:fs').readFileSync(
+    path.join(__dirname, '..', '..', 'frontend', 'partials', 'tab-monitor.html'), 'utf8');
+  assert.ok(html.includes('heldStepIndex(run)'), 'the alert must read heldStepIndex');
+  assert.ok(html.includes('Sequence held at step'), 'alert text is unchanged');
 }
 
 main().catch((error) => {

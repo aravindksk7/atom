@@ -547,6 +547,7 @@
         const resp = await api('POST', '/api/tokens', body);
         if (fromAuthWizard) {
           sessionStorage.setItem('etl_token', resp.raw_token);
+          this.closeAllRunStreams();
           this.storedTokenValue = resp.raw_token;
           this.activeTokenName = resp.name || name;
           this.activeTokenIsAdmin = true;
