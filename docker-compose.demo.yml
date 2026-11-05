@@ -79,6 +79,9 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       DEMO_BASE_URL: http://atom:8055
       DEMO_PACE: ${DEMO_PACE:-1}
+      DEMO_TRACE: ${DEMO_TRACE:-}
+      # demo/seed/seed_history.py writes the earlier nightly runs here.
+      DEMO_ATOM_DB_URL: postgresql+psycopg://atom:demo_only@atom-db:5432/atom
     command: node node_modules/@playwright/test/cli.js test --config demo/playwright.demo.config.ts
     depends_on:
       atom:

@@ -1,6 +1,8 @@
 // Playwright global setup: creates everything the demo needs in ATOM through its
 // public API, before recording starts. The audience sees the finished sequence.
 import { APIRequestContext, request as pwRequest } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 
 export const BUSINESS_DATE = '2026-06-03';
 export const SEQUENCE_NAME = 'Nightly Regression';
@@ -43,6 +45,8 @@ const CRUSHFTP_PROFILE = 'CrushFTP Production';
 const POSTGRES_URL = 'postgresql+psycopg://atom:demo_only@postgres:5432/qa';
 const ORACLE_SIM_URL = 'postgresql+psycopg://atom:demo_only@oracle-sim:5432/prod';
 const DATE = '{{run_date}}';
+// The comparisons take seconds, too quick to see or talk through. See "Limits" in demo/README.md.
+const RECON_WAIT_SECONDS = 12;
 const OUTPUTS = `/demo-data/out/${DATE}`;
 
 function etlRange(set: number, first: number, last: number): string[] {
@@ -349,10 +353,12 @@ function serialStage(jobNames: string[], startRule: StartRule = 'all_success') {
   };
 }
 
-function parallelStage(jobNames: string[], startRule: StartRule = 'all_success') {
+function parallelStage(jobNames: string[], startRule: StartRule = 'all_success', waitSeconds = 0) {
   return {
     mode: 'parallel',
-    steps: jobNames.map((job) => ({ step_id: job, job_name: job, trigger_rule: startRule })),
+    steps: jobNames.map((job) => ({
+      step_id: job, job_name: job, trigger_rule: startRule, wait_seconds: waitSeconds,
+    })),
   };
 }
 
@@ -381,13 +387,45 @@ async function createSequence(ctx: APIRequestContext, configId: number) {
       // Set 4, in series, publishing to AWS S3: 6 jobs.
       serialStage([...ETLS[4], EXEC_JOBS.publishS3, EXEC_JOBS.validateS3]),
       // Reconcile, 7 file and database comparisons side by side.
-      parallelStage([r.csv, r.xml, r.published, r.trades, r.balances, r.positionsFile, r.oracleFile]),
+      parallelStage(
+        [r.csv, r.xml, r.published, r.trades, r.balances, r.positionsFile, r.oracleFile],
+        'all_success',
+        RECON_WAIT_SECONDS,
+      ),
       // A data difference is a real result, so BO comparison still runs after one. Within
       // this stage each report waits for the one before it, so an error stops what follows.
       serialStage([r.boOrders, r.boDaily, r.boSummary], 'all_done'),
     ],
   });
   return sequence.id as number;
+}
+
+/**
+ * Earlier nightly runs, so the recorded run's bars have history to estimate from. Each job's
+ * seconds are what it takes in this stack, so the percents move sensibly on screen. The file
+ * watcher has none, because it waits for the presenter: its bar shows that ATOM has no estimate.
+ */
+function seedHistory(sequenceId: number): void {
+  const r = RECON_JOBS;
+  const jobs: Record<string, number> = {
+    [EXEC_JOBS.watchTrigger]: 0,
+    [EXEC_JOBS.fetchFlatFile]: 1,
+    [EXEC_JOBS.validateSet1]: 1,
+    [EXEC_JOBS.validateSet2]: 1,
+    [EXEC_JOBS.validateSet3]: 1,
+    [EXEC_JOBS.publishS3]: 4,
+    [EXEC_JOBS.validateS3]: 3,
+    [r.csv]: 9, [r.xml]: 9, [r.published]: 9, [r.trades]: 4, [r.balances]: 4,
+    [r.positionsFile]: 4, [r.oracleFile]: 1, [r.boOrders]: 1, [r.boDaily]: 1, [r.boSummary]: 1,
+  };
+  const parallelEtls = new Set([...ETLS[2], ...ETLS[3].slice(1, 4)]);
+  for (const name of allEtls()) jobs[name] = parallelEtls.has(name) ? 16 : 4;
+  execFileSync('python', [path.join(__dirname, 'seed_history.py')], {
+    input: JSON.stringify({
+      sequence_id: sequenceId, sequence_name: SEQUENCE_NAME, nights: 5, run_seconds: 200, jobs,
+    }),
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
 }
 
 export default async function seedAtom(): Promise<void> {
@@ -430,6 +468,7 @@ export default async function seedAtom(): Promise<void> {
     await createExecutionJobs(ctx);
     await createReconciliationJobs(ctx, configs);
     const sequenceId = await createSequence(ctx, configs.regression);
+    seedHistory(sequenceId);
 
     // The simulated GitLab runner authenticates with a scoped CI token, as a real one would.
     const ciToken = await post(ctx, '/api/tokens', { name: 'gitlab-ci', role: 'ci_trigger' });

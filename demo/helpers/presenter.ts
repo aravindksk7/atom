@@ -1,6 +1,7 @@
 // Presentation layer for the demo video: visible cursor, element highlights, step banners
 // and pacing. Nothing here knows about ATOM, so the script reads as the narration.
 import { Locator, Page } from '@playwright/test';
+import { speakingSeconds } from './timeline';
 
 /** Multiplies every pause. 1 is presentation pace, 2 is slower, 0 is a fast smoke run. */
 export const DEMO_PACE = Number(process.env.DEMO_PACE ?? 1);
@@ -83,12 +84,24 @@ export class Presenter {
   private bannerTitle = '';
   private bannerAbout = '';
   private stepNumber = 0;
-  private readonly startedAt = Date.now();
+  private stepShownAt = 0;
+  private narration = new Map<number, string>();
+  private startedAt = Date.now();
 
   constructor(private readonly page: Page, private readonly totalParts: number) {}
 
   private now(): number {
     return Date.now() - this.startedAt;
+  }
+
+  /** How far into the video this moment is. */
+  elapsed(): number {
+    return this.now();
+  }
+
+  /** Counts timecodes for a video that started this long ago, rather than with the browser. */
+  startClock(videoSoFarMs: number): void {
+    this.startedAt = Date.now() - videoSoFarMs;
   }
 
   /** Call once, before the first navigation. */
@@ -125,6 +138,20 @@ export class Presenter {
     );
   }
 
+  /** The words for each step, so a step's banner stays up long enough to say them. */
+  useNarration(narration: Map<number, string>): void {
+    this.narration = narration;
+  }
+
+  /** Waits until the current step's narration has had time to be said. */
+  async holdForNarration(): Promise<void> {
+    const said = this.narration.get(this.stepNumber);
+    if (!said) return;
+    const endsAt = this.stepShownAt + speakingSeconds(said) * 1000 * DEMO_PACE;
+    const remaining = endsAt - Date.now();
+    if (remaining > 0) await this.page.waitForTimeout(remaining);
+  }
+
   /** Waits so the speaker can finish the sentence. */
   async pace(length: keyof typeof PAUSE_MS = 'medium'): Promise<void> {
     await this.page.waitForTimeout(PAUSE_MS[length] * DEMO_PACE);
@@ -153,6 +180,7 @@ export class Presenter {
 
   /** Announces a part on a title card, then keeps its name at the top of the screen. */
   async part(number: number, title: string, summary: string): Promise<void> {
+    await this.holdForNarration();
     this.timeline.push({ kind: 'part', at: this.now(), part: number, title, summary });
     this.bannerTitle = '';
     this.bannerAbout = '';
@@ -164,7 +192,9 @@ export class Presenter {
 
   /** Shows the banner naming the current step and what it is about. Numbers steps in order. */
   async step(title: string, about: string): Promise<void> {
+    await this.holdForNarration();
     this.stepNumber += 1;
+    this.stepShownAt = Date.now();
     this.timeline.push({ kind: 'step', at: this.now(), step: this.stepNumber, title, about });
     this.bannerTitle = `Step ${this.stepNumber}: ${title}`;
     this.bannerAbout = about;

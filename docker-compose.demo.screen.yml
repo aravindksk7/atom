@@ -1,0 +1,15 @@
+# Added to docker-compose.demo.yml by demo/record-screen.cjs, whose browser runs on the host and so
+# has to reach these two services. Loopback only, because the demo uses throwaway credentials.
+services:
+  atom:
+    ports:
+      - "127.0.0.1:18055:8055"
+  gitlab-sim:
+    ports:
+      - "127.0.0.1:18090:8090"
+  demo-runner:
+    environment:
+      DEMO_BROWSER_WS: ${DEMO_BROWSER_WS:-}
+      DEMO_CAPTURE_DIR: /app/demo/output/capture
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
