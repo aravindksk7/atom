@@ -240,7 +240,7 @@ const dialogCases: DialogCase[] = [
     statePath: 'stepReleaseModal.show',
     refName: 'stepReleaseDialog',
     dialog: '[x-ref="stepReleaseDialog"]',
-    view: 'config',
+    view: 'monitor',
     firstFocus: '[x-ref="stepReleaseDialog"] input[type="radio"][value="approve"]',
     lastFocus: '[x-ref="stepReleaseDialog"] .btn-primary',
     prepare: async (page) => {

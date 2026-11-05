@@ -171,6 +171,18 @@ test.describe('Sequence flow modes', () => {
       await expect(reloaded).toBeVisible({ timeout: 30_000 });
       await reloaded.getByTestId('run-tab-timeline').click();
       await expect(reloaded.getByTestId('run-gantt-legend')).toContainText('Reconciliation');
+
+      // Release opens its dialog from this tab, and the button goes once it succeeds.
+      await reloaded.getByTestId('run-tab-progress').click();
+      const reloadedRelease = reloaded.getByTestId('monitor-step-right').getByRole('button', { name: 'Release' });
+      await reloadedRelease.click();
+      const dialog = page.getByRole('dialog', { name: 'Release Held Step' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByPlaceholder('Alice').fill('e2e');
+      await dialog.getByLabel('Note').fill('checked');
+      await dialog.getByRole('button', { name: 'Release' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(reloadedRelease).toHaveCount(0);
     } finally {
       if (runId) await ctx.post(`/api/runs/${runId}/cancel`);
       await ctx.dispose();

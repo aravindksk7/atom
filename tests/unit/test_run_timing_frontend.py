@@ -116,6 +116,13 @@ def test_monitor_tablist_is_labelled():
     assert re.search(r'role="tablist"[^>]*aria-label=', MONITOR.read_text(encoding="utf-8"))
 
 
+def test_release_dialog_renders_on_the_tab_that_opens_it():
+    # Each tab partial is an x-if, so a dialog in another tab's partial isn't in the
+    # page and the Release button appears to do nothing.
+    assert 'x-ref="stepReleaseDialog"' in MONITOR.read_text(encoding="utf-8")
+    assert "openStepRelease" in MONITOR.read_text(encoding="utf-8")
+
+
 def test_blocked_has_a_badge_color():
     assert re.search(r"BLOCKED:\s*'badge-amber'", (ROOT / "frontend" / "app.js").read_text(encoding="utf-8"))
 
