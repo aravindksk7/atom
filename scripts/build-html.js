@@ -96,7 +96,18 @@ function build() {
     );
   }
 
-  fs.writeFileSync(OUTPUT, out.join(eol));
+  // A SHARED marker only expands in its exact form. Anything else would pass
+  // through as an HTML comment and silently drop the markup it stood for.
+  const output = out.join(eol);
+  const leftover = output.split(/\r?\n/).filter((line) => line.includes('SHARED:'));
+  if (leftover.length) {
+    throw new Error(
+      `Malformed or nested SHARED marker(s) left after expansion (required form, on its ` +
+      `own line: "<!-- SHARED: shared/<file>.html -->"): ${JSON.stringify(leftover)}`
+    );
+  }
+
+  fs.writeFileSync(OUTPUT, output);
   console.log(`Built ${OUTPUT} from ${TEMPLATE} + ${includeCount} partials`);
 }
 

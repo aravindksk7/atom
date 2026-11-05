@@ -27,7 +27,7 @@
           <div class="rt-gantt-row" :data-testid="'run-gantt-row-' + (row.step.step_id || row.step.step_index)">
             <div class="rt-job-name">
               <span class="rt-job-title" x-text="row.step.job_name"></span>
-              <span class="rt-job-sub" x-text="row.step.job_type || 'unknown' + ' · ' + row.step.status"></span>
+              <span class="rt-job-sub" x-text="(row.step.job_type || 'unknown') + ' · ' + stepStatusLabel(row.step)"></span>
             </div>
             <div class="rt-gantt-track">
               <template x-if="row.bar">
@@ -43,6 +43,11 @@
             </div>
             <div class="rt-runtime" x-text="runtimeText(row.step)"></div>
           </div>
+        </template>
+      </div>
+      <div class="rt-legend" data-testid="run-gantt-legend">
+        <template x-for="item in ganttLegend()" :key="item.cls">
+          <span><i :class="item.cls"></i><span x-text="item.label"></span></span>
         </template>
       </div>
     </div>

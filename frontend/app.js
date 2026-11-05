@@ -1194,6 +1194,7 @@ function _appRaw() {
         PENDING:   'badge-gray',
         ERROR:     'badge-rose',
         COMPLETED: 'badge-green',
+        BLOCKED:   'badge-amber',
       };
       return 'badge ' + (map[status] || 'badge-gray');
     },
