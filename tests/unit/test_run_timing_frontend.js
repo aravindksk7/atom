@@ -19,6 +19,8 @@ global.normalizeToken = (raw) => String(raw || '').trim();
 global.isTerminalStatusValue = (status) => TERMINAL_STATUSES.includes(status);
 require(path.join(__dirname, '..', '..', 'frontend', 'features', 'run-timing.js'));
 require(path.join(__dirname, '..', '..', 'frontend', 'features', 'monitor.js'));
+require(path.join(__dirname, '..', '..', 'frontend', 'features', 'history.js'));
+require(path.join(__dirname, '..', '..', 'frontend', 'features', 'sequences.js'));
 const { fmtSeconds, ganttLayout } = window.ETL_RUN_TIMING;
 const { parseSseChunk } = window.ETL_MONITOR;
 
@@ -188,6 +190,8 @@ async function main() {
   await testPolling();
   await testStepsRefetch();
   await testRelease();
+  await testHistoryRunDetail();
+  await testSelectSequence();
 }
 
 // --- stale documents ------------------------------------------------------
@@ -791,6 +795,222 @@ async function testRelease() {
   await pollLoad;
   assert.strictEqual(m.runTimings.r.steps[0].progress.state, 'done', 'the older poll must not bring Release back');
   assert.ok(calls.includes('POST /api/runs/r/steps/1/release'));
+}
+
+// --- History run detail ---------------------------------------------------
+function historyDetail() {
+  const { viewRunDetail } = window.ETL_FEATURE_HISTORY();
+  return Object.assign(component(), {
+    viewRunDetail,
+    selectedRun: null,
+    restartRerunDownstream: false,
+    toasts: [],
+    charted: 0,
+    toast(...args) { this.toasts.push(args); },
+    renderChart() { this.charted += 1; },
+    $nextTick(callback) { callback(); },
+  });
+}
+
+// Serves the run itself at once and hands /timing to the caller.
+function detailApi(onTiming) {
+  const calls = [];
+  global.api = (method, url) => {
+    calls.push(url);
+    if (url.endsWith('/timing')) return onTiming(url);
+    if (url.endsWith('/steps')) return Promise.resolve([{ step_id: 'a' }]);
+    if (url.endsWith('/restart')) return Promise.resolve({ run_id: 'next' });
+    return Promise.resolve({ run_id: url.split('/').pop(), status: 'PASSED' });
+  };
+  return calls;
+}
+
+async function testHistoryRunDetail() {
+  const doc = (runId, status, seconds) => ({ run_id: runId, status, server_time: T(seconds), steps: [] });
+
+  // An older server or a 500 on /timing costs the timeline and nothing else.
+  let h = historyDetail();
+  detailApi(() => Promise.reject(new Error('500')));
+  await h.viewRunDetail('r');
+  await flush();
+  assert.strictEqual(h.selectedRun.run_id, 'r');
+  assert.deepStrictEqual(h.selectedRun.steps, [{ step_id: 'a' }]);
+  assert.strictEqual(h.selectedRun.restarted_as_run_id, 'next');
+  assert.strictEqual(h.charted, 1);
+  assert.deepStrictEqual(h.toasts, [], 'a failed /timing must not look like a failed load');
+  assert.strictEqual(h.runTimings.r, undefined);
+
+  // A slow /timing doesn't hold up the rest of the detail.
+  h = historyDetail();
+  const slow = deferred();
+  detailApi(() => slow.promise);
+  await h.viewRunDetail('r');
+  assert.strictEqual(h.charted, 1, 'the detail must not wait for /timing');
+  slow.resolve(doc('r', 'PASSED', 1));
+  await flush();
+  assert.strictEqual(h.runTimings.r.status, 'PASSED');
+
+  // Seen on Monitor as running, with a poll's /timing still out, then finished.
+  h = historyDetail();
+  const pending = [];
+  const calls = detailApi(() => {
+    const d = deferred();
+    pending.push(d);
+    return d.promise;
+  });
+  h.setRunTiming('r', doc('r', 'RUNNING', 1));
+  const poll = h.loadRunTiming('r');
+  await h.viewRunDetail('r');
+  assert.strictEqual(calls.filter((url) => url.endsWith('/timing')).length, 2, 'the in-flight guard must not swallow this load');
+  pending[1].resolve(doc('r', 'PASSED', 10));
+  await flush();
+  assert.strictEqual(h.runTimings.r.status, 'PASSED');
+  pending[0].resolve(doc('r', 'RUNNING', 5));
+  await poll;
+  assert.strictEqual(h.runTimings.r.status, 'PASSED', 'the older poll must not bring back the live timing');
+
+  // Each run keeps its own document, and opening a run again asks the server again.
+  h = historyDetail();
+  let clock = 0;
+  detailApi((url) => Promise.resolve(doc(url.split('/')[3], 'PASSED', ++clock)));
+  await h.viewRunDetail('a');
+  await h.viewRunDetail('b');
+  await flush();
+  assert.strictEqual(h.selectedRun.run_id, 'b');
+  assert.strictEqual(h.runTimings.a.run_id, 'a');
+  assert.strictEqual(h.runTimings.b.run_id, 'b');
+  const before = h.runTimings.b.server_time;
+  await h.viewRunDetail('b');
+  await flush();
+  assert.notStrictEqual(h.runTimings.b.server_time, before);
+}
+
+// --- Sequences detail -----------------------------------------------------
+function sequencesDetail(extra) {
+  return Object.assign(Object.create(null), {
+    selectSequence: window.ETL_FEATURE_SEQUENCES().selectSequence,
+    loadSequences: window.ETL_FEATURE_SEQUENCES().loadSequences,
+    loadSequenceRuns: window.ETL_FEATURE_SEQUENCES().loadSequenceRuns,
+    openSequenceRun: window.ETL_FEATURE_SEQUENCES().openSequenceRun,
+    sequences: [],
+    sequencesLoading: false,
+    selectedSequence: null,
+    sequenceUsage: { selections: [], schedules: [] },
+    sequenceRuns: [],
+    _sequenceSelectToken: 0,
+  }, extra);
+}
+
+// Every request waits until the test settles it by URL.
+function heldApi() {
+  const held = new Map();
+  global.api = (method, url) => {
+    const d = deferred();
+    held.set(url, d);
+    return d.promise;
+  };
+  return {
+    has: (url) => held.has(url),
+    resolve: async (url, value) => { held.get(url).resolve(value); await flush(); },
+    reject: async (url) => { held.get(url).reject(new Error('nope')); await flush(); },
+  };
+}
+
+async function testSelectSequence() {
+  const usage = (name) => ({ selections: [name], schedules: [] });
+  const runs = (name) => [{ run_id: `${name}-run`, status: 'PASSED' }];
+
+  // Rows from the last selection are gone as soon as another is picked.
+  let s = sequencesDetail({ selectedSequence: { id: 1 }, sequenceRuns: runs('old') });
+  let held = heldApi();
+  s.selectSequence({ id: 2 });
+  assert.deepStrictEqual(s.sequenceRuns, []);
+  await held.resolve('/api/sequences/2', { id: 2 });
+  await held.resolve('/api/sequences/2/usage', usage('b'));
+  await held.resolve('/api/sequences/2/runs?limit=20', runs('b'));
+  assert.deepStrictEqual(s.sequenceRuns, runs('b'));
+
+  // A then B: A's responses landing after B's must not show under B.
+  s = sequencesDetail();
+  held = heldApi();
+  s.selectSequence({ id: 1 });
+  await held.resolve('/api/sequences/1', { id: 1 });
+  await held.resolve('/api/sequences/1/usage', usage('a'));
+  s.selectSequence({ id: 2 });
+  await held.resolve('/api/sequences/2', { id: 2 });
+  await held.resolve('/api/sequences/2/usage', usage('b'));
+  await held.resolve('/api/sequences/2/runs?limit=20', runs('b'));
+  await held.resolve('/api/sequences/1/runs?limit=20', runs('a'));
+  assert.deepStrictEqual(s.sequenceRuns, runs('b'));
+
+  // The same holds at each earlier request, and for a late failure.
+  s = sequencesDetail();
+  held = heldApi();
+  s.selectSequence({ id: 1 });
+  s.selectSequence({ id: 2 });
+  await held.resolve('/api/sequences/2', { id: 2 });
+  await held.resolve('/api/sequences/2/usage', usage('b'));
+  await held.resolve('/api/sequences/2/runs?limit=20', runs('b'));
+  await held.resolve('/api/sequences/1', { id: 1 });
+  assert.strictEqual(s.selectedSequence.id, 2);
+  assert.ok(!held.has('/api/sequences/1/usage'), 'a replaced selection stops loading');
+  assert.deepStrictEqual(s.sequenceUsage, usage('b'));
+
+  s = sequencesDetail();
+  held = heldApi();
+  s.selectSequence({ id: 1 });
+  s.selectSequence({ id: 2 });
+  await held.resolve('/api/sequences/2', { id: 2 });
+  await held.reject('/api/sequences/1');
+  assert.strictEqual(s.selectedSequence.id, 2, 'a late failure must not close the current sequence');
+
+  // The detail is still useful without its history.
+  s = sequencesDetail();
+  held = heldApi();
+  s.selectSequence({ id: 1 });
+  await held.resolve('/api/sequences/1', { id: 1 });
+  await held.resolve('/api/sequences/1/usage', usage('a'));
+  await held.reject('/api/sequences/1/runs?limit=20');
+  assert.strictEqual(s.selectedSequence.id, 1);
+  assert.deepStrictEqual(s.sequenceRuns, []);
+
+  // A failed detail closes the panel and shows no runs.
+  s = sequencesDetail({ selectedSequence: { id: 9 } });
+  held = heldApi();
+  s.selectSequence({ id: 1 });
+  await held.reject('/api/sequences/1');
+  assert.strictEqual(s.selectedSequence, null);
+  assert.ok(!held.has('/api/sequences/1/runs?limit=20'));
+
+  // Coming back to the tab refreshes the list, so a run that just finished shows.
+  s = sequencesDetail({ selectedSequence: { id: 1 }, sequenceRuns: runs('old') });
+  held = heldApi();
+  const loading = s.loadSequences();
+  await held.resolve('/api/sequences', []);
+  await loading;
+  await held.resolve('/api/sequences/1/runs?limit=20', runs('new'));
+  assert.deepStrictEqual(s.sequenceRuns, runs('new'));
+
+  // ...but not over a selection made while that refresh was out.
+  s = sequencesDetail({ selectedSequence: { id: 1 } });
+  held = heldApi();
+  s.loadSequenceRuns(1);
+  s.selectSequence({ id: 2 });
+  await held.resolve('/api/sequences/1/runs?limit=20', runs('a'));
+  assert.deepStrictEqual(s.sequenceRuns, []);
+
+  // Opening a run goes through the tab switch, which also starts and stops pollers,
+  // and an earlier run's detail doesn't stand in while this one loads.
+  const entered = [];
+  const opened = [];
+  s = sequencesDetail({
+    selectedRun: { run_id: 'earlier' },
+    onTabEnter(id) { entered.push(id); },
+    viewRunDetail(id) { opened.push(id); assert.strictEqual(this.selectedRun, null); },
+  });
+  s.openSequenceRun('r');
+  assert.deepStrictEqual(entered, ['history']);
+  assert.deepStrictEqual(opened, ['r']);
 }
 
 main().catch((error) => {

@@ -196,3 +196,34 @@ def test_shared_partial_cannot_nest_another(tmp_path):
     gantt = tree / "frontend" / "partials" / "shared" / "run-gantt.html"
     gantt.write_text("<!-- SHARED: shared/run-gantt.html -->\n", encoding="utf-8")
     assert _run_build(tree).returncode != 0
+
+
+@needs_node
+def test_built_page_includes_the_shared_gantt_in_monitor_and_history(tmp_path):
+    tree = _build_tree(tmp_path)
+    proc = _run_build(tree)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    html = (tree / "frontend" / "index.html").read_text(encoding="utf-8")
+    assert "<!-- SHARED:" not in html
+    assert html.count('data-testid="run-gantt"') == 2
+
+
+# --- History and Sequences ----------------------------------------------------
+
+def test_sequence_detail_has_recent_runs():
+    markup = (ROOT / "frontend" / "partials" / "tab-sequences.html").read_text(encoding="utf-8")
+    assert 'data-testid="sequence-recent-runs"' in markup
+    script = (ROOT / "frontend" / "features" / "sequences.js").read_text(encoding="utf-8")
+    assert "/runs?limit=20" in script
+
+
+def test_history_detail_shows_elapsed_and_timeline():
+    markup = (ROOT / "frontend" / "partials" / "tab-history.html").read_text(encoding="utf-8")
+    assert 'data-testid="history-run-elapsed"' in markup
+    assert 'data-testid="history-timeline"' in markup
+    assert "<!-- SHARED: shared/run-gantt.html -->" in markup
+
+
+def test_history_can_filter_blocked_runs():
+    markup = (ROOT / "frontend" / "partials" / "tab-history.html").read_text(encoding="utf-8")
+    assert '<option value="BLOCKED">BLOCKED</option>' in markup
