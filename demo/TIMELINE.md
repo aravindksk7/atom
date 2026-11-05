@@ -64,7 +64,7 @@ Say: Launching. From here on ATOM drives everything, with no manual steps.
 
 On screen: Counters update as each job finishes
 
-Say: Opening the Execution Monitor to watch the run live. The counters update as each job finishes, and the timeline below shows every job on its execution level.
+Say: Opening the Execution Monitor to watch the run live. The counters update as each job finishes, every job has a progress bar, and the Timeline view shows each job as a bar on a time axis.
 
 **02:34 Step 8: Set 1: SERIES**
 

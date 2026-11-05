@@ -453,6 +453,9 @@ the same with `sequence` swapped in for `selection`.
    `atom` directly rather than the wrapper script — see the **GitLab CI example** in
    [docs/cli.md](docs/cli.md), which also documents every `atom run` flag
    (`--target-type`, `--junit-out`, `--timeout`, exit codes 0–6, etc.).
+   `atom run` shows live job bars in a terminal and plain status lines in CI or when piped;
+   `atom timing <run_id>` and `atom sequence-runs <id or name>` show start, end and
+   elapsed time. A `BLOCKED` run ends the wait and exits 1.
 
 ### CI/CD: GitLab Commit Status and MR Comments
 
@@ -611,7 +614,7 @@ Do not remove the existing examples below when updating this guide; they are the
 - **Scheduler Reporting System** — review telemetry-backed schedule summaries, filtered failures, timelines, metrics, and exports from the Scheduler Reports UI tab, `/api/scheduler-reports/*` endpoints, or the standalone CLI.
 - View the **job lineage DAG** (job → job dependency graph) in the History tab.
 - **Audit log** — every create, update, delete, and mismatch-accept action is recorded with actor, action, resource type, resource ID, and a JSON diff. Queryable via `GET /api/audit`.
-- **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling.
+- **SSE run streaming** — subscribe to live progress events with `GET /api/runs/{run_id}/stream`; the Monitor tab uses Server-Sent Events with automatic fallback to 5-second polling. Run timing is available from `GET /api/runs/{run_id}/timing` (start, end, elapsed, held time, per-job runtime) and a sequence's run history from `GET /api/sequences/{id}/runs`.
 - **Run cancellation** — send `POST /api/runs/{run_id}/cancel` at any time to cooperatively stop an active ETL run. The executor finishes its current job step, cancels all remaining steps, and sets the run to `CANCELLED`. Safe to call on already-terminal runs (returns `cancel_requested: false`).
 - **Pytest suite runner** — trigger the project's pytest suite as a tracked run with `POST /api/runs/test-suite`. Progress (collected count, passed/failed/error counters) streams via the same SSE endpoint; the run appears in History with `run_type=test_suite`. Supports the cancel endpoint to terminate a running test process.
 - **Cooperative Cancellation**: A `cancel_requested` flag is added to the `TestRun` model, acting as a shared signal for cancellation. The `RunExecutor` will check this flag between steps.
@@ -636,7 +639,7 @@ Do not remove the existing examples below when updating this guide; they are the
   - The **Contracts tab** in the UI lists all contracts with live OK / BREACHED / OVERDUE status badges, breach history, and inline version bump.
   - Derived endpoints expose the source job's DQ rules (`/rules`) and latest schema snapshot (`/schema`) without duplicating configuration.
 - **Write-Audit-Publish gate** — `POST /api/gates/{job}/evaluate` returns a machine-readable `PROMOTE`/`HOLD` verdict (latest result status + open contract breaches) so orchestrators can gate a staging→production swap on data quality.
-- **CI gate exit codes** — `python -m etl_framework.runner.cli --gate-run <run_id>` queries the run's status without needing `--config`/`--source-env`/`--target-env`, returning exit code `0` (passed), `1` (failed), `2` (cancelled), `3` (error), or `4` (not found) so CI pipelines can gate on the result.
+- **CI gate exit codes** — `python -m etl_framework.runner.cli --gate-run <run_id>` queries the run's status without needing `--config`/`--source-env`/`--target-env`, returning exit code `0` (passed), `1` (failed or blocked), `2` (cancelled), `3` (error), or `4` (not found) so CI pipelines can gate on the result.
 - **Shadow run profile** — set `run_settings.run_profile` to `"shadow"` (default `"full"`) to reconcile a `shadow_sample_frac` sample (default `0.02`) of rows instead of the full dataset, wrapping the comparison backend in `SamplingBackend` for cheap, fast per-PR checks.
 - **Rules-as-code** — export job DQ rules to versioned YAML suites in `expectations/`, review them in PRs, and sync them back with `POST /api/expectations/sync`. Schema snapshot diffs now include a `compatibility` verdict (`full` / `non_breaking` / `risky` / `breaking`).
 - **Multi-file reconciliation** — a `reconciliation` job can compare many files per side (`params.source_mode: "multi_file"`) instead of one query/file: pair files by filename token (`match_on`) or let the framework guess pairs by structural similarity (`strategy: "automated"`), read from local disk, S3, or SFTP, poll for a live spool to finish writing, and run every matched pair in parallel with per-pair failure isolation. See [Multi-File Reconciliation](#multi-file-reconciliation).
@@ -2620,7 +2623,7 @@ Default seed jobs are returned if the database has no saved jobs.
 Use this tab to:
 
 - Watch active runs, including pytest test suite runs (`run_type=test_suite`).
-- View run progress.
+- View run progress: each job has a progress bar, estimated from that job's recent results, and **Timeline** shows the jobs as a Gantt chart.
 - See passed, failed, slow, and error counters.
 - Track the current job where progress data is available.
 - Receive live updates through `GET /api/runs/{run_id}/stream`; the browser falls back to 5-second polling if SSE is unavailable.
