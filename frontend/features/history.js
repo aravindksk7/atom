@@ -183,6 +183,12 @@
         const body = this.restartRerunDownstream ? { rerun_downstream: true } : undefined;
         const restarted = await api('POST', `/api/runs/${runId}/restart`, body);
         await this.loadRuns();
+        // A restart can finish before the Monitor's next poll, which only picks up live runs.
+        const run = this.runs.find((r) => r.run_id === restarted.run_id);
+        if (run) {
+          if (!this.activeRuns.some((r) => r.run_id === run.run_id)) this.activeRuns.unshift(run);
+          this.startRunStream(run);
+        }
         await this.viewRunDetail(restarted.run_id);
         this.toast('success', 'Restart queued', `New run ${restarted.run_id.substring(0, 8)}… started`);
       } catch (e) {

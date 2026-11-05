@@ -1,0 +1,16 @@
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).parents[2]
+SPEC = Path(__file__).with_suffix(".js")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_restart_shows_on_monitor():
+    proc = subprocess.run(
+        [shutil.which("node"), str(SPEC)], capture_output=True, text=True, cwd=str(ROOT),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
