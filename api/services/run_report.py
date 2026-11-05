@@ -378,6 +378,9 @@ def build_run_report_snapshot(run: Any, include_mismatches: bool = False) -> Run
         slow = sum(1 for result in results if result.effective_status == "SLOW")
         error = sum(1 for result in results if result.effective_status == "ERROR")
         total_tests = len(results)
+        # While a run is live its results are only the steps finished so far.
+        if str(getattr(run, "status", "")) not in TERMINAL_STATUSES:
+            total_tests = max(total_tests, _as_int(getattr(run, "total_tests", 0)))
     else:
         passed = _as_int(getattr(run, "passed", 0))
         failed = _as_int(getattr(run, "failed", 0))

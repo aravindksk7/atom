@@ -268,6 +268,8 @@
         this.sequenceCompiledSteps = [];
         this.sequenceDerived = null;
         this.sequenceEditorOpen = true;
+        // Fills the execution order preview and reports any problem with the saved version.
+        this.validateSequenceSteps();
       },
 
       _applySequenceStages(flowMode, stages) {

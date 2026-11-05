@@ -77,6 +77,20 @@
     // ===========================================================
     // HISTORY
     // ===========================================================
+    // "source → target" for a result's Files column. A multi-file result stores the
+    // same phrase on both sides, so it is merged to read as one count per side.
+    resultFilesLabel(source, target) {
+      if (!source && !target) return '';
+      const pattern = /^(\d+) file\(s\) across (\d+) pair\(s\)$/;
+      const a = pattern.exec(source || '');
+      const b = pattern.exec(target || '');
+      if (a && b && a[2] === b[2]) {
+        const files = a[1] === '1' && b[1] === '1' ? 'file' : 'files';
+        return `${a[1]} → ${b[1]} ${files} across ${a[2]} ${a[2] === '1' ? 'pair' : 'pairs'}`;
+      }
+      return `${source || 'N/A'} → ${target || 'N/A'}`;
+    },
+
     async loadRuns() {
       const params = new URLSearchParams();
       if (this.historyFilterStatus) params.set('status', this.historyFilterStatus);

@@ -595,7 +595,18 @@ def aggregate_reconciliation_results(
     pair_summaries: list[dict[str, Any]] = []
     pairs_passed = 0
     pairs_errored = 0
+    # Consumers read these from the summary, the same as for a single-file
+    # result: column stats, the report charts and the Differences column filter.
+    by_column: dict[str, int] = {}
+    compared_rows_by_column: dict[str, int] = {}
     for pair, result in zip(mapping.pairs, pair_results):
+        pair_summary = result.mismatch_summary if isinstance(result.mismatch_summary, dict) else {}
+        for totals, summary_key in (
+            (by_column, "by_column"),
+            (compared_rows_by_column, "compared_rows_by_column"),
+        ):
+            for column, count in (pair_summary.get(summary_key) or {}).items():
+                totals[column] = totals.get(column, 0) + int(count or 0)
         if mapping.match_on:
             pair_key = dict(zip(mapping.match_on, pair.key))
         else:
@@ -674,6 +685,8 @@ def aggregate_reconciliation_results(
             "pairs_passed": pairs_passed,
             "pairs_failed": total_pairs - pairs_passed - pairs_errored,
             "pairs_errored": pairs_errored,
+            "by_column": by_column,
+            "compared_rows_by_column": compared_rows_by_column,
         },
         source_file_name=f"{total_source_files} file(s) across {total_pairs} pair(s)",
         target_file_name=f"{total_target_files} file(s) across {total_pairs} pair(s)",

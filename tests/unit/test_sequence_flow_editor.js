@@ -181,3 +181,15 @@ run('the preview reads compiled steps when there are any', () => {
   assert.strictEqual(seq.sequenceLevels.length, 1);
   assert.strictEqual(seq.sequenceLevels[0].steps.length, 2);
 });
+
+run('opening a saved version validates it, so the preview shows straight away', () => {
+  const seq = editor([]);
+  let validated = 0;
+  seq.validateSequenceSteps = () => { validated += 1; };
+  seq.selectedSequence = {
+    name: 's', description: '', tags: [],
+    versions: [{ flow_mode: 'serial', steps: [], stages: [{ mode: 'serial', steps: [{ step_id: 'a', job_name: 'j' }] }] }],
+  };
+  seq.openSequenceVersionEditor();
+  assert.strictEqual(validated, 1);
+});

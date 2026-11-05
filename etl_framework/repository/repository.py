@@ -644,7 +644,11 @@ class RunRepository:
                 accepted, rejected = True, None
             elif status == "rejected":
                 accepted, rejected = None, True
-        if column:
+        if column == "<row>":
+            # Column stats report whole missing rows under this name, but a stored
+            # missing row has no column of its own.
+            query = query.filter(or_(MismatchDetail.column_name.is_(None), MismatchDetail.column_name == ""))
+        elif column:
             query = query.filter(MismatchDetail.column_name == column)
         if mismatch_type:
             query = query.filter(MismatchDetail.mismatch_type == mismatch_type)

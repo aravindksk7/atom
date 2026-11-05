@@ -36,7 +36,6 @@ from etl_framework.reconciliation.compare_utils import (
     resolve_key_columns,
     value_mismatch_mask,
 )
-from etl_framework.reconciliation.data_sources import extract_data_source
 from etl_framework.reconciliation.file_mapping import (
     FileMappingSpec,
     pair_files,
@@ -229,14 +228,15 @@ def stored_completeness_summary(db: Session, run: TestRun) -> dict[str, int]:
     return {"stored_rows": stored, "total_issues": total}
 
 
-def accepted_counts(db: Session, run_id: str) -> dict[str, int]:
-    rows = (
+def accepted_counts(db: Session, run_id: str, result_id: int | None = None) -> dict[str, int]:
+    query = (
         db.query(MismatchDetail.accepted, func.count(MismatchDetail.id))
         .join(TestResult, TestResult.id == MismatchDetail.test_result_id)
         .filter(TestResult.run_id == run_id)
-        .group_by(MismatchDetail.accepted)
-        .all()
     )
+    if result_id is not None:
+        query = query.filter(TestResult.id == result_id)
+    rows = query.group_by(MismatchDetail.accepted).all()
     counts = {"accepted": 0, "open": 0}
     for accepted, count in rows:
         counts["accepted" if accepted else "open"] += int(count)
@@ -748,8 +748,7 @@ def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: Diff
 
 def _write_matrix_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
     req = MatrixCompareRequest(**payload)
-    df_a = extract_data_source(req.source_a.model_dump(), db)
-    df_b = extract_data_source(req.source_b.model_dump(), db)
+    df_a, df_b = CompareService(db, ConfigRepository(db))._load_matrix_frames(req)
     options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     _write_tabular_differences(
         df_a,
@@ -813,8 +812,7 @@ def _write_compare_job(
             raise ValueError(
                 "compare jobs with live or API sources require live connections to be enabled"
             )
-        df_a = extract_data_source(req.source_a.model_dump(), db)
-        df_b = extract_data_source(req.source_b.model_dump(), db)
+        df_a, df_b = svc._load_matrix_frames(req)
         options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     elif compare_type == "sql":
         req = SQLCompareRequest(**payload)

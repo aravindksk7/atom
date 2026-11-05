@@ -80,6 +80,11 @@ def _extract_file_source(spec: dict[str, Any]) -> pd.DataFrame:
 
 
 def _extract_sql_source(spec: dict[str, Any], db_session: Any | None = None) -> pd.DataFrame:
+    # Already read from a saved config by CompareService. Not reachable from a
+    # request: JSON cannot carry a DataFrame.
+    if isinstance(spec.get("df"), pd.DataFrame):
+        return spec["df"]
+
     query_or_table = (
         spec.get("query_or_table")
         or spec.get("query")

@@ -2,6 +2,7 @@ from __future__ import annotations
 import io
 import logging
 import base64
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,7 @@ def _load_in_chunks(
 logger = logging.getLogger("api.services.compare_service")
 
 _SENTINEL_QUERY = "__file_source__"
+_BARE_TABLE_NAME = re.compile(r"[A-Za-z_][\w$#]*(\.[A-Za-z_][\w$#]*)*")
 
 
 def _recon_kind_label(is_dataframe: bool) -> str:
@@ -1054,6 +1056,9 @@ class CompareService:
         real, config_id-driven path the Matrix UI actually sends.
         """
         source_type = str(spec.get("source_type") or "").lower()
+        if source_type == "sql":
+            return self._resolve_sql_source_spec(spec)
+
         config_id = spec.get("config_id")
         if config_id is None:
             return spec
@@ -1098,14 +1103,67 @@ class CompareService:
 
         return spec
 
-    def compare_matrix(self, req: MatrixCompareRequest) -> "ReconciliationResult":
-        """Execute matrix comparison between source_a and source_b and return result."""
+    def _resolve_sql_source_spec(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Read a config_id SQL source from that config's database.
+
+        A SQL source must name its database. Without this it ran against ATOM's
+        own repository, so a config_id was silently ignored and any query could
+        read ATOM's tables, API tokens included.
+        """
+        from etl_framework.config.models import resolve_connection
+        from etl_framework.db.engine import DBEngine
+        from etl_framework.db.sql_utils import is_read_only_sql
+
+        if any(spec.get(key) for key in ("connection_string", "conn_str", "db_url")):
+            return spec
+
+        config_id = spec.get("config_id")
+        if config_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A SQL Matrix source needs a config_id or a connection_string",
+            )
+        query = spec.get("query_or_table") or spec.get("query")
+        if not query:
+            raise HTTPException(status_code=422, detail="query_or_table is required on a SQL Matrix source")
+        query = str(query).strip()
+        if _BARE_TABLE_NAME.fullmatch(query):
+            query = f"SELECT * FROM {query}"
+        if not is_read_only_sql(query):
+            raise HTTPException(
+                status_code=422,
+                detail="A SQL Matrix source must be a table name or a single read-only SELECT or WITH query",
+            )
+
+        cfg = self._config_repo.get(config_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
+        config_json = cfg.config_json or {}
+        connection_name = spec.get("connection_name")
+        if connection_name and connection_name not in (config_json.get("connections") or {}):
+            # resolve_connection would quietly fall back to the config's default database.
+            raise HTTPException(
+                status_code=422,
+                detail=f"Connection '{connection_name}' not found in config {config_id}",
+            )
+
+        engine = DBEngine(resolve_connection(config_json, connection_name, env_name=cfg.env_name or ""))
+        try:
+            return {**spec, "df": engine.execute_query(query)}
+        finally:
+            engine.dispose()
+
+    def _load_matrix_frames(self, req: MatrixCompareRequest) -> tuple["pd.DataFrame", "pd.DataFrame"]:
         spec_a = req.source_a.model_dump() if hasattr(req.source_a, "model_dump") else req.source_a
         spec_b = req.source_b.model_dump() if hasattr(req.source_b, "model_dump") else req.source_b
-        spec_a = self._resolve_source_spec(spec_a)
-        spec_b = self._resolve_source_spec(spec_b)
-        df_a = extract_data_source(spec_a, self._db)
-        df_b = extract_data_source(spec_b, self._db)
+        return (
+            extract_data_source(self._resolve_source_spec(spec_a)),
+            extract_data_source(self._resolve_source_spec(spec_b)),
+        )
+
+    def compare_matrix(self, req: MatrixCompareRequest) -> "ReconciliationResult":
+        """Execute matrix comparison between source_a and source_b and return result."""
+        df_a, df_b = self._load_matrix_frames(req)
 
         key_columns = req.key_columns
         if not key_columns:
