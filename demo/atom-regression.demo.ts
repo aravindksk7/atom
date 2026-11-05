@@ -87,10 +87,9 @@ class RunFollower {
     return Boolean(step) && !['PENDING', 'RUNNING'].includes(step!.status);
   }
 
-  /** The row showing one execution level on the Monitor's timeline. */
-  level(jobName: string): Locator {
-    return this.page.getByTestId(`monitor-step-${jobName}`)
-      .locator('xpath=ancestor::div[contains(@class, "py-1")][1]');
+  /** The per-job rows on the Monitor's Progress tab. Stripes mark the jobs running right now. */
+  progressRows(): Locator {
+    return this.page.getByTestId(`monitor-run-${this.runId}`).getByTestId('run-progress-rows');
   }
 
   /**
@@ -111,14 +110,13 @@ class RunFollower {
         const chip = this.page.getByTestId(`monitor-step-${current.step_id}`);
         if (await chip.count()) await this.presenter.centre(chip).catch(() => undefined);
       }
-      // The Monitor refreshes a few seconds behind the API, so highlight the level only once the
+      // The Monitor refreshes a little behind the API, so highlight the rows only once the
       // screen itself shows several jobs running.
       if (running.length > 1 && !highlightedParallel) {
-        const level = this.level(running[0].step_id);
-        const onScreen = (await level.textContent().catch(() => '')) ?? '';
-        if ((onScreen.match(/RUNNING/g) ?? []).length > 1) {
+        const rows = this.progressRows();
+        if ((await rows.locator('.rt-stripe').count().catch(() => 0)) > 1) {
           highlightedParallel = true;
-          await this.presenter.show(level).catch(() => undefined);
+          await this.presenter.show(rows).catch(() => undefined);
         }
       }
       if (jobNames.every((name) => this.isFinished(steps, name))) return peakRunning;
@@ -224,13 +222,13 @@ test('ATOM end-to-end regression for one business date', async ({ page }) => {
     await presenter.part(2, 'Execute', '25 jobs: ETLs, file watcher, CrushFTP, AWS S3 and step validation');
 
     // STEP 7: Opening the Execution Monitor to watch the run live. The counters update as each job
-    // finishes, and the timeline below shows every job on its execution level.
+    // finishes, and the rows below show every job's progress.
     await presenter.step('Watch the run live', 'Counters update as each job finishes');
     await presenter.click(nav(page, 'monitor'));
     const monitorRun = page.getByTestId(`monitor-run-${firstRunId}`);
     await expect(monitorRun).toBeVisible({ timeout: 60_000 });
     await presenter.show(monitorRun.locator('.grid-stat'), 'short');
-    await expect(monitorRun.getByTestId('monitor-step-timeline')).toBeVisible({ timeout: 60_000 });
+    await expect(monitorRun.getByTestId('run-progress-rows')).toBeVisible({ timeout: 60_000 });
 
     // STEP 8: Set 1 runs in series. Here the file watcher is waiting for the upstream arrival signal
     // on CrushFTP, and nothing starts until it lands. There it is. Now we fetch the Production file,
@@ -239,7 +237,7 @@ test('ATOM end-to-end regression for one business date', async ({ page }) => {
     await presenter.step('Set 1: SERIES', 'File watcher → CrushFTP fetch → 3 ETLs → validation, one after another');
     const watcher = page.getByTestId(`monitor-step-${EXEC_JOBS.watchTrigger}`);
     await presenter.show(watcher);
-    expect(await watcher.textContent(), 'the watcher is waiting for its signal').toContain('RUNNING');
+    await expect(watcher.locator('.rt-stripe'), 'the watcher is waiting for its signal').toBeVisible({ timeout: 30_000 });
     fs.writeFileSync(path.posix.join('/demo-data/crushftp/inbound', BUSINESS_DATE, 'trigger.done'), BUSINESS_DATE);
     const set1Peak = await follower.until([
       EXEC_JOBS.watchTrigger, EXEC_JOBS.fetchFlatFile, ...ETLS[1], EXEC_JOBS.validateSet1,

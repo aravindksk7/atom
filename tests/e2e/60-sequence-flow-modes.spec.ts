@@ -88,13 +88,14 @@ test.describe('Sequence flow modes', () => {
     }
   });
 
-  test('the monitor shows a parallel group on one level', async ({ authedPage: page, adminToken }) => {
+  test("the monitor shows each job's progress and a timeline", async ({ authedPage: page, adminToken }) => {
     const ctx = await authedContext(adminToken);
     let runId = '';
+    const sequenceName = `e2e-monitor-${Date.now()}`;
     try {
       const created = await ctx.post('/api/sequences', {
         data: {
-          name: `e2e-monitor-${Date.now()}`,
+          name: sequenceName,
           stages: [
             { mode: 'parallel', steps: [
               { step_id: 'left', job_name: jobs[0] },
@@ -117,11 +118,59 @@ test.describe('Sequence flow modes', () => {
       await page.getByTestId('nav-tab-monitor').click();
       const run = page.getByTestId(`monitor-run-${runId}`);
       await expect(run).toBeVisible({ timeout: 30_000 });
-      const timeline = run.getByTestId('monitor-step-timeline');
-      await expect(timeline).toBeVisible({ timeout: 30_000 });
-      const leftLevel = run.getByTestId('monitor-step-left').locator('xpath=ancestor::div[contains(@class, "py-1")][1]');
-      await expect(leftLevel.getByTestId('monitor-step-right')).toBeVisible();
-      await expect(leftLevel.getByTestId('monitor-step-join')).toHaveCount(0);
+      // Progress tab: every job has a row, and the held job offers Release.
+      await expect(run.getByTestId('run-progress-rows')).toBeVisible({ timeout: 30_000 });
+      await expect(run.getByTestId('monitor-step-left')).toBeVisible();
+      const right = run.getByTestId('monitor-step-right');
+      await expect(right.getByRole('button', { name: 'Release' })).toBeVisible({ timeout: 30_000 });
+      await expect(run.getByTestId('monitor-step-join')).toContainText('queued');
+      await expect(run.getByTestId('run-elapsed')).not.toHaveText('—');
+
+      // The header names the sequence and shows Started once.
+      await expect(run.getByTestId('monitor-run-name')).toHaveText(sequenceName);
+      expect((await run.innerText()).match(/Started/g)).toHaveLength(1);
+
+      // held_step only comes from /stream, so this proves the stream gets through auth.
+      await expect(run.getByText('Sequence held at step')).toBeVisible({ timeout: 30_000 });
+
+      // Bars and tabs need their CSS to mean anything, and losing it fails nothing else.
+      const transparent = 'rgba(0, 0, 0, 0)';
+      const rightFill = right.locator('.rt-bar-fill');
+      await expect(rightFill).toBeVisible();
+      await expect(rightFill).not.toHaveCSS('background-color', transparent);
+      expect((await rightFill.boundingBox())!.height).toBeGreaterThan(0);
+      await expect(run.getByTestId('run-tab-progress')).not.toHaveCSS('border-bottom-color', transparent);
+      await expect(run.getByTestId('run-tab-timeline')).toHaveCSS('border-bottom-color', transparent);
+
+      // Timeline tab: jobs that ran have bars, and the waiting job has none yet.
+      await run.getByTestId('run-tab-timeline').click();
+      await expect(run.getByTestId('run-progress-rows')).toBeHidden();
+      await expect(run.getByTestId('run-tab-timeline')).not.toHaveCSS('border-bottom-color', transparent);
+      await expect(run.getByTestId('run-tab-progress')).toHaveCSS('border-bottom-color', transparent);
+      const leftBar = run.getByTestId('run-gantt-row-left').getByTestId('run-gantt-bar');
+      await expect(leftBar).toBeVisible();
+      await expect(leftBar).not.toHaveCSS('background-color', transparent);
+      const box = (await leftBar.boundingBox())!;
+      expect(box.height).toBeGreaterThan(0);
+      expect(box.width).toBeGreaterThan(0);
+      await expect(run.getByTestId('run-gantt-row-right').getByTestId('run-gantt-bar')).toBeVisible();
+      await expect(run.getByTestId('run-gantt-row-right').getByTestId('run-gantt-hold')).toBeVisible();
+      await expect(run.getByTestId('run-gantt-row-join').getByTestId('run-gantt-bar')).toHaveCount(0);
+      // The status shows next to the job type, not only when the type is missing.
+      await expect(run.getByTestId('run-gantt-row-right').locator('.rt-job-sub')).toContainText('HELD');
+
+      // The color toggle swaps the legend and survives a reload.
+      const legend = run.getByTestId('run-gantt-legend');
+      await expect(legend).toBeVisible();
+      await expect(legend).toContainText('Passed');
+      await run.getByTestId('gantt-color-family').click();
+      await expect(legend).toContainText('Reconciliation');
+      await page.reload();
+      await page.getByTestId('nav-tab-monitor').click();
+      const reloaded = page.getByTestId(`monitor-run-${runId}`);
+      await expect(reloaded).toBeVisible({ timeout: 30_000 });
+      await reloaded.getByTestId('run-tab-timeline').click();
+      await expect(reloaded.getByTestId('run-gantt-legend')).toContainText('Reconciliation');
     } finally {
       if (runId) await ctx.post(`/api/runs/${runId}/cancel`);
       await ctx.dispose();
