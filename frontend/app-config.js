@@ -1,5 +1,5 @@
 (function (global) {
-  const TERMINAL_STATUSES = ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED'];
+  const TERMINAL_STATUSES = ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED'];
 
   function isTerminalStatusValue(status) {
     return TERMINAL_STATUSES.includes(String(status || '').toUpperCase());

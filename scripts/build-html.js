@@ -24,6 +24,15 @@ const INCLUDE_RE = /^<!-- INCLUDE: (.+?) -->\r?$/;
 // missing closing "-->") must fail the build loudly rather than pass through
 // as literal HTML content.
 const INCLUDE_SNIFF_RE = /^<!-- INCLUDE:/;
+// One level of reuse: a tab partial can pull in markup shared with another tab.
+// These live in partials/shared/, outside the count check below, which only
+// looks at top-level partials.
+const SHARED_RE = /^[ \t]*<!-- SHARED: (shared\/[\w.-]+\.html) -->\r?$/gm;
+
+function expandShared(text) {
+  return text.replace(SHARED_RE, (_, file) =>
+    fs.readFileSync(path.join(ROOT, 'frontend', 'partials', file), 'utf8').replace(/\r?\n$/, ''));
+}
 // Tab partials must render inside <main class="main-content">. That element is
 // the flex:1 child of the .app-content column, so a tab marker placed after
 // </main> renders as a later sibling: pushed to the bottom of the viewport and
@@ -74,7 +83,7 @@ function build() {
     }
     includeCount += 1;
     const partialPath = path.join(ROOT, 'frontend', match[1]);
-    return fs.readFileSync(partialPath, 'utf8').replace(/\r?\n$/, '');
+    return expandShared(fs.readFileSync(partialPath, 'utf8')).replace(/\r?\n$/, '');
   });
 
   const partialsDir = path.join(ROOT, 'frontend', 'partials');
@@ -87,7 +96,18 @@ function build() {
     );
   }
 
-  fs.writeFileSync(OUTPUT, out.join(eol));
+  // A SHARED marker only expands in its exact form. Anything else would pass
+  // through as an HTML comment and silently drop the markup it stood for.
+  const output = out.join(eol);
+  const leftover = output.split(/\r?\n/).filter((line) => line.includes('SHARED:'));
+  if (leftover.length) {
+    throw new Error(
+      `Malformed or nested SHARED marker(s) left after expansion (required form, on its ` +
+      `own line: "<!-- SHARED: shared/<file>.html -->"): ${JSON.stringify(leftover)}`
+    );
+  }
+
+  fs.writeFileSync(OUTPUT, output);
   console.log(`Built ${OUTPUT} from ${TEMPLATE} + ${includeCount} partials`);
 }
 

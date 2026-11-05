@@ -31,6 +31,26 @@ calls with no flag are unchanged), `--source-env` (required), `--target-env`
 `--no-wait` (launch, print run id, exit 0), `--junit-out`, `--json-out`, and
 `--html-out`.
 
+In a terminal, `atom run` shows live colored job bars. With `CI` set, or when
+output is piped, it prints plain status lines instead. At the end it prints each
+job's runtime and the run's start, end, elapsed and held time, all in UTC. The
+display never changes the exit code: the gate result comes from the run status
+alone. A run that ends `BLOCKED` stops the wait and exits 1.
+
+With `--output json`, the final document also carries `started_at`,
+`completed_at`, `elapsed_seconds`, `held_seconds` and `active_seconds` (each
+`null` if the timing could not be fetched).
+
+### atom timing RUN_ID
+
+Start, end, elapsed and held time, and each job's runtime for a run, from
+`GET /api/runs/{run_id}/timing`.
+
+### atom sequence-runs SEQUENCE [--limit 20]
+
+Start, end and elapsed time for each run of a sequence (id or exact name), newest
+first, from `GET /api/sequences/{id}/runs`. `--limit` accepts 1-200.
+
 ### atom report RUN_ID
 
 ```bash
@@ -49,7 +69,7 @@ Discovery listings. `atom runs --limit N` caps the list (default 20).
 | Code | Meaning |
 |---|---|
 | 0 | Run passed / command succeeded |
-| 1 | Run failed |
+| 1 | Run failed or blocked |
 | 2 | Run cancelled |
 | 3 | Run error |
 | 4 | Selection or run not found |

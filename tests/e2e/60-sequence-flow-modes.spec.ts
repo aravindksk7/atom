@@ -88,13 +88,14 @@ test.describe('Sequence flow modes', () => {
     }
   });
 
-  test('the monitor shows a parallel group on one level', async ({ authedPage: page, adminToken }) => {
+  test("the monitor shows each job's progress and a timeline", async ({ authedPage: page, adminToken }) => {
     const ctx = await authedContext(adminToken);
     let runId = '';
+    const sequenceName = `e2e-monitor-${Date.now()}`;
     try {
       const created = await ctx.post('/api/sequences', {
         data: {
-          name: `e2e-monitor-${Date.now()}`,
+          name: sequenceName,
           stages: [
             { mode: 'parallel', steps: [
               { step_id: 'left', job_name: jobs[0] },
@@ -117,15 +118,230 @@ test.describe('Sequence flow modes', () => {
       await page.getByTestId('nav-tab-monitor').click();
       const run = page.getByTestId(`monitor-run-${runId}`);
       await expect(run).toBeVisible({ timeout: 30_000 });
-      const timeline = run.getByTestId('monitor-step-timeline');
-      await expect(timeline).toBeVisible({ timeout: 30_000 });
-      const leftLevel = run.getByTestId('monitor-step-left').locator('xpath=ancestor::div[contains(@class, "py-1")][1]');
-      await expect(leftLevel.getByTestId('monitor-step-right')).toBeVisible();
-      await expect(leftLevel.getByTestId('monitor-step-join')).toHaveCount(0);
+      // Progress tab: every job has a row, and the held job offers Release.
+      await expect(run.getByTestId('run-progress-rows')).toBeVisible({ timeout: 30_000 });
+      await expect(run.getByTestId('monitor-step-left')).toBeVisible();
+      const right = run.getByTestId('monitor-step-right');
+      await expect(right.getByRole('button', { name: 'Release' })).toBeVisible({ timeout: 30_000 });
+      await expect(run.getByTestId('monitor-step-join')).toContainText('queued');
+      await expect(run.getByTestId('run-elapsed')).not.toHaveText('—');
+
+      // The header names the sequence and shows Started once.
+      await expect(run.getByTestId('monitor-run-name')).toHaveText(sequenceName);
+      expect((await run.innerText()).match(/Started/g)).toHaveLength(1);
+
+      // held_step only comes from /stream, so this proves the stream gets through auth.
+      await expect(run.getByText('Sequence held at step')).toBeVisible({ timeout: 30_000 });
+
+      // Bars and tabs need their CSS to mean anything, and losing it fails nothing else.
+      const transparent = 'rgba(0, 0, 0, 0)';
+      const rightFill = right.locator('.rt-bar-fill');
+      await expect(rightFill).toBeVisible();
+      await expect(rightFill).not.toHaveCSS('background-color', transparent);
+      expect((await rightFill.boundingBox())!.height).toBeGreaterThan(0);
+      await expect(run.getByTestId('run-tab-progress')).not.toHaveCSS('border-bottom-color', transparent);
+      await expect(run.getByTestId('run-tab-timeline')).toHaveCSS('border-bottom-color', transparent);
+
+      // Timeline tab: jobs that ran have bars, and the waiting job has none yet.
+      await run.getByTestId('run-tab-timeline').click();
+      await expect(run.getByTestId('run-progress-rows')).toBeHidden();
+      await expect(run.getByTestId('run-tab-timeline')).not.toHaveCSS('border-bottom-color', transparent);
+      await expect(run.getByTestId('run-tab-progress')).toHaveCSS('border-bottom-color', transparent);
+      const leftBar = run.getByTestId('run-gantt-row-left').getByTestId('run-gantt-bar');
+      await expect(leftBar).toBeVisible();
+      await expect(leftBar).not.toHaveCSS('background-color', transparent);
+      const box = (await leftBar.boundingBox())!;
+      expect(box.height).toBeGreaterThan(0);
+      expect(box.width).toBeGreaterThan(0);
+      await expect(run.getByTestId('run-gantt-row-right').getByTestId('run-gantt-bar')).toBeVisible();
+      await expect(run.getByTestId('run-gantt-row-right').getByTestId('run-gantt-hold')).toBeVisible();
+      await expect(run.getByTestId('run-gantt-row-join').getByTestId('run-gantt-bar')).toHaveCount(0);
+      // The status shows next to the job type, not only when the type is missing.
+      await expect(run.getByTestId('run-gantt-row-right').locator('.rt-job-sub')).toContainText('HELD');
+
+      // The color toggle swaps the legend and survives a reload.
+      const legend = run.getByTestId('run-gantt-legend');
+      await expect(legend).toBeVisible();
+      await expect(legend).toContainText('Passed');
+      await run.getByTestId('gantt-color-family').click();
+      await expect(legend).toContainText('Reconciliation');
+      await page.reload();
+      await page.getByTestId('nav-tab-monitor').click();
+      const reloaded = page.getByTestId(`monitor-run-${runId}`);
+      await expect(reloaded).toBeVisible({ timeout: 30_000 });
+      await reloaded.getByTestId('run-tab-timeline').click();
+      await expect(reloaded.getByTestId('run-gantt-legend')).toContainText('Reconciliation');
+
+      // Release opens its dialog from this tab, and the button goes once it succeeds.
+      await reloaded.getByTestId('run-tab-progress').click();
+      const reloadedRelease = reloaded.getByTestId('monitor-step-right').getByRole('button', { name: 'Release' });
+      await reloadedRelease.click();
+      const dialog = page.getByRole('dialog', { name: 'Release Held Step' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByPlaceholder('Alice').fill('e2e');
+      await dialog.getByLabel('Note').fill('checked');
+      await dialog.getByRole('button', { name: 'Release' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(reloadedRelease).toHaveCount(0);
     } finally {
       if (runId) await ctx.post(`/api/runs/${runId}/cancel`);
       await ctx.dispose();
     }
+  });
+
+  // Runs a one-step sequence to the end, through the API.
+  async function finishedSequenceRun(ctx: Awaited<ReturnType<typeof authedContext>>, name: string) {
+    const created = await ctx.post('/api/sequences', {
+      data: {
+        name,
+        stages: [{ mode: 'serial', steps: [{ step_id: 'only', job_name: jobs[3] }] }],
+      },
+    });
+    expect(created.ok()).toBe(true);
+    const { id } = await created.json();
+    const launched = await ctx.post(`/api/sequences/${id}/launch`, {
+      data: { source_env: 'dev', target_env: 'dev' },
+    });
+    expect(launched.ok()).toBe(true);
+    const { run_id: runId } = await launched.json();
+    await expect.poll(async () => {
+      const timing = await (await ctx.get(`/api/runs/${runId}/timing`)).json();
+      return timing.completed_at;
+    }, { timeout: 60_000 }).not.toBeNull();
+    return { id, runId: runId as string };
+  }
+
+  test('a finished sequence shows its time in Recent runs and a timeline in History', async ({ authedPage: page, adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    try {
+      const name = `e2e-timing-${Date.now()}`;
+      const { id, runId } = await finishedSequenceRun(ctx, name);
+
+      const history = await (await ctx.get(`/api/sequences/${id}/runs`)).json();
+      expect(history[0].run_id).toBe(runId);
+      expect(history[0].elapsed_seconds).not.toBeNull();
+
+      await page.goto('/');
+      await page.getByTestId('nav-tab-sequences').click();
+      await page.getByTestId(`sequence-row-${name}`).click();
+      const row = page.getByTestId(`sequence-run-${runId}`);
+      await expect(row).toBeVisible();
+      await expect(row.locator('.badge')).toHaveText(history[0].status);
+      await row.click();
+
+      await expect(page.getByTestId('nav-tab-history')).toHaveClass(/active/);
+      await expect(page.getByTestId('history-run-elapsed')).toBeVisible();
+      const timeline = page.getByTestId('history-timeline');
+      await expect(timeline.getByTestId('run-gantt-row-only').getByTestId('run-gantt-bar')).toBeVisible();
+      await expect(timeline.getByTestId('gantt-color-status')).toHaveAttribute('aria-pressed', 'true');
+
+      // Back leads to the run list, which has to be there after a deep navigation.
+      await page.getByTestId('run-detail-back-btn').click();
+      await expect(page.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+
+      // The keyboard reaches the row, and the selected sequence is still showing.
+      await page.getByTestId('nav-tab-sequences').click();
+      await expect(row).toBeVisible();
+      await page.getByTestId('sequence-edit-btn').focus();
+      await page.keyboard.press('Tab');
+      await expect(row).toBeFocused();
+      await expect(row).not.toHaveCSS('outline-style', 'none');
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('history-timeline')).toBeVisible();
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  test('History copes with a failed timing request and with runs that have no step timing', async ({ authedPage: page, adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    try {
+      const name = `e2e-timing-old-${Date.now()}`;
+      const { runId } = await finishedSequenceRun(ctx, name);
+      const real = await (await ctx.get(`/api/runs/${runId}/timing`)).json();
+      let timing: Record<string, unknown> | null = null;
+      await page.route(`**/api/runs/${runId}/timing`, async (route) => {
+        if (timing) await route.fulfill({ json: timing });
+        else await route.fulfill({ status: 500, json: { detail: 'boom' } });
+      });
+
+      await page.goto('/');
+      await page.getByTestId('nav-tab-history').click();
+      const open = async () => {
+        await page.getByTestId(`history-run-row-${runId}`).click();
+        await expect(page.getByTestId('history-run-steps')).toBeVisible();
+      };
+
+      // A failed request costs the timing, not the detail.
+      await open();
+      await expect(page.locator('#runChart')).toBeVisible();
+      await expect(page.getByTestId('history-run-elapsed')).toHaveCount(0);
+      await expect(page.getByTestId('history-timeline')).toHaveCount(0);
+
+      // A run from before this feature: elapsed, and the timeline says why it's empty.
+      timing = {
+        ...real,
+        timing_recorded: false,
+        steps: real.steps.map((step: Record<string, unknown>) => ({ ...step, started_at: null, finished_at: null })),
+      };
+      await page.getByTestId('run-detail-back-btn').click();
+      await open();
+      await expect(page.getByTestId('history-run-elapsed')).toBeVisible();
+      await expect(page.getByTestId('run-gantt-not-recorded')).toHaveText(/Step timing not recorded/);
+
+      // A run with no steps has nothing to draw, and still has its elapsed time.
+      timing = { ...real, steps: [] };
+      await page.getByTestId('run-detail-back-btn').click();
+      await open();
+      await expect(page.getByTestId('history-run-elapsed')).toBeVisible();
+      await expect(page.getByTestId('history-timeline')).toHaveCount(0);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  test('Recent runs fit a phone, and showing another sequence drops the last one\'s runs', async ({ authedPage: page, adminToken }) => {
+    const ctx = await authedContext(adminToken);
+    try {
+      const stamp = Date.now();
+      const first = await finishedSequenceRun(ctx, `e2e-race-a-${stamp}`);
+      const second = await finishedSequenceRun(ctx, `e2e-race-b-${stamp}`);
+
+      // A's runs come back only after B is on screen.
+      let releaseFirst = () => {};
+      const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      await page.route(`**/api/sequences/${first.id}/runs*`, async (route) => {
+        await firstHeld;
+        await route.continue();
+      });
+
+      await page.setViewportSize({ width: 390, height: 800 });
+      await page.goto('/#sequences');
+      await page.getByTestId(`sequence-row-e2e-race-a-${stamp}`).click();
+      await page.getByTestId(`sequence-row-e2e-race-b-${stamp}`).click();
+      const secondRow = page.getByTestId(`sequence-run-${second.runId}`);
+      await expect(secondRow).toBeVisible();
+      releaseFirst();
+      await page.waitForTimeout(500);
+      await expect(page.getByTestId(`sequence-run-${first.runId}`)).toHaveCount(0);
+      await expect(secondRow).toBeVisible();
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+      await secondRow.scrollIntoViewIfNeeded();
+      const panel = (await page.getByTestId('sequence-recent-runs').boundingBox())!;
+      expect(panel.x + panel.width).toBeLessThanOrEqual(390);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  test('the History list filters blocked runs', async ({ authedPage: page }) => {
+    await page.goto('/');
+    await page.getByTestId('nav-tab-history').click();
+    const request = page.waitForRequest((req) => req.url().includes('/api/runs?status=BLOCKED'));
+    await page.getByTestId('history-status-filter').selectOption('BLOCKED');
+    await request;
   });
 
   test('a graph that does not fit stages opens in advanced mode and warns before rewriting', async ({ authedPage: page, adminToken }) => {

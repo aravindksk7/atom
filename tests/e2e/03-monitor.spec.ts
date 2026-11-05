@@ -78,7 +78,7 @@ test.describe('03 monitor', () => {
       createdJobNames.push(jobName);
       const { run_id } = await triggerRun(ctx, [jobName]);
       const terminalStatus = await waitForTerminal(ctx, run_id);
-      expect(['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED']).toContain(
+      expect(['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED']).toContain(
         String(terminalStatus.status).toUpperCase()
       );
 

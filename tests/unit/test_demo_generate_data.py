@@ -1,6 +1,7 @@
 """The demo's seeded data must hold exactly the differences the video narrates."""
 from __future__ import annotations
 
+import base64
 import importlib.util
 import sys
 from pathlib import Path
@@ -47,21 +48,14 @@ def test_is_deterministic(generator, dataset):
     assert generator.build_dataset(DATE) == dataset
 
 
-def test_has_100_etls_in_4_sets_of_25(dataset):
-    assert len(dataset.etls) == 100
-    for number in range(1, 5):
-        assert sum(name.startswith(f"SET{number}_") for name in dataset.etls) == 25
+def test_has_18_etls_across_4_sets(dataset):
+    counts = [sum(name.startswith(f"SET{number}_") for name in dataset.etls) for number in range(1, 5)]
+    assert counts == [3, 6, 5, 4]
 
 
-def test_has_64_csv_and_40_xml_feeds(dataset):
-    assert sum(f.fmt == "csv" for f in dataset.feeds) == 64
-    assert sum(f.fmt == "xml" for f in dataset.feeds) == 40
-
-
-def test_the_failing_etl_is_the_last_of_set_3(dataset):
-    assert dataset.failing_etl == "SET3_ETL_075"
-    set_3 = [name for name in dataset.etls if name.startswith("SET3_")]
-    assert set_3[-1] == dataset.failing_etl
+def test_has_14_csv_and_6_xml_feeds(dataset):
+    assert sum(f.fmt == "csv" for f in dataset.feeds) == 14
+    assert sum(f.fmt == "xml" for f in dataset.feeds) == 6
 
 
 def test_missing_record_is_only_in_its_feed(dataset):
@@ -70,7 +64,7 @@ def test_missing_record_is_only_in_its_feed(dataset):
 
 
 def test_additional_record_is_only_in_its_feed(dataset):
-    extra = feed(dataset, "gl_020")
+    extra = feed(dataset, "gl_008")
     assert len(extra.test_rows) == len(extra.prod_rows) + 1
 
 
@@ -83,7 +77,7 @@ def test_wrong_notional_is_in_one_xml_row(dataset):
 
 
 def test_only_fee_amount_changes_in_every_other_feed(dataset):
-    exceptions = {"gl_003", "gl_005", "gl_020"}
+    exceptions = {"gl_003", "gl_005", "gl_008"}
     impacted = 0
     for f in dataset.feeds:
         if f.name in exceptions:
@@ -92,7 +86,7 @@ def test_only_fee_amount_changes_in_every_other_feed(dataset):
         changed = changed_fields(f.prod_rows, f.test_rows)
         assert changed <= {"fee_amount"}, f.name
         impacted += bool(changed)
-    assert impacted >= 30
+    assert impacted == 10
 
 
 def test_trades_differ_by_fee_amount_and_one_notional(dataset):
@@ -120,9 +114,19 @@ def test_files_are_written_where_the_jobs_look(generator, dataset, tmp_path):
     etl_of_gl_003 = feed(dataset, "gl_003").etl
     assert (tmp_path / "templates" / etl_of_gl_003 / "gl_003.xml").exists()
     assert (tmp_path / "crushftp" / "prod" / DATE / "positions.csv").exists()
+    # The script delivers the arrival signal on screen, so only its folder exists yet.
+    assert (tmp_path / "crushftp" / "inbound" / DATE).is_dir()
+    assert not (tmp_path / "crushftp" / "inbound" / DATE / "trigger.done").exists()
     assert (tmp_path / "bo" / DATE / "sales_summary.csv").exists()
-    jobs = (tmp_path / "sapds-jobs.json").read_text()
-    assert '"SET3_ETL_075": "Error"' in jobs
+    assert '"SET3_ETL_014": "succeeded"' in (tmp_path / "sapds-jobs.json").read_text()
+
+
+def test_the_daily_sales_baseline_arrives_late(generator, dataset, tmp_path):
+    """Its absence is the unintended failure the demo restarts from."""
+    generator.write_local_files(dataset, tmp_path)
+
+    assert not (tmp_path / "bo" / DATE / "daily_sales.csv").exists()
+    assert (tmp_path / "bo-late" / DATE / "daily_sales.csv").exists()
 
 
 def test_generated_files_are_readable_by_atom(generator, dataset, tmp_path):
@@ -130,11 +134,7 @@ def test_generated_files_are_readable_by_atom(generator, dataset, tmp_path):
 
     generator.write_local_files(dataset, tmp_path)
     f = feed(dataset, "gl_003")
-    frame = read_tabular(
-        content_b64=__import__("base64").b64encode(
-            (tmp_path / "templates" / f.etl / "gl_003.xml").read_bytes()
-        ).decode("ascii"),
-        file_name="gl_003.xml",
-    )
+    raw = (tmp_path / "templates" / f.etl / "gl_003.xml").read_bytes()
+    frame = read_tabular(content_b64=base64.b64encode(raw).decode("ascii"), file_name="gl_003.xml")
     assert len(frame) == len(f.test_rows)
     assert {"trade_id", "notional", "fee_amount"} <= set(frame.columns)

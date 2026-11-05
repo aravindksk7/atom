@@ -50,6 +50,14 @@
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <template x-if="runTimings[selectedRun.run_id]">
+            <div data-testid="history-run-elapsed">
+              <span class="text-muted">Elapsed</span><br>
+              <span x-text="fmtSeconds(runTimings[selectedRun.run_id].elapsed_seconds)"></span>
+              <span class="text-xs text-muted" x-show="runTimings[selectedRun.run_id].held_seconds > 0"
+                    x-text="'(held ' + fmtSeconds(runTimings[selectedRun.run_id].held_seconds) + ')'"></span>
+            </div>
+          </template>
           <div x-show="selectedRun.restarted_from_run_id"><span class="text-muted">Restarted from</span><br><button @click="viewRunDetail(selectedRun.restarted_from_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_from_run_id"></button></div>
           <div x-show="selectedRun.restarted_as_run_id"><span class="text-muted">Restarted as</span><br><button @click="viewRunDetail(selectedRun.restarted_as_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_as_run_id"></button></div>
           <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
@@ -121,6 +129,13 @@
           </div>
         </div>
       </div>
+
+      <template x-for="timing in [runTimings[selectedRun.run_id]].filter((t) => t && t.steps.length)" :key="selectedRun.run_id">
+        <div class="card mb-4" data-testid="history-timeline">
+          <div class="card-title mb-2">Timeline</div>
+          <!-- SHARED: shared/run-gantt.html -->
+        </div>
+      </template>
 
       <!-- Sequence steps -->
       <div class="card mb-4" x-show="(selectedRun.steps || []).length" data-testid="history-run-steps">
@@ -831,6 +846,7 @@
             <option value="COMPLETED">COMPLETED</option>
             <option value="FAILED">FAILED</option>
             <option value="ERROR">ERROR</option>
+            <option value="BLOCKED">BLOCKED</option>
           </select>
           <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter" aria-label="history runtype filter">
             <option value="">All types</option>

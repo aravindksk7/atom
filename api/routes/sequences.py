@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from api.schemas import (
     RunBatchOut,
     RunSettings,
     SequenceDefaults,
+    SequenceRunTimingOut,
     SequenceLaunchRequest,
     SequenceBatchLaunchRequest,
     SequenceRef,
@@ -31,6 +33,7 @@ from api.routes.selections import _dump_job_sequence
 from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
 from api.services.job_env_validation import validate_env_requirements
+from api.services.run_timing import build_run_elapsed
 from api.services.sequence_preconditions import check_for_session as check_preconditions
 from api.services.sequence_resolver import SequenceResolutionError, resolve as resolve_sequence
 from api.services.sequence_validation import (
@@ -260,6 +263,27 @@ def get_sequence_version(
 def get_sequence_usage(sequence_id: int, db: Session = Depends(get_session)):
     _get_or_404(db, sequence_id)
     return SequenceUsageOut(**ExecutionSequenceRepository(db).usage(sequence_id))
+
+
+@router.get("/{sequence_id}/runs", response_model=list[SequenceRunTimingOut])
+def list_sequence_runs(
+    sequence_id: int,
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_session),
+):
+    _get_or_404(db, sequence_id)
+    now = datetime.now(timezone.utc)
+    return [
+        SequenceRunTimingOut(
+            run_id=run.run_id,
+            status=run.status,
+            started_at=run.started_at,
+            completed_at=run.completed_at,
+            **build_run_elapsed(run, run.steps, now),
+        )
+        for run in RunRepository(db).list_runs_for_sequence(sequence_id, limit, offset)
+    ]
 
 
 @router.post("/{sequence_id}/launch", response_model=RunStatusOut, status_code=202)

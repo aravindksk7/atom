@@ -4,9 +4,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal
 from sqlalchemy import String, case, cast, func, insert, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
+from etl_framework.repository.database import sequence_id_from_snapshot
 from etl_framework.repository.query_utils import apply_pagination
 from etl_framework.utils.serialization import json_safe
 from etl_framework.repository.models import (
@@ -431,6 +432,7 @@ class RunRepository:
             ci_context=ci_context,
             run_batch_id=run_batch_id,
             restarted_from_run_id=restarted_from_run_id,
+            sequence_id=sequence_id_from_snapshot(config_snapshot),
         )
         self._db.add(run)
         self._db.commit()
@@ -439,6 +441,20 @@ class RunRepository:
 
     def get_run(self, run_id: str) -> TestRun | None:
         return self._db.query(TestRun).filter(TestRun.run_id == run_id).first()
+
+    def list_runs_for_sequence(
+        self, sequence_id: int, limit: int = 20, offset: int = 0
+    ) -> list[TestRun]:
+        # The caller reads only the hold columns of each run's steps.
+        return (
+            self._db.query(TestRun)
+            .options(selectinload(TestRun.steps).load_only(RunStep.held_at, RunStep.released_at))
+            .filter(TestRun.sequence_id == sequence_id)
+            .order_by(TestRun.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
     def find_restart_for_run(self, original_run_id: str) -> TestRun | None:
         return (
@@ -1731,6 +1747,11 @@ class RunStepRepository:
         step = self.get_step(run_id, step_index)
         if step is None:
             return None
+        now = datetime.now(timezone.utc)
+        if status == "RUNNING" and step.started_at is None:
+            step.started_at = now
+        if step.status == "RUNNING" and status != "RUNNING" and step.finished_at is None:
+            step.finished_at = now
         step.status = status
         for k, v in kwargs.items():
             setattr(step, k, v)

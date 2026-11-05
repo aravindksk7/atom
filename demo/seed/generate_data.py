@@ -6,15 +6,16 @@ can be unit tested without any of those systems.
 
 Differences seeded (everything else is identical between Test and Production):
 
-    fee_amount   intentionally changed in about a third of the feeds and in the
-                 trades table: the expected difference a reviewer accepts
+    fee_amount   intentionally changed in the even-numbered feeds and in the trades
+                 table: the expected difference a reviewer accepts
     gl_005       a record missing from Test
-    gl_020       an additional record in Test
+    gl_008       an additional record in Test
     gl_003       one wrong notional (XML)
     trades       one wrong notional
     positions    one row missing from Postgres, compared with the CrushFTP file
-    SET3_ETL_075 the ETL fails, so its output is missing
     BO summary   the Production amount total differs from the live report
+    BO daily     its Production copy arrives late (bo-late/), which errors the first
+                 run: the unintended failure the demo restarts from
 """
 from __future__ import annotations
 
@@ -31,19 +32,19 @@ from xml.etree import ElementTree
 
 BUSINESS_DATE = "2026-06-03"
 PRIOR_DATE = "2026-06-02"
-ETLS_PER_SET = 25
-SETS = 4
+# ETL numbers in each of the four sets.
+ETL_SETS = {1: range(1, 4), 2: range(4, 10), 3: range(10, 15), 4: range(15, 19)}
 ROWS_PER_FEED = 20
 TRADE_ROWS = 200
 POSITION_ROWS = 60
-FAILING_ETL_NUMBER = 75
-# These ETLs write a second CSV feed, which is what takes 100 ETLs to 104 files.
-ETLS_WITH_EXTRA_FEED = {10, 30, 60, 90}
+BALANCE_ROWS = 40
+# These ETLs write a second CSV feed, so 18 ETLs produce 20 file pairs.
+ETLS_WITH_EXTRA_FEED = {4, 10}
 
 MISSING_RECORD_FEED = "gl_005"
-ADDITIONAL_RECORD_FEED = "gl_020"
+ADDITIONAL_RECORD_FEED = "gl_008"
 WRONG_VALUE_FEED = "gl_003"
-EXCEPTION_FEEDS = {MISSING_RECORD_FEED, ADDITIONAL_RECORD_FEED, WRONG_VALUE_FEED}
+LATE_BO_BASELINE = "daily_sales"
 
 BOOKS = ("EQ-LDN", "EQ-NYC", "FX-LDN", "FI-SGP", "CR-FRA")
 CURRENCIES = ("USD", "EUR", "GBP", "SGD")
@@ -67,17 +68,17 @@ class Feed:
 class Dataset:
     business_date: str
     etls: list[str]
-    failing_etl: str
     feeds: list[Feed]
     trades_prod: list[dict]
     trades_test: list[dict]
     positions_prod: list[dict]
     positions_test: list[dict]
+    balances: list[dict]
     bo_baselines: dict[str, list[dict]]
 
 
 def etl_name(number: int) -> str:
-    set_number = (number - 1) // ETLS_PER_SET + 1
+    set_number = next(n for n, numbers in ETL_SETS.items() if number in numbers)
     return f"SET{set_number}_ETL_{number:03d}"
 
 
@@ -114,7 +115,7 @@ def _feed_test_rows(name: str, number: int, prod_rows: list[dict]) -> list[dict]
         return [dict(row) for row in prod_rows] + [extra]
     if name == WRONG_VALUE_FEED:
         return _with_wrong_notional(prod_rows, 4)
-    if number % 3 == 0:
+    if number % 2 == 0:
         return _apply_fee_change(prod_rows)
     return [dict(row) for row in prod_rows]
 
@@ -153,9 +154,10 @@ def _bo_baselines() -> dict[str, list[dict]]:
 
 def build_dataset(business_date: str = BUSINESS_DATE) -> Dataset:
     rng = random.Random(f"atom-demo-{business_date}")
+    numbers = [number for group in ETL_SETS.values() for number in group]
     feeds: list[Feed] = []
-    for number in range(1, ETLS_PER_SET * SETS + 1):
-        fmt = "xml" if number % 5 in (1, 3) else "csv"
+    for number in numbers:
+        fmt = "xml" if number % 3 == 0 else "csv"
         feeds.append(_build_feed(rng, f"gl_{number:03d}", number, fmt))
         if number in ETLS_WITH_EXTRA_FEED:
             feeds.append(_build_feed(rng, f"gl_{number:03d}_adj", number, "csv"))
@@ -175,15 +177,24 @@ def build_dataset(business_date: str = BUSINESS_DATE) -> Dataset:
     ]
     positions_test = [dict(row) for i, row in enumerate(positions_prod) if i != 17]
 
+    balances = [
+        {
+            "account_id": f"ACC-{index:04d}",
+            "currency": rng.choice(CURRENCIES),
+            "balance": round(rng.uniform(-2_000_000, 9_000_000), 2),
+        }
+        for index in range(1, BALANCE_ROWS + 1)
+    ]
+
     return Dataset(
         business_date=business_date,
-        etls=[etl_name(number) for number in range(1, ETLS_PER_SET * SETS + 1)],
-        failing_etl=etl_name(FAILING_ETL_NUMBER),
+        etls=[etl_name(number) for number in numbers],
         feeds=feeds,
         trades_prod=trades_prod,
         trades_test=trades_test,
         positions_prod=positions_prod,
         positions_test=positions_test,
+        balances=balances,
         bo_baselines=_bo_baselines(),
     )
 
@@ -217,21 +228,27 @@ def write_local_files(dataset: Dataset, root: Path) -> None:
         (folder / feed.file_name).write_bytes(feed_bytes(feed, feed.test_rows))
 
     jobs = {name: "succeeded" for name in dataset.etls}
-    jobs[dataset.failing_etl] = "Error"
     (root / "sapds-jobs.json").write_text(json.dumps(jobs, indent=2), encoding="utf-8")
 
-    crushftp = root / "crushftp" / "prod" / dataset.business_date
-    crushftp.mkdir(parents=True, exist_ok=True)
-    (crushftp / "positions.csv").write_bytes(_csv_bytes(dataset.positions_prod))
+    crushftp = root / "crushftp"
+    prod = crushftp / "prod" / dataset.business_date
+    prod.mkdir(parents=True, exist_ok=True)
+    (prod / "positions.csv").write_bytes(_csv_bytes(dataset.positions_prod))
+    # The file watcher at the start of Set 1 waits here. The demo script delivers the
+    # arrival signal on screen, which holds the run until the presenter is ready.
+    (crushftp / "inbound" / dataset.business_date).mkdir(parents=True, exist_ok=True)
 
     bo = root / "bo" / dataset.business_date
+    late = root / "bo-late" / dataset.business_date
     bo.mkdir(parents=True, exist_ok=True)
+    late.mkdir(parents=True, exist_ok=True)
     for name, rows in dataset.bo_baselines.items():
-        (bo / f"{name}.csv").write_bytes(_csv_bytes(rows))
+        folder = late if name == LATE_BO_BASELINE else bo
+        (folder / f"{name}.csv").write_bytes(_csv_bytes(rows))
 
 
 def _retry(action, description: str, attempts: int = 60, delay: float = 2.0):
-    """Services report healthy before they accept work, and MinIO has no healthcheck."""
+    """Services report healthy before they accept work, and the S3 simulator needs a moment."""
     for attempt in range(1, attempts + 1):
         try:
             return action()
@@ -241,7 +258,9 @@ def _retry(action, description: str, attempts: int = 60, delay: float = 2.0):
             time.sleep(delay)
 
 
-def upload_baselines(dataset: Dataset, endpoint_url: str, bucket: str, key: str, secret: str) -> None:
+def upload_baselines(
+    dataset: Dataset, endpoint_url: str, bucket: str, published_bucket: str, key: str, secret: str,
+) -> None:
     import boto3
 
     client = boto3.client(
@@ -249,6 +268,7 @@ def upload_baselines(dataset: Dataset, endpoint_url: str, bucket: str, key: str,
         aws_secret_access_key=secret, region_name="us-east-1",
     )
     _retry(lambda: client.create_bucket(Bucket=bucket), "S3 simulator")
+    client.create_bucket(Bucket=published_bucket)
     for feed in dataset.feeds:
         client.put_object(
             Bucket=bucket,
@@ -260,10 +280,7 @@ def upload_baselines(dataset: Dataset, endpoint_url: str, bucket: str, key: str,
 def load_trades(dsn: str, schema: str, rows: list[dict], business_date: str, prior_rows: list[dict]) -> None:
     import psycopg
 
-    def connect():
-        return psycopg.connect(dsn)
-
-    with _retry(connect, f"Database for {schema}") as conn, conn.cursor() as cur:
+    with _retry(lambda: psycopg.connect(dsn), f"Database for {schema}") as conn, conn.cursor() as cur:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         cur.execute(f"DROP TABLE IF EXISTS {schema}.gl_trades")
         cur.execute(
@@ -297,6 +314,22 @@ def load_positions(dsn: str, rows: list[dict], business_date: str) -> None:
         )
 
 
+def load_balances(dsn: str, schema: str, rows: list[dict], business_date: str) -> None:
+    import psycopg
+
+    with _retry(lambda: psycopg.connect(dsn), f"Database for {schema}") as conn, conn.cursor() as cur:
+        cur.execute(f"DROP TABLE IF EXISTS {schema}.gl_balances")
+        cur.execute(
+            f"CREATE TABLE {schema}.gl_balances (business_date date NOT NULL, account_id text NOT NULL, "
+            "currency text, balance double precision, PRIMARY KEY (business_date, account_id))"
+        )
+        cur.executemany(
+            f"INSERT INTO {schema}.gl_balances VALUES ('{business_date}', "
+            "%(account_id)s, %(currency)s, %(balance)s)",
+            rows,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=os.environ.get("DEMO_DATA_ROOT", "/demo-data"))
@@ -306,15 +339,19 @@ def main() -> None:
     write_local_files(dataset, Path(args.root))
     upload_baselines(
         dataset,
-        os.environ["DEMO_S3_ENDPOINT"], os.environ["DEMO_S3_BUCKET"],
+        os.environ["DEMO_S3_ENDPOINT"], os.environ["DEMO_S3_BUCKET"], os.environ["DEMO_S3_PUBLISHED_BUCKET"],
         os.environ["DEMO_S3_KEY"], os.environ["DEMO_S3_SECRET"],
     )
+    qa, prod = os.environ["DEMO_POSTGRES_DSN"], os.environ["DEMO_ORACLE_SIM_DSN"]
     # The prior day's rows are different on purpose: a query ignoring the business
     # date would return them too, and the row counts would no longer match.
     prior = _trade_rows(random.Random("atom-demo-prior"), 25, "TRD-PRIOR")
-    load_trades(os.environ["DEMO_POSTGRES_DSN"], "qa_owner", dataset.trades_test, dataset.business_date, prior)
-    load_trades(os.environ["DEMO_ORACLE_SIM_DSN"], "prod_owner", dataset.trades_prod, dataset.business_date, prior)
-    load_positions(os.environ["DEMO_POSTGRES_DSN"], dataset.positions_test, dataset.business_date)
+    load_trades(qa, "qa_owner", dataset.trades_test, dataset.business_date, prior)
+    load_trades(prod, "prod_owner", dataset.trades_prod, dataset.business_date, prior)
+    load_positions(qa, dataset.positions_test, dataset.business_date)
+    load_positions(prod, dataset.positions_prod, dataset.business_date)
+    load_balances(qa, "qa_owner", dataset.balances, dataset.business_date)
+    load_balances(prod, "prod_owner", dataset.balances, dataset.business_date)
     print(
         f"Seeded {len(dataset.etls)} ETLs and {len(dataset.feeds)} feeds "
         f"for {dataset.business_date}",

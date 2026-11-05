@@ -11,7 +11,7 @@ def _utcnow() -> datetime:
 
 
 TERMINAL_STATUSES: frozenset[str] = frozenset(
-    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
+    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED", "BLOCKED"}
 )
 
 
@@ -157,6 +157,7 @@ class TestRun(Base):
     ci_context = Column(JSON, nullable=True)
     restarted_from_run_id = Column(String(36), nullable=True, index=True)
     run_batch_id = Column(String(36), ForeignKey("run_batches.batch_id", ondelete="SET NULL"), nullable=True, index=True)
+    sequence_id = Column(Integer, nullable=True, index=True)
 
     results = relationship("TestResult", back_populates="run",
                            cascade="all, delete-orphan", lazy="select")
@@ -188,6 +189,8 @@ class TestRun(Base):
 
 class TestResult(Base):
     __tablename__ = "test_results"
+    # Run timing looks up a job's latest results by name, newest first.
+    __table_args__ = (Index("ix_test_results_query_name_id", "query_name", "id"),)
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(String(36), ForeignKey("test_runs.run_id", ondelete="CASCADE"),
@@ -532,6 +535,8 @@ class RunStep(Base):
     release_note = Column(Text, nullable=True)
     release_action = Column(String(20), nullable=True)
     carried_over = Column(Boolean, nullable=False, default=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
     run = relationship("TestRun", back_populates="steps")
 

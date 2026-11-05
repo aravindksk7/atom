@@ -376,7 +376,7 @@
       id: 'sequences',
       category: 'Execution',
       title: 'Execution Sequences (DAGs)',
-      intro: 'Run jobs serially, in parallel, or in stages that hand over from one to the next. Choose a flow in the sequence editor, or use Advanced graph to model any dependencies. Validate acyclic topology and recover without rerunning passed nodes.',
+      intro: 'Run jobs serially, in parallel, or in stages that hand over from one to the next. Choose a flow in the sequence editor, or use Advanced graph to model any dependencies. Validate acyclic topology and recover without rerunning passed nodes. Each sequence lists its recent runs with start, end, and elapsed time.',
       steps: [
         {
           title: 'Design and launch a topological DAG',
@@ -666,7 +666,7 @@
       steps: [
         {
           title: 'Watch live progress and logs',
-          text: 'The Monitor view subscribes to a run stream and updates QUEUED, RUNNING, PASSED, FAILED, ERROR, BLOCKED, and CANCELLED states without a page reload. Step cards expose duration and carried-over state.',
+          text: 'The Monitor view subscribes to a run stream and updates QUEUED, RUNNING, PASSED, FAILED, ERROR, BLOCKED, and CANCELLED states without a page reload. Step cards expose duration and carried-over state. Each job shows a progress bar. The percent is an estimate from that job\'s last 10 results and stops at 95% until the job finishes. Amber means the job has passed its estimate. Moving stripes with no percent mean there isn\'t enough history yet. Timeline shows the jobs as a Gantt chart, colored by status or job type, with time spent held shown hatched.',
           where: 'Monitor -> active run',
           when: 'Following a long sequence or diagnosing a step while it executes.',
           uiMockup: { title: 'Live run monitor', badge: 'SSE connected', elements: [
@@ -713,7 +713,7 @@
       steps: [
         {
           title: 'Explore run history and export evidence',
-          text: 'Filter history by status, job, label, or date. Open a run to inspect results, schema history, profile-driven DQ rule suggestions, lineage, and segment drilldowns; export complete CSV evidence when needed. All-differences exports and the Full HTML Report rebuild from live data, skip jobs that passed, and show each job\'s progress while they run. A job that cannot be rebuilt shows its stored rows with an export_incomplete row, and clicking the export again retries it.',
+          text: 'Filter history by status, job, label, or date. Open a run to inspect results, schema history, profile-driven DQ rule suggestions, lineage, and segment drilldowns; export complete CSV evidence when needed. All-differences exports and the Full HTML Report rebuild from live data, skip jobs that passed, and show each job\'s progress while they run. A job that cannot be rebuilt shows its stored rows with an export_incomplete row, and clicking the export again retries it. A run\'s Timeline shows each job as a Gantt bar, with start, end, elapsed, and held time (atom timing <run_id> prints the same).',
           where: 'History -> filters -> run detail',
           when: 'Auditing a past execution or finding recurring failure segments.',
           uiMockup: { title: 'Run history', elements: [

@@ -39,6 +39,8 @@ _CI_TRIGGER_ALLOWED: list[tuple[str, re.Pattern]] = [
     ("GET", re.compile(r"^/api/runs/[^/]+/markdown-summary$")),
     ("GET", re.compile(r"^/api/runs/[^/]+/report$")),
     ("GET", re.compile(r"^/api/runs/[^/]+/export$")),
+    ("GET", re.compile(r"^/api/runs/[^/]+/timing$")),
+    ("GET", re.compile(r"^/api/sequences/\d+/runs$")),
 ]
 
 

@@ -3,7 +3,7 @@
 const API = window.ETL_API_BASE || '';
 const APP_CONFIG = window.ETL_APP_CONFIG || {};
 const isTerminalStatusValue = APP_CONFIG.isTerminalStatusValue || ((status) =>
-  ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase()));
+  ['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED'].includes(String(status || '').toUpperCase()));
 const highlightMatch = APP_CONFIG.highlightMatch || ((text, query) => {
   const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   if (!query.trim()) return safe;
@@ -596,6 +596,7 @@ function _appRaw() {
     handleAuthError(e) {
       if (!this.isAuthError(e)) return false;
       sessionStorage.removeItem('etl_token');
+      this.closeAllRunStreams();
       this.storedTokenValue = '';
       this.activeTokenName = '';
       this.activeTokenIsAdmin = false;
@@ -640,12 +641,14 @@ function _appRaw() {
         return;
       }
       sessionStorage.setItem('etl_token', raw);
+      this.closeAllRunStreams();
       this.storedTokenValue = raw;
       this.authPasteValue = '';
       this.authError = '';
       const valid = await this.resolveActiveTokenName({ verify: true });
       if (!valid) {
         sessionStorage.removeItem('etl_token');
+        this.closeAllRunStreams();
         this.storedTokenValue = '';
         this.authError = 'Your API token was rejected. Paste a valid raw token.';
         this.showAuthModal = true;
@@ -674,6 +677,7 @@ function _appRaw() {
         }
         if (clearInvalid) {
           sessionStorage.removeItem('etl_token');
+          this.closeAllRunStreams();
           this.storedTokenValue = '';
           this.activeTokenName = '';
           this.activeTokenIsAdmin = false;
@@ -1003,12 +1007,14 @@ function _appRaw() {
       const token = normalizeToken(raw);
       if (token) {
         sessionStorage.setItem('etl_token', token);
+        this.closeAllRunStreams();
         this.storedTokenValue = token;
         this.resolveActiveTokenName({ verify: true });
         this.loadAll();
         this.toast('success', 'Token saved', 'Will be used for all API calls');
       } else {
         sessionStorage.removeItem('etl_token');
+        this.closeAllRunStreams();
         this.storedTokenValue = '';
         this.activeTokenName = '';
         this.activeTokenIsAdmin = false;
@@ -1194,6 +1200,7 @@ function _appRaw() {
         PENDING:   'badge-gray',
         ERROR:     'badge-rose',
         COMPLETED: 'badge-green',
+        BLOCKED:   'badge-amber',
       };
       return 'badge ' + (map[status] || 'badge-gray');
     },
@@ -1506,7 +1513,7 @@ function _appRaw() {
   // the need to judge, slice by slice, whether "this one needs" special
   // handling: future slices with getters are handled automatically, and
   // forgetting to special-case a getter-bearing slice can no longer happen.
-  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_HISTORY(), ETL_FEATURE_CI_RUNS(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES(), ETL_FEATURE_FILE_SERVERS(), ETL_FEATURE_IMPORT_EXPORT(), ETL_FEATURE_BULK_COMPARE()];
+  const FEATURE_SLICES = [ETL_FEATURE_COMPARE(), ETL_FEATURE_CONFIG(), ETL_FEATURE_LAUNCH(), ETL_FEATURE_MONITOR(), ETL_FEATURE_RUN_TIMING(), ETL_FEATURE_HISTORY(), ETL_FEATURE_CI_RUNS(), ETL_FEATURE_ADAPTERS(), ETL_FEATURE_AWS(), ETL_FEATURE_REPORTS(), ETL_FEATURE_DIFFERENCES(), ETL_FEATURE_CONTRACTS(), ETL_FEATURE_SCHEDULER_REPORTS(), ETL_FEATURE_LOGS(), ETL_FEATURE_SEQUENCES(), ETL_FEATURE_FILE_SERVERS(), ETL_FEATURE_IMPORT_EXPORT(), ETL_FEATURE_BULK_COMPARE()];
   const merged = FEATURE_SLICES.reduce(
     (acc, slice) => Object.defineProperties(acc, Object.getOwnPropertyDescriptors(slice)),
     {}

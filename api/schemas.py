@@ -536,6 +536,8 @@ class RunStepOut(BaseModel):
     release_note: str | None = None
     release_action: str | None = None
     carried_over: bool = False
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1194,6 +1196,58 @@ class RunProgressOut(BaseModel):
     percent_complete: int = Field(default=0, ge=0, le=100)
     current_step: int | None = None
     held_step: int | None = None
+
+
+class StepProgressOut(BaseModel):
+    state: Literal[
+        "queued", "running", "over_estimate", "running_unknown", "held",
+        "done", "not_recorded", "not_run", "carried_over", "interrupted",
+    ]
+    percent: int | None = None
+    label: str
+
+
+class StepTimingOut(BaseModel):
+    step_id: str | None = None
+    step_index: int
+    job_name: str
+    job_type: str | None = None
+    job_family: str = "other"
+    status: str
+    attempt: int = 0
+    started_at: str | None = None
+    finished_at: str | None = None
+    held_at: str | None = None
+    hold_ended_at: str | None = None
+    runtime_seconds: float | None = None
+    estimate_seconds: float | None = None
+    held_seconds: float = 0.0
+    progress: StepProgressOut
+
+
+class RunTimingOut(BaseModel):
+    run_id: str
+    status: str
+    server_time: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    elapsed_seconds: float | None = None
+    held_seconds: float = 0.0
+    active_seconds: float | None = None
+    jobs_total: int = 0
+    jobs_done: int = 0
+    timing_recorded: bool = False
+    steps: list[StepTimingOut] = Field(default_factory=list)
+
+
+class SequenceRunTimingOut(BaseModel):
+    run_id: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    elapsed_seconds: float | None = None
+    held_seconds: float = 0.0
+    active_seconds: float | None = None
 
 
 class BODocOut(BaseModel):

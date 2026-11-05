@@ -1,7 +1,8 @@
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
-from sqlalchemy import DateTime, create_engine, inspect
+from sqlalchemy import DateTime, create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
 from etl_framework.utils.serialization import safe_json_dumps
@@ -32,6 +33,8 @@ def init_db() -> None:
     _ensure_contract_columns(engine)
     _ensure_file_server_columns(engine)
     _ensure_export_job_columns(engine)
+    _ensure_run_timing_columns(engine)
+    _ensure_test_results_query_index(engine)
     _backfill_schedule_selections(engine)
 
 
@@ -75,6 +78,91 @@ def _ensure_export_job_columns(bind) -> None:
         return
     with bind.begin() as conn:
         ensure_column(conn, "difference_export_jobs", "heartbeat_at", _export_heartbeat_column_ddl(bind.dialect))
+
+
+_SEQUENCE_INDEX = "ix_test_runs_sequence_id"
+_SEQUENCE_BACKFILL_BATCH = 500
+_MAX_SEQUENCE_ID = 2**31 - 1  # the INTEGER column's limit
+
+
+def sequence_id_from_snapshot(snapshot) -> int | None:
+    """The sequence id in a run's config snapshot, or None unless it is a positive int that fits the column."""
+    sequence = snapshot.get("sequence") if isinstance(snapshot, dict) else None
+    value = sequence.get("id") if isinstance(sequence, dict) else None
+    return value if type(value) is int and 1 <= value <= _MAX_SEQUENCE_ID else None
+
+
+def _ensure_run_timing_columns(bind) -> None:
+    """Add step times and sequence_id on existing databases.
+
+    Not SQLite-gated: /timing and the stream read these columns on every
+    dialect. The datetime type comes from the dialect because Postgres has no
+    DATETIME. The sequence_id index is the completion marker: it is created
+    last, so a crash mid-backfill (SQLite commits ALTER at once) reruns the
+    backfill next start. Batches keep memory bounded and locks short.
+    """
+    tables = set(inspect(bind).get_table_names())
+    if not {"test_runs", "run_steps"}.issubset(tables):
+        return
+    needs_backfill = _SEQUENCE_INDEX not in {
+        index["name"] for index in inspect(bind).get_indexes("test_runs")
+    }
+    datetime_type = DateTime(timezone=True).compile(dialect=bind.dialect)
+    with bind.begin() as conn:
+        ensure_column(conn, "run_steps", "started_at", f"ALTER TABLE run_steps ADD COLUMN started_at {datetime_type}")
+        ensure_column(conn, "run_steps", "finished_at", f"ALTER TABLE run_steps ADD COLUMN finished_at {datetime_type}")
+        ensure_column(conn, "test_runs", "sequence_id", "ALTER TABLE test_runs ADD COLUMN sequence_id INTEGER")
+    if needs_backfill:
+        _backfill_run_sequence_ids(bind)
+    with bind.begin() as conn:
+        ensure_index(conn, _SEQUENCE_INDEX, f"CREATE INDEX {_SEQUENCE_INDEX} ON test_runs (sequence_id)")
+
+
+_RESULTS_QUERY_INDEX = "ix_test_results_query_name_id"
+
+
+def _ensure_test_results_query_index(bind) -> None:
+    """Index test_results (query_name, id) on existing databases.
+
+    Without it the estimate lookup scans the whole table for jobs with little
+    history. Own short transaction: building the index can take a while.
+    """
+    if "test_results" not in set(inspect(bind).get_table_names()):
+        return
+    with bind.begin() as conn:
+        ensure_index(
+            conn, _RESULTS_QUERY_INDEX,
+            f"CREATE INDEX {_RESULTS_QUERY_INDEX} ON test_results (query_name, id)",
+        )
+
+
+def _backfill_run_sequence_ids(bind) -> None:
+    last_id = 0
+    while True:
+        with bind.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, config_snapshot FROM test_runs "
+                    "WHERE id > :last AND sequence_id IS NULL AND config_snapshot IS NOT NULL "
+                    "ORDER BY id LIMIT :batch"
+                ),
+                {"last": last_id, "batch": _SEQUENCE_BACKFILL_BATCH},
+            ).fetchall()
+            for row_id, snapshot in rows:
+                last_id = row_id
+                if isinstance(snapshot, str):
+                    try:
+                        snapshot = json.loads(snapshot)
+                    except ValueError:
+                        continue
+                sequence_id = sequence_id_from_snapshot(snapshot)
+                if sequence_id is not None:
+                    conn.execute(
+                        text("UPDATE test_runs SET sequence_id = :sequence_id WHERE id = :row_id"),
+                        {"sequence_id": sequence_id, "row_id": row_id},
+                    )
+        if not rows:
+            return
 
 
 def _ensure_compare_columns(bind) -> None:

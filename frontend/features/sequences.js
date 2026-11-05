@@ -10,6 +10,8 @@
       sequencesLoading: false,
       selectedSequence: null,          // detail payload from GET /api/sequences/{id}
       sequenceUsage: { selections: [], schedules: [] },
+      sequenceRuns: [],                // recent runs with elapsed time, from GET /api/sequences/{id}/runs
+      _sequenceSelectToken: 0,         // guards against responses for an earlier selection
       showLaunchSequenceModal: false,
       launchSequenceModal: {},
       sequenceEditorOpen: false,
@@ -123,16 +125,42 @@
           this.sequences = await api('GET', '/api/sequences');
         } catch { this.sequences = []; }
         this.sequencesLoading = false;
+        // The tab keeps its selection, and a run may have finished since then.
+        if (this.selectedSequence) this.loadSequenceRuns(this.selectedSequence.id);
       },
 
       async selectSequence(sequence) {
+        const token = ++this._sequenceSelectToken;
+        this.sequenceRuns = [];
         try {
-          this.selectedSequence = await api('GET', `/api/sequences/${sequence.id}`);
-          this.sequenceUsage = await api('GET', `/api/sequences/${sequence.id}/usage`);
+          const detail = await api('GET', `/api/sequences/${sequence.id}`);
+          if (token !== this._sequenceSelectToken) return;
+          this.selectedSequence = detail;
+          const usage = await api('GET', `/api/sequences/${sequence.id}/usage`);
+          if (token !== this._sequenceSelectToken) return;
+          this.sequenceUsage = usage;
         } catch {
+          if (token !== this._sequenceSelectToken) return;
           this.selectedSequence = null;
           this.sequenceUsage = { selections: [], schedules: [] };
+          return;
         }
+        await this.loadSequenceRuns(sequence.id);
+      },
+
+      async loadSequenceRuns(sequenceId) {
+        const token = this._sequenceSelectToken;
+        let runs = [];   // the detail is still useful without its history
+        try {
+          runs = await api('GET', `/api/sequences/${sequenceId}/runs?limit=20`);
+        } catch { /* see above */ }
+        if (token === this._sequenceSelectToken) this.sequenceRuns = runs;
+      },
+
+      openSequenceRun(runId) {
+        this.selectedRun = null;   // an earlier run's detail must not stand in for this one
+        this.onTabEnter('history');
+        this.viewRunDetail(runId);
       },
 
       // ===== EDITING =====

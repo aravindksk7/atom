@@ -35,13 +35,13 @@
     </div>
 
     <!-- Detail -->
-    <div class="card lg:col-span-2" x-show="selectedSequence" data-testid="sequence-detail">
-      <div class="flex items-center justify-between">
+    <div class="card lg:col-span-2 min-w-0" x-show="selectedSequence" data-testid="sequence-detail">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
           <span class="chip" data-testid="sequence-flow-badge" x-text="selectedSequenceFlowLabel"></span>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
           <button class="btn btn-primary btn-sm" data-testid="sequence-launch-btn"
                   @click="openLaunchSequenceModal(selectedSequence)">Run sequence</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-ci-btn"
@@ -52,6 +52,7 @@
       </div>
       <div class="text-sm text-muted mb-3" x-text="selectedSequence && selectedSequence.description"></div>
 
+      <div class="overflow-x-auto">
       <table class="data-table" aria-label="sequences table 1">
         <thead>
           <tr><th>Step</th><th>Job</th><th>Runs after</th></tr>
@@ -69,6 +70,7 @@
           </template>
         </tbody>
       </table>
+      </div>
       <template x-if="selectedSequence && !selectedSequence.versions[selectedSequence.versions.length - 1].steps.length">
         <div class="empty-state" data-testid="sequence-steps-empty-state">
           <div class="empty-state-title">This version has no steps</div>
@@ -81,6 +83,32 @@
         <div class="text-muted">
           <span x-text="sequenceUsage.selections.length + ' selection(s)'"></span> ·
           <span x-text="sequenceUsage.schedules.length + ' schedule(s)'"></span>
+        </div>
+      </div>
+
+      <div class="mt-4 text-sm" data-testid="sequence-recent-runs">
+        <div class="font-medium mb-1">Recent runs</div>
+        <div x-show="sequenceRuns.length === 0" class="text-muted">No runs yet.</div>
+        <div class="overflow-x-auto" x-show="sequenceRuns.length > 0">
+          <table class="data-table" aria-label="recent runs">
+            <thead>
+              <tr><th>Started</th><th>Ended</th><th>Elapsed</th><th>Held</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <template x-for="seqRun in sequenceRuns" :key="seqRun.run_id">
+                <tr class="cursor-pointer" tabindex="0"
+                    :data-testid="'sequence-run-' + seqRun.run_id"
+                    @click="openSequenceRun(seqRun.run_id)"
+                    @keydown.enter="openSequenceRun(seqRun.run_id)">
+                  <td class="whitespace-nowrap" x-text="fmtDate(seqRun.started_at)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtDate(seqRun.completed_at)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtSeconds(seqRun.elapsed_seconds)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtSeconds(seqRun.held_seconds)"></td>
+                  <td><span :class="statusBadgeClass(seqRun.status)" x-text="seqRun.status"></span></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

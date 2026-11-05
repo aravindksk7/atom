@@ -36,7 +36,8 @@ def _gate_exit_code(run_id: str, output: str) -> int:
             verdict, code = "CANCELLED", 2
         elif (run.error or 0) > 0 or run.status == "ERROR":
             verdict, code = "ERROR", 3
-        elif (run.failed or 0) > 0 or run.status == "FAILED":
+        # A blocked run did not run everything it was asked to, so it can't pass a gate.
+        elif (run.failed or 0) > 0 or run.status in ("FAILED", "BLOCKED"):
             verdict, code = "FAILED", 1
         else:
             verdict, code = "PASSED", 0

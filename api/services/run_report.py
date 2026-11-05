@@ -285,6 +285,10 @@ def _as_float(value: Any) -> float:
 
 
 def _snapshot_status(raw_status: str, results: list[ReportResult]) -> str:
+    # A blocked step writes no result row, so the recorded results can all pass while
+    # the run as a whole did not finish.
+    if raw_status == "BLOCKED":
+        return raw_status
     if raw_status not in TERMINAL_STATUSES or not results:
         return raw_status
     statuses = [result.effective_status for result in results]

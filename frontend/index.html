@@ -694,35 +694,6 @@
     </template>
   </div>
 
-  <!-- Step Release Modal -->
-  <div x-show="stepReleaseModal.show" x-cloak class="modal-backdrop" @click.self="stepReleaseModal.show = false">
-    <div x-ref="stepReleaseDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="stepReleaseDialogTitle">
-      <h2 id="stepReleaseDialogTitle" class="text-lg font-bold mb-4">Release Held Step</h2>
-      <div class="space-y-3">
-        <div>
-          <label  class="field-label" for="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name">Action *</label>
-          <div class="flex gap-3 mt-1">
-            <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="approve" aria-label="stepreleasemodal action" /> Approve &amp; continue
-            </label>
-            <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="skip" aria-label="stepreleasemodal action" /> Skip &amp; continue
-            </label>
-            <label class="flex items-center gap-1 text-sm cursor-pointer">
-              <input type="radio" x-model="stepReleaseModal.action" value="cancel" aria-label="stepreleasemodal action" /> Cancel run
-            </label>
-          </div>
-        </div>
-        <div><label class="field-label">Your name *</label><input x-model="stepReleaseModal.releasedBy" class="field-input" placeholder="Alice" id="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name" /></div>
-        <div><label  class="field-label" for="a11y-config-note">Note *</label><textarea x-model="stepReleaseModal.note" class="field-input" rows="2" placeholder="Verified data looks correct…" id="a11y-config-note"></textarea></div>
-      </div>
-      <div class="flex justify-end gap-3 mt-6">
-        <button @click="stepReleaseModal.show = false" class="btn-secondary">Cancel</button>
-        <button @click="submitStepRelease()" :disabled="!stepReleaseModal.note.trim() || !stepReleaseModal.releasedBy.trim()" class="btn-primary">Release</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Webhook Modal -->
   <div x-show="showHookModal" x-cloak class="modal-backdrop" @click.self="showHookModal = false">
     <div x-ref="hookDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="hookDialogTitle">
@@ -3213,13 +3184,13 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     </div>
 
     <!-- Detail -->
-    <div class="card lg:col-span-2" x-show="selectedSequence" data-testid="sequence-detail">
-      <div class="flex items-center justify-between">
+    <div class="card lg:col-span-2 min-w-0" x-show="selectedSequence" data-testid="sequence-detail">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <div class="card-title" x-text="selectedSequence && selectedSequence.name"></div>
           <span class="chip" data-testid="sequence-flow-badge" x-text="selectedSequenceFlowLabel"></span>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
           <button class="btn btn-primary btn-sm" data-testid="sequence-launch-btn"
                   @click="openLaunchSequenceModal(selectedSequence)">Run sequence</button>
           <button class="btn btn-secondary btn-sm" data-testid="sequence-ci-btn"
@@ -3230,6 +3201,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       </div>
       <div class="text-sm text-muted mb-3" x-text="selectedSequence && selectedSequence.description"></div>
 
+      <div class="overflow-x-auto">
       <table class="data-table" aria-label="sequences table 1">
         <thead>
           <tr><th>Step</th><th>Job</th><th>Runs after</th></tr>
@@ -3247,6 +3219,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </template>
         </tbody>
       </table>
+      </div>
       <template x-if="selectedSequence && !selectedSequence.versions[selectedSequence.versions.length - 1].steps.length">
         <div class="empty-state" data-testid="sequence-steps-empty-state">
           <div class="empty-state-title">This version has no steps</div>
@@ -3259,6 +3232,32 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         <div class="text-muted">
           <span x-text="sequenceUsage.selections.length + ' selection(s)'"></span> ·
           <span x-text="sequenceUsage.schedules.length + ' schedule(s)'"></span>
+        </div>
+      </div>
+
+      <div class="mt-4 text-sm" data-testid="sequence-recent-runs">
+        <div class="font-medium mb-1">Recent runs</div>
+        <div x-show="sequenceRuns.length === 0" class="text-muted">No runs yet.</div>
+        <div class="overflow-x-auto" x-show="sequenceRuns.length > 0">
+          <table class="data-table" aria-label="recent runs">
+            <thead>
+              <tr><th>Started</th><th>Ended</th><th>Elapsed</th><th>Held</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <template x-for="seqRun in sequenceRuns" :key="seqRun.run_id">
+                <tr class="cursor-pointer" tabindex="0"
+                    :data-testid="'sequence-run-' + seqRun.run_id"
+                    @click="openSequenceRun(seqRun.run_id)"
+                    @keydown.enter="openSequenceRun(seqRun.run_id)">
+                  <td class="whitespace-nowrap" x-text="fmtDate(seqRun.started_at)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtDate(seqRun.completed_at)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtSeconds(seqRun.elapsed_seconds)"></td>
+                  <td class="whitespace-nowrap" x-text="fmtSeconds(seqRun.held_seconds)"></td>
+                  <td><span :class="statusBadgeClass(seqRun.status)" x-text="seqRun.status"></span></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -3708,16 +3707,19 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <div class="space-y-4">
     <template x-for="run in activeRuns" :key="run.run_id">
-      <div class="card" :data-testid="'monitor-run-' + run.run_id">
+      <div class="card" :data-testid="'monitor-run-' + run.run_id" x-init="loadRunTiming(run.run_id)">
         <div class="flex items-start justify-between mb-4">
           <div>
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-sm text-slate-400" x-text="run.run_id.substring(0,8)+'…'"></span>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-semibold text-sm" data-testid="monitor-run-name" x-text="run.target_name || runLabel(run)"></span>
+              <span class="font-mono text-sm text-slate-400" x-show="run.target_name" x-text="run.run_id.substring(0,8)+'…'"></span>
               <span class="badge" :class="statusBadgeClass(run.status)" :data-testid="'monitor-run-status-' + run.run_id" x-text="run.status"></span>
             </div>
             <div class="text-muted mt-1">
               <span x-text="run.source_env||'?'"></span> → <span x-text="run.target_env||'?'"></span>
-              <span class="ml-2" x-text="run.started_at ? 'Started ' + fmtDate(run.started_at) : 'Pending…'"></span>
+              <!-- Runs with step timing show Started and Ended in the summary below. -->
+              <span class="ml-2" x-show="!runTimings[run.run_id] || !runTimings[run.run_id].steps.length"
+                    x-text="run.started_at ? 'Started ' + fmtDate(run.started_at) : 'Pending…'"></span>
             </div>
             <template x-if="run._progress && run._progress.current_job">
               <div class="text-muted mt-1 text-xs">
@@ -3737,10 +3739,114 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
 
-        <!-- Progress bar -->
-        <div class="progress-track mb-4">
-          <div class="progress-fill" :style="'width:' + runProgress(run) + '%'"></div>
+        <!-- Runs with steps get per-job progress; others keep the single bar. -->
+        <template x-if="!runTimings[run.run_id] || !runTimings[run.run_id].steps.length">
+          <div class="progress-track mb-4">
+            <div class="progress-fill" :style="'width:' + runProgress(run) + '%'"></div>
+          </div>
+        </template>
+        <template x-for="timing in [runTimings[run.run_id]].filter((t) => t && t.steps.length)" :key="run.run_id">
+          <div class="mb-4" data-testid="run-timing">
+            <div class="rt-summary">
+              <div class="text-xs text-muted">
+                <span>Started </span><span data-testid="run-started" x-text="fmtDate(timing.started_at)"></span>
+                <span> · Ended </span><span data-testid="run-ended" x-text="fmtDate(timing.completed_at)"></span>
+                <span x-show="timing.held_seconds > 0" x-text="' · Held ' + fmtSeconds(timing.held_seconds)"></span>
+              </div>
+              <div class="text-right">
+                <div class="rt-elapsed" data-testid="run-elapsed" x-text="fmtSeconds(timing.elapsed_seconds)"></div>
+                <div class="text-xs text-muted" x-text="timing.jobs_done + ' of ' + timing.jobs_total + ' jobs done'"></div>
+              </div>
+            </div>
+            <div class="rt-tabs" role="tablist" aria-label="Run timing views">
+              <button type="button" role="tab" class="rt-tab" :class="runTimingTab(run) === 'progress' && 'is-on'"
+                      :aria-selected="runTimingTab(run) === 'progress'" @click="setRunTimingTab(run.run_id, 'progress')"
+                      data-testid="run-tab-progress">Progress</button>
+              <button type="button" role="tab" class="rt-tab" :class="runTimingTab(run) === 'timeline' && 'is-on'"
+                      :aria-selected="runTimingTab(run) === 'timeline'" @click="setRunTimingTab(run.run_id, 'timeline')"
+                      data-testid="run-tab-timeline">Timeline</button>
+            </div>
+            <div x-show="runTimingTab(run) === 'progress'" data-testid="run-progress-rows">
+              <template x-for="step in timing.steps" :key="step.step_index">
+                <div class="rt-progress-row" :data-testid="'monitor-step-' + (step.step_id || step.step_index)">
+                  <div class="rt-job-name">
+                    <span class="rt-job-title" x-text="step.job_name"></span>
+                    <span class="rt-job-sub" x-text="step.job_type || 'unknown'"></span>
+                  </div>
+                  <div class="rt-bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                       :aria-valuenow="step.progress.percent === null ? null : step.progress.percent"
+                       :aria-label="step.job_name + ': ' + step.progress.label">
+                    <template x-if="step.progress.state !== 'queued' && step.progress.state !== 'not_run'">
+                      <div class="rt-bar-fill" :class="progressBarClass(step)" :style="'width:' + progressBarWidth(step)"
+                           x-text="step.progress.percent === null ? '' : step.progress.label"></div>
+                    </template>
+                  </div>
+                  <div class="rt-runtime" x-text="runtimeText(step)"></div>
+                  <template x-if="step.progress.state === 'held'">
+                    <button @click="openStepRelease(run.run_id, step.step_index)" class="btn-primary btn-sm text-xs py-1 px-3">Release</button>
+                  </template>
+                </div>
+              </template>
+            </div>
+            <div x-show="runTimingTab(run) === 'timeline'">
+<div data-testid="run-gantt">
+  <template x-if="!timing.timing_recorded">
+    <div class="text-sm text-muted" data-testid="run-gantt-not-recorded">Step timing not recorded for this run.</div>
+  </template>
+  <template x-if="timing.timing_recorded">
+    <div>
+      <div class="rt-toggle" role="group" aria-label="Gantt color">
+        <span class="text-xs text-muted">Color by:</span>
+        <button type="button" class="rt-toggle-btn" :class="ganttColorBy === 'status' && 'is-on'"
+                :aria-pressed="ganttColorBy === 'status'" @click="setGanttColorBy('status')"
+                data-testid="gantt-color-status">Status</button>
+        <button type="button" class="rt-toggle-btn" :class="ganttColorBy === 'family' && 'is-on'"
+                :aria-pressed="ganttColorBy === 'family'" @click="setGanttColorBy('family')"
+                data-testid="gantt-color-family">Job type</button>
+      </div>
+      <div class="rt-gantt">
+        <div class="rt-gantt-axis">
+          <span></span>
+          <div class="rt-gantt-ticks">
+            <template x-for="tick in ganttLayout(timing).ticks" :key="tick.percent">
+              <span x-text="tick.label"></span>
+            </template>
+          </div>
+          <span class="text-right">Runtime</span>
         </div>
+        <template x-for="row in ganttLayout(timing).rows" :key="row.step.step_id || row.step.step_index">
+          <div class="rt-gantt-row" :data-testid="'run-gantt-row-' + (row.step.step_id || row.step.step_index)">
+            <div class="rt-job-name">
+              <span class="rt-job-title" x-text="row.step.job_name"></span>
+              <span class="rt-job-sub" x-text="(row.step.job_type || 'unknown') + ' · ' + stepStatusLabel(row.step)"></span>
+            </div>
+            <div class="rt-gantt-track">
+              <template x-if="row.bar">
+                <div class="rt-gantt-bar" :class="ganttBarClass(row.step)" tabindex="0"
+                         :style="'left:' + row.bar.left + '%;width:' + row.bar.width + '%'"
+                         :title="ganttTooltip(row.step)" :aria-label="ganttTooltip(row.step)"
+                         data-testid="run-gantt-bar"></div>
+              </template>
+              <template x-if="row.hold">
+                <div class="rt-gantt-hold" :style="'left:' + row.hold.left + '%;width:' + row.hold.width + '%'"
+                         title="Held, waiting for release" data-testid="run-gantt-hold"></div>
+              </template>
+            </div>
+            <div class="rt-runtime" x-text="runtimeText(row.step)"></div>
+          </div>
+        </template>
+      </div>
+      <div class="rt-legend" data-testid="run-gantt-legend">
+        <template x-for="item in ganttLegend()" :key="item.cls">
+          <span><i :class="item.cls"></i><span x-text="item.label"></span></span>
+        </template>
+      </div>
+    </div>
+  </template>
+</div>
+            </div>
+          </div>
+        </template>
 
         <!-- Stat mini-cards -->
         <div class="grid-stat">
@@ -3762,53 +3868,44 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
 
-        <!-- Step timeline (shown when run has step data) -->
-        <template x-if="runStepsCache[run.run_id] && runStepsCache[run.run_id].length > 0">
-          <div class="mt-4">
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Steps</div>
-            <div class="space-y-1.5">
-              <template x-for="step in runStepsCache[run.run_id]" :key="step.step_index">
-                <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">
-                  <span class="text-xs font-bold text-slate-400 w-5 text-center" x-text="step.step_index + 1"></span>
-                  <span class="flex-1 text-sm font-medium text-slate-700" x-text="step.job_name"></span>
-                  <span class="badge text-xs" :class="stepStatusBadgeClass(step.status)" x-text="step.status"></span>
-                  <template x-if="step.status === 'HELD'">
-                    <button @click="openStepRelease(run.run_id, step.step_index)" class="btn-primary btn-sm text-xs py-1 px-3">Release</button>
-                  </template>
-                </div>
-              </template>
-            </div>
-            <div class="mt-3" data-testid="monitor-step-timeline">
-              <div class="field-label">Step timeline</div>
-              <template x-for="level in monitorStepLevels(runStepsCache[run.run_id])" :key="level.index">
-                <div class="flex items-start gap-3 py-1">
-                  <span class="text-xs text-muted w-16 pt-1" x-text="'level ' + (level.index + 1)"></span>
-                  <div class="flex flex-wrap gap-2">
-                    <template x-for="step in level.steps" :key="step.step_id || step.step_index">
-                      <div class="chip flex items-center gap-2"
-                           :data-testid="'monitor-step-' + (step.step_id || step.step_index)">
-                        <span x-text="step.step_id || step.job_name"></span>
-                        <span :class="monitorStepBadgeClass(step.status)" x-text="step.status"></span>
-                        <span class="text-xs text-muted" x-show="(step.attempt || 0) > 1"
-                              x-text="'try ' + step.attempt"></span>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </div>
-        </template>
 
         <!-- HELD alert -->
-        <template x-if="run._progress && run._progress.held_step != null">
+        <template x-if="heldStepIndex(run) != null">
           <div class="mt-3 flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <span class="text-amber-600 font-semibold text-sm">⏸ Sequence held at step <span x-text="(run._progress.held_step + 1)"></span></span>
-            <button @click="loadRunSteps(run.run_id)" class="btn-secondary btn-sm text-xs">Load steps</button>
+            <span class="text-amber-600 font-semibold text-sm">⏸ Sequence held at step <span x-text="(heldStepIndex(run) + 1)"></span></span>
           </div>
         </template>
       </div>
     </template>
+  </div>
+
+  <!-- Step Release Modal -->
+  <div x-show="stepReleaseModal.show" x-cloak class="modal-backdrop" @click.self="stepReleaseModal.show = false">
+    <div x-ref="stepReleaseDialog" class="modal-box w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="stepReleaseDialogTitle">
+      <h2 id="stepReleaseDialogTitle" class="text-lg font-bold mb-4">Release Held Step</h2>
+      <div class="space-y-3">
+        <div>
+          <label  class="field-label" for="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name">Action *</label>
+          <div class="flex gap-3 mt-1">
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="approve" aria-label="stepreleasemodal action" /> Approve &amp; continue
+            </label>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="skip" aria-label="stepreleasemodal action" /> Skip &amp; continue
+            </label>
+            <label class="flex items-center gap-1 text-sm cursor-pointer">
+              <input type="radio" x-model="stepReleaseModal.action" value="cancel" aria-label="stepreleasemodal action" /> Cancel run
+            </label>
+          </div>
+        </div>
+        <div><label class="field-label">Your name *</label><input x-model="stepReleaseModal.releasedBy" class="field-input" placeholder="Alice" id="a11y-config-action-approve-and-continue-skip-and-continue-cancel-run-your-name" /></div>
+        <div><label  class="field-label" for="a11y-config-note">Note *</label><textarea x-model="stepReleaseModal.note" class="field-input" rows="2" placeholder="Verified data looks correct…" id="a11y-config-note"></textarea></div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button @click="stepReleaseModal.show = false" class="btn-secondary">Cancel</button>
+        <button @click="submitStepRelease()" :disabled="!stepReleaseModal.note.trim() || !stepReleaseModal.releasedBy.trim()" class="btn-primary">Release</button>
+      </div>
+    </div>
   </div>
 </div></template>
 
@@ -3868,6 +3965,14 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <div><span class="text-muted">Environments</span><br><span x-text="(selectedRun.source_env||'?') + ' → ' + (selectedRun.target_env||'?')"></span></div>
           <div><span class="text-muted">Started</span><br><span x-text="fmtDate(selectedRun.started_at)"></span></div>
           <div><span class="text-muted">Completed</span><br><span x-text="fmtDate(selectedRun.completed_at)"></span></div>
+          <template x-if="runTimings[selectedRun.run_id]">
+            <div data-testid="history-run-elapsed">
+              <span class="text-muted">Elapsed</span><br>
+              <span x-text="fmtSeconds(runTimings[selectedRun.run_id].elapsed_seconds)"></span>
+              <span class="text-xs text-muted" x-show="runTimings[selectedRun.run_id].held_seconds > 0"
+                    x-text="'(held ' + fmtSeconds(runTimings[selectedRun.run_id].held_seconds) + ')'"></span>
+            </div>
+          </template>
           <div x-show="selectedRun.restarted_from_run_id"><span class="text-muted">Restarted from</span><br><button @click="viewRunDetail(selectedRun.restarted_from_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_from_run_id"></button></div>
           <div x-show="selectedRun.restarted_as_run_id"><span class="text-muted">Restarted as</span><br><button @click="viewRunDetail(selectedRun.restarted_as_run_id)" class="font-mono text-xs text-indigo-500 hover:underline" x-text="selectedRun.restarted_as_run_id"></button></div>
           <div x-show="selectedRun.is_baseline" class="text-amber-500 font-semibold text-xs">★ Baseline run</div>
@@ -3939,6 +4044,67 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </div>
       </div>
+
+      <template x-for="timing in [runTimings[selectedRun.run_id]].filter((t) => t && t.steps.length)" :key="selectedRun.run_id">
+        <div class="card mb-4" data-testid="history-timeline">
+          <div class="card-title mb-2">Timeline</div>
+<div data-testid="run-gantt">
+  <template x-if="!timing.timing_recorded">
+    <div class="text-sm text-muted" data-testid="run-gantt-not-recorded">Step timing not recorded for this run.</div>
+  </template>
+  <template x-if="timing.timing_recorded">
+    <div>
+      <div class="rt-toggle" role="group" aria-label="Gantt color">
+        <span class="text-xs text-muted">Color by:</span>
+        <button type="button" class="rt-toggle-btn" :class="ganttColorBy === 'status' && 'is-on'"
+                :aria-pressed="ganttColorBy === 'status'" @click="setGanttColorBy('status')"
+                data-testid="gantt-color-status">Status</button>
+        <button type="button" class="rt-toggle-btn" :class="ganttColorBy === 'family' && 'is-on'"
+                :aria-pressed="ganttColorBy === 'family'" @click="setGanttColorBy('family')"
+                data-testid="gantt-color-family">Job type</button>
+      </div>
+      <div class="rt-gantt">
+        <div class="rt-gantt-axis">
+          <span></span>
+          <div class="rt-gantt-ticks">
+            <template x-for="tick in ganttLayout(timing).ticks" :key="tick.percent">
+              <span x-text="tick.label"></span>
+            </template>
+          </div>
+          <span class="text-right">Runtime</span>
+        </div>
+        <template x-for="row in ganttLayout(timing).rows" :key="row.step.step_id || row.step.step_index">
+          <div class="rt-gantt-row" :data-testid="'run-gantt-row-' + (row.step.step_id || row.step.step_index)">
+            <div class="rt-job-name">
+              <span class="rt-job-title" x-text="row.step.job_name"></span>
+              <span class="rt-job-sub" x-text="(row.step.job_type || 'unknown') + ' · ' + stepStatusLabel(row.step)"></span>
+            </div>
+            <div class="rt-gantt-track">
+              <template x-if="row.bar">
+                <div class="rt-gantt-bar" :class="ganttBarClass(row.step)" tabindex="0"
+                         :style="'left:' + row.bar.left + '%;width:' + row.bar.width + '%'"
+                         :title="ganttTooltip(row.step)" :aria-label="ganttTooltip(row.step)"
+                         data-testid="run-gantt-bar"></div>
+              </template>
+              <template x-if="row.hold">
+                <div class="rt-gantt-hold" :style="'left:' + row.hold.left + '%;width:' + row.hold.width + '%'"
+                         title="Held, waiting for release" data-testid="run-gantt-hold"></div>
+              </template>
+            </div>
+            <div class="rt-runtime" x-text="runtimeText(row.step)"></div>
+          </div>
+        </template>
+      </div>
+      <div class="rt-legend" data-testid="run-gantt-legend">
+        <template x-for="item in ganttLegend()" :key="item.cls">
+          <span><i :class="item.cls"></i><span x-text="item.label"></span></span>
+        </template>
+      </div>
+    </div>
+  </template>
+</div>
+        </div>
+      </template>
 
       <!-- Sequence steps -->
       <div class="card mb-4" x-show="(selectedRun.steps || []).length" data-testid="history-run-steps">
@@ -4649,6 +4815,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
             <option value="COMPLETED">COMPLETED</option>
             <option value="FAILED">FAILED</option>
             <option value="ERROR">ERROR</option>
+            <option value="BLOCKED">BLOCKED</option>
           </select>
           <select x-model="historyFilterRunType" @change="loadRuns()" class="field-input field-select text-sm py-1" style="width:auto" data-testid="history-runtype-filter" aria-label="history runtype filter">
             <option value="">All types</option>
@@ -9500,6 +9667,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
     <script src="features/launch.js"></script>
     <script src="features/sequences.js"></script>
     <script src="features/monitor.js"></script>
+    <script src="features/run-timing.js"></script>
     <script src="features/history.js"></script>
     <script src="features/ci-runs.js"></script>
     <script src="features/adapters.js"></script>

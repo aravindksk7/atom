@@ -64,6 +64,7 @@ def test_gate_run_exit_codes(tmp_path, monkeypatch):
     session.add(TestRun(run_id="run-fail", status="COMPLETED", failed=2, error=0))
     session.add(TestRun(run_id="run-err", status="COMPLETED", failed=0, error=1))
     session.add(TestRun(run_id="run-cancel", status="CANCELLED"))
+    session.add(TestRun(run_id="run-blocked", status="BLOCKED", failed=0, error=0))
     session.commit()
     session.close()
 
@@ -74,6 +75,8 @@ def test_gate_run_exit_codes(tmp_path, monkeypatch):
     assert cli.main(["--gate-run", "run-cancel"]) == 2
     assert cli.main(["--gate-run", "run-err"]) == 3
     assert cli.main(["--gate-run", "run-ghost"]) == 4
+    # A blocked run did not run everything it was asked to, so it can't pass a gate.
+    assert cli.main(["--gate-run", "run-blocked"]) == 1
 
 
 def _session_factory():

@@ -344,6 +344,33 @@ def test_ci_trigger_token_denied_outside_allowlist(client, method, path):
     assert resp.status_code == 403
 
 
+@pytest.mark.parametrize("path", [
+    "/api/runs/some-run-id/timing",
+    "/api/sequences/1/runs",
+])
+def test_ci_trigger_token_allowed_on_timing_reads(client, path):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.get(path, headers={"Authorization": f"Bearer {ci_raw}"})
+    # The scope check lets it through; the route may then 404/200, never 403.
+    assert resp.status_code != 403
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/api/runs/some-run-id/timing"),
+    ("POST", "/api/sequences/1/runs"),
+    ("GET", "/api/runs/some-run-id/stream"),
+    ("GET", "/api/sequences/1/runs/extra"),
+])
+def test_ci_trigger_token_still_denied_near_timing_reads(client, method, path):
+    c, _ = client
+    admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]
+    ci_raw = _create_ci_trigger_token(c, admin_raw)
+    resp = c.request(method, path, headers={"Authorization": f"Bearer {ci_raw}"})
+    assert resp.status_code == 403
+
+
 def test_full_token_unaffected_by_scope_check(client):
     c, _ = client
     admin_raw = c.post("/api/tokens", json={"name": "bootstrap"}).json()["raw_token"]

@@ -145,6 +145,9 @@
     async viewRunDetail(runId) {
       try {
         if (runId !== this.selectedRun?.run_id) this.restartRerunDownstream = false;
+        // Not awaited: it handles its own failure, and the rest of the detail
+        // doesn't wait for it. Forced because Monitor's last poll may be older.
+        this.loadRunTiming(runId, { force: true });
         this.selectedRun = await api('GET', `/api/runs/${runId}`);
         this.selectedRun.steps = await api('GET', `/api/runs/${runId}/steps`);
         const restart = await api('GET', `/api/runs/${runId}/restart`);

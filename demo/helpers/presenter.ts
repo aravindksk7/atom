@@ -1,4 +1,4 @@
-// Presentation layer for the demo video: visible cursor, element highlights, captions
+// Presentation layer for the demo video: visible cursor, element highlights, step banners
 // and pacing. Nothing here knows about ATOM, so the script reads as the narration.
 import { Locator, Page } from '@playwright/test';
 
@@ -11,7 +11,11 @@ const CURSOR_GLIDE_MS = 700;
 const HIGHLIGHT_FADE_MS = 400;
 const Z_TOP = 2147483647;
 
-// Runs in every document, including Mailpit's inbox, so the cursor and captions
+export type TimelineEntry =
+  | { kind: 'part'; at: number; part: number; title: string; summary: string }
+  | { kind: 'step'; at: number; step: number; title: string; about: string };
+
+// Runs in every document, including the simulated GitLab page, so the cursor and banners
 // survive navigation.
 function installOverlay(zTop: number, glideMs: number, fadeMs: number) {
   const build = () => {
@@ -25,20 +29,22 @@ function installOverlay(zTop: number, glideMs: number, fadeMs: number) {
         pointer-events: none; transition: transform ${glideMs}ms cubic-bezier(.22,.8,.3,1);
         filter: drop-shadow(0 2px 3px rgba(0,0,0,.45));
       }
-      #demo-cursor.pressed svg { transform: scale(.82); }
-      #demo-chapter {
+      #demo-part {
         position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: ${zTop - 1}; pointer-events: none;
         background: #111827; color: #fff; padding: 9px 16px; border-radius: 8px;
         font: 600 17px/1.3 system-ui, sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.35);
       }
-      #demo-chapter:empty { display: none; }
-      #demo-note {
-        position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: ${zTop - 1};
-        pointer-events: none; max-width: 1400px; background: rgba(17,24,39,.94); color: #fff;
-        padding: 13px 24px; border-radius: 10px; text-align: center;
-        font: 500 23px/1.35 system-ui, sans-serif; box-shadow: 0 6px 18px rgba(0,0,0,.4);
+      #demo-part:empty { display: none; }
+      #demo-banner {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: ${zTop - 1};
+        pointer-events: none; width: min(1500px, 86vw); box-sizing: border-box;
+        background: rgba(17,24,39,.96); color: #fff; padding: 13px 24px; border-radius: 10px;
+        border-left: 6px solid #FF3366; box-shadow: 0 6px 18px rgba(0,0,0,.45);
+        font-family: system-ui, sans-serif;
       }
-      #demo-note:empty { display: none; }
+      #demo-banner:empty { display: none; }
+      #demo-banner b { display: block; font-size: 23px; font-weight: 700; line-height: 1.3; }
+      #demo-banner span { display: block; font-size: 19px; line-height: 1.35; color: #d1d5db; margin-top: 2px; }
       #demo-slate {
         position: fixed; inset: 0; z-index: ${zTop - 2}; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 28px; padding: 60px; text-align: center;
@@ -52,12 +58,12 @@ function installOverlay(zTop: number, glideMs: number, fadeMs: number) {
 
     const cursor = document.createElement('div');
     cursor.id = 'demo-cursor';
-    cursor.innerHTML = `<svg viewBox="0 0 24 24" width="28" height="28" style="transition:transform .12s">
+    cursor.innerHTML = `<svg viewBox="0 0 24 24" width="28" height="28">
       <path d="M4 2 L4 20 L9 15.5 L12.5 22.5 L15.5 21 L12 14 L19 14 Z"
             fill="#fff" stroke="#111827" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
     document.documentElement.appendChild(cursor);
 
-    for (const id of ['demo-chapter', 'demo-note']) {
+    for (const id of ['demo-part', 'demo-banner']) {
       const element = document.createElement('div');
       element.id = id;
       document.documentElement.appendChild(element);
@@ -68,11 +74,22 @@ function installOverlay(zTop: number, glideMs: number, fadeMs: number) {
 }
 
 export class Presenter {
+  /** Every part and step with its time from the start of the video, for the timeline. */
+  readonly timeline: TimelineEntry[] = [];
+
   private cursorX = 960;
   private cursorY = 540;
-  private chapterText = '';
+  private partText = '';
+  private bannerTitle = '';
+  private bannerAbout = '';
+  private stepNumber = 0;
+  private readonly startedAt = Date.now();
 
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly totalParts: number) {}
+
+  private now(): number {
+    return Date.now() - this.startedAt;
+  }
 
   /** Call once, before the first navigation. */
   async install(): Promise<void> {
@@ -84,13 +101,27 @@ export class Presenter {
 
   private async restoreOverlay(): Promise<void> {
     await this.page.evaluate(
-      ({ x, y, chapter }) => {
+      ({ x, y, part, title, about }) => {
         const cursor = document.getElementById('demo-cursor');
         if (cursor) cursor.style.transform = `translate(${x}px, ${y}px)`;
-        const label = document.getElementById('demo-chapter');
-        if (label) label.textContent = chapter;
+        const label = document.getElementById('demo-part');
+        if (label) label.textContent = part;
+        const banner = document.getElementById('demo-banner');
+        if (banner) {
+          banner.textContent = '';
+          if (title) {
+            const heading = document.createElement('b');
+            heading.textContent = title;
+            const detail = document.createElement('span');
+            detail.textContent = about;
+            banner.append(heading, detail);
+          }
+        }
       },
-      { x: this.cursorX, y: this.cursorY, chapter: this.chapterText },
+      {
+        x: this.cursorX, y: this.cursorY, part: this.partText,
+        title: this.bannerTitle, about: this.bannerAbout,
+      },
     );
   }
 
@@ -120,19 +151,25 @@ export class Presenter {
     await this.page.evaluate(() => document.getElementById('demo-slate')?.remove());
   }
 
-  /** Announces a chapter on a title card, then keeps its name in the corner. */
-  async chapter(number: number, title: string, summary: string): Promise<void> {
+  /** Announces a part on a title card, then keeps its name at the top of the screen. */
+  async part(number: number, title: string, summary: string): Promise<void> {
+    this.timeline.push({ kind: 'part', at: this.now(), part: number, title, summary });
+    this.bannerTitle = '';
+    this.bannerAbout = '';
+    await this.restoreOverlay();
     await this.slate(`${number}. ${title}`, summary, '', 3500);
-    this.chapterText = `Step ${number} of 5: ${title}`;
+    this.partText = `Part ${number} of ${this.totalParts}: ${title}`;
     await this.restoreOverlay();
   }
 
-  /** A caption along the bottom of the screen. Pass nothing to clear it. */
-  async note(text = ''): Promise<void> {
-    await this.page.evaluate((value) => {
-      const note = document.getElementById('demo-note');
-      if (note) note.textContent = value;
-    }, text);
+  /** Shows the banner naming the current step and what it is about. Numbers steps in order. */
+  async step(title: string, about: string): Promise<void> {
+    this.stepNumber += 1;
+    this.timeline.push({ kind: 'step', at: this.now(), step: this.stepNumber, title, about });
+    this.bannerTitle = `Step ${this.stepNumber}: ${title}`;
+    this.bannerAbout = about;
+    await this.restoreOverlay();
+    await this.pace('short');
   }
 
   private async moveCursorTo(target: Locator): Promise<void> {
@@ -202,11 +239,21 @@ export class Presenter {
     await this.pace('short');
   }
 
-  /** Types at human speed. */
+  /**
+   * Types at a steady human speed. pressSequentially's delay was unsteady here, because the page
+   * responds slowly while recording. So this shows the text growing at the set speed and sends the
+   * app one input event when typing finishes.
+   */
   async type(target: Locator, text: string): Promise<void> {
     await this.spotlight(target, async () => {
       await target.click();
-      await target.pressSequentially(text, { delay: TYPING_DELAY_MS * Math.min(DEMO_PACE, 1) });
+      for (let length = 1; length <= text.length; length++) {
+        await target.evaluate((element, value) => {
+          (element as HTMLInputElement).value = value;
+        }, text.slice(0, length));
+        await this.page.waitForTimeout(TYPING_DELAY_MS * Math.min(DEMO_PACE, 1));
+      }
+      await target.dispatchEvent('input');
     });
     await this.pace('short');
   }

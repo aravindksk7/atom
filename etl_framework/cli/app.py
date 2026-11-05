@@ -5,10 +5,12 @@ HTTP-only: this module must never import api.* or etl_framework.repository.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+from urllib.parse import quote
 
 import typer
 
@@ -19,6 +21,12 @@ from etl_framework.cli.client import (
     AtomClient,
     AtomConnectionError,
     AtomNotFoundError,
+)
+from etl_framework.cli.progress import (
+    DISPLAY_TIMEOUT_SECONDS,
+    LiveProgress,
+    PlainProgress,
+    safe_print,
 )
 
 EXIT_PASSED = 0
@@ -32,8 +40,11 @@ EXIT_TIMEOUT = 6
 # Mirror of etl_framework.repository.models.TERMINAL_STATUSES (CLI is HTTP-only,
 # so it must not import the models module).
 TERMINAL_STATUSES = frozenset(
-    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED"}
+    {"PASSED", "FAILED", "SLOW", "ERROR", "COMPLETED", "CANCELLED", "BLOCKED"}
 )
+
+# Bars need to move, so an interactive terminal polls at least this often.
+LIVE_POLL_SECONDS = 2.0
 
 app = typer.Typer(help="Atom CI/CD command line client", no_args_is_help=True)
 
@@ -88,15 +99,86 @@ def _resolve_target(client: AtomClient, target_type: str, target: str) -> int:
 
 
 def _wait_for_run(client: AtomClient, run_id: str,
-                  timeout: float, poll_interval: float) -> dict:
+                  timeout: float, poll_interval: float,
+                  on_tick: Optional[Callable[[float], None]] = None) -> dict:
+    """Status alone decides the outcome. `on_tick` gets the seconds left and must not raise."""
     deadline = time.monotonic() + timeout
     while True:
         status = client.get_json(f"/api/runs/{run_id}/status")
         if status.get("status") in TERMINAL_STATUSES:
             return status
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise WaitTimeoutError(run_id)
-        time.sleep(poll_interval)
+        pause = poll_interval
+        if on_tick is not None:
+            on_tick(deadline - now)
+            pause = max(0.0, poll_interval - (time.monotonic() - now))
+        time.sleep(pause)
+
+
+def _interactive() -> bool:
+    """Bars only on a real terminal outside CI. Deciding can't fail the gate."""
+    if os.environ.get("CI", "").strip().lower() not in ("", "0", "false", "no", "off"):
+        return False
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _wait_with_progress(client: AtomClient, run_id: str, timeout: float,
+                        poll_interval: float, output: str) -> dict:
+    if output == "json":
+        return _wait_for_run(client, run_id, timeout, poll_interval)
+    if _interactive():
+        with LiveProgress(client, run_id) as display:
+            return _wait_for_run(client, run_id, timeout,
+                                  min(poll_interval, LIVE_POLL_SECONDS), display.tick)
+    with PlainProgress(client, run_id) as display:
+        return _wait_for_run(client, run_id, timeout, poll_interval, display.tick)
+
+
+def _final_timing(client: AtomClient, run_id: str) -> Optional[dict]:
+    """Timing for the final report, or None. Never affects the gate result."""
+    try:
+        document = client.get_json(f"/api/runs/{run_id}/timing",
+                                   single_try_timeout=DISPLAY_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _json_times(timing: Optional[dict]) -> dict:
+    """The time fields for the JSON document: null for anything that isn't a time."""
+    times = timing or {}
+
+    def stamp(key: str) -> Optional[str]:
+        value = times.get(key)
+        return value if isinstance(value, str) else None
+
+    def seconds(key: str) -> Optional[float]:
+        value = times.get(key)
+        is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+        return value if is_number and abs(value) < float("inf") else None
+
+    return {
+        "started_at": stamp("started_at"),
+        "completed_at": stamp("completed_at"),
+        "elapsed_seconds": seconds("elapsed_seconds"),
+        "held_seconds": seconds("held_seconds"),
+        "active_seconds": seconds("active_seconds"),
+    }
+
+
+def _print_finish_report(timing: Optional[dict], status: dict, code: int) -> None:
+    """Job table and times if they can be shown, then always the summary line."""
+    if timing is not None:
+        try:
+            safe_print(f"{render.timing_table(timing)}\n{render.timing_summary(timing)}")
+        except Exception:
+            pass
+    safe_print(render.run_summary(status, code))
 
 
 def _gate_exit_code(status: dict) -> int:
@@ -104,7 +186,8 @@ def _gate_exit_code(status: dict) -> int:
         return EXIT_CANCELLED
     if (status.get("error") or 0) > 0 or status.get("status") == "ERROR":
         return EXIT_ERROR
-    if (status.get("failed") or 0) > 0 or status.get("status") == "FAILED":
+    # A blocked run did not run everything it was asked to, so it can't pass a gate.
+    if (status.get("failed") or 0) > 0 or status.get("status") in ("FAILED", "BLOCKED"):
         return EXIT_FAILED
     return EXIT_PASSED
 
@@ -191,17 +274,19 @@ def run(
         if no_wait:
             print(json.dumps({"run_id": run_id}) if output == "json" else run_id)
             raise typer.Exit(EXIT_PASSED)
-        status = _wait_for_run(client, run_id, timeout, poll_interval)
+        status = _wait_with_progress(client, run_id, timeout, poll_interval, output)
         _write_artifacts(client, run_id, junit_out, json_out, html_out)
         code = _gate_exit_code(status)
+        final_timing = _final_timing(client, run_id)
         if output == "json":
             print(json.dumps({
                 "run_id": run_id, "verdict": status.get("status"),
                 "exit_code": code, "passed": status.get("passed"),
                 "failed": status.get("failed"), "error": status.get("error"),
+                **_json_times(final_timing),
             }))
         else:
-            print(render.run_summary(status, code))
+            _print_finish_report(final_timing, status, code)
         raise typer.Exit(code)
     except WaitTimeoutError as exc:
         print(exc.run_id)
@@ -250,6 +335,52 @@ def report(
         out.write_bytes(content)
     else:
         sys.stdout.write(content.decode())
+
+
+@app.command()
+def timing(
+    ctx: typer.Context,
+    run_id: str = typer.Argument(..., help="Run id to show"),
+) -> None:
+    """Show start, end, elapsed time and each job's runtime for a run."""
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        document = client.get_json(f"/api/runs/{quote(run_id, safe='')}/timing")
+    except AtomNotFoundError as exc:
+        raise _fail(output, EXIT_NOT_FOUND, str(exc))
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(document, default=str))
+    else:
+        print(render.timing_table(document))
+        print(render.timing_summary(document))
+
+
+@app.command("sequence-runs")
+def sequence_runs(
+    ctx: typer.Context,
+    sequence: str = typer.Argument(..., help="Sequence id or exact name (an all-digit value is treated as an id)"),
+    limit: int = typer.Option(20, "--limit", min=1, max=200,
+                              help="Maximum runs to show (1-200)"),
+) -> None:
+    """Show start, end and elapsed time for each run of a sequence."""
+    client, output = ctx.obj["client"], ctx.obj["output"]
+    try:
+        sequence_id = _resolve_target(client, "sequence", sequence)
+        rows = client.get_json(f"/api/sequences/{sequence_id}/runs?limit={limit}")
+    except AtomNotFoundError as exc:
+        raise _fail(output, EXIT_NOT_FOUND, str(exc))
+    except (AtomConnectionError, AtomAuthError) as exc:
+        raise _fail(output, EXIT_CONNECTION, str(exc))
+    except AtomAPIError as exc:
+        raise _fail(output, EXIT_ERROR, str(exc))
+    if output == "json":
+        print(json.dumps(rows, default=str))
+    else:
+        print(render.sequence_runs_table(rows))
 
 
 @app.command()

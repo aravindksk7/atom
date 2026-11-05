@@ -157,7 +157,7 @@ export async function triggerRun(ctx: APIRequestContext, jobNames: string[], con
 }
 
 export async function waitForTerminal(ctx: APIRequestContext, runId: string, timeoutMs = 30_000) {
-  const terminal = new Set(['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED']);
+  const terminal = new Set(['PASSED', 'FAILED', 'SLOW', 'ERROR', 'COMPLETED', 'CANCELLED', 'BLOCKED']);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const resp = await ctx.get(`/api/runs/${runId}/status`);
