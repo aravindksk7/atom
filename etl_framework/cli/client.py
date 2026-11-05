@@ -54,9 +54,16 @@ class AtomClient:
             method, f"{self.base_url}{path}", timeout=self.timeout, **kwargs
         )
 
-    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
+    def _request(self, method: str, path: str, single_try_timeout: float | None = None,
+                 **kwargs) -> requests.Response:
+        """`single_try_timeout` skips the retries, for requests a gate must not wait on."""
         try:
-            resp = self._send(method, path, **kwargs)
+            if single_try_timeout is None:
+                resp = self._send(method, path, **kwargs)
+            else:
+                resp = self._session.request(
+                    method, f"{self.base_url}{path}", timeout=single_try_timeout, **kwargs
+                )
         except (requests.ConnectionError, requests.Timeout) as exc:
             raise AtomConnectionError(
                 f"cannot reach Atom API at {self.base_url}: {exc}"

@@ -5,6 +5,7 @@ HTTP-only: this module must never import api.* or etl_framework.repository.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -21,7 +22,12 @@ from etl_framework.cli.client import (
     AtomConnectionError,
     AtomNotFoundError,
 )
-from etl_framework.cli.progress import LiveProgress, PlainProgress
+from etl_framework.cli.progress import (
+    DISPLAY_TIMEOUT_SECONDS,
+    LiveProgress,
+    PlainProgress,
+    safe_print,
+)
 
 EXIT_PASSED = 0
 EXIT_FAILED = 1
@@ -94,37 +100,85 @@ def _resolve_target(client: AtomClient, target_type: str, target: str) -> int:
 
 def _wait_for_run(client: AtomClient, run_id: str,
                   timeout: float, poll_interval: float,
-                  on_tick: Optional[Callable[[], None]] = None) -> dict:
+                  on_tick: Optional[Callable[[float], None]] = None) -> dict:
+    """Status alone decides the outcome. `on_tick` gets the seconds left and must not raise."""
     deadline = time.monotonic() + timeout
     while True:
-        if on_tick is not None:
-            on_tick()
         status = client.get_json(f"/api/runs/{run_id}/status")
         if status.get("status") in TERMINAL_STATUSES:
             return status
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise WaitTimeoutError(run_id)
-        time.sleep(poll_interval)
+        pause = poll_interval
+        if on_tick is not None:
+            on_tick(deadline - now)
+            pause = max(0.0, poll_interval - (time.monotonic() - now))
+        time.sleep(pause)
+
+
+def _interactive() -> bool:
+    """Bars only on a real terminal outside CI. Deciding can't fail the gate."""
+    if os.environ.get("CI", "").strip().lower() not in ("", "0", "false", "no", "off"):
+        return False
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
 
 
 def _wait_with_progress(client: AtomClient, run_id: str, timeout: float,
                         poll_interval: float, output: str) -> dict:
     if output == "json":
         return _wait_for_run(client, run_id, timeout, poll_interval)
-    if sys.stdout.isatty():
+    if _interactive():
         with LiveProgress(client, run_id) as display:
             return _wait_for_run(client, run_id, timeout,
-                                  min(poll_interval, LIVE_POLL_SECONDS), display.update)
+                                  min(poll_interval, LIVE_POLL_SECONDS), display.tick)
     with PlainProgress(client, run_id) as display:
-        return _wait_for_run(client, run_id, timeout, poll_interval, display.update)
+        return _wait_for_run(client, run_id, timeout, poll_interval, display.tick)
 
 
 def _final_timing(client: AtomClient, run_id: str) -> Optional[dict]:
     """Timing for the final report, or None. Never affects the gate result."""
     try:
-        return client.get_json(f"/api/runs/{run_id}/timing")
-    except (AtomAPIError, AtomAuthError, AtomConnectionError, AtomNotFoundError):
+        document = client.get_json(f"/api/runs/{run_id}/timing",
+                                   single_try_timeout=DISPLAY_TIMEOUT_SECONDS)
+    except Exception:
         return None
+    return document if isinstance(document, dict) else None
+
+
+def _json_times(timing: Optional[dict]) -> dict:
+    """The time fields for the JSON document: null for anything that isn't a time."""
+    times = timing or {}
+
+    def stamp(key: str) -> Optional[str]:
+        value = times.get(key)
+        return value if isinstance(value, str) else None
+
+    def seconds(key: str) -> Optional[float]:
+        value = times.get(key)
+        is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+        return value if is_number and abs(value) < float("inf") else None
+
+    return {
+        "started_at": stamp("started_at"),
+        "completed_at": stamp("completed_at"),
+        "elapsed_seconds": seconds("elapsed_seconds"),
+        "held_seconds": seconds("held_seconds"),
+        "active_seconds": seconds("active_seconds"),
+    }
+
+
+def _print_finish_report(timing: Optional[dict], status: dict, code: int) -> None:
+    """Job table and times if they can be shown, then always the summary line."""
+    if timing is not None:
+        try:
+            safe_print(f"{render.timing_table(timing)}\n{render.timing_summary(timing)}")
+        except Exception:
+            pass
+    safe_print(render.run_summary(status, code))
 
 
 def _gate_exit_code(status: dict) -> int:
@@ -225,22 +279,14 @@ def run(
         code = _gate_exit_code(status)
         final_timing = _final_timing(client, run_id)
         if output == "json":
-            times = final_timing or {}
             print(json.dumps({
                 "run_id": run_id, "verdict": status.get("status"),
                 "exit_code": code, "passed": status.get("passed"),
                 "failed": status.get("failed"), "error": status.get("error"),
-                "started_at": times.get("started_at"),
-                "completed_at": times.get("completed_at"),
-                "elapsed_seconds": times.get("elapsed_seconds"),
-                "held_seconds": times.get("held_seconds"),
-                "active_seconds": times.get("active_seconds"),
+                **_json_times(final_timing),
             }))
         else:
-            if final_timing is not None:
-                print(render.timing_table(final_timing))
-                print(render.timing_summary(final_timing))
-            print(render.run_summary(status, code))
+            _print_finish_report(final_timing, status, code)
         raise typer.Exit(code)
     except WaitTimeoutError as exc:
         print(exc.run_id)
