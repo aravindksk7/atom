@@ -66,11 +66,17 @@ def _style(step: dict) -> str:
     return _STATE_STYLES.get(state) or _STATUS_STYLES.get(step.get("status"), "bright_black")
 
 
+def _tries(step: dict) -> str:
+    """" try N" once a job has been retried; attempt is written when a step settles."""
+    attempt = step.get("attempt") or 0
+    return f" try {attempt}" if isinstance(attempt, int) and attempt > 1 else ""
+
+
 def _runtime_text(step: dict) -> str:
     runtime = render.fmt_seconds(step.get("runtime_seconds"))
     if _state(step) in ("running", "over_estimate") and step.get("estimate_seconds") is not None:
-        return f"{runtime} / ~{render.fmt_seconds(step['estimate_seconds'])}"
-    return "" if step.get("runtime_seconds") is None else runtime
+        return f"{runtime} / ~{render.fmt_seconds(step['estimate_seconds'])}{_tries(step)}"
+    return ("" if step.get("runtime_seconds") is None else runtime) + _tries(step)
 
 
 def _visible_steps(steps: list, max_rows: int | None) -> list:
@@ -212,7 +218,7 @@ class PlainProgress(_Display):
                 continue
             runtime = render.fmt_seconds(step.get("runtime_seconds"))
             safe_print(f"{render.fmt_time(timing.get('server_time'))} {step['job_name']} "
-                       f"{step['status']} runtime={runtime}", flush=True)
+                       f"{step['status']} runtime={runtime}{_tries(step)}", flush=True)
 
 
 class LiveProgress(_Display):

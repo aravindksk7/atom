@@ -194,6 +194,7 @@ async function main() {
   await testSelectSequence();
   await testStreamLifecycle();
   testHeldAlertFallback();
+  testOverEstimateGantt();
 }
 
 // --- stale documents ------------------------------------------------------
@@ -1130,6 +1131,17 @@ function testHeldAlertFallback() {
     path.join(__dirname, '..', '..', 'frontend', 'partials', 'tab-monitor.html'), 'utf8');
   assert.ok(html.includes('heldStepIndex(run)'), 'the alert must read heldStepIndex');
   assert.ok(html.includes('Sequence held at step'), 'alert text is unchanged');
+}
+
+// --- over-estimate on the Gantt -------------------------------------------
+function testOverEstimateGantt() {
+  const c = component();
+  const over = step({ status: 'RUNNING', progress: { state: 'over_estimate', percent: 95, label: '' } });
+  assert.strictEqual(c.ganttBarClass(over), 'rt-s-slow', 'amber, like the Progress bar');
+  assert.strictEqual(c.ganttBarClass(step({ status: 'RUNNING' })), 'rt-s-running');
+  c.setGanttColorBy('family');
+  assert.strictEqual(c.ganttBarClass(over), 'rt-f-sap');
+  c.setGanttColorBy('status');
 }
 
 main().catch((error) => {

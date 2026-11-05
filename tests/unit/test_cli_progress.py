@@ -356,6 +356,39 @@ def test_live_bars_show_each_state():
         assert expected in text
 
 
+def test_live_bars_label_retries_only_after_the_first_try():
+    from io import StringIO
+
+    from rich.console import Console
+
+    from etl_framework.cli.progress import bars
+
+    doc = timing([
+        step("once", "PASSED", "done", 100, "PASSED", runtime=5.0, attempt=1),
+        step("retried", "FAILED", "done", 100, "FAILED", runtime=7.0, attempt=3),
+        step("fresh", "RUNNING", "running", 50, "50%", runtime=2.0, attempt=0),
+    ], "RUNNING")
+    stream = StringIO()
+    Console(file=stream, width=120, force_terminal=False).print(bars(doc))
+    rows = {line.split()[0]: line for line in stream.getvalue().splitlines() if line.strip()[:1].isalpha()}
+    assert "try 3" in rows["retried"]
+    assert "try" not in rows["once"]
+    assert "try" not in rows["fresh"]
+
+
+def test_plain_progress_labels_retries_only_after_the_first_try(capsys):
+    from etl_framework.cli.progress import PlainProgress
+
+    docs = [
+        timing([step("a", "FAILED", "done", 100, "FAILED", runtime=3.0, attempt=2),
+                step("b", "PASSED", "done", 100, "PASSED", runtime=3.0, attempt=1)], "RUNNING"),
+    ]
+    PlainProgress(FakeClient({"/api/runs/r-1/timing": docs[0]}), "r-1").update()
+    out = capsys.readouterr().out.strip().splitlines()
+    assert "try 2" in next(line for line in out if " a " in line)
+    assert "try" not in next(line for line in out if " b " in line)
+
+
 def _launch_responses(status="PASSED", timing_doc=None):
     responses = {
         "/api/selections/3/launch": {"run_id": "r-1"},

@@ -77,6 +77,8 @@
   function statusClass(step) {
     // An interrupted step's status still says RUNNING, but nothing is running.
     if (isInterrupted(step)) return 'rt-s-idle';
+    // Still RUNNING, but past its estimate: amber, as the Progress bar shows it.
+    if (step.progress && step.progress.state === 'over_estimate') return 'rt-s-slow';
     return `rt-s-${STATUS_CLASSES[step.status] || 'idle'}`;
   }
 
