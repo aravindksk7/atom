@@ -5,15 +5,16 @@ import { authedContext, createConfig, deleteConfig, deleteFileServerByName, dele
 
 const liveBackends = process.env.E2E_LIVE_BACKENDS === '1';
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'data');
-const MINIO_ENDPOINT = 'http://127.0.0.1:29000';
-const MINIO_BUCKET = 'atom-e2e';
+// floci's S3 emulator (docker-compose.integration.yml); MinIO's images were withdrawn.
+const S3_ENDPOINT = 'http://127.0.0.1:4566';
+const S3_BUCKET = 'atom-e2e';
 const SFTP_HOST = '127.0.0.1';
 const SFTP_PORT = '12222';
 const SFTP_USER = 'e2euser';
 const SFTP_PASS = 'e2epass';
 
-test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
-  test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1 (docker-compose.integration.yml minio service)');
+test.describe('17b multi-file reconciliation - live S3 (floci)', () => {
+  test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1 (docker-compose.integration.yml floci service)');
 
   let jobName: string;
   let configId: number;
@@ -34,7 +35,7 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
 
   test('creates, previews, saves, and runs a multi_file job with a real S3 source through the job editor UI', async ({ authedPage, adminToken }) => {
     jobName = `e2e-live-s3-${Date.now()}`;
-    profileName = `e2e-live-minio-${Date.now()}`;
+    profileName = `e2e-live-s3-${Date.now()}`;
 
     const ctx = await authedContext(adminToken);
     try {
@@ -47,9 +48,9 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
         data: {
           name: profileName,
           kind: 's3',
-          aws_access_key_id: 'minioadmin',
-          aws_secret_access_key: 'minioadmin',
-          endpoint_url: MINIO_ENDPOINT,
+          aws_access_key_id: 'test',
+          aws_secret_access_key: 'test',
+          endpoint_url: S3_ENDPOINT,
           region_name: 'us-east-1',
         },
       });
@@ -70,7 +71,7 @@ test.describe('17b multi-file reconciliation - live S3 (MinIO)', () => {
 
     await authedPage.locator('[data-testid="job-modal-mf-match-on-input"]').fill('region');
     await authedPage.locator('[data-testid="job-modal-mf-source-kind-select"]').selectOption('s3');
-    await authedPage.locator('[data-testid="job-modal-mf-source-root-input"]').fill(`s3://${MINIO_BUCKET}/source`);
+    await authedPage.locator('[data-testid="job-modal-mf-source-root-input"]').fill(`s3://${S3_BUCKET}/source`);
     await authedPage.locator('[data-testid="job-modal-mf-source-pattern-input"]').fill('sales_{region}.csv');
 
     await authedPage.locator('[data-testid="job-modal-mf-target-root-input"]').fill(path.join(FIXTURE_DIR, 'multi_target'));
@@ -141,6 +142,12 @@ test.describe('17b multi-file reconciliation - live SFTP', () => {
         },
       });
       if (!profileResp.ok()) throw new Error(`file-server profile creation failed: ${profileResp.status()} ${await profileResp.text()}`);
+      // SFTP refuses an unpinned host key (commit 7d80a86). Pin it the way a user
+      // would, through Test Connection's "accept fingerprint".
+      const { id: profileId } = await profileResp.json();
+      const pinResp = await ctx.post(`/api/file-servers/${profileId}/test`, { data: { accept_fingerprint: true } });
+      const pin = await pinResp.json();
+      if (!pinResp.ok() || pin.status !== 'ok') throw new Error(`host key pin failed: ${pinResp.status()} ${JSON.stringify(pin)}`);
     } finally {
       await ctx.dispose();
     }

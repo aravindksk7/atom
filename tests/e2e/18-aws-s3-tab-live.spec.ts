@@ -4,13 +4,14 @@ import { test, expect } from './fixtures';
 import { authedContext, createConfig, deleteConfig, deleteJob, triggerRun, waitForTerminal } from './api-helpers';
 
 const liveBackends = process.env.E2E_LIVE_BACKENDS === '1';
-const MINIO_ENDPOINT = 'http://127.0.0.1:29000';
-const MINIO_BUCKET = 'atom-e2e';
+// floci's S3 emulator (docker-compose.integration.yml); MinIO's images were withdrawn.
+const S3_ENDPOINT = 'http://127.0.0.1:4566';
+const S3_BUCKET = 'atom-e2e';
 const CSV_KEY = 'source/sales_east.csv';
 const CSV_PREFIX = 'source/';
 
-test.describe('18 AWS S3 tab - live MinIO', () => {
-  test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1 (docker-compose.integration.yml minio service)');
+test.describe('18 AWS S3 tab - live S3', () => {
+  test.skip(!liveBackends, 'requires E2E_LIVE_BACKENDS=1 (docker-compose.integration.yml floci service)');
 
   let configId: number;
   const createdJobs: string[] = [];
@@ -33,9 +34,9 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
         db_host: 'localhost',
         db_password: 'unused',
         aws_region: 'us-east-1',
-        aws_access_key_id: 'minioadmin',
-        aws_secret_access_key: 'minioadmin',
-        aws_endpoint_url: MINIO_ENDPOINT,
+        aws_access_key_id: 'test',
+        aws_secret_access_key: 'test',
+        aws_endpoint_url: S3_ENDPOINT,
         aws_verify_ssl: false,
       });
       configId = cfg.id;
@@ -52,7 +53,7 @@ test.describe('18 AWS S3 tab - live MinIO', () => {
     await page.getByRole('button', { name: 'AWS' }).click();
     await expect(page.locator('[data-testid="aws-service-s3"]')).toBeVisible();
     await page.locator('[data-testid="aws-config-select"]').selectOption(String(configId));
-    await page.locator('[data-testid="aws-bucket-input"]').fill(MINIO_BUCKET);
+    await page.locator('[data-testid="aws-bucket-input"]').fill(S3_BUCKET);
     await page.locator('[data-testid="aws-key-input"]').fill(CSV_KEY);
     await page.locator('[data-testid="aws-prefix-input"]').fill(CSV_PREFIX);
     await page.locator('[data-testid="aws-fmt-select"]').selectOption('csv');

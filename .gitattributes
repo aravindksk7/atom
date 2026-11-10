@@ -1,0 +1,3 @@
+# E2E fixtures are compared byte for byte after copies through SMB, SFTP and S3,
+# so keep them exactly as committed (LF) even where core.autocrlf=true.
+tests/e2e/fixtures/**/*.csv text eol=lf

@@ -28,19 +28,17 @@ export default async function globalSetup(_config: FullConfig) {
     });
     seedSqlServer();
     seedOracle();
-    seedMinio();
+    seedS3();
     seedGlueAthena();
     waitForAirflow();
   }
 }
 
-function seedMinio() {
-  // MinIO has no bind-mount equivalent of the SFTP service's static seed
-  // directory -- objects must be PUT over the S3 API, so a real seed step is
-  // unavoidable here. The retry loop below is this service's actual
-  // readiness gate (the minio service itself has no Docker healthcheck --
-  // see docker-compose.integration.yml's comment on why: the official image
-  // is distroless, no shell/curl to run a CMD healthcheck with).
+function seedS3() {
+  // Objects for specs 17b and 18. They used a MinIO service until MinIO's public
+  // images were withdrawn (Docker Hub and quay.io, 2026-11); the floci service
+  // already emulates S3 for the Glue/Athena specs, so they share it. Objects must
+  // be PUT over the S3 API, and the retry loop is the readiness gate.
   const fixturesDir = path.join(REPO_ROOT, 'tests', 'e2e', 'fixtures', 'data', 'multi_source').replace(/\\/g, '/');
   const script = `
 import time
@@ -49,9 +47,9 @@ from pathlib import Path
 
 client = boto3.client(
     "s3",
-    endpoint_url="http://127.0.0.1:29000",
-    aws_access_key_id="minioadmin",
-    aws_secret_access_key="minioadmin",
+    endpoint_url="http://127.0.0.1:4566",
+    aws_access_key_id="test",
+    aws_secret_access_key="test",
     region_name="us-east-1",
 )
 
@@ -62,7 +60,7 @@ for attempt in range(30):
     except Exception:
         time.sleep(1)
 else:
-    raise RuntimeError("MinIO did not become ready within 30s")
+    raise RuntimeError("floci S3 did not become ready within 30s")
 
 bucket = "atom-e2e"
 existing = {b["Name"] for b in client.list_buckets().get("Buckets", [])}
@@ -76,9 +74,9 @@ print("seeded")
 `;
   const result = spawnSync('python', ['-c', script], { encoding: 'utf-8' });
   if (result.status !== 0) {
-    throw new Error(`MinIO seed failed:\n${result.stdout}\n${result.stderr}`);
+    throw new Error(`S3 seed failed:\n${result.stdout}\n${result.stderr}`);
   }
-  console.log('[global-setup] MinIO seeded:', result.stdout.trim());
+  console.log('[global-setup] S3 (floci) seeded:', result.stdout.trim());
 }
 
 function seedGlueAthena() {
