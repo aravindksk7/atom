@@ -1,7 +1,9 @@
 from __future__ import annotations
+import logging
 import os
+import sqlite3
 from pathlib import Path
-from sqlalchemy import DateTime, create_engine, inspect
+from sqlalchemy import DateTime, create_engine, event, inspect
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from etl_framework.repository.migrations import execute_once, ensure_column, ensure_index, ensure_table
 from etl_framework.utils.serialization import safe_json_dumps
@@ -11,12 +13,46 @@ _DEFAULT_SQLITE_PATH = _REPO_ROOT / "etl_framework.db"
 DATABASE_URL = os.environ.get(
     "ETL_DATABASE_URL", f"sqlite:///{_DEFAULT_SQLITE_PATH.as_posix()}"
 )
+_SQLITE_BUSY_TIMEOUT_SECONDS = 30
+_SQLITE_JOURNAL_MODES = {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-    json_serializer=safe_json_dumps,
-)
+logger = logging.getLogger("etl_framework.repository.database")
+
+
+def _set_sqlite_journal_mode(dbapi_connection, _connection_record) -> None:
+    """Use WAL so a run's writes never block status polling.
+
+    SQLite's default journal locks readers out while a writer commits, and a poll
+    that waited past the timeout failed with "database is locked". WAL does not
+    work on network filesystems, where ETL_SQLITE_JOURNAL_MODE=DELETE restores the
+    old behaviour.
+    """
+    mode = os.environ.get("ETL_SQLITE_JOURNAL_MODE", "WAL").upper()
+    if mode not in _SQLITE_JOURNAL_MODES:
+        logger.warning("Ignoring unknown ETL_SQLITE_JOURNAL_MODE %r", mode)
+        return
+    try:
+        dbapi_connection.execute(f"PRAGMA journal_mode={mode}").close()
+    except sqlite3.OperationalError as exc:
+        # Still usable, only less tolerant of concurrent access.
+        logger.warning("Could not set SQLite journal mode %s: %s", mode, exc)
+
+
+def _create_repository_engine(url: str):
+    is_sqlite = url.startswith("sqlite")
+    repository_engine = create_engine(
+        url,
+        connect_args=(
+            {"check_same_thread": False, "timeout": _SQLITE_BUSY_TIMEOUT_SECONDS} if is_sqlite else {}
+        ),
+        json_serializer=safe_json_dumps,
+    )
+    if is_sqlite:
+        event.listen(repository_engine, "connect", _set_sqlite_journal_mode)
+    return repository_engine
+
+
+engine = _create_repository_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
