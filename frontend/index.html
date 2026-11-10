@@ -4044,7 +4044,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
                   <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
-                  <td class="font-mono text-xs" x-text="((r.source_file_name || selectedRun.file_name_a) || (r.target_file_name || selectedRun.file_name_b)) ? ((r.source_file_name || selectedRun.file_name_a) || 'N/A') + ' → ' + ((r.target_file_name || selectedRun.file_name_b) || 'N/A') : '—'"></td>
+                  <td class="font-mono text-xs" x-text="resultFilesLabel(r.source_file_name || selectedRun.file_name_a, r.target_file_name || selectedRun.file_name_b) || '—'"></td>
                   <td x-text="r.source_row_count ?? '—'"></td>
                   <td x-text="r.target_row_count ?? '—'"></td>
                   <td>
@@ -5921,7 +5921,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                     <td class="font-mono text-xs" x-text="t.name"></td>
                     <td><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
                     <td :class="(t.status||'').toUpperCase()==='SLOW' ? 'text-amber-400 font-semibold' : ''" x-text="t.duration_seconds != null ? t.duration_seconds.toFixed(3) + 's' : '-'"></td>
-                    <td class="font-mono text-xs" x-text="(t.source_file_name || t.target_file_name) ? (t.source_file_name || 'N/A') + ' → ' + (t.target_file_name || 'N/A') : 'N/A'"></td>
+                    <td class="font-mono text-xs" x-text="resultFilesLabel(t.source_file_name, t.target_file_name) || 'N/A'"></td>
                     <td x-text="t.source_row_count ?? 0"></td>
                     <td x-text="t.target_row_count ?? 0"></td>
                     <td :class="(t.total_issues ?? 0) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'" x-text="t.total_issues ?? 0"></td>
