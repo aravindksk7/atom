@@ -92,6 +92,9 @@ test.describe('08c compare / SQL client-side guards', () => {
   test('negative: submitting empty shows Config A required first', async ({ authedPage }) => {
     await openSQL(authedPage);
     await authedPage.locator('[data-testid="compare-sql-run-btn"]').click();
-    await expect(authedPage.locator('.toast-title')).toContainText('Config A required');
+    // Validation is shared with "save as job", so the toast title is generic;
+    // the message names the first missing field.
+    await expect(authedPage.locator('.toast-title')).toContainText('SQL compare');
+    await expect(authedPage.locator('.toast-msg')).toContainText('Select a config for Source A');
   });
 });
