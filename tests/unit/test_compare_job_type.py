@@ -26,6 +26,25 @@ def test_compare_job_accepts_a_bo_request_with_repeatable_sources():
     assert job.params["compare_type"] == "bo"
 
 
+def test_matrix_sql_source_needs_a_connection():
+    from etl_framework.runner.job_validation import validate_job_definition
+
+    def issues(source_a):
+        return validate_job_definition({
+            "name": "nightly_compare",
+            "job_type": "compare",
+            "params": {"compare_type": "matrix", "request": {
+                "source_a": source_a,
+                "source_b": {"source_type": "sql", "config_id": 1, "query_or_table": "SELECT 1"},
+            }},
+        })
+
+    assert [i.field for i in issues({"source_type": "sql", "query_or_table": "SELECT 1"})] == [
+        "params.request.source_a",
+    ]
+    assert issues({"source_type": "sql", "query_or_table": "SELECT 1", "connection_string": "sqlite://"}) == []
+
+
 def test_compare_job_requires_a_known_compare_type():
     with pytest.raises(ValidationError, match="compare_type"):
         JobDefinition(

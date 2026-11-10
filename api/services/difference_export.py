@@ -36,7 +36,6 @@ from etl_framework.reconciliation.compare_utils import (
     resolve_key_columns,
     value_mismatch_mask,
 )
-from etl_framework.reconciliation.data_sources import extract_data_source
 from etl_framework.reconciliation.file_mapping import (
     FileMappingSpec,
     pair_files,
@@ -748,8 +747,7 @@ def _write_multi_file_compare(db: Session, payload: dict[str, Any], writer: Diff
 
 def _write_matrix_compare(db: Session, payload: dict[str, Any], writer: DifferenceWriter) -> None:
     req = MatrixCompareRequest(**payload)
-    df_a = extract_data_source(req.source_a.model_dump(), db)
-    df_b = extract_data_source(req.source_b.model_dump(), db)
+    df_a, df_b = CompareService(db, ConfigRepository(db))._load_matrix_frames(req)
     options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     _write_tabular_differences(
         df_a,
@@ -813,8 +811,7 @@ def _write_compare_job(
             raise ValueError(
                 "compare jobs with live or API sources require live connections to be enabled"
             )
-        df_a = extract_data_source(req.source_a.model_dump(), db)
-        df_b = extract_data_source(req.source_b.model_dump(), db)
+        df_a, df_b = svc._load_matrix_frames(req)
         options = req.to_advanced_options(list(set(df_a.columns).union(set(df_b.columns))))
     elif compare_type == "sql":
         req = SQLCompareRequest(**payload)

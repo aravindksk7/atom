@@ -425,6 +425,16 @@ def validate_job_definition(job: Any) -> list[ValidationIssue]:
                             f"compare job {label} is an upload, which cannot be re-run on a "
                             "schedule - use a file path or another repeatable source",
                         ))
+                    if (
+                        source.source_type == "sql"
+                        and source.config_id is None
+                        and not (source.model_extra or {}).get("connection_string")
+                    ):
+                        issues.append(ValidationIssue(
+                            field,
+                            f"compare job {label} is a SQL source, which needs a config_id "
+                            "or a connection_string",
+                        ))
         elif compare_type == "sql":
             try:
                 SQLCompareRequest.model_validate(request)

@@ -80,7 +80,7 @@ def test_matrix_compare_uses_selected_comparison_backend(monkeypatch):
     import api.services.compare_service as svc_module
 
     frame = pd.DataFrame({"id": [1], "amount": [1.0]})
-    monkeypatch.setattr(svc_module, "extract_data_source", lambda spec, db: frame.copy())
+    monkeypatch.setattr(svc_module, "extract_data_source", lambda spec, db=None: frame.copy())
 
     captured: dict = {}
 
