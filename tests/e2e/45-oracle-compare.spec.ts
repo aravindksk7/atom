@@ -75,11 +75,13 @@ test.describe('45 compare / Oracle', () => {
     expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(false);
   });
 
-  test('negative: malformed SQL surfaces backend error', async ({ authedPage }) => {
+  test('negative: a query that fails in the database surfaces backend error', async ({ authedPage }) => {
+    // Must pass the read-only check (POST /api/compare/sql answers 422 for anything but
+    // a single SELECT or WITH) to reach Oracle and fail there.
     await openSQL(authedPage);
     await authedPage.locator('[data-testid="compare-sql-config-a-select"]').selectOption(String(srcConfigId));
     await authedPage.locator('[data-testid="compare-sql-config-b-select"]').selectOption(String(tgtConfigId));
-    await authedPage.locator('[data-testid="compare-sql-query-a-textarea"]').fill('SELEKT this is not sql');
+    await authedPage.locator('[data-testid="compare-sql-query-a-textarea"]').fill('SELECT id FROM no_such_table');
     await authedPage.locator('[data-testid="compare-sql-query-b-textarea"]').fill('SELECT id FROM orders');
     await authedPage.locator('[data-testid="compare-sql-run-btn"]').click();
     await expect(authedPage.locator('.badge:visible', { hasText: 'ERROR' })).toBeVisible({ timeout: 20_000 });

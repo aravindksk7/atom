@@ -64,8 +64,10 @@ test.describe('22 stored BO run vs local xlsx', () => {
   async function runOnce(page: import('@playwright/test').Page, adminToken: string) {
     const before = await listRunIds(adminToken);
     await page.locator(`[data-testid="job-row-${jobName}-checkbox"]`).click();
-    if (await page.locator('.toggle-track.on').count() === 0) {
-      await page.locator('span.toggle-label', { hasText: 'Live Connections' }).click();
+    // The hidden New Job Selection modal has its own Live Connections toggle; use the visible one.
+    const liveWrap = page.locator('label.toggle-wrap:visible', { hasText: 'Live Connections' });
+    if (await liveWrap.locator('.toggle-track.on').count() === 0) {
+      await liveWrap.locator('span.toggle-label').click();
     }
     await page.locator('[data-testid="run-tests-btn"]').click();
     let runId = '';

@@ -87,8 +87,10 @@ test.describe('24 adapters - browse, download, add as job, run', () => {
 
     const before = await listRunIds(adminToken);
     await authedPage.locator(`[data-testid="job-row-${JOB_NAME}-checkbox"]`).click();
-    if (await authedPage.locator('.toggle-track.on').count() === 0) {
-      await authedPage.locator('span.toggle-label', { hasText: 'Live Connections' }).click();
+    // The hidden New Job Selection modal has its own Live Connections toggle; use the visible one.
+    const liveWrap = authedPage.locator('label.toggle-wrap:visible', { hasText: 'Live Connections' });
+    if (await liveWrap.locator('.toggle-track.on').count() === 0) {
+      await liveWrap.locator('span.toggle-label').click();
     }
     await authedPage.locator('[data-testid="run-tests-btn"]').click();
 

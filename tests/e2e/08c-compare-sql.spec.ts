@@ -73,18 +73,32 @@ test.describe('08c compare / SQL', () => {
     expect(pageErrors.some((e) => e.includes('renderTgt is not defined'))).toBe(false);
   });
 
-  test('negative: malformed SQL surfaces backend error', async ({ authedPage }) => {
+  test('negative: a query that fails in the database surfaces backend error', async ({ authedPage }) => {
     // The compare runs as a background task (POST returns 202 immediately) — a query
     // error only surfaces once polling picks up the terminal ERROR status; there is no
     // 'SQL compare failed' toast for this path (that toast is only for exceptions thrown
     // by the initial POST /api/compare/sql request itself, e.g. a network error).
+    // The query must pass the read-only check (see the next test) to reach the database.
+    await openSQL(authedPage);
+    await authedPage.locator('[data-testid="compare-sql-config-a-select"]').selectOption(String(srcConfigId));
+    await authedPage.locator('[data-testid="compare-sql-config-b-select"]').selectOption(String(tgtConfigId));
+    await authedPage.locator('[data-testid="compare-sql-query-a-textarea"]').fill('SELECT id FROM dbo.no_such_table');
+    await authedPage.locator('[data-testid="compare-sql-query-b-textarea"]').fill('SELECT id FROM dbo.orders');
+    await authedPage.locator('[data-testid="compare-sql-run-btn"]').click();
+    await expect(authedPage.locator('.badge:visible', { hasText: 'ERROR' })).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('negative: a query that is not read-only is refused before a run starts', async ({ authedPage }) => {
+    // POST /api/compare/sql answers 422 for anything but a single SELECT or WITH,
+    // so no run is created and the request's own error toast shows instead.
     await openSQL(authedPage);
     await authedPage.locator('[data-testid="compare-sql-config-a-select"]').selectOption(String(srcConfigId));
     await authedPage.locator('[data-testid="compare-sql-config-b-select"]').selectOption(String(tgtConfigId));
     await authedPage.locator('[data-testid="compare-sql-query-a-textarea"]').fill('SELEKT this is not sql');
     await authedPage.locator('[data-testid="compare-sql-query-b-textarea"]').fill('SELECT id FROM dbo.orders');
     await authedPage.locator('[data-testid="compare-sql-run-btn"]').click();
-    await expect(authedPage.locator('.badge:visible', { hasText: 'ERROR' })).toBeVisible({ timeout: 20_000 });
+    await expect(authedPage.locator('.toast-title')).toContainText('SQL compare failed');
+    await expect(authedPage.locator('.toast-msg')).toContainText('read-only');
   });
 });
 
