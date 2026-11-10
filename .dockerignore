@@ -1,6 +1,7 @@
 .git
 .claude
 .kilo
+.venv
 node_modules
 **/__pycache__
 .pytest_cache
@@ -9,4 +10,7 @@ playwright-report
 test-results
 logs
 reports
+tests
+demo
 *.db
+*.log

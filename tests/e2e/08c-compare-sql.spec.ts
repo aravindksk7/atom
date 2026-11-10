@@ -93,5 +93,6 @@ test.describe('08c compare / SQL client-side guards', () => {
     await openSQL(authedPage);
     await authedPage.locator('[data-testid="compare-sql-run-btn"]').click();
     await expect(authedPage.locator('.toast-title')).toContainText('Config A required');
+    await expect(authedPage.locator('.toast-msg')).toContainText('Select a config for Source A');
   });
 });

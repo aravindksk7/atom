@@ -1019,10 +1019,13 @@
     },
 
     _buildSqlComparePayload() {
-      if (!this.sqlConfigA) throw new Error('Select a config for Source A');
-      if (!this.sqlConfigB) throw new Error('Select a config for Source B');
-      if (!this.sqlQueryA.trim()) throw new Error('Enter a SQL query for Source A');
-      if (!this.sqlQueryB.trim()) throw new Error('Enter a SQL query for Source B');
+      // Each error carries a short title for the Run toast; "save as job"
+      // shows only the message.
+      const missing = (title, message) => Object.assign(new Error(message), { title });
+      if (!this.sqlConfigA) throw missing('Config A required', 'Select a config for Source A');
+      if (!this.sqlConfigB) throw missing('Config B required', 'Select a config for Source B');
+      if (!this.sqlQueryA.trim()) throw missing('Query A required', 'Enter a SQL query for Source A');
+      if (!this.sqlQueryB.trim()) throw missing('Query B required', 'Enter a SQL query for Source B');
       return {
         config_id_a: parseInt(this.sqlConfigA),
         config_id_b: parseInt(this.sqlConfigB),
@@ -1044,7 +1047,7 @@
       try {
         payload = this._buildSqlComparePayload();
       } catch (e) {
-        this.toast('warn', 'SQL compare', e.message);
+        this.toast('warn', e.title || 'SQL compare', e.message);
         return;
       }
       this.sqlCompareLoading = true;
