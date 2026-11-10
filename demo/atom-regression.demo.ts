@@ -190,9 +190,6 @@ test('ATOM end-to-end regression for one business date', async ({ page }) => {
     // several on a line run together. Set 1 is in series, Set 2 is in parallel, and Set 3 is a
     // hybrid: one job, then three together, then one again.
     await presenter.step('Preview the execution order', 'One job on a line runs alone, several on a line run together');
-    // The editor fills this preview on its first change, not when it opens. An input event with
-    // no actual change triggers that, and Cancel below discards the editor without saving.
-    await page.getByTestId('sequence-step-id-0').dispatchEvent('input');
     await presenter.show(page.getByTestId('sequence-graph-preview'));
     await presenter.click(page.getByTestId('sequence-editor').getByRole('button', { name: 'Cancel' }));
 
