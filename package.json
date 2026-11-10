@@ -6,7 +6,11 @@
     "build:vendor": "npm run build:css && node scripts/copy-vendor.js",
     "watch:css": "tailwindcss -i tailwind.input.css -o frontend/vendor/tailwind.css --watch",
     "build:html": "node scripts/build-html.js",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:py:docker": "node scripts/docker-test-cleanup.js run test-py",
+    "test:py:postgres:docker": "node scripts/docker-test-cleanup.js run test-py-postgres",
+    "test:e2e:docker": "node scripts/docker-test-cleanup.js run test-e2e",
+    "docker:cleanup": "node scripts/docker-test-cleanup.js"
   },
   "dependencies": {
     "headroom-ai": "^0.22.4"

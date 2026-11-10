@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 
@@ -10,12 +9,10 @@ export default async function globalTeardown() {
   // (e.g. a container that won't stop) must not skip the other.
   try {
     if (process.env.E2E_LIVE_BACKENDS === '1') {
-      console.log('[global-teardown] stopping docker-compose.integration.yml services...');
-      execSync('docker compose -f docker-compose.integration.yml down -v', {
-        cwd: REPO_ROOT,
-        stdio: 'inherit',
-        timeout: 60_000,
-      });
+      console.log('[global-teardown] removing docker test containers and releasing memory...');
+      // Compose services, floci's own sibling containers, and the Docker VM's cache.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require(path.join(REPO_ROOT, 'scripts', 'docker-test-cleanup.js')).cleanup();
     }
   } finally {
     const dbDir = process.env.E2E_DB_DIR;

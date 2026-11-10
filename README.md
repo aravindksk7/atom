@@ -4081,11 +4081,17 @@ Run the test suites in Docker:
 
 ```powershell
 docker compose -f docker-compose.test.yml build test-py
-docker compose -f docker-compose.test.yml run --rm test-py
-docker compose -f docker-compose.test.yml run --rm test-e2e
-docker compose -f docker-compose.test.yml run --rm test-py-postgres
-docker compose -f docker-compose.test.yml down -v
+npm run test:py:docker            # pytest -n auto, one worker per CPU
+npm run test:e2e:docker
+npm run test:py:postgres:docker
 ```
+
+Each `npm run test:*:docker` removes its containers, volumes and network when it
+finishes, even when tests fail, and releases the memory the Docker VM cached.
+Playwright live-backend runs (`E2E_LIVE_BACKENDS=1`) do the same in
+`tests/e2e/global-teardown.ts`, including the containers floci starts itself. Run
+`npm run docker:cleanup` to do it by hand, or set `ATOM_KEEP_DOCKER=1` to keep
+everything running for debugging.
 
 The source is bind-mounted, so code changes need no rebuild. Rebuild after changing `requirements.txt` or `package-lock.json`. Tests known to fail in this environment are listed in `docs/superpowers/plans/2026-11-03-docker-test-baseline.md`.
 
