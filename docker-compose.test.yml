@@ -21,7 +21,8 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       # Keep SQLite off the Windows bind mount, where file locking is unreliable.
       ETL_DATABASE_URL: sqlite:////tmp/etl_test.db
-    command: python -m pytest tests/unit tests/integration -q
+    # -n auto: one pytest-xdist worker per CPU; tests/conftest.py gives each its own SQLite file.
+    command: python -m pytest tests/unit tests/integration -q -n auto
 
   test-py-postgres:
     <<: *test-base

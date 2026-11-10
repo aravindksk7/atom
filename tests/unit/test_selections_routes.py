@@ -24,6 +24,10 @@ def client(monkeypatch):
     Base.metadata.create_all(engine)
     monkeypatch.setattr(_db_module, "SessionLocal", sessionmaker(bind=engine))
     monkeypatch.setattr("api.routes.selections._execute_run", lambda *a, **k: None)
+    # The batch runner waits for each run to finish, and stubbed runs never do.
+    # It also used the route's own SessionLocal (ATOM's real database), so these
+    # tests only passed when some earlier test had created its tables.
+    monkeypatch.setattr("api.routes.selections.run_batch", lambda *a, **k: None)
 
     with Session(engine) as db:
         raw, _ = TokenRepository(db).create("test-runner")

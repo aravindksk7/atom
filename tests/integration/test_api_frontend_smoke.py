@@ -294,8 +294,11 @@ def test_webhook_delivery_is_tracked_with_thread_owned_session(client, monkeypat
     )
     assert launch.status_code == 202
 
+    # The DNS lookup that fails the delivery can take seconds when the host is
+    # busy (e.g. under pytest -n), so poll against a deadline, not a count.
     deliveries = []
-    for _ in range(250):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         response = client.get(f"/api/notifications/{hook_id}/deliveries")
         assert response.status_code == 200
         deliveries = response.json()
