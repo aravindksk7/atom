@@ -419,7 +419,10 @@ test('recovers a stopped multi-day sequence without rerunning successful ingesti
     await page.getByRole('button', { name: 'Restart from failure' }).click();
     await expect(page.getByText('Restarted from')).toBeVisible();
     for (const jobName of [names.ingestion, names.processing, names.report]) {
-      const resultGroup = page.getByText(jobName, { exact: true }).locator('xpath=ancestor::tbody[1]');
+      // Scope to the results table: the Steps table above it also lists every job name.
+      const resultGroup = resultsTable.locator('tbody').filter({
+        has: page.getByText(jobName, { exact: true }),
+      });
       await expect(resultGroup).toContainText('PASSED');
       if (jobName === names.ingestion) await expect(resultGroup).toContainText('carried over');
     }
