@@ -32,6 +32,7 @@
     diffStoredComplete: true,
     diffLoading: false,
     diffInsights: null,
+    _diffInsightsToken: 0,           // guards against out-of-order insights responses
 
       // ===== METHODS (extracted from app.js) =====
     _applyDeepLink() {
@@ -79,26 +80,41 @@
       await this.loadDifferenceInsights();
     },
 
+    // The metrics and charts cover the selected test, or the whole run when none is.
     async loadDifferenceInsights() {
       if (!this.diffRunId) return;
+      const token = ++this._diffInsightsToken;
+      const scope = this.diffResultId ? `?result_id=${this.diffResultId}` : '';
       try {
-        this.diffInsights = await api('GET', `/api/runs/${this.diffRunId}/mismatches/insights`);
+        const insights = await api('GET', `/api/runs/${this.diffRunId}/mismatches/insights${scope}`);
+        if (token !== this._diffInsightsToken) return;
+        this.diffInsights = insights;
       } catch (e) {
+        if (token !== this._diffInsightsToken) return;
         this.diffInsights = null;
         this.toast('error', 'Failed to load insights', e.message);
-      } finally {
-        this.$nextTick(() => this._renderDifferenceCharts());
       }
+      this.$nextTick(() => this._renderDifferenceCharts());
+    },
+
+    get diffInsightsScopeLabel() {
+      const test = (this.diffTestOptions || []).find(t => t.id === this.diffResultId);
+      return test ? `Showing test: ${test.query_name}` : 'Showing the whole run';
     },
 
     async selectDifferenceResult(resultId) {
       this.diffResultId = resultId ? Number(resultId) : null;
       this.diffPage = 0;
       this.diffColumnOptions = [];
-      if (!this.diffResultId) { this.diffRows = []; this.diffTotal = 0; return; }
+      if (!this.diffResultId) {
+        this.diffRows = [];
+        this.diffTotal = 0;
+        await this.loadDifferenceInsights();
+        return;
+      }
       const result = (this.diffRunDetail?.results || []).find(r => r.id === this.diffResultId);
       this.diffColumnOptions = (result?.column_stats || []).map(s => s.column);
-      await this.fetchDifferenceRows();
+      await Promise.all([this.fetchDifferenceRows(), this.loadDifferenceInsights()]);
     },
 
     differenceQueryString() {

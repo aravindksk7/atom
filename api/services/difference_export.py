@@ -228,14 +228,15 @@ def stored_completeness_summary(db: Session, run: TestRun) -> dict[str, int]:
     return {"stored_rows": stored, "total_issues": total}
 
 
-def accepted_counts(db: Session, run_id: str) -> dict[str, int]:
-    rows = (
+def accepted_counts(db: Session, run_id: str, result_id: int | None = None) -> dict[str, int]:
+    query = (
         db.query(MismatchDetail.accepted, func.count(MismatchDetail.id))
         .join(TestResult, TestResult.id == MismatchDetail.test_result_id)
         .filter(TestResult.run_id == run_id)
-        .group_by(MismatchDetail.accepted)
-        .all()
     )
+    if result_id is not None:
+        query = query.filter(TestResult.id == result_id)
+    rows = query.group_by(MismatchDetail.accepted).all()
     counts = {"accepted": 0, "open": 0}
     for accepted, count in rows:
         counts["accepted" if accepted else "open"] += int(count)

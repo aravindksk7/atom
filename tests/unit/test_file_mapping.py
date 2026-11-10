@@ -1,6 +1,8 @@
 # tests/unit/test_file_mapping.py
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from etl_framework.reconciliation.file_mapping import compile_token_pattern
@@ -333,6 +335,30 @@ def test_aggregate_reconciliation_results_rolls_up_pairs() -> None:
     pair_summary_by_region = {p["key"]["region"]: p for p in aggregate.mismatch_summary["file_pairs"]}
     assert pair_summary_by_region["east"]["status"] == "PASSED"
     assert pair_summary_by_region["west"]["status"] == "FAILED"
+
+
+def test_aggregate_reconciliation_results_sums_column_counts() -> None:
+    """Column stats and the Differences column filter read these from the summary."""
+    source = FileGroup(key=("east",), files=[_df("e.csv", region="east")])
+    target = FileGroup(key=("east",), files=[_df("e.dat", region="east")])
+    pair = FilePair(key=("east",), source=source, target=target)
+    mapping = FileMappingResult(
+        match_on=("region",), pairs=[pair, pair, pair], unmatched_sources=[], unmatched_targets=[],
+    )
+    first = dataclasses.replace(_pair_result(TestStatus.FAILED), mismatch_summary={
+        "by_column": {"fee": 2, "<row>": 1},
+        "compared_rows_by_column": {"fee": 10, "notional": 10},
+    })
+    second = dataclasses.replace(_pair_result(TestStatus.FAILED), mismatch_summary={
+        "by_column": {"fee": 3},
+        "compared_rows_by_column": {"fee": 5, "notional": 5},
+    })
+    errored = dataclasses.replace(_pair_result(TestStatus.ERROR), mismatch_summary={"error": "unreadable"})
+
+    aggregate = aggregate_reconciliation_results("job", mapping, [first, second, errored])
+
+    assert aggregate.mismatch_summary["by_column"] == {"fee": 5, "<row>": 1}
+    assert aggregate.mismatch_summary["compared_rows_by_column"] == {"fee": 15, "notional": 15}
 
 
 def test_aggregate_reconciliation_results_rejects_length_mismatch() -> None:

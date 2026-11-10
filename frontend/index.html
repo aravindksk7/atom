@@ -6245,6 +6245,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
 
   <template x-if="diffInsights">
     <div class="space-y-4 mb-4">
+      <div class="text-xs text-muted" data-testid="diff-insights-scope" x-text="diffInsightsScopeLabel"></div>
       <div class="metric-grid">
         <div class="metric-card metric-green"><div class="metric-label">Accepted</div><div class="metric-value" x-text="diffInsights.accepted_count"></div></div>
         <div class="metric-card metric-rose"><div class="metric-label">Open</div><div class="metric-value" x-text="diffInsights.open_count"></div></div>

@@ -409,10 +409,10 @@ test('ATOM end-to-end regression for one business date', async ({ page }) => {
     const differenceRows = page.locator('[data-testid="diff-results-table"] tbody tr');
     const firstRow = differenceRows.first();
 
-    // Accepts the intended change, leaving only what the change does not explain. It searches
-    // rather than using the column dropdown, which is empty for multi-file results.
+    // Accepts the intended change, leaving only what the change does not explain.
     const acceptImpactedField = async (jobName: string, exceptionsLeft: number) => {
       await chooseTest(jobName);
+      await expect(page.getByTestId('diff-column-select').locator('option', { hasText: IMPACTED_FIELD })).toHaveCount(1);
       await presenter.click(page.getByTestId('diff-clear-filters-btn'));
       await presenter.type(page.getByTestId('diff-search-input'), IMPACTED_FIELD);
       await expect(firstRow).toContainText(IMPACTED_FIELD);
@@ -467,6 +467,9 @@ test('ATOM end-to-end regression for one business date', async ({ page }) => {
     // STEP 28: The tally for the whole run. Hundreds of differences were reviewed. The expected ones
     // are accepted, and exactly six exceptions stay open for someone to resolve.
     await presenter.step('The tally', `${OPEN_EXCEPTIONS} exceptions stay open across the whole run`);
+    // With no test selected, the metrics cover the whole run.
+    await presenter.select(testSelect, '');
+    await expect(page.getByTestId('diff-insights-scope')).toHaveText('Showing the whole run');
     await expect(openCount).toHaveText(String(OPEN_EXCEPTIONS), { timeout: 30_000 });
     await presenter.centre(openCount);
     await presenter.show(openCount.locator('..'));

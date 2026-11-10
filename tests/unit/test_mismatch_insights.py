@@ -122,6 +122,45 @@ def test_insights_aggregates_across_results(client):
     assert tests_by_name["invoices"]["result_id"] == result_b_id
 
 
+def test_insights_can_be_scoped_to_one_test(client):
+    run_id = str(uuid.uuid4())
+    result_a_id, result_b_id = _seed_two_results(run_id)
+
+    resp = client.get(f"/api/runs/{run_id}/mismatches/insights", params={"result_id": result_b_id})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["accepted_count"] == 0
+    assert data["open_count"] == 1
+    assert {c["column"]: c["count"] for c in data["top_columns"]} == {"amount": 1}
+    assert data["type_totals"]["value_diff"] == 1
+    assert data["type_totals"]["missing_in_target"] == 0
+    # The list of tests stays whole, since it describes the run.
+    assert {t["result_id"] for t in data["tests"]} == {result_a_id, result_b_id}
+
+
+def test_insights_404_for_a_test_from_another_run(client):
+    run_id = str(uuid.uuid4())
+    _, result_b_id = _seed_two_results(run_id)
+    other_run_id = str(uuid.uuid4())
+    _seed_two_results(other_run_id)
+
+    resp = client.get(f"/api/runs/{other_run_id}/mismatches/insights", params={"result_id": result_b_id})
+    assert resp.status_code == 404
+
+
+def test_row_column_filter_returns_the_missing_rows(client):
+    """Column stats report missing rows under "<row>", and the Differences column
+    dropdown offers that name, but stored missing rows have no column."""
+    run_id = str(uuid.uuid4())
+    result_a_id, _ = _seed_two_results(run_id)
+
+    resp = client.get(f"/api/runs/{run_id}/results/{result_a_id}/mismatches", params={"column": "<row>"})
+    assert resp.status_code == 200
+    assert resp.headers["X-Total-Count"] == "2"
+    assert {row["mismatch_type"] for row in resp.json()} == {"missing_in_target", "missing_in_source"}
+
+
 def test_insights_404_for_unknown_run(client):
     resp = client.get("/api/runs/no-such-run/mismatches/insights")
     assert resp.status_code == 404

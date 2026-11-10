@@ -886,13 +886,20 @@ def list_result_mismatches(
 
 
 @router.get("/{run_id}/mismatches/insights", response_model=RunMismatchInsightsOut)
-def get_run_mismatch_insights(run_id: str, db: Session = Depends(get_session)):
+def get_run_mismatch_insights(
+    run_id: str,
+    result_id: int | None = None,
+    db: Session = Depends(get_session),
+):
+    """Totals for the whole run, or for one test when ``result_id`` is given."""
     repo = RunRepository(db)
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
     snapshot = build_run_report_snapshot(run)
+    if result_id is not None and all(result.id != result_id for result in snapshot.results):
+        raise HTTPException(status_code=404, detail="Result not found in this run")
     stored_counts = stored_detail_counts(db, run_id)
 
     column_totals: dict[str, int] = {}
@@ -900,10 +907,11 @@ def get_run_mismatch_insights(run_id: str, db: Session = Depends(get_session)):
     tests: list[MismatchTestInsight] = []
 
     for result in snapshot.results:
-        for column, count in result.mismatch_by_column.items():
-            column_totals[column] = column_totals.get(column, 0) + count
-        for mtype, count in result.mismatch_by_type.items():
-            type_totals[mtype] = type_totals.get(mtype, 0) + count
+        if result_id is None or result.id == result_id:
+            for column, count in result.mismatch_by_column.items():
+                column_totals[column] = column_totals.get(column, 0) + count
+            for mtype, count in result.mismatch_by_type.items():
+                type_totals[mtype] = type_totals.get(mtype, 0) + count
         stored_rows = stored_counts.get(result.id, 0) if result.id is not None else 0
         tests.append(MismatchTestInsight(
             result_id=result.id or 0,
@@ -914,7 +922,7 @@ def get_run_mismatch_insights(run_id: str, db: Session = Depends(get_session)):
         ))
 
     top_columns = sorted(column_totals.items(), key=lambda kv: -kv[1])[:10]
-    accepted = accepted_counts(db, run_id)
+    accepted = accepted_counts(db, run_id, result_id=result_id)
 
     return RunMismatchInsightsOut(
         run_id=run_id,
