@@ -175,6 +175,10 @@
     sqlMismatchRowLimit: 5000,
     sqlSampleFrac: '',
     sqlParallelColumns: false,
+    sqlStrategy: 'in_memory',
+    sqlStreamBatchSize: 100000,
+    sqlDuckdbMemoryLimit: '',
+    sqlPushdownBuckets: 16384,
 
     mfAdvancedOpen: false,
     mfFloatTolerance: '1e-9',
@@ -530,6 +534,12 @@
       this[`${prefix}MismatchRowLimit`] = adv.mismatch_row_limit ?? 5000;
       this[`${prefix}SampleFrac`] = adv.sample_frac != null ? String(adv.sample_frac) : '';
       this[`${prefix}ParallelColumns`] = Boolean(adv.parallel_columns);
+      if (prefix === 'sql') {
+        this.sqlStrategy = adv.reconciliation_strategy || 'in_memory';
+        this.sqlStreamBatchSize = adv.stream_batch_size ?? 100000;
+        this.sqlDuckdbMemoryLimit = adv.duckdb_memory_limit || '';
+        this.sqlPushdownBuckets = adv.pushdown_buckets ?? 16384;
+      }
     },
 
     _parseColumnTolerances(raw) {
@@ -557,6 +567,14 @@
       };
       const sf = parseFloat(this[`${p}SampleFrac`]);
       if (sf > 0 && sf <= 1) adv.sample_frac = sf;
+      // Only SQL-to-SQL compares read from the databases themselves, so only
+      // they offer the large-table strategies.
+      if (p === 'sql') {
+        adv.reconciliation_strategy = this.sqlStrategy || 'in_memory';
+        adv.stream_batch_size = Number(this.sqlStreamBatchSize) || 100000;
+        adv.duckdb_memory_limit = (this.sqlDuckdbMemoryLimit || '').trim();
+        adv.pushdown_buckets = Number(this.sqlPushdownBuckets) || 16384;
+      }
       return adv;
     },
 

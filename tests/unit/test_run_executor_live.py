@@ -91,6 +91,25 @@ def test_sqla_engine_exposes_env_name():
     assert sqa._env.name == "staging"
 
 
+def test_sqla_engine_streams_batches_and_exposes_dialect():
+    """Live runs go through this wrapper: chunked loading and the streaming /
+    pushdown strategies need the DBEngine's batch reader and SQL dialect, or
+    they silently fall back to one full read."""
+    import pandas as pd
+    from types import SimpleNamespace
+    from etl_framework.reconciliation.pushdown_sql import engine_dialect
+
+    batches = [pd.DataFrame({"id": [1]}), pd.DataFrame({"id": [2]})]
+    mock_db_engine = MagicMock()
+    mock_db_engine.iter_query_batches.return_value = iter(batches)
+    mock_db_engine._engine = SimpleNamespace(dialect=SimpleNamespace(name="oracle"))
+    sqa = SQLAlchemyQueryEngine(db_engine=mock_db_engine)
+
+    assert list(sqa.iter_query_batches("SELECT 1", {"a": 1}, batch_size=500)) == batches
+    mock_db_engine.iter_query_batches.assert_called_once_with("SELECT 1", {"a": 1}, batch_size=500)
+    assert engine_dialect(sqa) == "oracle"
+
+
 # ---------------------------------------------------------------------------
 # _build_engines: simulation vs live
 # ---------------------------------------------------------------------------

@@ -1326,11 +1326,55 @@
       <div class="settings-group-label">Comparison</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div>
-          <label  class="field-label" for="a11y-launch-comparison-backend">Comparison Backend</label>
-          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select" id="a11y-launch-comparison-backend">
+          <div class="flex items-center gap-1 mb-1">
+            <label class="field-label mb-0" for="a11y-launch-comparison-backend">Comparison Backend</label>
+            <button @click="showHelp('comparisonBackend')" class="help-btn" title="Learn more" data-testid="launch-comparison-backend-help">
+              <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <select x-model="launchSettings.comparison_backend" class="field-input field-select" data-testid="launch-comparison-backend-select" id="a11y-launch-comparison-backend"
+                  :disabled="launchSettings.reconciliation_strategy !== 'in_memory'"
+                  :title="launchSettings.reconciliation_strategy !== 'in_memory' ? 'Not used: the large-table strategy compares in DuckDB' : 'Engine for the in-memory comparison'">
             <option value="pandas">Pandas</option>
             <option value="polars">Polars</option>
           </select>
+        </div>
+        <div>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="field-label mb-0" for="a11y-launch-recon-strategy">Large-table Strategy</label>
+            <button @click="showHelp('reconStrategy')" class="help-btn" title="Learn more" data-testid="launch-recon-strategy-help">
+              <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+          <select x-model="launchSettings.reconciliation_strategy" class="field-input field-select" data-testid="launch-recon-strategy-select"
+                  title="How rows are compared. In-memory loads both sides into pandas/Polars; the others use DuckDB on disk and suit tables too large for RAM." id="a11y-launch-recon-strategy">
+            <option value="in_memory">In-memory (pandas / Polars)</option>
+            <option value="auto">Auto (pushdown where supported, else streaming)</option>
+            <option value="pushdown">Pushdown (hash buckets in each DB)</option>
+            <option value="streaming">Streaming (DuckDB on disk)</option>
+          </select>
+        </div>
+        <div x-show="launchSettings.reconciliation_strategy !== 'in_memory'">
+          <label class="field-label" for="a11y-launch-stream-batch-size">Stream Batch Rows</label>
+          <input type="number" min="1000" max="5000000" step="1000" x-model.number="launchSettings.stream_batch_size"
+                 class="field-input" data-testid="launch-stream-batch-size-input"
+                 title="Rows read from the database per batch. Lower it for wide rows or BLOB/CLOB columns." id="a11y-launch-stream-batch-size">
+        </div>
+        <div x-show="launchSettings.reconciliation_strategy !== 'in_memory'">
+          <label class="field-label" for="a11y-launch-duckdb-memory-limit">DuckDB Memory Limit</label>
+          <input type="text" x-model.trim="launchSettings.duckdb_memory_limit" placeholder="auto (~27% of RAM)"
+                 class="field-input font-mono text-sm" data-testid="launch-duckdb-memory-limit-input"
+                 title="Cap on DuckDB's working memory, e.g. 4GB. It spills to disk beyond this. Blank = about 27% of RAM." id="a11y-launch-duckdb-memory-limit">
+        </div>
+        <div x-show="launchSettings.reconciliation_strategy === 'pushdown' || launchSettings.reconciliation_strategy === 'auto'">
+          <label class="field-label" for="a11y-launch-pushdown-buckets">Pushdown Buckets</label>
+          <input type="number" min="1" max="1000000" x-model.number="launchSettings.pushdown_buckets"
+                 class="field-input" data-testid="launch-pushdown-buckets-input"
+                 title="Hash buckets per side. More buckets = fewer rows fetched when differences are scattered." id="a11y-launch-pushdown-buckets">
         </div>
         <div>
           <div class="flex items-center gap-1 mb-1">
@@ -7452,9 +7496,42 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           <span x-text="sqlAdvancedOpen ? '▲' : '▼'"></span>
         </button>
         <div data-testid="compare-sql-advanced-panel" x-show="sqlAdvancedOpen" class="px-3 pb-3 grid grid-cols-2 gap-2 text-xs border-t">
+          <div class="col-span-2">
+            <div class="flex items-center gap-1 mb-1">
+              <label class="field-label mb-0" for="a11y-compare-sql-strategy">Large-table Strategy</label>
+              <button @click="showHelp('reconStrategy')" class="help-btn" title="Learn more" data-testid="compare-sql-strategy-help">
+                <svg class="icon-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </button>
+            </div>
+            <select data-testid="compare-sql-strategy-select" x-model="sqlStrategy" class="field-input" id="a11y-compare-sql-strategy"
+                    title="In-memory loads both results into pandas/Polars. The others compare in DuckDB on disk; key columns are then required.">
+              <option value="in_memory">In-memory (pandas / Polars)</option>
+              <option value="auto">Auto (pushdown where supported, else streaming)</option>
+              <option value="pushdown">Pushdown (hash buckets in each DB)</option>
+              <option value="streaming">Streaming (DuckDB on disk)</option>
+            </select>
+            <p x-show="sqlStrategy !== 'in_memory' && !sqlKeyColumns.trim()" class="text-amber-600 mt-1" data-testid="compare-sql-strategy-key-warning">
+              Key columns are required for this strategy.
+            </p>
+          </div>
+          <div x-show="sqlStrategy !== 'in_memory'">
+            <label class="field-label" for="a11y-compare-sql-stream-batch">Stream Batch Rows</label>
+            <input data-testid="compare-sql-stream-batch-size-input" x-model.number="sqlStreamBatchSize" type="number" min="1000" max="5000000" step="1000" class="field-input" id="a11y-compare-sql-stream-batch" />
+          </div>
+          <div x-show="sqlStrategy !== 'in_memory'">
+            <label class="field-label" for="a11y-compare-sql-duckdb-memory">DuckDB Memory Limit</label>
+            <input data-testid="compare-sql-duckdb-memory-limit-input" x-model.trim="sqlDuckdbMemoryLimit" placeholder="auto (~27% of RAM)" class="field-input font-mono" id="a11y-compare-sql-duckdb-memory" />
+          </div>
+          <div x-show="sqlStrategy === 'pushdown' || sqlStrategy === 'auto'">
+            <label class="field-label" for="a11y-compare-sql-pushdown-buckets">Pushdown Buckets</label>
+            <input data-testid="compare-sql-pushdown-buckets-input" x-model.number="sqlPushdownBuckets" type="number" min="1" max="1000000" class="field-input" id="a11y-compare-sql-pushdown-buckets" />
+          </div>
           <div>
             <label  class="field-label" for="a11y-compare-backend-3">Backend</label>
-            <select data-testid="compare-sql-backend-select" x-model="sqlBackend" class="field-input" id="a11y-compare-backend-3">
+            <select data-testid="compare-sql-backend-select" x-model="sqlBackend" class="field-input" id="a11y-compare-backend-3"
+                    :disabled="sqlStrategy !== 'in_memory'">
               <option value="pandas">pandas</option>
               <option value="polars">polars</option>
             </select>
@@ -9653,7 +9730,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </svg>
         </button>
       </div>
-      <p class="text-sm text-slate-600" x-text="helpContent"></p>
+      <p class="text-sm text-slate-600" style="white-space: pre-line" data-testid="help-popover-content" x-text="helpContent"></p>
     </div>
   </div>
 </template>

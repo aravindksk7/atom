@@ -148,9 +148,17 @@ class SQLAlchemyQueryEngine:
     def __init__(self, db_engine: DBEngine) -> None:
         self._db = db_engine
         self._env = db_engine._env
+        # The SQLAlchemy engine: its dialect is how the streaming / pushdown
+        # reconciliation strategies tell Oracle, PostgreSQL and SQL Server apart.
+        self._engine = getattr(db_engine, "_engine", None)
 
     def execute_query(self, query: str, params: dict | None = None) -> pd.DataFrame:
         return self._db.execute_query(query, params)
+
+    def iter_query_batches(self, query: str, params: dict | None = None, *, batch_size: int):
+        """Cursor batches, so chunked and streaming reads never load the whole
+        result at once (without this they fall back to one execute_query)."""
+        return self._db.iter_query_batches(query, params, batch_size=batch_size)
 
     def connect(self):
         return self
@@ -967,6 +975,10 @@ class RunExecutor:
             backend=self._build_backend(job),
             segment_columns=segment_columns,
             max_compare_rows=self._settings.max_compare_rows,
+            strategy=self._settings.reconciliation_strategy,
+            pushdown_buckets=self._settings.pushdown_buckets,
+            stream_batch_size=self._settings.stream_batch_size,
+            duckdb_memory_limit=self._settings.duckdb_memory_limit or None,
         )
         result = engine.reconcile(
             query=query,
@@ -2425,7 +2437,7 @@ class RunExecutor:
                     raise ValueError(
                         "compare jobs with SQL sources require live connections to be enabled"
                     )
-                result = service.compare_sql(SQLCompareRequest.model_validate(request))
+                result = service.compare_sql(self._with_run_strategy(SQLCompareRequest.model_validate(request)))
             else:
                 raise ValueError(
                     f"unknown compare_type '{compare_type}' for compare job '{job.name}'"
@@ -2435,6 +2447,18 @@ class RunExecutor:
             # label_a instead.
             return dataclasses.replace(result, query_name=job.name)
         return run_job
+
+    def _with_run_strategy(self, req):
+        """A SQL compare job saved without its own large-table strategy uses
+        the run's, so one Launch setting covers every job in a selection."""
+        from api.schemas import LARGE_TABLE_SETTING_NAMES
+
+        if req.advanced.reconciliation_strategy != "in_memory":
+            return req
+        if self._settings.reconciliation_strategy == "in_memory":
+            return req
+        update = {name: getattr(self._settings, name) for name in LARGE_TABLE_SETTING_NAMES}
+        return req.model_copy(update={"advanced": req.advanced.model_copy(update=update)})
 
     def _build_case_dbt(self, job: JobDefinition):
         def run_job() -> ReconciliationResult:

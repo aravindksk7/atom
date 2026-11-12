@@ -13,8 +13,10 @@ import pandas as pd
 from etl_framework.exceptions import CompareRowLimitExceeded, SchemaValidationError
 from etl_framework.reconciliation.backends.base import ComparisonBackend
 from etl_framework.reconciliation.chunker import build_hash_query, hashes_match, load_in_chunks
+from etl_framework.reconciliation.large_table import STRATEGIES, LargeTableReconciler
 from etl_framework.reconciliation.models import MismatchRecord, ReconciliationResult
 from etl_framework.reconciliation.normalizer import TypeNormalizer
+from etl_framework.reconciliation.pushdown_sql import engine_dialect
 from etl_framework.runner.state import TestStatus
 from etl_framework.utils.tracing import span as _span
 
@@ -49,7 +51,14 @@ class ReconciliationEngine:
         parallel_workers: int = 4,
         segment_columns: list[str] | None = None,
         max_compare_rows: int = 0,
+        strategy: str = "in_memory",            # "in_memory" | "streaming" | "pushdown" | "auto"
+        pushdown_buckets: int = 16384,
+        stream_batch_size: int = 100_000,
+        duckdb_memory_limit: str | None = None,
+        spill_dir: str | None = None,
     ):
+        if strategy not in STRATEGIES:
+            raise ValueError(f"strategy must be one of {STRATEGIES}, got {strategy!r}")
         self._source_engine = source_engine
         self._target_engine = target_engine
         self._key_columns = key_columns
@@ -73,6 +82,11 @@ class ReconciliationEngine:
         self._parallel_workers: int = parallel_workers
         self._segment_columns: list[str] = segment_columns or []
         self._max_compare_rows = max_compare_rows
+        self._strategy = strategy
+        self._pushdown_buckets = max(1, int(pushdown_buckets))
+        self._stream_batch_size = max(1, int(stream_batch_size))
+        self._duckdb_memory_limit = duckdb_memory_limit or None
+        self._spill_dir = spill_dir or None
 
     def reconcile(
         self,
@@ -80,17 +94,32 @@ class ReconciliationEngine:
         query_name: str,
         params: dict | None = None,
         max_duration_seconds: float | None = None,
+        target_query: str | None = None,
     ) -> ReconciliationResult:
+        """``target_query``, when given, runs on the target instead of ``query``
+        (two databases whose SQL differs); otherwise both run ``query``."""
+        target_query = target_query or query
         with _span("reconciliation.reconcile", attributes={"query_name": query_name}):
             t0 = time.monotonic()
             executed_at = datetime.now(timezone.utc)
 
+            if self._strategy != "in_memory":
+                # Large-table path: rows go to an on-disk DuckDB database instead
+                # of pandas, so max_compare_rows and the pluggable backend do not
+                # apply.
+                result = LargeTableReconciler(self).reconcile(
+                    query, query_name, params, executed_at, target_query=target_query,
+                )
+                result = dataclasses.replace(result, duration_seconds=time.monotonic() - t0)
+                return self._apply_slo(result, max_duration_seconds)
+
             if self._chunk_size > 0:
                 # Hash pre-check: if enabled, run a lightweight hash query first;
-                # if hashes match, return an early PASSED result.
-                if self._use_hash_precheck:
+                # if hashes match, return an early PASSED result. The query uses
+                # SQL Server's CHECKSUM, so other databases skip it.
+                if self._use_hash_precheck and self._hash_precheck_supported():
                     hash_q_src = build_hash_query(query, self._key_columns)
-                    hash_q_tgt = build_hash_query(query, self._key_columns)
+                    hash_q_tgt = build_hash_query(target_query, self._key_columns)
                     hash_src = self._normalizer.normalize(
                         self._source_engine.execute_query(hash_q_src, params)
                     )
@@ -128,7 +157,7 @@ class ReconciliationEngine:
                     self._chunk_size, params, self._normalizer.normalize,
                 )
                 df_target = load_in_chunks(
-                    self._target_engine, query, self._key_columns,
+                    self._target_engine, target_query, self._key_columns,
                     self._chunk_size, params, self._normalizer.normalize,
                 )
             else:
@@ -136,7 +165,7 @@ class ReconciliationEngine:
                     self._source_engine.execute_query(query, params)
                 )
                 df_target = self._normalizer.normalize(
-                    self._target_engine.execute_query(query, params)
+                    self._target_engine.execute_query(target_query, params)
                 )
 
             total_rows = len(df_source) + len(df_target)
@@ -267,20 +296,33 @@ class ReconciliationEngine:
         df_source: pd.DataFrame,
         df_target: pd.DataFrame,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        return self._preprocess_frame(df_source), self._preprocess_frame(df_target)
+
+    def _preprocess_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         if not self._case_insensitive_columns and not self._whitespace_normalize_columns:
-            return df_source, df_target
-        df_source = df_source.copy()
-        df_target = df_target.copy()
+            return df
+        df = df.copy()
         for col in self._case_insensitive_columns | self._whitespace_normalize_columns:
-            for df in (df_source, df_target):
-                if col not in df.columns:
-                    continue
-                if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-                    if col in self._whitespace_normalize_columns:
-                        df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
-                    if col in self._case_insensitive_columns:
-                        df[col] = df[col].str.lower()
-        return df_source, df_target
+            if col not in df.columns:
+                continue
+            if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+                if col in self._whitespace_normalize_columns:
+                    df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
+                if col in self._case_insensitive_columns:
+                    df[col] = df[col].str.lower()
+        return df
+
+    def _hash_precheck_supported(self) -> bool:
+        """The pre-check SQL is SQL Server's; DB engines on other dialects skip it.
+
+        Engines without a SQLAlchemy dialect (pre-loaded frames) keep the old
+        behaviour: their hash frame lacks ``hash_value``, so it never matches.
+        """
+        for engine in (self._source_engine, self._target_engine):
+            dialect = engine_dialect(engine)
+            if dialect is not None and dialect != "mssql":
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Schema helpers

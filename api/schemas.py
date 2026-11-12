@@ -196,6 +196,15 @@ class TestResultOverrideRequest(BaseModel):
 
 
 
+ReconStrategy = Literal["in_memory", "streaming", "pushdown", "auto"]
+# A DuckDB size such as 4GB or 512MiB, or blank for the automatic limit. It is
+# interpolated into a SET statement, so nothing else is accepted.
+DUCKDB_MEMORY_LIMIT_PATTERN = r"^(\d+(\.\d+)?\s*(KB|MB|GB|TB|KiB|MiB|GiB|TiB))?$"
+LARGE_TABLE_SETTING_NAMES = (
+    "reconciliation_strategy", "pushdown_buckets", "stream_batch_size", "duckdb_memory_limit",
+)
+
+
 class RunSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -213,6 +222,13 @@ class RunSettings(BaseModel):
     shadow_sample_frac: float = Field(default=0.02, gt=0, le=1.0)
     mismatch_row_limit: int = Field(default=1000, ge=1)
     max_compare_rows: int = Field(default=0, ge=0)
+    # Large-table strategy: in_memory (pandas/polars), streaming (DuckDB on
+    # disk), pushdown (per-bucket hashes in each database, then DuckDB for the
+    # buckets that differ) or auto (pushdown where supported, else streaming).
+    reconciliation_strategy: ReconStrategy = "in_memory"
+    pushdown_buckets: int = Field(default=16384, ge=1, le=1_000_000)
+    stream_batch_size: int = Field(default=100_000, ge=1_000, le=5_000_000)
+    duckdb_memory_limit: str = Field(default="", pattern=DUCKDB_MEMORY_LIMIT_PATTERN)
     exclude_columns: list[str] = Field(default_factory=list)
     key_columns: list[str] = Field(default_factory=list)
     health_check: bool = False
@@ -1486,6 +1502,13 @@ class AdvancedCompareOptions(BaseModel):
     sample_frac: float | None = Field(default=None, ge=0.01, le=1.0)
     parallel_columns: bool = False
     parallel_workers: int = Field(default=4, ge=1, le=32)
+    # Large-table strategy (see RunSettings). Only SQL-to-SQL compares read
+    # from the databases directly; other sources are already in memory, so
+    # they ignore it.
+    reconciliation_strategy: ReconStrategy = "in_memory"
+    pushdown_buckets: int = Field(default=16384, ge=1, le=1_000_000)
+    stream_batch_size: int = Field(default=100_000, ge=1_000, le=5_000_000)
+    duckdb_memory_limit: str = Field(default="", pattern=DUCKDB_MEMORY_LIMIT_PATTERN)
 
 
 class BOCompareRequest(BaseModel):
