@@ -264,6 +264,10 @@ def _build_engine(
         parallel_columns=adv.parallel_columns,
         parallel_workers=adv.parallel_workers,
         backend=backend,
+        strategy=adv.reconciliation_strategy,
+        pushdown_buckets=adv.pushdown_buckets,
+        stream_batch_size=adv.stream_batch_size,
+        duckdb_memory_limit=adv.duckdb_memory_limit or None,
     )
 
 
@@ -579,6 +583,8 @@ class CompareService:
 
     def compare_sql(self, req: SQLCompareRequest) -> "ReconciliationResult":
         """Run both queries against their configs and reconcile; returns ONE result."""
+        if req.advanced.reconciliation_strategy != "in_memory":
+            return self._compare_sql_large(req)
         df_a, df_b = self._load_sql_frames(req)
 
         recon_req = ReconFileCompareRequest(
@@ -592,8 +598,40 @@ class CompareService:
         )
         return self._tabular_file_result(recon_req, df_a, df_b)
 
-    def _load_sql_frames(self, req: SQLCompareRequest) -> tuple["pd.DataFrame", "pd.DataFrame"]:
-        """Run both read-only queries and return frames whose column case agrees."""
+    def _compare_sql_large(self, req: SQLCompareRequest) -> "ReconciliationResult":
+        """SQL compare without loading either result into pandas.
+
+        Streams (or pushes the comparison down to) both databases through
+        ReconciliationEngine's large-table strategies. Keys are required: the
+        in-memory path infers them from the loaded rows, which is exactly
+        what this path avoids.
+        """
+        if not req.key_columns:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"key columns are required for the '{req.advanced.reconciliation_strategy}' "
+                    "large-table strategy (they cannot be inferred without loading the data)"
+                ),
+            )
+        engine_a, engine_b = self._sql_engines(req)
+        try:
+            reconciler = _build_engine(
+                engine_a, engine_b,
+                key_columns=list(req.key_columns),
+                exclude_columns=req.exclude_columns or [],
+                mismatch_row_limit=_compare_mismatch_row_limit(req.advanced),
+                adv=req.advanced,
+            )
+            return reconciler.reconcile(
+                req.query_a, req.label_a or "sql_comparison", target_query=req.query_b,
+            )
+        finally:
+            engine_a.dispose()
+            engine_b.dispose()
+
+    def _sql_engines(self, req: SQLCompareRequest) -> tuple["DBEngine", "DBEngine"]:
+        """Validate both queries are read-only and connect to both configs."""
         from etl_framework.db.engine import DBEngine
         from etl_framework.config.models import resolve_connection
         from etl_framework.db.sql_utils import is_read_only_sql
@@ -613,8 +651,11 @@ class CompareService:
 
         env_a = resolve_connection(cfg_a.config_json or {}, req.connection_a, env_name=cfg_a.env_name or "")
         env_b = resolve_connection(cfg_b.config_json or {}, req.connection_b, env_name=cfg_b.env_name or "")
-        engine_a = DBEngine(env_a)
-        engine_b = DBEngine(env_b)
+        return DBEngine(env_a), DBEngine(env_b)
+
+    def _load_sql_frames(self, req: SQLCompareRequest) -> tuple["pd.DataFrame", "pd.DataFrame"]:
+        """Run both read-only queries and return frames whose column case agrees."""
+        engine_a, engine_b = self._sql_engines(req)
         key_cols = req.key_columns or []
         try:
             df_a = _load_in_chunks(engine_a, req.query_a, key_cols, req.chunk_size)
