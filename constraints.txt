@@ -1,0 +1,103 @@
+# Pinned dependency versions, as resolved for v1.2.0 (2026-11-05).
+# Used via "-c constraints.txt" in requirements.txt, so builds install
+# exactly what the last release shipped with.
+#
+# Regenerate only on purpose, and check the on-prem mirror has the new
+# versions first:
+#   uv pip compile requirements.txt extra.in --universal --python-version 3.12 \n#     --exclude-newer <UTC timestamp> --no-header --no-annotate -o constraints.txt
+# (extra.in lists "typer", which the Dockerfiles install separately.)
+
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.16.0
+apscheduler==3.11.3
+bcrypt==5.0.0
+beautifulsoup4==4.15.0
+boto3==1.43.124
+botocore==1.43.124
+certifi==2026.10.23
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+charset-normalizer==3.5.2
+click==8.5.0
+colorama==0.4.6 ; sys_platform == 'win32'
+coverage==7.17.2
+cryptography==50.0.2
+duckdb==2.0.0
+et-xmlfile==2.0.0
+fastapi==0.162.0
+googleapis-common-protos==1.76.0
+grpcio==1.85.1
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.9.0
+httpx==0.28.1
+hypothesis==6.170.14
+idna==3.20
+iniconfig==2.3.1
+invoke==3.0.3
+jinja2==3.1.6
+jmespath==1.1.0
+markdown-it-py==4.2.0
+markupsafe==3.0.4
+mdurl==0.1.2
+moto==5.2.5
+numpy==2.5.4
+openpyxl==3.1.5
+opentelemetry-api==1.45.2
+opentelemetry-exporter-http-transport==0.66b2
+opentelemetry-exporter-otlp==1.45.2
+opentelemetry-exporter-otlp-common==0.66b2
+opentelemetry-exporter-otlp-proto-common==1.45.2
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
+opentelemetry-exporter-otlp-proto-http==1.45.2
+opentelemetry-proto==1.45.2
+opentelemetry-sdk==1.45.2
+opentelemetry-semantic-conventions==0.66b2
+packaging==26.3
+pandas==3.1.1
+paramiko==5.1.0
+pluggy==1.7.0
+polars==2.1.0
+polars-runtime-32==2.1.0
+prometheus-client==0.26.0
+protobuf==7.36.2
+psycopg==3.3.8
+psycopg-binary==3.3.8 ; implementation_name != 'pypy'
+pyarrow==26.0.1
+pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pydantic==2.14.2
+pydantic-core==2.50.2
+pygments==2.21.0
+pynacl==1.6.2
+pyodbc==5.3.0
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1
+pytest-cov==7.1.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.4
+python-json-logger==4.2.0
+pyyaml==6.0.3
+requests==2.34.2
+responses==0.26.3
+rich==15.0.0
+s3transfer==0.19.3
+shellingham==1.5.4
+six==1.17.0
+sortedcontainers==2.4.0
+soupsieve==4.0.1
+sqlalchemy==2.1.8
+starlette==1.10.0
+tabulate==0.10.0
+tenacity==9.2.1
+typer==0.27.3
+typing-extensions==4.16.0
+typing-inspection==0.4.5
+tzdata==2026.6 ; sys_platform == 'emscripten' or sys_platform == 'win32'
+tzlocal==5.4.5
+urllib3==2.8.0
+uvicorn==0.54.0
+uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
+watchfiles==1.3.0
+websockets==17.4
+werkzeug==3.1.9
+xmltodict==1.0.4

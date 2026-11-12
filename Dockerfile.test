@@ -14,7 +14,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 WORKDIR /app
 
-COPY requirements.txt package.json package-lock.json ./
+COPY requirements.txt constraints.txt package.json package-lock.json ./
 RUN pip install --no-cache-dir -r requirements.txt typer pytest-xdist
 RUN npm ci
 RUN node node_modules/@playwright/test/cli.js install --with-deps chromium

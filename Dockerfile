@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8080
 
 # Install Python requirements
-COPY requirements.txt ./
+COPY requirements.txt constraints.txt ./
 RUN pip install --no-cache-dir -r requirements.txt typer
 
 # Copy application directories and assets

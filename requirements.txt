@@ -1,3 +1,9 @@
+# Exact versions come from constraints.txt: the set that resolved when
+# v1.2.0 was built (2026-11-05). On-prem package mirrors lag PyPI, so an
+# unpinned build can pick a version the mirror lists but cannot serve.
+# Regenerate deliberately (see the header of constraints.txt).
+-c constraints.txt
+
 # Core dependencies
 pandas>=2.0
 openpyxl>=3.1

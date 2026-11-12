@@ -20,7 +20,7 @@ dependencies = [
     "tabulate>=0.9",
     "pydantic>=2.0",
     "cryptography>=41.0",
-    "fastapi>=0.111",
+    "fastapi>=0.111,<=0.162.0",
     "uvicorn[standard]>=0.29",
     "apscheduler>=3.10,<4.0",
     "beautifulsoup4>=4.12",
@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 json-logging = ["python-json-logger>=2.0"]
-api = ["fastapi>=0.111", "uvicorn[standard]>=0.29"]
+api = ["fastapi>=0.111,<=0.162.0", "uvicorn[standard]>=0.29"]
 tracing = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp>=1.20"]
 metrics = ["prometheus_client>=0.17"]
 stats = ["scipy>=1.10"]
