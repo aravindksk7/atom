@@ -208,6 +208,46 @@
           },
         },
         {
+          title: 'Choose pandas, Polars or DuckDB for the comparison',
+          text: 'Large-table Strategy decides where rows are compared; Comparison Backend only matters for In-memory. In-memory (pandas or Polars) loads every row of both sides into RAM: fastest for small and medium results, but a run that does not fit fails with "Unable to allocate ... MiB for an array". Pandas is the default and the only engine that applies case-insensitive and whitespace column options before comparing in memory. Polars gives the same answers with a faster, leaner join on wide (50+ column) or string-heavy tables, but it starts from a pandas read, so it does not lower the loading peak. Streaming (DuckDB) reads both queries in batches, writes each batch to disk and lets DuckDB join them, spilling past DuckDB Memory Limit, so Python memory stays near one batch whatever the table size. Pushdown asks Oracle, PostgreSQL and SQL Server for per-bucket row counts and MD5 sums of a canonical form of every row; buckets that agree count as matched without moving a row, and only differing buckets are streamed into DuckDB and compared exactly, so identical tables transfer nothing. Auto uses pushdown where both databases support it and streaming everywhere else. Sizing guide: rows x columns x about 50 bytes x 3 (source, target, merge) must fit in free RAM for In-memory. On a 16 GB server keep In-memory below roughly 5 million narrow rows and use Auto above that; a 1 million row Oracle-to-PostgreSQL run peaked at ~500 MiB in pandas and ~10 MiB with Streaming or Pushdown. Streaming, Pushdown and Auto ignore Max Compare Rows and Comparison Backend.',
+          where: 'Launch -> Run Settings -> Comparison -> Large-table Strategy / Comparison Backend',
+          when: 'A reconciliation runs out of memory, or a source query returns millions of rows or wide rows.',
+          uiMockup: { title: 'Large-table run settings', badge: 'Auto', elements: [
+            { type: 'select', label: 'Large-table Strategy', value: 'Auto (pushdown where supported, else streaming)', highlight: true },
+            { type: 'select', label: 'Comparison Backend', value: 'Pandas (not used)' },
+            { type: 'input', label: 'Stream Batch Rows', value: '100000' },
+            { type: 'input', label: 'DuckDB Memory Limit', value: '4GB' },
+            { type: 'input', label: 'Pushdown Buckets', value: '16384' },
+          ] },
+          cli: {
+            command: "curl -s -X POST -H 'Authorization: Bearer $ATOM_API_TOKEN' -H 'Content-Type: application/json' '$ATOM_API_URL/api/runs' -d '{\"source_env\":\"oracle-prod\",\"target_env\":\"pg-prod\",\"job_names\":[\"orders-reconcile\"],\"run_settings\":{\"reconciliation_strategy\":\"auto\",\"stream_batch_size\":100000,\"duckdb_memory_limit\":\"4GB\",\"pushdown_buckets\":16384}}'",
+            description: 'Launches a reconciliation with the large-table strategy. The run log names the path taken, e.g. "(pushdown): src=38000000 tgt=38000000 buckets=16384 differing=12", or "pushdown unavailable (...); streaming instead" with the reason.',
+            params: [
+              { flag: 'reconciliation_strategy', desc: 'in_memory (default), streaming, pushdown or auto.' },
+              { flag: 'stream_batch_size', desc: 'Rows per database read batch, 1,000-5,000,000. Default 100,000.' },
+              { flag: 'duckdb_memory_limit', desc: 'Such as 4GB or 512MiB. Blank = about 27% of RAM; DuckDB spills to disk beyond it.' },
+              { flag: 'pushdown_buckets', desc: 'Hash buckets per side. More buckets mean fewer rows fetched when differences are scattered.' },
+            ],
+            sampleOutput: 'FAILED run=run-9a1d passed=0 failed=1 error=0 exit=1',
+          },
+        },
+        {
+          title: 'BLOB / CLOB columns and memory on small servers',
+          text: 'BLOB, RAW, bytea and varbinary columns, and CLOB / NCLOB, are the usual reason an in-memory run blows up: every byte of every object is held in pandas. With Pushdown or Auto they are hashed inside the database (Oracle DBMS_CRYPTO.HASH, PostgreSQL MD5, SQL Server HASHBYTES) and only their 32-character MD5 is fetched for rows that differ, so mismatch details show the MD5 instead of the bytes. On Oracle this needs GRANT EXECUTE ON SYS.DBMS_CRYPTO to the connecting user; without it the run log says so and the job streams instead, still with the correct result. Streaming moves the real bytes, so lower Stream Batch Rows to 10,000-20,000 for tables with large objects. Oracle stores an empty string and an empty BLOB as NULL while PostgreSQL keeps them, and every strategy reports those rows as differences, exactly as in-memory does. Numbers are hashed at the precision of Float Tolerance and timestamps to the microsecond, so a difference smaller than the tolerance never hides a real one.',
+          where: 'Launch -> Run Settings -> Large-table Strategy = Auto, Stream Batch Rows, DuckDB Memory Limit',
+          when: 'The query includes BLOB/CLOB/bytea columns, or the app server has little RAM (for example 16 GB).',
+          uiMockup: { title: 'LOB-heavy table on a 16 GB server', badge: 'Pushdown', elements: [
+            { type: 'select', label: 'Large-table Strategy', value: 'Auto (pushdown where supported, else streaming)', highlight: true },
+            { type: 'input', label: 'Stream Batch Rows', value: '20000' },
+            { type: 'input', label: 'DuckDB Memory Limit', value: '4GB' },
+          ] },
+          cli: {
+            command: 'GRANT EXECUTE ON SYS.DBMS_CRYPTO TO etl_reader;',
+            description: 'Run once as a DBA on the Oracle source so pushdown can hash BLOB and CLOB columns in the database. Replace etl_reader with the user in the Oracle connection.',
+            sampleOutput: 'Grant succeeded.',
+          },
+        },
+        {
           title: 'Repeat execution and run from external pytest',
           text: 'Repeat execution advances a date variable over multiple launches with skip, shift, or ignore weekend policy and optional stop-on-failure. External pytest and schedulers should launch the same saved selection through the supported client.',
           where: 'Launch -> selection -> Repeat execution / Schedule',
