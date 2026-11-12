@@ -10,7 +10,7 @@ The application can run entirely in local simulation mode for development, or it
 cd C:\atom
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -74,7 +74,7 @@ ETL Test Framework answers a simple question: **did the right data arrive in the
 cd C:\atom
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -816,26 +816,40 @@ source .venv/bin/activate
 
 ### 3. Install The Application
 
+Always install with `-c constraints.txt`. It pins every dependency (including
+all extras) to the versions the last release was built and tested with.
+Without it pip takes the newest release of everything, which an on-prem
+package mirror may not serve yet: the on-prem Nexus only allows releases
+older than 7 days, so an unpinned install fails on packages such as
+`fastapi` or `annotated-doc` a few days after they are published.
+`pip install -r requirements.txt` applies the constraints automatically.
+
 Basic install:
 
 ```powershell
-pip install -e .
+pip install -c constraints.txt -e .
 ```
 
 Development install:
 
 ```powershell
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"
 ```
 
 Optional extras:
 
 ```powershell
-pip install -e ".[json-logging]"
-pip install -e ".[tracing]"
-pip install -e ".[metrics]"
-pip install -e ".[netezza]"
+pip install -c constraints.txt -e ".[json-logging]"
+pip install -c constraints.txt -e ".[tracing]"
+pip install -c constraints.txt -e ".[metrics]"
+pip install -c constraints.txt -e ".[netezza]"
 ```
+
+Updating the pins: regenerate `constraints.txt` with a cut-off at least 8 days
+in the past (the command is in the file's header), then run
+`python scripts/check_dependency_age.py`. It exits non-zero if any pinned
+version is younger than 7 days, so the mirror would block it. CI runs the same
+check.
 
 `[netezza]` is required for any environment with `db_type: netezza`, for both
 the `nzpy` and the ODBC driver. It pulls in `nzalchemy`, which supplies the

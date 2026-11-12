@@ -55,7 +55,13 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+        run: pip install -c constraints.txt -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+
+      - name: Pinned dependencies are old enough for the on-prem mirror (7 days)
+        run: python scripts/check_dependency_age.py --min-age-days 7 constraints.txt
+
+      - name: Every install path resolves only to pinned versions
+        run: pip install uv && python scripts/verify_pinned_install.py
 
       - name: Run pytest
         run: python -m pytest tests/ -v --tb=short
