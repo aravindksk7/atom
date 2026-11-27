@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 # The specific comparison a run performed lives in config_snapshot, not in
 # run_type (which is "reconciliation" for all of them). Prefer it when present.
@@ -160,3 +160,38 @@ def report_name_base_for(run: Any) -> str:
         target_env=getattr(run, "target_env", None),
         config_snapshot=getattr(run, "config_snapshot", None),
     )
+
+
+def _source_dict_is_pdf(source: Any) -> bool:
+    if not isinstance(source, dict):
+        return False
+    if str(source.get("format") or "").strip().lower() == "pdf":
+        return True
+    for key in ("file_name", "file_path"):
+        val = source.get(key)
+        if isinstance(val, str) and val.lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def run_compared_as(run: Any) -> Literal["printed"] | None:
+    """Return 'printed' when the run is a PDF-vs-PDF comparison, else None.
+
+    Reads run.results the same way build_run_report_snapshot does (list_runs
+    and detail endpoints already load results via build_run_report_snapshot),
+    and falls back to config_snapshot['request'] for newly queued or
+    lightweight runs whose results are not yet populated.
+    """
+    if run is None:
+        return None
+    for result in (getattr(run, "results", None) or []):
+        summary = getattr(result, "mismatch_summary", None)
+        if isinstance(summary, dict) and summary.get("pdf_sources"):
+            return "printed"
+    snapshot = getattr(run, "config_snapshot", None)
+    if isinstance(snapshot, dict):
+        req = snapshot.get("request")
+        if isinstance(req, dict):
+            if _source_dict_is_pdf(req.get("source_a")) and _source_dict_is_pdf(req.get("source_b")):
+                return "printed"
+    return None

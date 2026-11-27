@@ -269,7 +269,7 @@ def notify(
                     subject_template = getattr(hook, "subject_template", None)
                     body_template = getattr(hook, "body_template", None)
                     subject = render_template(subject_template, p) if subject_template \
-                        else f"ETL run {p.get('status', '')}: {run_id}"
+                        else f"ETL run {p.get('status_label') or p.get('status', '')}: {run_id}"
                     body = render_template(body_template, p) if body_template \
                         else json.dumps(p, indent=2, default=str)
                     smtp_config = _resolve_smtp_config()

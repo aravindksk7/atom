@@ -203,17 +203,18 @@
 </head>
 <body>
   <div class="container">
-    {% macro status_badge(status) %}
+    {% macro status_badge(status, as_printed=false) %}
+      {% set label = status ~ " (as printed)" if as_printed else status %}
       {% if status == "PASSED" %}
-        <span class="badge badge-pass">PASSED</span>
+        <span class="badge badge-pass">{{ label }}</span>
       {% elif status == "FAILED" or status == "ERROR" %}
-        <span class="badge badge-fail">{{ status }}</span>
+        <span class="badge badge-fail">{{ label }}</span>
       {% elif status == "SLOW" %}
-        <span class="badge badge-amber">SLOW</span>
+        <span class="badge badge-amber">{{ label }}</span>
       {% elif status in ("RUNNING", "SKIPPED") %}
-        <span class="badge badge-amber">{{ status }}</span>
+        <span class="badge badge-amber">{{ label }}</span>
       {% else %}
-        <span class="badge badge-gray">{{ status }}</span>
+        <span class="badge badge-gray">{{ label }}</span>
       {% endif %}
     {% endmacro %}
     {% set suite_total_issues = suite.total_issues if suite.total_issues is defined else (suite.reconciliation_results | sum(attribute='total_issues')) %}
@@ -378,20 +379,23 @@
         </thead>
         <tbody>
           {% for result in suite.reconciliation_results %}
+          {% set has_pdf_sources = result.mismatch_summary is defined and result.mismatch_summary and result.mismatch_summary.pdf_sources %}
           <tr>
             <td style="font-family: monospace;">{{ result.query_name }}</td>
             <td>
-              {{ status_badge(result.effective_status) }}
+              {{ status_badge(result.effective_status, as_printed=has_pdf_sources) }}
               {% if result.effective_status != result.status %}
               <span style="font-size:0.78em;color:var(--muted);margin-left:6px">raw: {{ result.status }}</span>
               {% endif %}
             </td>
             <td>{{ "%.2f"|format(result.duration_seconds) if result.duration_seconds else "N/A" }}s</td>
             <td style="font-family: monospace; font-size:0.86em; color:var(--soft);">
-              {% if result.source_file_name or result.target_file_name %}
+              {% if result.source_file_name or result.target_file_name or has_pdf_sources %}
+                {% if result.source_file_name or result.target_file_name %}
                 <div>Source: {{ result.source_file_name or "N/A" }}</div>
                 <div>Target: {{ result.target_file_name or "N/A" }}</div>
-                {% if result.mismatch_summary and result.mismatch_summary.file_pairs %}
+                {% endif %}
+                {% if result.mismatch_summary is defined and result.mismatch_summary and result.mismatch_summary.file_pairs %}
                 <details data-testid="file-pairs-details" style="margin-top:8px; color:var(--soft);">
                   <summary style="cursor:pointer;color:var(--accent);font-family:var(--font-display);">File pairs</summary>
                   <div style="margin-top:6px;display:grid;gap:6px;">
@@ -422,6 +426,47 @@
                     {% endif %}
                   </div>
                 </details>
+                {% endif %}
+                {% if has_pdf_sources %}
+                {% set pdf = result.mismatch_summary.pdf_sources %}
+                <div data-testid="pdf-sources-block" style="margin-top:8px;display:grid;gap:6px;">
+                  {% for side_key, side_label in (('a', 'Source A'), ('b', 'Source B')) %}
+                    {% set s = pdf[side_key] %}
+                    {% if s %}
+                    <div data-testid="pdf-source-{{ side_key }}" class="pair-row">
+                      <div><strong>{{ side_label }}:</strong> {{ s.file_name or 'N/A' }} ({{ s.pages or 0 }} page{{ '' if s.pages == 1 else 's' }})</div>
+                      {% if s.table %}
+                      <div>Header: {{ (s.table.header or []) | join(' | ') }}</div>
+                      <div>Rows: {{ s.table.rows if s.table.rows is defined else 0 }}; filled cells: {{ s.filled_cells or 0 }}; dropped empty rows: {{ s.dropped_empty_rows or 0 }}; ignored tables: {{ (s.ignored_tables or []) | length }}</div>
+                      {% else %}
+                      <div>Filled cells: {{ s.filled_cells or 0 }}; dropped empty rows: {{ s.dropped_empty_rows or 0 }}; ignored tables: {{ (s.ignored_tables or []) | length }}</div>
+                      {% endif %}
+                      {% if s.prompts %}
+                      <div>Prompts: {% for p in s.prompts %}{{ p.label }}: {{ p.value }}{% if not loop.last %}; {% endif %}{% endfor %}</div>
+                      {% endif %}
+                      {% if s.warnings %}
+                      <div style="color:#fcd34d;">Warnings: {{ s.warnings | join('; ') }}</div>
+                      {% endif %}
+                    </div>
+                    {% endif %}
+                  {% endfor %}
+                  {% if pdf.prompt_differences %}
+                  <div data-testid="pdf-prompt-differences" class="pair-row">
+                    <div><strong>Prompt differences:</strong></div>
+                    {% for diff in pdf.prompt_differences %}
+                    <div>{{ diff.label }}: {{ diff.a if diff.a is not none else '—' }} vs {{ diff.b if diff.b is not none else '—' }}</div>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                  {% if pdf.alignment and pdf.alignment.precision_note %}
+                  <div data-testid="pdf-precision-note" class="pair-row">{{ pdf.alignment.precision_note }}</div>
+                  {% endif %}
+                  {% if pdf.alignment and pdf.alignment.warnings %}
+                  <div data-testid="pdf-alignment-warnings" class="pair-row" style="color:#fcd34d;">
+                    {% for w in pdf.alignment.warnings %}<div>{{ w }}</div>{% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
                 {% endif %}
               {% else %}
                 <span style="color:var(--muted)">N/A</span>

@@ -91,6 +91,11 @@
       return `${source || 'N/A'} → ${target || 'N/A'}`;
     },
 
+    runStatusLabel(run) {
+      if (!run || !run.status) return '';
+      return run.status + (run.compared_as === 'printed' ? ' (as printed)' : '');
+    },
+
     async loadRuns() {
       const params = new URLSearchParams();
       if (this.historyFilterStatus) params.set('status', this.historyFilterStatus);

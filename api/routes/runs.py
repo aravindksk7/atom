@@ -62,6 +62,7 @@ from api.schemas import (
 from api.services.ci_runs_reporting import CiRunsFilters, CiRunsReportingService
 from api.services.job_env_validation import validate_env_requirements
 from api.services.run_executor import RunExecutor
+from api.services.run_label import run_compared_as
 from api.services.run_timing import load_timing_context, timing_for_run
 from api.services.pytest_runner import PytestRunExecutor
 from etl_framework.repository.repository import (
@@ -245,6 +246,7 @@ def _run_status_out(run, selection_names_map: dict[int, str] | None = None) -> R
         target_type=target_type,
         target_name=target_name,
         restarted_from_run_id=restarted_from_run_id,
+        compared_as=run_compared_as(run),
     )
 
 
@@ -467,14 +469,19 @@ def trigger_test_suite(
     db: Session = Depends(get_session),
 ):
     run_id = str(uuid.uuid4())
-    RunRepository(db).create_run(
+    run = RunRepository(db).create_run(
         run_id=run_id,
         source_env=None,
         target_env=None,
         run_type="test_suite",
     )
     background_tasks.add_task(_run_pytest, run_id, body.pytest_args)
-    return RunStatusOut(run_id=run_id, status="PENDING", run_type="test_suite")
+    return RunStatusOut(
+        run_id=run_id,
+        status="PENDING",
+        run_type="test_suite",
+        compared_as=run_compared_as(run),
+    )
 
 
 @router.post("", response_model=RunStatusOut, status_code=202)
@@ -502,7 +509,7 @@ def trigger_run(
             for s in ordered_jobs
         ]
     config_snapshot["run_settings"] = run_settings
-    repo.create_run(
+    run = repo.create_run(
         run_id=run_id,
         source_env=body.source_env,
         target_env=body.target_env,
@@ -529,7 +536,7 @@ def trigger_run(
         body.run_settings,
         config_snapshot,
     )
-    return RunStatusOut(run_id=run_id, status="PENDING")
+    return RunStatusOut(run_id=run_id, status="PENDING", compared_as=run_compared_as(run))
 
 
 @router.post("/{run_id}/cancel", status_code=202)
@@ -573,6 +580,7 @@ def restart_failed_run(
         run_id=plan.run_id,
         status=plan.status,
         restarted_from_run_id=plan.restarted_from_run_id,
+        compared_as=run_compared_as(new_run),
     )
 
 
@@ -632,6 +640,7 @@ def mark_step_passed(
         run_id=plan.run_id,
         status=plan.status,
         restarted_from_run_id=plan.restarted_from_run_id,
+        compared_as=run_compared_as(new_run),
     )
 
 
@@ -1595,6 +1604,7 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_session)):
             total_tests=r.total_tests, passed=r.passed,
             failed=r.failed, slow=r.slow, error=r.error,
             run_type=r.run_type, pair_id=r.pair_id,
+            compared_as=run_compared_as(r),
         )
 
     tests_a = {r.query_name: r for r in ra.results}
@@ -1679,6 +1689,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_session)):
         file_name_a=snapshot.file_name_a,
         file_name_b=snapshot.file_name_b,
         results=results,
+        compared_as=run_compared_as(run),
     )
 
 

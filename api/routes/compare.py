@@ -30,6 +30,7 @@ from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.audit_service import AuditService
+from api.services.run_label import run_compared_as
 from api.services.run_report import build_run_report_snapshot
 from api.services.upload_store import sanitize_compare_request
 
@@ -51,6 +52,7 @@ def _status_out(r) -> RunStatusOut:
         error=snapshot.error,
         run_type=snapshot.run_type,
         pair_id=snapshot.pair_id,
+        compared_as=run_compared_as(r),
     )
 
 

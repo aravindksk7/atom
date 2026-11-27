@@ -2705,9 +2705,20 @@ class RunExecutor:
 
     def _fire_webhooks(self, status: str, **extra) -> None:
         try:
+            from types import SimpleNamespace
             from etl_framework.repository.repository import NotificationRepository
             from api.services.notifier import notify
+            from api.services.run_label import run_compared_as
             hooks = NotificationRepository(self._db).list_enabled_for_event(status)
+            run = self._run_repo.get_run(self._run_id)
+            if run is None and self._config_snapshot:
+                run = SimpleNamespace(config_snapshot=self._config_snapshot, results=[])
+            if run_compared_as(run) == "printed":
+                extra = {
+                    **extra,
+                    "compared_as": "printed",
+                    "status_label": f"{status} (as printed)",
+                }
             notify(self._run_id, status, extra=extra, hooks=hooks, db_session=self._db)
         except Exception:
             pass  # never let notifier failures affect the run

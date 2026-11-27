@@ -3971,7 +3971,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="flex items-center gap-3 mb-4">
         <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
         <div class="section-title">Run Detail</div>
-        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="selectedRun.status"></span>
+        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="runStatusLabel(selectedRun)"></span>
       </div>
 
       <!-- Summary stat cards -->
@@ -4886,7 +4886,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + runStatusLabel(run) + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -4897,7 +4897,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <option value="">— Select —</option>
                 <template x-for="run in runs" :key="run.run_id">
                   <option :value="run.run_id"
-                          x-text="runLabel(run) + ' [' + run.status + '] ' + fmtDate(run.started_at)">
+                          x-text="runLabel(run) + ' [' + runStatusLabel(run) + '] ' + fmtDate(run.started_at)">
                   </option>
                 </template>
               </select>
@@ -5022,7 +5022,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
                 <td class="text-xs font-mono text-slate-600" x-text="run.report_name" :data-testid="'history-run-report-name-' + run.run_id"></td>
-                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="run.status"></span></td>
+                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="runStatusLabel(run)"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
                 <td>
