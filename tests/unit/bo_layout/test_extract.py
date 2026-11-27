@@ -56,16 +56,17 @@ def test_large_borderless_page_fails_fast(tmp_path, monkeypatch):
 
 def test_preflight_errors(tmp_path):
     one = {"header": ["A"], "rows": [["1"]]}
-    cases = [(build_bo_pdf(tmp_path / "e.pdf", tables=[one], encrypt="pw"), {}, 1000, "encrypted"),
-             (build_bo_pdf(tmp_path / "i.pdf", tables=[], image_only=True), {}, 1000, "no_text_layer"),
-             (build_bo_pdf(tmp_path / "m.pdf", tables=[{"header": ["A"], "rows": [[str(i)] for i in range(30)]}], rows_per_page=10), {}, 2, "too_many_pages"),
-             (build_bo_pdf(tmp_path / "s.pdf", tables=[one]), {"explicit_lines": []}, 1000, "bad_settings")]
+    cases = [(build_bo_pdf(tmp_path / "e.pdf", tables=[one], encrypt="pw"), {}, 1000, "encrypted", "the PDF is encrypted"),
+             (build_bo_pdf(tmp_path / "i.pdf", tables=[], image_only=True), {}, 1000, "no_text_layer", "the PDF has no text layer (scanned?); OCR is not supported"),
+             (build_bo_pdf(tmp_path / "m.pdf", tables=[{"header": ["A"], "rows": [[str(i)] for i in range(30)]}], rows_per_page=10), {}, 2, "too_many_pages", "the PDF has 3 pages; the limit is 2"),
+             (build_bo_pdf(tmp_path / "s.pdf", tables=[one]), {"explicit_lines": []}, 1000, "bad_settings", "unsupported table_settings: ['explicit_lines']")]
     (tmp_path / "g.pdf").write_bytes(b"not a pdf at all")
-    cases.append((tmp_path / "g.pdf", {}, 1000, "invalid_pdf"))
-    for path, settings, max_pages, code in cases:
+    cases.append((tmp_path / "g.pdf", {}, 1000, "invalid_pdf", "the file is not a readable PDF"))
+    for path, settings, max_pages, code, message in cases:
         with pytest.raises(PdfReadError) as e:
             extract_tables(path, settings, max_pages=max_pages)
         assert e.value.code == code, path.name
+        assert e.value.message == message, path.name
 
 @pytest.mark.slow
 def test_tall_page_is_fast_and_equals_paginated_twin(tmp_path):

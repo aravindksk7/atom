@@ -8,7 +8,6 @@ from typing import Any
 
 import pdfplumber
 from pdfminer.pdfdocument import PDFEncryptionError, PDFPasswordIncorrect
-from pdfminer.pdfparser import PDFSyntaxError
 from pdfplumber.utils import extract_text, extract_words
 from pdfplumber.utils.exceptions import PdfminerException
 
@@ -358,7 +357,7 @@ def extract_tables(
     if table_settings:
         unknown = sorted(set(table_settings) - ALLOWED_TABLE_SETTINGS)
         if unknown:
-            raise PdfReadError("bad_settings", f"unknown table_settings keys: {', '.join(unknown)}")
+            raise PdfReadError("bad_settings", f"unsupported table_settings: {unknown}")
 
     merged_settings = {**_DEFAULT_FALLBACK_SETTINGS, **(table_settings or {})}
 
@@ -367,21 +366,22 @@ def extract_tables(
     except Exception as exc:
         inner = exc.args[0] if isinstance(exc, PdfminerException) and exc.args else exc
         if isinstance(inner, (PDFPasswordIncorrect, PDFEncryptionError)):
-            raise PdfReadError("encrypted", "PDF is encrypted and cannot be read") from exc
-        if isinstance(inner, PDFSyntaxError):
-            raise PdfReadError("invalid_pdf", f"invalid PDF: {inner}") from exc
-        raise PdfReadError("invalid_pdf", f"unable to open PDF: {inner}") from exc
+            raise PdfReadError("encrypted", "the PDF is encrypted") from exc
+        raise PdfReadError("invalid_pdf", "the file is not a readable PDF") from exc
 
     with pdf:
         page_count = len(pdf.pages)
         if page_count > max_pages:
             raise PdfReadError(
                 "too_many_pages",
-                f"PDF has {page_count} pages, exceeding max_pages={max_pages}",
+                f"the PDF has {page_count} pages; the limit is {max_pages}",
             )
 
         if not any(page.chars for page in pdf.pages):
-            raise PdfReadError("no_text_layer", "PDF has no extractable text layer")
+            raise PdfReadError(
+                "no_text_layer",
+                "the PDF has no text layer (scanned?); OCR is not supported",
+            )
 
         meta = pdf.metadata or {}
         raw_producer = meta.get("Producer")
