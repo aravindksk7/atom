@@ -21,6 +21,7 @@ from api.schemas import (
 )
 from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
+from api.services.run_label import run_compared_as
 from api.services.job_env_validation import (
     SINGLE_ENV_JOB_TYPES as _SINGLE_ENV_JOB_TYPES,  # noqa: F401 — back-compat re-export
     job_name_of as _job_name_of,  # noqa: F401 — back-compat re-export
@@ -187,6 +188,7 @@ def list_selection_runs(selection_id: int, db: Session = Depends(get_session)):
             completed_at=r.completed_at, total_tests=r.total_tests,
             passed=r.passed, failed=r.failed, slow=r.slow, error=r.error,
             run_type=r.run_type, pair_id=r.pair_id,
+            compared_as=run_compared_as(r),
         )
         for r in repo.runs_for_selection(selection_id)
     ]
@@ -201,7 +203,8 @@ def launch_selection(
     db: Session = Depends(get_session),
 ):
     run_id = _do_launch_selection(selection_id, body, background_tasks, request, db)
-    return RunStatusOut(run_id=run_id, status="PENDING")
+    run = RunRepository(db).get_run(run_id)
+    return RunStatusOut(run_id=run_id, status="PENDING", compared_as=run_compared_as(run))
 
 
 def _do_launch_selection(

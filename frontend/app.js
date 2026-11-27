@@ -344,6 +344,9 @@ function _appRaw() {
     // -----------------------------------------------------------
     toasts: [],
     _toastSeq: 0,
+    // Set when the server rejects a file path outside SERVER_FILE_ALLOWED_DIRS;
+    // shown as a persistent panel because a toast fades before it can be read.
+    serverPathHelp: null,
 
     compareTemplates: [],
     activeCompareTemplate: '',
@@ -580,6 +583,7 @@ function _appRaw() {
     // TOAST helpers
     // ===========================================================
     toast(type, title, msg = '') {
+      if (type === 'error' && this._noteServerPathError(msg, title)) return;
       const id = ++this._toastSeq;
       this.toasts.push({ id, type, title, msg, fading: false });
       setTimeout(() => {
@@ -587,6 +591,43 @@ function _appRaw() {
         if (t) t.fading = true;
         setTimeout(() => { this.toasts = this.toasts.filter(x => x.id !== id); }, 350);
       }, 3500);
+    },
+
+    // Recognise the backend's "Invalid file path ... SERVER_FILE_ALLOWED_DIRS"
+    // guidance and open the setup panel with it. Returns true when handled.
+    _noteServerPathError(msg, title = '') {
+      const text = String(msg || '');
+      if (!/^Invalid file path/.test(text) || !/SERVER_FILE_ALLOWED_DIRS/.test(text)) return false;
+      const cmd = text.match(/^(\$env:SERVER_FILE_ALLOWED_DIRS = .*|export SERVER_FILE_ALLOWED_DIRS=.*)$/m);
+      const folder = text.match(/To allow the report folder (.+?), set SERVER_FILE_ALLOWED_DIRS/);
+      this.serverPathHelp = {
+        title: title || 'File path not allowed',
+        message: text,
+        summary: text.split(/\r?\n/)[0],
+        command: cmd ? cmd[1] : '',
+        folder: folder ? folder[1] : '',
+        copied: false,
+      };
+      return true;
+    },
+
+    // Same, for a finished run whose result rows carry the path error (server
+    // paths are read inside the background run for most compare types).
+    _noteServerPathErrorInRun(run, title = '') {
+      for (const r of (run?.results || [])) {
+        if (this._noteServerPathError(r?.error_message, title)) return true;
+      }
+      return false;
+    },
+
+    async copyServerPathCommand() {
+      if (!this.serverPathHelp?.command) return;
+      try {
+        await navigator.clipboard.writeText(this.serverPathHelp.command);
+        this.serverPathHelp = { ...this.serverPathHelp, copied: true };
+      } catch (_) {
+        // Clipboard can be blocked (http, permissions); the command stays selectable.
+      }
     },
 
     isAuthError(e) {
@@ -1359,6 +1400,14 @@ function _appRaw() {
       const tmpReports = this.boReportsA;
       this.boReportsA = this.boReportsB;
       this.boReportsB = tmpReports;
+      // Swap PDF preview state
+      const prev = this.boPdfPreview || { a: null, b: null };
+      this.boPdfPreview = { a: prev.b ?? null, b: prev.a ?? null };
+      const tbls = this.boPdfTableOptions || { a: [], b: [] };
+      this.boPdfTableOptions = { a: tbls.b || [], b: tbls.a || [] };
+      const loading = this.boPdfPreviewLoading || { a: false, b: false };
+      this.boPdfPreviewLoading = { a: Boolean(loading.b), b: Boolean(loading.a) };
+      this.boPdfError = null;
       this.toast('success', 'Sides swapped', 'Source A and Source B have been swapped');
     },
 

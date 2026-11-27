@@ -172,6 +172,43 @@ class TestReportTemplateSmoke:
         assert "no target counterpart" in html
         assert "sales_north.csv" in html
 
+    def test_pdf_source_block_rendered(self, tmp_path):
+        suite = _make_suite()
+        result = suite.reconciliation_results[0]
+        side = lambda n: {
+            "file_name": n,
+            "pages": 1,
+            "table": {"header": ["Region", "Value"], "rows": 50},
+            "filled_cells": 0,
+            "dropped_empty_rows": 0,
+            "prompts": [{"label": "Enter date", "value": "March 4, 2025"}],
+            "ignored_tables": [],
+            "warnings": [],
+        }
+        result.mismatch_summary = {
+            "pdf_sources": {
+                "a": side("qa.pdf"),
+                "b": side("prod.pdf"),
+                "alignment": {
+                    "rewrapped_values": {},
+                    "printed_as": {},
+                    "warnings": ["Value: printed with different decimals (A 2 dp, B 1 dp)"],
+                    "precision_note": "compared as printed; differences smaller than the printed decimals can't be seen (Value: 1 dp)",
+                },
+                "prompt_differences": [
+                    {"label": "Enter date", "a": "March 3, 2025", "b": "March 4, 2025"}
+                ],
+            }
+        }
+        html = _render(suite, tmp_path)
+        assert 'data-testid="pdf-source-a"' in html
+        assert 'data-testid="pdf-source-b"' in html
+        assert "Region | Value" in html
+        assert "March 3, 2025 vs March 4, 2025" in html
+        assert "(Value: 1 dp)" in html
+        assert "(as printed)" in html
+        assert "printed with different decimals" in html
+
 
 def test_started_at_rendered_via_to_local_filter(tmp_path):
     """The header interpolated the raw datetime, so it read

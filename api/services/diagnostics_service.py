@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from etl_framework.bo_layout import ERROR_COUNTS, selftest
 from etl_framework.repository.database import engine
 from etl_framework.utils.diagnostics import build_support_bundle
 
@@ -11,4 +12,5 @@ class DiagnosticsService:
         bundle = build_support_bundle(engine=engine)
         if not include_logs:
             bundle["recent_logs"] = []
+        bundle["pdf_reader"] = {**selftest(), "error_counts": dict(ERROR_COUNTS)}
         return bundle

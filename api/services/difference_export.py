@@ -485,7 +485,9 @@ def run_difference_export_job(export_id: str) -> None:
 
 def _friendly_export_error(exc: Exception) -> str:
     if isinstance(exc, HTTPException):
-        return str(exc.detail)
+        from api.services.adapter_service import _friendly_error
+
+        return _friendly_error(exc)
     return str(exc) or exc.__class__.__name__
 
 
@@ -635,12 +637,25 @@ def _write_bo_compare(db: Session, payload: dict[str, Any], writer: DifferenceWr
     # This re-pulls the sources from a stored payload to build an export. The
     # bytes were already persisted by the run that produced that payload, so
     # storing them again would duplicate them under a second directory.
-    df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id, store_responses=False)
-    df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id, store_responses=False)
+    df_a, df_b, pdf_info = svc._load_bo_frames(
+        req.source_a,
+        req.source_b,
+        req.doc_id,
+        req.report_id,
+        store_responses=False,
+        key_columns=req.key_columns,
+        exclude_columns=req.exclude_columns,
+        rewrap=req.pdf_rewrap,
+    )
+    key_columns = (
+        svc._pdf_key_rules(df_a, df_b, req.key_columns, req.label_a, req.label_b)
+        if pdf_info is not None
+        else (req.key_columns or [])
+    )
     _write_tabular_differences(
         df_a,
         df_b,
-        key_columns=req.key_columns or [],
+        key_columns=key_columns,
         exclude_columns=req.exclude_columns or [],
         options=req.advanced,
         test_name=req.label_a or "bo_comparison",
@@ -781,6 +796,7 @@ def _write_compare_job(
     payload = dict(params.get("request") or {})
     svc = CompareService(db, ConfigRepository(db))
     use_live = settings.use_live_connections if settings is not None else True
+    pdf_key_columns: list[str] | None = None
     if compare_type == "bo":
         req = BOCompareRequest(**payload)
         if not use_live and any(
@@ -790,8 +806,24 @@ def _write_compare_job(
             raise ValueError(
                 "compare jobs with live or API sources require live connections to be enabled"
             )
-        df_a = svc._load_bo_source(req.source_a, req.doc_id, req.report_id, store_responses=False)
-        df_b = svc._load_bo_source(req.source_b, req.doc_id, req.report_id, store_responses=False)
+        df_a, df_b, pdf_info = svc._load_bo_frames(
+            req.source_a,
+            req.source_b,
+            req.doc_id,
+            req.report_id,
+            store_responses=False,
+            key_columns=req.key_columns,
+            exclude_columns=req.exclude_columns,
+            rewrap=req.pdf_rewrap,
+        )
+        if pdf_info is not None:
+            pdf_key_columns = svc._pdf_key_rules(
+                df_a,
+                df_b,
+                req.key_columns,
+                req.label_a,
+                req.label_b,
+            )
         options = req.advanced
     elif compare_type == "recon_file":
         req = ReconFileCompareRequest(**payload)
@@ -825,7 +857,7 @@ def _write_compare_job(
     _write_tabular_differences(
         df_a,
         df_b,
-        key_columns=req.key_columns or [],
+        key_columns=pdf_key_columns if pdf_key_columns is not None else (req.key_columns or []),
         exclude_columns=req.exclude_columns or [],
         options=options,
         test_name=job.name,

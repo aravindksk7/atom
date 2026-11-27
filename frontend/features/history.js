@@ -91,6 +91,19 @@
       return `${source || 'N/A'} → ${target || 'N/A'}`;
     },
 
+    runStatusLabel(run) {
+      if (!run || !run.status) return '';
+      return run.status + (run.compared_as === 'printed' ? ' (as printed)' : '');
+    },
+
+    resultStatusLabel(r, run) {
+      if (!r) return '';
+      const status = r.effective_status || r.status || '';
+      if (!status) return '';
+      const isPrinted = Boolean(r.mismatch_summary?.pdf_sources || run?.compared_as === 'printed');
+      return status + (isPrinted ? ' (as printed)' : '');
+    },
+
     async loadRuns() {
       const params = new URLSearchParams();
       if (this.historyFilterStatus) params.set('status', this.historyFilterStatus);

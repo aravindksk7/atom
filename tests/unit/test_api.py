@@ -181,6 +181,11 @@ def test_health_diagnostics_endpoint(client):
     assert data["recent_logs"] == []
 
 
+def test_health_diagnostics_reports_pdf_reader(client):
+    body = client.get("/api/health/diagnostics?include_logs=false").json()["pdf_reader"]
+    assert body["ok"] is True and isinstance(body["error_counts"], dict)
+
+
 def test_trigger_run(client):
     payload = {"source_env": "dev", "target_env": "prod", "job_names": ["orders_query"]}
     resp = client.post("/api/runs", json=payload)

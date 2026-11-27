@@ -388,6 +388,7 @@ class JobSelectionRepository:
     def runs_for_selection(self, selection_id: int, limit: int = 100) -> list[TestRun]:
         return (
             self._db.query(TestRun)
+            .options(selectinload(TestRun.results))
             .filter(TestRun.selection_id == selection_id)
             .order_by(TestRun.id.desc())
             .limit(limit)

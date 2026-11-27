@@ -67,6 +67,28 @@ jobs:
         run: python -m pytest tests/ -v --tb=short
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Slow BO PDF tests (manual workflow_dispatch only)
+  # Note: ATOM_REQUIRE_REAL_SAMPLES is intentionally unset in CI (D-1)
+  # ─────────────────────────────────────────────────────────────────────────────
+  slow:
+    name: Slow BO PDF tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -c constraints.txt -e ".[dev]" 2>/dev/null || pip install -r requirements.txt
+
+      - name: Run slow BO PDF tests
+        run: python -m pytest tests/unit/bo_layout -m slow -s -q
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Live reconciliation run via the API (only on push to master/manual trigger)
   # Uses short-lived token — minted at start, revoked in always-run cleanup step
   # ─────────────────────────────────────────────────────────────────────────────

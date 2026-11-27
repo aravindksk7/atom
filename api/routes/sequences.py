@@ -32,6 +32,7 @@ from api.schemas import (
 from api.routes.selections import _dump_job_sequence
 from api.routes.runs import _execute_run, _snapshot_from_trigger
 from api.services.audit_service import AuditService
+from api.services.run_label import run_compared_as
 from api.services.job_env_validation import validate_env_requirements
 from api.services.run_timing import build_run_elapsed
 from api.services.sequence_preconditions import check_for_session as check_preconditions
@@ -295,7 +296,8 @@ def launch_sequence(
     db: Session = Depends(get_session),
 ):
     run_id = _do_launch_sequence(sequence_id, body, background_tasks, request, db)
-    return RunStatusOut(run_id=run_id, status="PENDING")
+    run = RunRepository(db).get_run(run_id)
+    return RunStatusOut(run_id=run_id, status="PENDING", compared_as=run_compared_as(run))
 
 
 def _do_launch_sequence(

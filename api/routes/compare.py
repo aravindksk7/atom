@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from api.schemas import (
     BOCompareRequest,
+    BOPdfPreviewOut,
+    BOPdfPreviewRequest,
     ColumnStatsOut,
     ColumnStatsRequest,
     DataSourceSpec,
@@ -28,6 +30,7 @@ from etl_framework.repository.database import get_db
 from etl_framework.repository.models import SavedConfig
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from api.services.audit_service import AuditService
+from api.services.run_label import run_compared_as
 from api.services.run_report import build_run_report_snapshot
 from api.services.upload_store import sanitize_compare_request
 
@@ -49,6 +52,7 @@ def _status_out(r) -> RunStatusOut:
         error=snapshot.error,
         run_type=snapshot.run_type,
         pair_id=snapshot.pair_id,
+        compared_as=run_compared_as(r),
     )
 
 
@@ -263,6 +267,9 @@ def compare_bo_report(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RunStatusOut:
+    if body.source_a.is_pdf or body.source_b.is_pdf:
+        from api.services.compare_service import CompareService
+        CompareService(db, ConfigRepository(db)).precheck_bo_pdf(body)
     run_id = str(uuid.uuid4())
     snapshot = sanitize_compare_request(run_id, "bo_report", body.model_dump(mode="json"))
     compare_body = BOCompareRequest(**snapshot["request"])
@@ -284,6 +291,15 @@ def compare_bo_report(
     background_tasks.add_task(_run_bo_bg, compare_body, run_id)
     run = repo.get_run(run_id)
     return _status_out(run)
+
+
+@router.post("/bo-report/pdf-preview", response_model=BOPdfPreviewOut)
+def preview_bo_pdf(
+    body: BOPdfPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from api.services.compare_service import CompareService
+    return CompareService(db, ConfigRepository(db)).preview_bo_pdf(body)
 
 
 @router.post("/dual-env", response_model=DualEnvLaunchOut, status_code=202)

@@ -4,6 +4,9 @@ from enum import Enum
 from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
+from etl_framework.bo_layout.extract import ALLOWED_TABLE_SETTINGS
+from etl_framework.bo_layout.model import PdfReadOptions
+
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -648,6 +651,7 @@ class RunStatusOut(BaseModel):
     target_type: Literal["selection", "sequence"] | None = None
     target_name: str | None = None
     restarted_from_run_id: str | None = None
+    compared_as: Literal["printed"] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1454,12 +1458,81 @@ class RunCompareOut(BaseModel):
 # Compare tab schemas
 # ---------------------------------------------------------------------------
 
+class PdfReadOptionsModel(BaseModel):
+    table: int | str | None = None
+    number_locale: Literal["en", "eu"] = "en"
+    date_order: Literal["dmy", "mdy"] | None = None
+    fill_down: bool = True
+    table_settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("table")
+    @classmethod
+    def _validate_table(cls, v: int | str | None) -> int | str | None:
+        if isinstance(v, int) and v < 1:
+            raise ValueError("table must be >= 1")
+        return v
+
+    @field_validator("table_settings")
+    @classmethod
+    def _validate_table_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
+        bad = set(v) - ALLOWED_TABLE_SETTINGS
+        if bad:
+            raise ValueError(f"unsupported table_settings: {sorted(bad)}")
+        return v
+
+    def to_options(self) -> PdfReadOptions:
+        return PdfReadOptions(
+            table=self.table,
+            number_locale=self.number_locale,
+            date_order=self.date_order,
+            fill_down=self.fill_down,
+            table_settings=dict(self.table_settings),
+        )
+
+
+class BOPdfPreviewTableOut(BaseModel):
+    index: int
+    header: list[str]
+    rows: int
+    pages: list[int]
+    fragments: int
+
+
+class BOPdfPreviewChosenOut(BaseModel):
+    index: int
+    header: list[str]
+    column_types: dict[str, str]
+    sample_rows: list[list[Any]]
+    suggested_key: str | None = None
+
+
+class BOPdfPreviewPromptOut(BaseModel):
+    label: str
+    value: str
+
+
+class BOPdfPreviewRequest(BaseModel):
+    source: SourceConfig
+    doc_id: str | None = None
+    report_id: str | None = None
+
+
+class BOPdfPreviewOut(BaseModel):
+    pages: int
+    tables: list[BOPdfPreviewTableOut] = Field(default_factory=list)
+    chosen: BOPdfPreviewChosenOut | None = None
+    choose_error: str | None = None
+    prompts: list[BOPdfPreviewPromptOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class SourceConfig(BaseModel):
     source_type: Literal["live", "path", "upload", "api", "run"]
     config_id: int | None = None
     doc_id: str | None = None
     report_id: str | None = None
-    format: Literal["csv", "xlsx", "xls"] = "xlsx"
+    format: Literal["csv", "xlsx", "xls", "pdf"] = "xlsx"
+    pdf: PdfReadOptionsModel | None = None
     file_path: str | None = None
     file_content_b64: str | None = None
     file_name: str | None = None
@@ -1475,6 +1548,15 @@ class SourceConfig(BaseModel):
     run_id: str | None = None
     job_name: str | None = None
 
+    @property
+    def is_pdf(self) -> bool:
+        if self.format == "pdf":
+            return True
+        for name in (self.file_name, self.file_path):
+            if name and name.lower().endswith(".pdf"):
+                return True
+        return False
+
     @model_validator(mode="after")
     def validate_source(self) -> "SourceConfig":
         if self.source_type == "live" and self.config_id is None:
@@ -1488,6 +1570,9 @@ class SourceConfig(BaseModel):
         if self.source_type == "run" and (not self.run_id or not self.job_name):
             raise ValueError("run_id and job_name required for run source")
         return self
+
+
+BOPdfPreviewRequest.model_rebuild()
 
 
 class AdvancedCompareOptions(BaseModel):
@@ -1520,6 +1605,7 @@ class BOCompareRequest(BaseModel):
     exclude_columns: list[str] = Field(default_factory=list)
     label_a: str = "Source A"
     label_b: str = "Source B"
+    pdf_rewrap: bool = True
     advanced: AdvancedCompareOptions = Field(default_factory=AdvancedCompareOptions)
 
 
