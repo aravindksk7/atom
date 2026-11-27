@@ -345,9 +345,7 @@
         src.fileName = file.name;
         if (namespace !== 'colStats') {
           src.pdf = this._defaultBOPdfOptions();
-          this.boPdfPreview = { ...this.boPdfPreview, [side]: null };
-          this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: [] };
-          this.boPdfError = null;
+          this.clearBOPdfPreview(side);
         }
       };
       reader.readAsArrayBuffer(file);
@@ -447,6 +445,16 @@
 
     _defaultBOPdfOptions() {
       return { table: null, numberLocale: 'en', dateOrder: null, fillDown: true };
+    },
+
+    clearBOPdfPreview(side) {
+      const src = side === 'a' ? this.boSourceA : this.boSourceB;
+      if (src) {
+        src.pdf = { ...(src.pdf || this._defaultBOPdfOptions()), table: null };
+      }
+      this.boPdfPreview = { ...this.boPdfPreview, [side]: null };
+      this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: [] };
+      this.boPdfError = null;
     },
 
     _boSourceIsPdf(type, src) {

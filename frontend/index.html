@@ -6722,7 +6722,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </template>
         <template x-if="boSourceAType === 'path'">
-          <input data-testid="compare-bo-source-a-path-input" x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
+          <input data-testid="compare-bo-source-a-path-input" x-model="boSourceA.filePath" @input="clearBOPdfPreview('a')" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
           <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.pdf" @change="handleBOFileUpload($event, 'a')" class="field-input" aria-label="compare bo source a upload input" />
@@ -6898,7 +6898,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
           </div>
         </template>
         <template x-if="boSourceBType === 'path'">
-          <input data-testid="compare-bo-source-b-path-input" x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
+          <input data-testid="compare-bo-source-b-path-input" x-model="boSourceB.filePath" @input="clearBOPdfPreview('b')" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
           <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.pdf" @change="handleBOFileUpload($event, 'b')" class="field-input" aria-label="compare bo source b upload input" />
@@ -7229,7 +7229,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                            :checked="isResultSelected(r.id)" aria-label="input" />
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
-                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="r.status"></span></td>
+                  <td><span class="badge" :class="statusBadgeClass(r.status)" x-text="boStatusLabel({ status: r.status, results: [r] })"></span></td>
                   <td>
                     <span x-text="totalMismatches(r)"></span>
                     <div x-show="totalMismatches(r) > 0"

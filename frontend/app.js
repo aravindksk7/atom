@@ -1359,6 +1359,14 @@ function _appRaw() {
       const tmpReports = this.boReportsA;
       this.boReportsA = this.boReportsB;
       this.boReportsB = tmpReports;
+      // Swap PDF preview state
+      const prev = this.boPdfPreview || { a: null, b: null };
+      this.boPdfPreview = { a: prev.b ?? null, b: prev.a ?? null };
+      const tbls = this.boPdfTableOptions || { a: [], b: [] };
+      this.boPdfTableOptions = { a: tbls.b || [], b: tbls.a || [] };
+      const loading = this.boPdfPreviewLoading || { a: false, b: false };
+      this.boPdfPreviewLoading = { a: Boolean(loading.b), b: Boolean(loading.a) };
+      this.boPdfError = null;
       this.toast('success', 'Sides swapped', 'Source A and Source B have been swapped');
     },
 

@@ -143,4 +143,184 @@ try {
 } finally {
   global.FileReader = origFileReader;
 }
+
+// Final Review Fix Wave tests: openCompareForJob, swapCompareSides, clearBOPdfPreview, tab-compare.html
+const vm = require('node:vm');
+require(path.join(ROOT, 'frontend', 'features', 'launch.js'));
+
+function createAppInstance() {
+  const noopSlice = () => ({});
+  const featureNames = [
+    'ETL_FEATURE_COMPARE', 'ETL_FEATURE_CONFIG', 'ETL_FEATURE_LAUNCH',
+    'ETL_FEATURE_MONITOR', 'ETL_FEATURE_RUN_TIMING', 'ETL_FEATURE_HISTORY',
+    'ETL_FEATURE_CI_RUNS', 'ETL_FEATURE_ADAPTERS', 'ETL_FEATURE_AWS',
+    'ETL_FEATURE_REPORTS', 'ETL_FEATURE_DIFFERENCES', 'ETL_FEATURE_CONTRACTS',
+    'ETL_FEATURE_SCHEDULER_REPORTS', 'ETL_FEATURE_LOGS', 'ETL_FEATURE_SEQUENCES',
+    'ETL_FEATURE_FILE_SERVERS', 'ETL_FEATURE_IMPORT_EXPORT', 'ETL_FEATURE_BULK_COMPARE',
+  ];
+  const sandbox = {
+    window: {
+      ETL_API_BASE: '',
+      ETL_APP_CONFIG: {},
+      ETL_HELP_METHODS: { showHelp() {}, initKeyboardShortcuts() {} },
+    },
+    document: { addEventListener() {} },
+    localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    console,
+    Date,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Math,
+    JSON,
+    Set,
+    Map,
+    RegExp,
+    Error,
+    parseInt,
+    parseFloat,
+    isNaN,
+    encodeURIComponent,
+  };
+  for (const name of featureNames) {
+    sandbox[name] = name === 'ETL_FEATURE_COMPARE'
+      ? window.ETL_FEATURE_COMPARE
+      : name === 'ETL_FEATURE_LAUNCH'
+        ? window.ETL_FEATURE_LAUNCH
+        : noopSlice;
+  }
+  const appCode = fs.readFileSync(path.join(ROOT, 'frontend', 'app.js'), 'utf8');
+  vm.runInNewContext(appCode, sandbox, { filename: 'frontend/app.js' });
+  const instance = sandbox.app();
+  instance.toast = () => {};
+  return instance;
+}
+
+// 1. openCompareForJob hydrates boPdfRewrap and resets stale PDF preview/error state
+{
+  const app = createAppInstance();
+  app.boPdfPreview = { a: { pages: 1 }, b: { pages: 2 } };
+  app.boPdfTableOptions = { a: [{ index: 1 }], b: [{ index: 2 }] };
+  app.boPdfPreviewLoading = { a: true, b: true };
+  app.boPdfError = { message: 'stale error', suggestedKey: 'id', tables: [] };
+  app.boPdfRewrap = true;
+
+  app.openCompareForJob({
+    name: 'saved-bo-pdf-compare',
+    job_type: 'compare',
+    params: {
+      compare_type: 'bo',
+      request: {
+        source_a: { source_type: 'path', file_path: '/a.pdf', format: 'pdf', pdf: { table: 1, number_locale: 'eu', date_order: 'dmy', fill_down: false } },
+        source_b: { source_type: 'path', file_path: '/b.pdf', format: 'pdf', pdf: { table: 2, number_locale: 'en', date_order: null, fill_down: true } },
+        key_columns: ['Region'],
+        exclude_columns: [],
+        pdf_rewrap: false,
+      },
+    },
+  });
+
+  assert.strictEqual(app.boPdfRewrap, false);
+  assert.deepStrictEqual(app.boPdfPreview, { a: null, b: null });
+  assert.deepStrictEqual(app.boPdfTableOptions, { a: [], b: [] });
+  assert.deepStrictEqual(app.boPdfPreviewLoading, { a: false, b: false });
+  assert.strictEqual(app.boPdfError, null);
+}
+
+// 2. openCompareForJob resets boSourceB.pdf on non-compare BO jobs so switching to Path .pdf never throws
+{
+  const app = createAppInstance();
+  app.boPdfPreview = { a: { pages: 1 }, b: { pages: 2 } };
+  app.boPdfTableOptions = { a: [{ index: 1 }], b: [{ index: 2 }] };
+  app.boPdfPreviewLoading = { a: true, b: false };
+  app.boPdfError = { message: 'stale error', suggestedKey: null, tables: [] };
+
+  app.openCompareForJob({
+    name: 'bo-report-job',
+    job_type: 'bo_report',
+    key_columns: ['id'],
+    params: { report_id: '100', bo_report_id: '2' },
+  });
+
+  assert.deepStrictEqual(app.boSourceB.pdf, app._defaultBOPdfOptions());
+  assert.strictEqual(app.boSourceB.pdf.numberLocale, 'en');
+  assert.deepStrictEqual(app.boPdfPreview, { a: null, b: null });
+  assert.deepStrictEqual(app.boPdfTableOptions, { a: [], b: [] });
+  assert.deepStrictEqual(app.boPdfPreviewLoading, { a: false, b: false });
+  assert.strictEqual(app.boPdfError, null);
+}
+
+// 3. swapCompareSides swaps boPdfPreview, boPdfTableOptions, boPdfPreviewLoading and clears boPdfError
+{
+  const app = createAppInstance();
+  const prevA = { pages: 1, chosen: { index: 1 } };
+  const prevB = { pages: 3, chosen: { index: 2 } };
+  const tblsA = [{ index: 1, rows: 5 }];
+  const tblsB = [{ index: 2, rows: 10 }];
+  app.boSourceAType = 'path';
+  app.boSourceBType = 'upload';
+  app.boSourceA.filePath = '/a.pdf';
+  app.boSourceB.fileName = 'b.pdf';
+  app.boPdfPreview = { a: prevA, b: prevB };
+  app.boPdfTableOptions = { a: tblsA, b: tblsB };
+  app.boPdfPreviewLoading = { a: true, b: false };
+  app.boPdfError = { message: 'old err', suggestedKey: null, tables: [] };
+
+  app.swapCompareSides();
+
+  assert.strictEqual(app.boPdfPreview.a, prevB);
+  assert.strictEqual(app.boPdfPreview.b, prevA);
+  assert.strictEqual(app.boPdfTableOptions.a, tblsB);
+  assert.strictEqual(app.boPdfTableOptions.b, tblsA);
+  assert.strictEqual(app.boPdfPreviewLoading.a, false);
+  assert.strictEqual(app.boPdfPreviewLoading.b, true);
+  assert.strictEqual(app.boPdfError, null);
+}
+
+// 4. clearBOPdfPreview clears side preview, table options, pdf.table, and boPdfError
+{
+  const app = createAppInstance();
+  assert.strictEqual(typeof app.clearBOPdfPreview, 'function');
+  app.boSourceA.pdf = { table: 2, numberLocale: 'eu', dateOrder: 'dmy', fillDown: false };
+  app.boPdfPreview = { a: { pages: 1 }, b: { pages: 2 } };
+  app.boPdfTableOptions = { a: [{ index: 2 }], b: [{ index: 1 }] };
+  app.boPdfError = { message: 'err', suggestedKey: null, tables: [] };
+
+  app.clearBOPdfPreview('a');
+
+  assert.strictEqual(app.boPdfPreview.a, null);
+  assert.deepStrictEqual(app.boPdfPreview.b, { pages: 2 });
+  assert.deepStrictEqual(app.boPdfTableOptions.a, []);
+  assert.deepStrictEqual(app.boPdfTableOptions.b, [{ index: 1 }]);
+  assert.strictEqual(app.boSourceA.pdf.table, null);
+  assert.strictEqual(app.boSourceA.pdf.numberLocale, 'eu');
+  assert.strictEqual(app.boPdfError, null);
+}
+
+// 5. tab-compare.html and built index.html include result-row "(as printed)" badge and path @input handler
+{
+  const compareHtml = fs.readFileSync(path.join(ROOT, 'frontend', 'partials', 'tab-compare.html'), 'utf8');
+  assert.ok(
+    compareHtml.includes('boStatusLabel({ status: r.status, results: [r] })'),
+    'tab-compare.html result row badge must use boStatusLabel({ status: r.status, results: [r] })',
+  );
+  assert.ok(
+    compareHtml.includes("clearBOPdfPreview('a')") && compareHtml.includes("clearBOPdfPreview('b')"),
+    'tab-compare.html path inputs must clear PDF preview on @input',
+  );
+
+  const builtHtml = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+  assert.ok(
+    builtHtml.includes('boStatusLabel({ status: r.status, results: [r] })'),
+    'frontend/index.html result row badge must include boStatusLabel({ status: r.status, results: [r] })',
+  );
+  assert.ok(
+    builtHtml.includes("clearBOPdfPreview('a')") && builtHtml.includes("clearBOPdfPreview('b')"),
+    'frontend/index.html path inputs must include clearBOPdfPreview on @input',
+  );
+}
+
 console.log('ok');

@@ -1640,6 +1640,10 @@
       // creating a duplicate. Any other prefill (a fresh compare, or a
       // bo_report/reconciliation job) is not an edit of a compare job.
       this.editingCompareJob = job.job_type === 'compare' ? job : null;
+      this.boPdfPreview = { a: null, b: null };
+      this.boPdfTableOptions = { a: [], b: [] };
+      this.boPdfPreviewLoading = { a: false, b: false };
+      this.boPdfError = null;
       if (job.job_type === 'compare' && subTab === 'bo') {
         const req = job.params?.request || {};
         const a = this._hydrateBOSourceFromConfig(req.source_a);
@@ -1650,6 +1654,7 @@
         this.boSourceB = { ...b.src, label: req.label_b || 'Source B' };
         this.boKeyColumns = (req.key_columns || []).join(', ');
         this.boExcludeColumns = (req.exclude_columns || []).join(', ');
+        this.boPdfRewrap = req.pdf_rewrap !== undefined ? Boolean(req.pdf_rewrap) : true;
         this._applyAdvancedToPrefix('bo', req.advanced);
       } else if (job.job_type === 'compare' && subTab === 'recon') {
         const req = job.params?.request || {};
@@ -1698,17 +1703,19 @@
           runId: opts.runIdA || '', jobName: job.name,
           docId: job.params?.report_id || '', reportId: job.params?.bo_report_id || '',
           configId: this.boSourceA.configId,
+          pdf: this._defaultBOPdfOptions(),
         };
         this.boSourceBType = opts.runIdB ? 'run' : 'upload';
         if (opts.runIdB) {
-          this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name };
+          this.boSourceB = { ...this.boSourceB, runId: opts.runIdB, jobName: job.name, pdf: this._defaultBOPdfOptions() };
         } else {
           // No run reference for Source B -- don't leave a prior session's
           // Source B (or its exclude-columns filter) attached to this job.
-          this.boSourceB = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '' };
+          this.boSourceB = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '', pdf: this._defaultBOPdfOptions() };
           this.boExcludeColumns = '';
         }
         this.boKeyColumns = (job.key_columns || []).join(', ');
+        this.boPdfRewrap = true;
       } else if (subTab === 'multi_file') {
         this.mfCompareKeyColumns = (job.key_columns || []).join(', ');
         this.mfCompareSourceMode = opts.runIdA ? 'run' : 'files';
