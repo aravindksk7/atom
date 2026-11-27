@@ -26,7 +26,12 @@ logger = logging.getLogger(__name__)
 ERROR_COUNTS: Counter[str] = Counter()
 
 _DEFAULT_MAX_BYTES = 50 * 1024 * 1024
-_DEFAULT_TIMEOUT_S = 60
+_DEFAULT_TIMEOUT_S = 120
+_DEFAULT_PREVIEW_TIMEOUT_S = 60
+_MODE_TIMEOUT_ENV: dict[str, tuple[str, int]] = {
+    "read": ("ATOM_PDF_TIMEOUT_SECONDS", _DEFAULT_TIMEOUT_S),
+    "preview": ("ATOM_PDF_PREVIEW_TIMEOUT_SECONDS", _DEFAULT_PREVIEW_TIMEOUT_S),
+}
 _SELFTEST_TTL_S = 60.0
 _SELFTEST_LOCK = threading.Lock()
 _SELFTEST_CACHE: tuple[float, dict[str, Any]] | None = None
@@ -42,14 +47,14 @@ def _max_bytes() -> int:
         return _DEFAULT_MAX_BYTES
 
 
-def _default_timeout_s() -> int:
-    raw = os.environ.get("ATOM_PDF_TIMEOUT_SECONDS")
+def _env_timeout_s(env_var: str, default: int) -> int:
+    raw = os.environ.get(env_var)
     if raw is None:
-        return _DEFAULT_TIMEOUT_S
+        return default
     try:
         return max(1, int(raw))
     except ValueError:
-        return _DEFAULT_TIMEOUT_S
+        return default
 
 
 def _build_worker_env() -> dict[str, str]:
@@ -133,7 +138,8 @@ def _run_mode(
         if cached is not None:
             return cached, raw_sha256
 
-        eff_timeout = _default_timeout_s() if timeout_s is None else timeout_s
+        env_var, default_s = _MODE_TIMEOUT_ENV[mode]
+        eff_timeout = _env_timeout_s(env_var, default_s) if timeout_s is None else timeout_s
         deadline = time.monotonic() + eff_timeout
         slot_deadline = min(deadline, time.monotonic() + slot_wait_s) if slot_wait_s is not None else deadline
 

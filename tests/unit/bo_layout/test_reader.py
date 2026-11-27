@@ -81,6 +81,37 @@ def test_timeout_raises(tmp_path, monkeypatch):
     assert (e.value.code, e.value.message) == ("timeout", "the PDF could not be read in 1 s")
 
 
+@pytest.mark.parametrize(
+    ("fn", "env_overrides", "expected_s"),
+    [
+        (read_pdf_report, {}, 120),
+        (read_pdf_report, {"ATOM_PDF_TIMEOUT_SECONDS": "45"}, 45),
+        (preview_pdf_report, {}, 60),
+        (preview_pdf_report, {"ATOM_PDF_TIMEOUT_SECONDS": "200"}, 60),
+        (preview_pdf_report, {"ATOM_PDF_PREVIEW_TIMEOUT_SECONDS": "25", "ATOM_PDF_TIMEOUT_SECONDS": "200"}, 25),
+    ],
+)
+def test_timeout_env_defaults_and_overrides(tmp_path, monkeypatch, fn, env_overrides, expected_s):
+    monkeypatch.delenv("ATOM_PDF_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ATOM_PDF_PREVIEW_TIMEOUT_SECONDS", raising=False)
+    for k, v in env_overrides.items():
+        monkeypatch.setenv(k, v)
+
+    pdf = build_bo_pdf(tmp_path / "a.pdf", tables=[{"header": ["A"], "rows": [["1"]]}])
+    seen_timeouts: list[float] = []
+
+    def boom(*a, **k):
+        seen_timeouts.append(k["timeout"])
+        raise subprocess.TimeoutExpired(cmd="worker", timeout=k["timeout"])
+
+    monkeypatch.setattr(reader_mod.subprocess, "run", boom)
+    with pytest.raises(PdfReadError) as e:
+        fn(pdf.read_bytes(), PdfReadOptions())
+    assert (e.value.code, e.value.message) == ("timeout", f"the PDF could not be read in {expected_s} s")
+    assert len(seen_timeouts) == 1
+    assert expected_s - 5 < seen_timeouts[0] <= expected_s
+
+
 def test_too_large_rejected_before_spawning(monkeypatch, spawns):
     monkeypatch.setenv("ATOM_PDF_MAX_BYTES", "10")
     with pytest.raises(PdfReadError) as e:
