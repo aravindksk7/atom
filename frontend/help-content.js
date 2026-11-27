@@ -534,6 +534,32 @@
           },
         },
         {
+          title: 'Compare two BO PDF reports (as printed)',
+          text: 'Upload or reference two SAP BO PDF files on Source A and Source B to compare them as printed—results carry the "(as printed)" badge because differences smaller than printed decimals cannot be seen. Use Preview PDF to inspect detected tables, column types, warnings (ambiguous dates or mixed columns), and a suggested key. Set per-side Locale (en or eu), Date order (dmy or mdy), Fill down for merged break cells, Table selection when multiple tables exist, and Reconcile line wrapping (pdf_rewrap) when column widths differ. Prompts are diffed separately rather than compared as data rows. Both sides must be PDFs (no PDF vs xlsx/csv, live BO PDF export, section reports, scanned PDFs, encrypted PDFs, or large borderless PDFs), and unique key columns are required. See docs/bo-pdf-compare.md for env limits and error codes.',
+          where: 'Compare -> BO Report -> Upload / Path (.pdf) -> Preview PDF',
+          when: 'Comparing two printed SAP BO PDF exports across environments or versions.',
+          uiMockup: { title: 'BO PDF compare (as printed)', badge: 'PASSED (as printed)', elements: [
+            { type: 'input', label: 'Source A PDF', value: 'northwind_dev.pdf' },
+            { type: 'input', label: 'Source B PDF', value: 'northwind_qa.pdf' },
+            { type: 'select', label: 'Locale / Fill down', value: 'EN / On' },
+            { type: 'input', label: 'Key columns', value: 'Account Code' },
+            { type: 'status', value: 'Reconcile line wrapping: On', status: 'info' },
+            { type: 'button', label: 'Run BO Compare', highlight: true },
+          ] },
+          cli: {
+            command: "curl -s -X POST -H 'Authorization: Bearer $ATOM_API_TOKEN' -H 'Content-Type: application/json' '$ATOM_API_URL/api/compare/bo-report/pdf-preview' -d '{\"source\":{\"source_type\":\"path\",\"file_path\":\"C:/reports/northwind_dev.pdf\",\"format\":\"pdf\",\"pdf\":{\"number_locale\":\"en\",\"fill_down\":true}}}'",
+            description: 'Previews tables, column types, prompts, warnings, and a suggested key before submitting POST /api/compare/bo-report with PDF sources on both sides.',
+            params: [
+              { flag: 'number_locale', desc: 'en (1,234.56) or eu (1.234,56).' },
+              { flag: 'date_order', desc: 'dmy or mdy when slash dates are ambiguous.' },
+              { flag: 'fill_down', desc: 'True fills vertically merged cells downward.' },
+              { flag: 'pdf_rewrap', desc: 'Top-level boolean reconciling text line wraps across differing column widths.' },
+            ],
+            sampleOutput: '{"pages":2,"tables":[{"index":1,"header":["Account Code","Net Sales"],"rows":42,"pages":[1,2],"fragments":2}],"chosen":{"index":1,"suggested_key":"Account Code"},"prompts":[{"label":"Fiscal Year","value":"2026"}],"warnings":[]}',
+          },
+          warn: 'Both sides must be PDFs, and key columns must uniquely identify every row.',
+        },
+        {
           title: 'Scenario 2: Validating SAP BO Reports During Migration',
           text: 'Browse the legacy and replacement BO documents, answer required prompts identically, compare one tab or whole-document exports, choose stable business keys, and save the comparison as a bo_report job for repeated migration testing.',
           where: 'Adapters -> SAP BO, then Compare -> BO',

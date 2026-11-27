@@ -2889,8 +2889,8 @@ Each side (Source A, Source B) can be any combination of:
 | Source Type | When to use | Required inputs |
 |---|---|---|
 | `live` | Fetch the report directly from a live SAP BO server | Saved config with BO URL/credentials, Document ID, Report/Page selection or **All tabs (whole document)**, and export format (`csv`/`xlsx`/`xls`) |
-| `path` | Read a previously downloaded file from a server-side file path | Absolute file path allowed by the server file policy |
-| `upload` | Upload a file directly from your browser | File contents (`.csv`, `.xlsx`, `.xls`, `.json`, `.xml`, `.tsv`, or `.txt`) |
+| `path` | Read a previously downloaded file from a server-side file path | Absolute file path allowed by the server file policy (`.csv`, `.xlsx`, `.xls`, `.json`, `.xml`, `.tsv`, `.txt`, or `.pdf` for PDF-vs-PDF) |
+| `upload` | Upload a file directly from your browser | File contents (`.csv`, `.xlsx`, `.xls`, `.json`, `.xml`, `.tsv`, `.txt`, or `.pdf` for PDF-vs-PDF) |
 | `api` | Fetch data from a named REST API endpoint defined on a saved config | Saved config and endpoint name from the config's `api_endpoints` map; see [API Endpoints (REST API Data Sources)](#api-endpoints-rest-api-data-sources) |
 | `run` | Reuse comparable data from a previous run selected in the Compare UI | Run ID plus the selected job/result context (`job_name`) so the service can load that run's stored comparable artifact |
 
@@ -2969,6 +2969,16 @@ $body = @{
 } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/compare/bo-report" -Body $body -ContentType "application/json" -Headers $h
 ```
+
+**PDF-vs-PDF Compare (`as printed`):**
+
+Both Source A and Source B can also be SAP BO PDF exports (`path` or `upload` with `format: "pdf"` or a `.pdf` filename/path). PDF compares evaluate values **as printed** (`compared_as: "printed"`, shown in UI status badges such as `PASSED (as printed)`) — differences smaller than the printed decimals cannot be seen. Prompts are extracted and diffed separately rather than compared as data rows.
+
+- **Supported:** bordered BO data tables (plus small borderless fallback tables), multi-page continuation stitching, and one chosen data table per compare.
+- **Unsupported:** PDF vs. `.xlsx`/`.csv`, live BO PDF exports, `api`/`run` PDF sources, section reports (including one section per page), scanned PDFs (no OCR), encrypted PDFs, and large borderless PDFs.
+- **Options:** per-source `pdf` settings (`table`, `number_locale`: `"en"`/`"eu"`, `date_order`: `"dmy"`/`"mdy"`, `fill_down`, allow-listed `table_settings`), top-level `pdf_rewrap` (reconciles line wrapping when column widths differ), and required unique `key_columns`. Use `POST /api/compare/bo-report/pdf-preview` (or **Preview PDF** in the UI) to inspect tables, types, warnings, and a suggested key first.
+
+See [docs/bo-pdf-compare.md](docs/bo-pdf-compare.md) for printed-format warnings, wrap reconciliation, all `ATOM_PDF_*` environment limits, cache/Diagnostics details, complete error guidance, and the `ATOM_REQUIRE_REAL_SAMPLES=1` release-gate command.
 
 ---
 
