@@ -25,6 +25,7 @@ from api.services.api_artifact import (
 from api.services.file_source import read_tabular, resolve_allowed_path
 from api.services.frame_engine import FrameEngine
 from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
+from etl_framework.bo_layout.align import align_column_case as _align_column_case
 from etl_framework.reconciliation.chunker import load_in_chunks
 from etl_framework.reconciliation.data_sources import extract_data_source
 from etl_framework.reconciliation.engine import ReconciliationEngine
@@ -32,29 +33,6 @@ from etl_framework.repository.models import TestResult
 from etl_framework.repository.repository import ConfigRepository, RunRepository
 from etl_framework.reporting.metrics import MetricsWriter
 from etl_framework.runner.state import TestStatus
-
-
-def _align_column_case(df: "pd.DataFrame", reference_names) -> "pd.DataFrame":
-    """Rename columns to the reference spelling when names differ only by case.
-
-    Skipped for a column when the match is ambiguous (several reference
-    spellings, or several frame columns sharing the lower-cased name) or when
-    the new name would duplicate an existing column.
-    """
-    spellings: dict[str, set[str]] = {}
-    for name in reference_names:
-        spellings.setdefault(str(name).lower(), set()).add(str(name))
-    lowered = [str(c).lower() for c in df.columns]
-    existing = {str(c) for c in df.columns}
-    rename: dict[Any, str] = {}
-    for column, low in zip(df.columns, lowered):
-        options = spellings.get(low)
-        if not options or len(options) != 1 or lowered.count(low) != 1:
-            continue
-        (wanted,) = options
-        if wanted != str(column) and wanted not in existing:
-            rename[column] = wanted
-    return df.rename(columns=rename) if rename else df
 
 
 def _load_in_chunks(
