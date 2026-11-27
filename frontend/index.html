@@ -4250,7 +4250,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td>
-                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="r.effective_status || r.status"></span>
+                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="resultStatusLabel(r, selectedRun)"></span>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
                   <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
@@ -4933,11 +4933,11 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 <div class="compare-col-label">Test</div>
                 <div class="compare-col-a">
                   <span class="font-mono text-xs" x-text="compareResult.run_a.run_id.substring(0,8)+'…'"></span>
-                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_a.status)" x-text="compareResult.run_a.status"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_a.status)" x-text="runStatusLabel(compareResult.run_a)"></span>
                 </div>
                 <div class="compare-col-b">
                   <span class="font-mono text-xs" x-text="compareResult.run_b.run_id.substring(0,8)+'…'"></span>
-                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_b.status)" x-text="compareResult.run_b.status"></span>
+                  <span class="badge ml-1" :class="statusBadgeClass(compareResult.run_b.status)" x-text="runStatusLabel(compareResult.run_b)"></span>
                 </div>
                 <div class="compare-col-delta">Delta</div>
               </div>

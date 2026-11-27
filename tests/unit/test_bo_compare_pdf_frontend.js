@@ -24,16 +24,42 @@ assert.strictEqual(
   'PASSED',
 );
 
+assert.strictEqual(typeof history.resultStatusLabel, 'function');
+assert.strictEqual(
+  history.resultStatusLabel({ status: 'PASSED', mismatch_summary: { pdf_sources: { a: {}, b: {} } } }),
+  'PASSED (as printed)',
+);
+assert.strictEqual(
+  history.resultStatusLabel({ status: 'FAILED', effective_status: 'PASSED', mismatch_summary: null }, { compared_as: 'printed' }),
+  'PASSED (as printed)',
+);
+assert.strictEqual(
+  history.resultStatusLabel({ status: 'FAILED', effective_status: 'FAILED' }, { compared_as: null }),
+  'FAILED',
+);
+assert.strictEqual(
+  history.resultStatusLabel(null, { compared_as: 'printed' }),
+  '',
+);
+
 const historyHtml = fs.readFileSync(path.join(ROOT, 'frontend', 'partials', 'tab-history.html'), 'utf8');
 assert.ok(
-  historyHtml.includes('runStatusLabel(run)') && historyHtml.includes('runStatusLabel(selectedRun)'),
-  'History list and detail status badges must use runStatusLabel',
+  historyHtml.includes('runStatusLabel(run)') &&
+  historyHtml.includes('runStatusLabel(selectedRun)') &&
+  historyHtml.includes('resultStatusLabel(r, selectedRun)') &&
+  historyHtml.includes('runStatusLabel(compareResult.run_a)') &&
+  historyHtml.includes('runStatusLabel(compareResult.run_b)'),
+  'History list, detail, result rows, and compare headers must use runStatusLabel / resultStatusLabel',
 );
 
 const indexHtml = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
 assert.ok(
-  indexHtml.includes('runStatusLabel(run)') && indexHtml.includes('runStatusLabel(selectedRun)'),
-  'Built index.html must include runStatusLabel status badges',
+  indexHtml.includes('runStatusLabel(run)') &&
+  indexHtml.includes('runStatusLabel(selectedRun)') &&
+  indexHtml.includes('resultStatusLabel(r, selectedRun)') &&
+  indexHtml.includes('runStatusLabel(compareResult.run_a)') &&
+  indexHtml.includes('runStatusLabel(compareResult.run_b)'),
+  'Built index.html must include runStatusLabel and resultStatusLabel status badges',
 );
 
 console.log('ok - history status badge renders "(as printed)" when compared_as === "printed"');
