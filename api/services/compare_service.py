@@ -2,6 +2,7 @@ from __future__ import annotations
 import io
 import logging
 import base64
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import (
-    BOCompareRequest, ReconFileCompareRequest, SQLCompareRequest,
+    BOCompareRequest, BOPdfPreviewRequest, ReconFileCompareRequest, SQLCompareRequest,
     ColumnStatsRequest, ColumnStatsOut, ColumnStatsDiffOut,
     MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
     AdvancedCompareOptions, MultiFileCompareRequest, MatrixCompareRequest,
@@ -31,6 +32,7 @@ from etl_framework.bo_layout import (
     PdfReadOptions,
     PdfSourceInfo,
     align_pdf_frames,
+    preview_pdf_report,
     read_pdf_report,
 )
 from etl_framework.bo_layout.align import align_column_case as _align_column_case
@@ -57,8 +59,30 @@ _SENTINEL_QUERY = "__file_source__"
 _BARE_TABLE_NAME = re.compile(r"[A-Za-z_][\w$#]*(\.[A-Za-z_][\w$#]*)*")
 
 
+_DEFAULT_PDF_PREVIEW_TIMEOUT_S = 60
+
+
 def _is_pdf_source(src: Any) -> bool:
     return getattr(src, "is_pdf", False) is True
+
+
+def _pdf_preview_timeout_s() -> int:
+    raw = os.environ.get("ATOM_PDF_PREVIEW_TIMEOUT_SECONDS")
+    if raw is None:
+        return _DEFAULT_PDF_PREVIEW_TIMEOUT_S
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_PDF_PREVIEW_TIMEOUT_S
+
+
+def _pdf_error_to_http(exc: PdfReadError) -> HTTPException:
+    if exc.code == "busy":
+        return HTTPException(status_code=503, detail="PDF reader busy")
+    return HTTPException(
+        status_code=422,
+        detail={"message": exc.message, "code": exc.code, "tables": exc.tables},
+    )
 
 
 def _suggest_pdf_key(df: pd.DataFrame) -> str | None:
@@ -453,12 +477,42 @@ class CompareService:
                 slot_wait_s=slot_wait_s,
             )
         except PdfReadError as exc:
-            if exc.code == "busy":
-                raise HTTPException(status_code=503, detail="PDF reader busy") from exc
-            raise HTTPException(
-                status_code=422,
-                detail={"message": exc.message, "code": exc.code, "tables": exc.tables},
-            ) from exc
+            raise _pdf_error_to_http(exc) from exc
+
+    def precheck_bo_pdf(self, req: BOCompareRequest) -> None:
+        """Synchronously parse, align, and validate keys when either BO source is a PDF."""
+        if not (_is_pdf_source(req.source_a) or _is_pdf_source(req.source_b)):
+            return
+        df_a, df_b, _ = self._load_bo_frames(
+            req.source_a,
+            req.source_b,
+            req.doc_id,
+            req.report_id,
+            store_responses=False,
+            key_columns=req.key_columns,
+            exclude_columns=req.exclude_columns,
+            rewrap=req.pdf_rewrap,
+            timeout_s=_pdf_preview_timeout_s(),
+            slot_wait_s=10,
+        )
+        self._pdf_key_rules(df_a, df_b, req.key_columns, req.label_a, req.label_b)
+
+    def preview_bo_pdf(self, req: BOPdfPreviewRequest) -> dict[str, Any]:
+        """Inspect tables, column types, prompts, and a suggested key for a PDF BO source."""
+        if not _is_pdf_source(req.source):
+            raise HTTPException(status_code=422, detail="source is not a PDF")
+        raw, file_name = self._load_pdf_bytes(req.source, req.doc_id, req.report_id)
+        options = req.source.pdf.to_options() if req.source.pdf else PdfReadOptions()
+        try:
+            return preview_pdf_report(
+                raw,
+                options,
+                file_name=file_name,
+                timeout_s=_pdf_preview_timeout_s(),
+                slot_wait_s=10,
+            )
+        except PdfReadError as exc:
+            raise _pdf_error_to_http(exc) from exc
 
     def _load_bo_frames(
         self,
