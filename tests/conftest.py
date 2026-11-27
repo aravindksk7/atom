@@ -7,6 +7,8 @@ imports etl_framework.repository.database, which reads the variable at import.
 """
 import os
 
+pytest_plugins = ["pytester"]
+
 _worker = os.environ.get("PYTEST_XDIST_WORKER")
 _url = os.environ.get("ETL_DATABASE_URL", "")
 if _worker and _url.startswith("sqlite:///") and _url.endswith(".db"):

@@ -36,6 +36,9 @@ paramiko>=3.4
 # Logging
 python-json-logger>=2.0
 
+# BO PDF reports
+pdfplumber>=0.11
+
 # Observability (optional)
 opentelemetry-sdk>=1.20
 opentelemetry-exporter-otlp>=1.20
@@ -48,3 +51,4 @@ pytest-asyncio>=0.24
 hypothesis>=6.0
 httpx>=0.28
 moto>=5.0
+reportlab>=4.0

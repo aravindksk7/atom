@@ -40,3 +40,8 @@ upgrade.md
 
 # ATOM regression demo recordings
 demo/output/
+
+# Private SAP BO sample reports (PDF/xlsx). Never commit: confidential data.
+tests/fixtures/bo_layout/*
+!tests/fixtures/bo_layout/.gitkeep
+tests/e2e/fixtures/data/*.pdf
