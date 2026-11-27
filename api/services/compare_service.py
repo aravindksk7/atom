@@ -5,7 +5,7 @@ import base64
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import pandas as pd
 from fastapi import HTTPException
@@ -16,6 +16,7 @@ from api.schemas import (
     ColumnStatsRequest, ColumnStatsOut, ColumnStatsDiffOut,
     MismatchDiffRequest, MismatchDiffOut, MismatchRecordOut,
     AdvancedCompareOptions, MultiFileCompareRequest, MatrixCompareRequest,
+    SourceConfig,
 )
 from api.services.api_artifact import (
     adhoc_artifact_dir,
@@ -25,6 +26,13 @@ from api.services.api_artifact import (
 from api.services.file_source import read_tabular, resolve_allowed_path
 from api.services.frame_engine import FrameEngine
 from api.services.run_data_artifact import TABULAR_EXTS as _TABULAR_EXTS, load_row_diffable_frame
+from etl_framework.bo_layout import (
+    PdfReadError,
+    PdfReadOptions,
+    PdfSourceInfo,
+    align_pdf_frames,
+    read_pdf_report,
+)
 from etl_framework.bo_layout.align import align_column_case as _align_column_case
 from etl_framework.reconciliation.chunker import load_in_chunks
 from etl_framework.reconciliation.data_sources import extract_data_source
@@ -47,6 +55,39 @@ logger = logging.getLogger("api.services.compare_service")
 
 _SENTINEL_QUERY = "__file_source__"
 _BARE_TABLE_NAME = re.compile(r"[A-Za-z_][\w$#]*(\.[A-Za-z_][\w$#]*)*")
+
+
+def _is_pdf_source(src: Any) -> bool:
+    return getattr(src, "is_pdf", False) is True
+
+
+def _suggest_pdf_key(df: pd.DataFrame) -> str | None:
+    """Return the first all-non-empty, unique column of ``df``, or None."""
+    if len(df) == 0:
+        return None
+    for col in df.columns:
+        vals = df[col].tolist()
+        seen: set[Any] = set()
+        valid = True
+        for val in vals:
+            if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
+                valid = False
+                break
+            try:
+                if val in seen:
+                    valid = False
+                    break
+                seen.add(val)
+            except TypeError:
+                valid = False
+                break
+        if valid:
+            return str(col)
+    return None
+
+
+def _collapse_ws(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _recon_kind_label(is_dataframe: bool) -> str:
@@ -261,19 +302,36 @@ class CompareService:
 
     def compare_bo(self, req: BOCompareRequest, run_id: str | None = None) -> "ReconciliationResult":
         """Execute BO comparison and return a result without run bookkeeping."""
-        df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id, run_id)
-        df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id, run_id)
-        key_columns = req.key_columns
-        if not key_columns:
-            try:
-                key_columns = self._infer_key_columns(df_a, df_b)
-            except HTTPException:
-                df_a = df_a.copy()
-                df_b = df_b.copy()
-                df_a.insert(0, "__row__", range(1, len(df_a) + 1))
-                df_b.insert(0, "__row__", range(1, len(df_b) + 1))
-                key_columns = ["__row__"]
-        self._validate_key_columns(df_a, df_b, key_columns)
+        df_a, df_b, pdf_info = self._load_bo_frames(
+            req.source_a,
+            req.source_b,
+            req.doc_id,
+            req.report_id,
+            run_id=run_id,
+            key_columns=req.key_columns,
+            exclude_columns=req.exclude_columns,
+            rewrap=req.pdf_rewrap,
+        )
+        if pdf_info is not None:
+            key_columns = self._pdf_key_rules(
+                df_a,
+                df_b,
+                req.key_columns,
+                req.label_a,
+                req.label_b,
+            )
+        else:
+            key_columns = req.key_columns
+            if not key_columns:
+                try:
+                    key_columns = self._infer_key_columns(df_a, df_b)
+                except HTTPException:
+                    df_a = df_a.copy()
+                    df_b = df_b.copy()
+                    df_a.insert(0, "__row__", range(1, len(df_a) + 1))
+                    df_b.insert(0, "__row__", range(1, len(df_b) + 1))
+                    key_columns = ["__row__"]
+            self._validate_key_columns(df_a, df_b, key_columns)
         engine_a = FrameEngine(df_a, req.label_a)
         engine_b = FrameEngine(df_b, req.label_b)
         reconciler = _build_engine(
@@ -283,7 +341,13 @@ class CompareService:
             mismatch_row_limit=_compare_mismatch_row_limit(getattr(req, "advanced", None)),
             adv=getattr(req, "advanced", None),
         )
-        return reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
+        result = reconciler.reconcile(_SENTINEL_QUERY, req.label_a or "bo_comparison")
+        if pdf_info is not None:
+            result.mismatch_summary = {
+                **(result.mismatch_summary or {}),
+                "pdf_sources": pdf_info,
+            }
+        return result
 
     def _persist_single_result(self, run_id: str, result: "ReconciliationResult") -> None:
         """Store one result and close out its run as PASSED/FAILED."""
@@ -339,6 +403,188 @@ class CompareService:
 
         return SettingsRepository(self._db).get_timezone()
 
+    def _load_pdf_bytes(
+        self,
+        src: SourceConfig,
+        doc_id: str | None,
+        report_id: str | None,
+    ) -> tuple[bytes, str]:
+        """Load raw PDF bytes and a display file name for a PDF SourceConfig."""
+        if src.source_type == "path":
+            resolved = resolve_allowed_path(src.file_path)
+            try:
+                raw = resolved.read_bytes()
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"File not found: {src.file_path}")
+            name = src.file_name or Path(src.file_path).name
+            return raw, name
+        if src.source_type == "upload":
+            raw = base64.b64decode(src.file_content_b64)
+            name = src.file_name or "upload.pdf"
+            return raw, name
+        if src.source_type == "live":
+            raise HTTPException(
+                status_code=422,
+                detail="PDF export from a live BO source isn't enabled",
+            )
+        raise HTTPException(
+            status_code=422,
+            detail="PDF is supported for path and upload sources",
+        )
+
+    def _load_pdf_source(
+        self,
+        src: SourceConfig,
+        doc_id: str | None,
+        report_id: str | None,
+        *,
+        timeout_s: int | None = None,
+        slot_wait_s: float | None = None,
+    ) -> tuple[pd.DataFrame, PdfSourceInfo]:
+        """Load and parse a BO PDF source, mapping PdfReadError to HTTPException."""
+        raw, file_name = self._load_pdf_bytes(src, doc_id, report_id)
+        options = src.pdf.to_options() if src.pdf else PdfReadOptions()
+        try:
+            return read_pdf_report(
+                raw,
+                options,
+                file_name=file_name,
+                timeout_s=timeout_s,
+                slot_wait_s=slot_wait_s,
+            )
+        except PdfReadError as exc:
+            if exc.code == "busy":
+                raise HTTPException(status_code=503, detail="PDF reader busy") from exc
+            raise HTTPException(
+                status_code=422,
+                detail={"message": exc.message, "code": exc.code, "tables": exc.tables},
+            ) from exc
+
+    def _load_bo_frames(
+        self,
+        source_a,
+        source_b,
+        doc_id: str | None,
+        report_id: str | None,
+        *,
+        run_id: str | None = None,
+        store_responses: bool = True,
+        key_columns: Sequence[str] = (),
+        exclude_columns: Sequence[str] = (),
+        rewrap: bool = True,
+        timeout_s: int | None = None,
+        slot_wait_s: float | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any] | None]:
+        """Load both BO sources, enforcing PDF-vs-PDF symmetry and aligning PDF frames."""
+        pdf_a = _is_pdf_source(source_a)
+        pdf_b = _is_pdf_source(source_b)
+        if pdf_a != pdf_b:
+            raise HTTPException(
+                status_code=422,
+                detail="a PDF compare needs a PDF on both sides",
+            )
+        if not pdf_a:
+            df_a = self._load_bo_source(
+                source_a, doc_id, report_id, run_id, store_responses=store_responses
+            )
+            df_b = self._load_bo_source(
+                source_b, doc_id, report_id, run_id, store_responses=store_responses
+            )
+            return df_a, df_b, None
+
+        df_a, info_a = self._load_pdf_source(
+            source_a,
+            doc_id,
+            report_id,
+            timeout_s=timeout_s,
+            slot_wait_s=slot_wait_s,
+        )
+        df_b, info_b = self._load_pdf_source(
+            source_b,
+            doc_id,
+            report_id,
+            timeout_s=timeout_s,
+            slot_wait_s=slot_wait_s,
+        )
+        df_a, df_b, meta = align_pdf_frames(
+            df_a,
+            df_b,
+            info_a,
+            info_b,
+            key_columns=key_columns,
+            exclude_columns=exclude_columns,
+            rewrap=rewrap,
+        )
+        pdf_info = {
+            "a": info_a.to_dict(),
+            "b": info_b.to_dict(),
+            "alignment": meta,
+            "prompt_differences": self._pdf_prompt_differences(info_a, info_b),
+        }
+        return df_a, df_b, pdf_info
+
+    @staticmethod
+    def _pdf_prompt_differences(
+        info_a: PdfSourceInfo,
+        info_b: PdfSourceInfo,
+    ) -> list[dict[str, str | None]]:
+        """Compare prompt values case-insensitively by label after collapsing whitespace."""
+        map_a: dict[str, tuple[str, str]] = {}
+        for p in info_a.prompts:
+            k = p.label.strip().lower()
+            if k not in map_a:
+                map_a[k] = (p.label, p.value)
+        map_b: dict[str, tuple[str, str]] = {}
+        for p in info_b.prompts:
+            k = p.label.strip().lower()
+            if k not in map_b:
+                map_b[k] = (p.label, p.value)
+
+        diffs: list[dict[str, str | None]] = []
+        for k in dict.fromkeys([*map_a.keys(), *map_b.keys()]):
+            label = map_a[k][0] if k in map_a else map_b[k][0]
+            val_a = map_a[k][1] if k in map_a else None
+            val_b = map_b[k][1] if k in map_b else None
+            norm_a = _collapse_ws(val_a) if val_a is not None else None
+            norm_b = _collapse_ws(val_b) if val_b is not None else None
+            if norm_a != norm_b:
+                diffs.append({"label": label, "a": val_a, "b": val_b})
+        return diffs
+
+    def _pdf_key_rules(
+        self,
+        df_a: pd.DataFrame,
+        df_b: pd.DataFrame,
+        key_columns: Sequence[str],
+        label_a: str | None,
+        label_b: str | None,
+    ) -> list[str]:
+        """Resolve and validate unique key columns for a PDF-vs-PDF compare."""
+        key = list(key_columns)
+        if not key:
+            try:
+                key = self._infer_key_columns(df_a, df_b)
+            except HTTPException:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": "set key columns for a PDF compare",
+                        "suggested_key": _suggest_pdf_key(df_a),
+                    },
+                )
+        self._validate_key_columns(df_a, df_b, key)
+        for df, label in ((df_a, label_a or "Source A"), (df_b, label_b or "Source B")):
+            dup_mask = df.duplicated(subset=key)
+            n = int(dup_mask.sum())
+            if n > 0:
+                row = df.loc[dup_mask].iloc[0]
+                example = ", ".join(f"{k}={row[k]}" for k in key)
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"key columns aren't unique in {label}: {n} duplicate rows, for example {example}",
+                )
+        return key
+
     def _load_bo_source(
         self,
         src,
@@ -348,6 +594,9 @@ class CompareService:
         *,
         store_responses: bool = True,
     ):
+        if _is_pdf_source(src):
+            df, _ = self._load_pdf_source(src, fallback_doc_id, fallback_report_id)
+            return df
         if src.source_type == "live":
             doc_id = src.doc_id or fallback_doc_id
             # No report named is SAP's whole-document export — every tab in one
@@ -1239,8 +1488,7 @@ class CompareService:
         from etl_framework.reconciliation.column_stats import ColumnStatsComparer
         from datetime import timezone
 
-        df_a = self._load_bo_source(req.source_a, req.doc_id, req.report_id)
-        df_b = self._load_bo_source(req.source_b, req.doc_id, req.report_id)
+        df_a, df_b, _ = self._load_bo_frames(req.source_a, req.source_b, req.doc_id, req.report_id)
 
         comparer = ColumnStatsComparer(
             float_tolerance=req.float_tolerance,

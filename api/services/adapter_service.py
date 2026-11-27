@@ -39,7 +39,36 @@ class SAPBOAuthContext:
     auth_type: str | None = None
 
 
+def _render_http_detail(detail: object) -> str:
+    """Format an HTTPException detail (string or structured dict) into a friendly message."""
+    if isinstance(detail, dict):
+        msg = str(detail.get("message") or detail)
+        notes: list[str] = []
+        suggested = detail.get("suggested_key")
+        if suggested:
+            notes.append(f"suggested key: {suggested}")
+        tables = detail.get("tables")
+        if tables:
+            formatted = [
+                " | ".join(str(col) for col in (t.get("header") or []))
+                if isinstance(t, dict)
+                else str(t)
+                for t in tables
+            ]
+            formatted = [item for item in formatted if item]
+            if formatted:
+                notes.append(f"tables: {'; '.join(formatted)}")
+        if notes:
+            return f"{msg} ({'; '.join(notes)})"
+        return msg
+    if detail is None:
+        return ""
+    return str(detail)
+
+
 def _friendly_error(exc: Exception, auth_type: str | None = None, adapter: str = "SAP BO") -> str:
+    if isinstance(exc, HTTPException):
+        return _render_http_detail(exc.detail)
     msg = str(exc)
     exc_type = type(exc).__name__
     if isinstance(exc, ReportNotFoundError):
