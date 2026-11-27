@@ -3971,7 +3971,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
       <div class="flex items-center gap-3 mb-4">
         <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
         <div class="section-title">Run Detail</div>
-        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="runStatusLabel(selectedRun)"></span>
+        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="runStatusLabel(selectedRun)" data-testid="run-detail-status"></span>
       </div>
 
       <!-- Summary stat cards -->
@@ -4250,7 +4250,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td>
-                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="resultStatusLabel(r, selectedRun)"></span>
+                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="resultStatusLabel(r, selectedRun)" :data-testid="'run-result-status-' + r.query_name"></span>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
                   <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
@@ -4307,7 +4307,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                 </tr>
                 <!-- Error row -->
                 <tr x-show="r.error_message">
-                  <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                  <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message" :data-testid="'run-result-error-' + r.query_name"></td>
                 </tr>
                 <!-- File transfer summary row (only when the result carries a destination_root) -->
                 <template x-if="r.mismatch_summary?.destination_root">
@@ -5022,7 +5022,7 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
                 <td class="text-xs font-mono text-slate-600" x-text="run.report_name" :data-testid="'history-run-report-name-' + run.run_id"></td>
-                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="runStatusLabel(run)"></span></td>
+                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="runStatusLabel(run)" :data-testid="'history-run-status-' + run.run_id"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
                 <td>
@@ -9832,6 +9832,55 @@ ATOM_API_TOKEN = &lt;paste token, mark Masked+Protected&gt;</pre>
         </template>
       </div>
     </div>
+  </div>
+</template>
+
+
+<!-- ====================================================================
+     SERVER FILE PATH SETUP HELP (persistent; opened by toast() on an
+     "Invalid file path ... SERVER_FILE_ALLOWED_DIRS" error)
+     ==================================================================== -->
+<template x-if="serverPathHelp">
+  <div data-testid="server-path-help" role="alertdialog" aria-labelledby="server-path-help-title"
+       class="card p-4 text-sm"
+       style="position: fixed; right: 1rem; bottom: 1rem; z-index: 60; width: min(36rem, calc(100vw - 2rem)); max-height: 80vh; overflow-y: auto; border-left: 4px solid #e11d48;">
+    <div class="flex items-start justify-between gap-3 mb-2">
+      <div>
+        <div id="server-path-help-title" class="font-semibold text-rose-700" x-text="serverPathHelp.title"></div>
+        <div class="text-slate-700">The server isn't allowed to read this report path.</div>
+      </div>
+      <button type="button" class="btn-secondary btn-sm" data-testid="server-path-help-close"
+              @click="serverPathHelp = null" aria-label="Close file path help">✕</button>
+    </div>
+    <p class="text-slate-700 mb-2" data-testid="server-path-help-message"
+       x-text="serverPathHelp.summary"></p>
+    <template x-if="serverPathHelp.command">
+      <div class="space-y-2">
+        <p class="text-slate-700">
+          To compare reports from <span class="font-mono" x-text="serverPathHelp.folder"></span>,
+          an administrator adds that folder to <span class="font-mono">SERVER_FILE_ALLOWED_DIRS</span>
+          on the API server and restarts the API:
+        </p>
+        <ol class="text-slate-700 space-y-1" style="list-style: decimal; margin-left: 1.25rem;">
+          <li>Stop the API.</li>
+          <li>Run this in the shell that starts it (or set it as a System environment variable when the API runs as a service):</li>
+        </ol>
+        <div class="flex items-center gap-2">
+          <code class="flex-1 font-mono text-xs bg-slate-100 rounded px-2 py-1 break-all select-all"
+                data-testid="server-path-help-command" x-text="serverPathHelp.command"></code>
+          <button type="button" class="btn-secondary btn-sm" data-testid="server-path-help-copy"
+                  @click="copyServerPathCommand()" x-text="serverPathHelp.copied ? 'Copied' : 'Copy'"></button>
+        </div>
+        <ol start="3" class="text-slate-700 space-y-1" style="list-style: decimal; margin-left: 1.25rem;">
+          <li>Start the API again, then rerun the compare.</li>
+        </ol>
+        <p class="text-xs text-slate-500">
+          Separate several folders with <span class="font-mono">;</span> on Windows or
+          <span class="font-mono">:</span> on Linux. Prefer not to change the server? Switch the source to
+          <em>Upload</em> instead of a server path.
+        </p>
+      </div>
+    </template>
   </div>
 </template>
 

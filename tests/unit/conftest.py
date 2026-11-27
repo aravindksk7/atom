@@ -13,7 +13,10 @@ _REDACTED_NOTICE = (
     "real-sample assertion failed; details in tests/fixtures/bo_layout/_local_failures.log (local only)"
 )
 _REAL_SAMPLE_FIXTURES = ("real_pdf", "corpus", "bo_expected")
-_skipped_real_samples = 0
+# Tag on every real-sample skip reason. The summary counts skips by this tag
+# from the reports the controller receives, so it also works under xdist
+# (`-n auto`), where a module-level counter only grows in worker processes.
+_REAL_SAMPLE_SKIP_TAG = "[real-sample]"
 
 
 def _sample_dirs() -> list[Path]:
@@ -33,11 +36,9 @@ def _find_sample_file(rel_path: str) -> Path | None:
 
 
 def _missing_sample(reason: str) -> Any:
-    global _skipped_real_samples
     if os.environ.get("ATOM_REQUIRE_REAL_SAMPLES") == "1":
         pytest.fail(reason)
-    _skipped_real_samples += 1
-    pytest.skip(reason)
+    pytest.skip(f"{_REAL_SAMPLE_SKIP_TAG} {reason}")
 
 
 def _load_expected_optional() -> dict[str, Any] | None:
@@ -143,9 +144,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
     report.sections.clear()
 
 
+def _is_real_sample_skip(report: Any) -> bool:
+    longrepr = getattr(report, "longrepr", None)
+    # Skip reports carry longrepr as (path, lineno, "Skipped: <reason>").
+    reason = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else str(longrepr or "")
+    return _REAL_SAMPLE_SKIP_TAG in str(reason)
+
+
 def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
-    if _skipped_real_samples > 0:
+    skipped = sum(
+        1 for report in terminalreporter.stats.get("skipped", []) if _is_real_sample_skip(report)
+    )
+    if skipped > 0:
         terminalreporter.write_line(
-            f"{_skipped_real_samples} real-sample tests skipped "
+            f"{skipped} real-sample tests skipped "
             "(set ATOM_REQUIRE_REAL_SAMPLES=1 to fail instead)"
         )

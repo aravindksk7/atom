@@ -3083,6 +3083,8 @@ For on-prem server paths outside `C:\temp`, configure allowed roots before start
 $env:SERVER_FILE_ALLOWED_DIRS = 'D:\TDS\XML;D:\TDS\Reports'
 ```
 
+If a compare uses a server path outside these folders, the UI opens a **file path setup** panel instead of a short error toast. It names the report's folder and gives the exact `SERVER_FILE_ALLOWED_DIRS` command, which keeps the folders already configured, with a Copy button. Set it in the environment that starts the API (or as a System environment variable for a service) and restart the API: the allowlist is read at startup. Uploading the file instead needs no server change.
+
 **Positional fallback:** When no key column can be inferred and `key_columns` is not specified, the engine inserts a synthetic `__row__` column (1-based row number) and uses it as the key. This ensures every row is compared even for files without a natural identifier (e.g. summary reports).
 
 **API:**

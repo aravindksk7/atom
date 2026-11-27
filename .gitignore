@@ -45,3 +45,4 @@ demo/output/
 tests/fixtures/bo_layout/*
 !tests/fixtures/bo_layout/.gitkeep
 tests/e2e/fixtures/data/*.pdf
+tests/e2e/fixtures/data/_generated/

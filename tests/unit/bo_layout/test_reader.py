@@ -201,3 +201,16 @@ def test_twenty_thousand_rows_within_run_timeout(tmp_path, rows_per_page):
     df, _ = read_pdf_report(pdf.read_bytes(), PdfReadOptions(), timeout_s=120)
     assert len(df) == 20_000
     print("seconds", rows_per_page, round(time.monotonic() - t0, 1))
+
+
+def test_cache_does_not_bypass_a_lowered_page_limit(tmp_path, monkeypatch, spawns):
+    rows = [[str(i)] for i in range(60)]
+    raw = build_bo_pdf(
+        tmp_path / "a.pdf", tables=[{"header": ["A"], "rows": rows}], rows_per_page=25
+    ).read_bytes()
+    monkeypatch.setenv("ATOM_PDF_MAX_PAGES", "10")
+    read_pdf_report(raw, PdfReadOptions())
+    monkeypatch.setenv("ATOM_PDF_MAX_PAGES", "2")
+    with pytest.raises(PdfReadError) as e:
+        read_pdf_report(raw, PdfReadOptions())
+    assert e.value.code == "too_many_pages" and len(spawns) == 2

@@ -453,6 +453,43 @@ def _allowed_bases_detail(bases: tuple[Path, ...]) -> str:
     return ", ".join(str(base) for base in bases)
 
 
+def _path_not_allowed_detail(requested: str, resolved: Path, bases: tuple[Path, ...]) -> str:
+    """Explain a rejected server-side path and how to allow its folder.
+
+    Keeps the historical "Invalid file path" prefix (callers and logs match on
+    it) and adds the exact SERVER_FILE_ALLOWED_DIRS setting that would admit the
+    report's folder, keeping any folders already configured there.
+    """
+    folder = resolved.parent if resolved.suffix else resolved
+    configured = [
+        str(base) for base in _parse_base_dirs(os.environ.get("SERVER_FILE_ALLOWED_DIRS"))
+    ]
+    wanted = [str(folder)] + [
+        entry for entry in configured if os.path.normcase(entry) != os.path.normcase(str(folder))
+    ]
+    value = os.pathsep.join(wanted)
+    if os.name == "nt":
+        quoted = value.replace("'", "''")
+        command = f"$env:SERVER_FILE_ALLOWED_DIRS = '{quoted}'"
+        where = (
+            "in the PowerShell session that starts the API, or as a System environment "
+            "variable if the API runs as a service"
+        )
+    else:
+        quoted = value.replace("'", "'\\''")
+        command = f"export SERVER_FILE_ALLOWED_DIRS='{quoted}'"
+        where = "in the environment that starts the API (shell, systemd unit or container)"
+    return (
+        f"Invalid file path: {requested} is outside the folders this server may read "
+        f"({_allowed_bases_detail(bases)}).\n"
+        f"To allow the report folder {folder}, set SERVER_FILE_ALLOWED_DIRS {where}, "
+        "then restart the API:\n"
+        f"{command}\n"
+        f"Separate several folders with '{os.pathsep}'. "
+        "Or upload the file instead of using a server path."
+    )
+
+
 def _resolve_allowed_path(path: str) -> Path:
     bases = _allowed_bases()
     if not bases:
@@ -474,7 +511,7 @@ def _resolve_allowed_path(path: str) -> Path:
                 continue
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file path. Allowed server-side base directories: {_allowed_bases_detail(bases)}",
+            detail=_path_not_allowed_detail(path, resolved, bases),
         )
 
     base = bases[0]
@@ -484,7 +521,7 @@ def _resolve_allowed_path(path: str) -> Path:
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file path. Allowed server-side base directories: {_allowed_bases_detail(bases)}",
+            detail=_path_not_allowed_detail(path, resolved, bases),
         )
     return resolved
 

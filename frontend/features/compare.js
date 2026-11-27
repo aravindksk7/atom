@@ -497,7 +497,11 @@
       if (Array.isArray(previewTables) && previewTables.length > 0) return previewTables;
       const stored = this.boPdfTableOptions?.[side];
       if (Array.isArray(stored) && stored.length > 0) return stored;
-      return this.boPdfError?.tables || [];
+      // An error's table list belongs to the PDF it names; with no side named
+      // (older backends) it is offered to both.
+      const err = this.boPdfError;
+      if (!err || (err.side && err.side !== side)) return [];
+      return err.tables || [];
     },
 
     _boPdfHasAmbiguousDate(side) {
@@ -513,12 +517,38 @@
     },
 
     _showPdfError(detail, side = null) {
-      const isObj = detail !== null && typeof detail === 'object';
+      // Pydantic 422s carry `detail` as an array of validation errors; treat
+      // only plain objects as the structured PDF error shape.
+      const isObj = detail !== null && typeof detail === 'object' && !Array.isArray(detail);
       const tables = isObj && Array.isArray(detail.tables) ? detail.tables : [];
+      // The backend tags table errors with the PDF they came from.
+      if (side !== 'a' && side !== 'b' && isObj && (detail.side === 'a' || detail.side === 'b')) {
+        side = detail.side;
+      }
+      let message;
+      if (isObj && detail.message != null) {
+        message = String(detail.message);
+      } else if (typeof detail === 'string') {
+        message = detail;
+      } else if (Array.isArray(detail) && detail.some(item => item && item.msg)) {
+        message = detail
+          .map(item => {
+            if (!item || !item.msg) return '';
+            const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : '';
+            return field ? `${field}: ${item.msg}` : String(item.msg);
+          })
+          .filter(Boolean)
+          .join('; ');
+      } else if (typeof apiErrorMessage === 'function') {
+        message = apiErrorMessage(detail);
+      } else {
+        try { message = JSON.stringify(detail); } catch (_) { message = 'Request failed'; }
+      }
       this.boPdfError = {
-        message: isObj ? (detail.message ?? detail) : detail,
+        message,
         suggestedKey: isObj ? (detail.suggested_key ?? null) : null,
         tables,
+        side: side === 'a' || side === 'b' ? side : null,
       };
       if (tables.length > 0) {
         const next = { ...this.boPdfTableOptions };
@@ -1001,6 +1031,7 @@
           clearInterval(this.boComparePollInterval);
           this.boComparePollInterval = null;
           this.boCompareResult = await api('GET', `/api/runs/${this.boCompareRunId}`);
+          this._noteServerPathErrorInRun(this.boCompareResult, 'BO comparison failed');
           this.boCompareLoading = false;
           if (this.boSaveAsBaseline && status.status === 'PASSED') {
             try { await api('POST', `/api/runs/${this.boCompareRunId}/set-baseline`); } catch (_) {}
@@ -1121,6 +1152,7 @@
             if (this.isTerminalStatus(st.status)) {
               clearInterval(poll);
               this.fileCompareResult = await api('GET', `/api/runs/${run.run_id}`);
+              this._noteServerPathErrorInRun(this.fileCompareResult, 'File compare failed');
               this.fileCompareLoading = false;
               await this.loadRuns();
             }
@@ -1186,6 +1218,7 @@
             if (this.isTerminalStatus(st.status)) {
               clearInterval(poll);
               this.mfCompareResult = await api('GET', `/api/runs/${run.run_id}`);
+              this._noteServerPathErrorInRun(this.mfCompareResult, 'Multi-file compare failed');
               this.mfCompareLoading = false;
               await this.loadRuns();
             }
@@ -1359,6 +1392,7 @@
           clearInterval(this.matrixComparePollInterval);
           this.matrixComparePollInterval = null;
           this.matrixCompareResult = await api('GET', `/api/runs/${this.matrixCompareRunId}`);
+          this._noteServerPathErrorInRun(this.matrixCompareResult, 'Matrix comparison failed');
           this.matrixCompareLoading = false;
           await this.loadRuns();
         }

@@ -4,6 +4,7 @@ import logging
 import base64
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -76,37 +77,44 @@ def _pdf_preview_timeout_s() -> int:
         return _DEFAULT_PDF_PREVIEW_TIMEOUT_S
 
 
-def _pdf_error_to_http(exc: PdfReadError) -> HTTPException:
+def _pdf_error_to_http(exc: PdfReadError, side: str | None = None) -> HTTPException:
     if exc.code == "busy":
         return HTTPException(status_code=503, detail="PDF reader busy")
-    return HTTPException(
-        status_code=422,
-        detail={"message": exc.message, "code": exc.code, "tables": exc.tables},
-    )
+    detail: dict[str, Any] = {"message": exc.message, "code": exc.code, "tables": exc.tables}
+    if side is not None:
+        # Lets the UI route a table list to the PDF it came from.
+        detail["side"] = side
+    return HTTPException(status_code=422, detail=detail)
 
 
-def _suggest_pdf_key(df: pd.DataFrame) -> str | None:
-    """Return the first all-non-empty, unique column of ``df``, or None."""
+def _column_is_usable_key(df: pd.DataFrame, col: Any) -> bool:
+    """True when every value of ``df[col]`` is present, non-blank and unique."""
+    seen: set[Any] = set()
+    for val in df[col].tolist():
+        if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
+            return False
+        try:
+            if val in seen:
+                return False
+            seen.add(val)
+        except TypeError:
+            return False
+    return True
+
+
+def _suggest_pdf_key(df: pd.DataFrame, df_other: pd.DataFrame | None = None) -> str | None:
+    """Return the first column that is non-empty and unique in ``df`` and, when
+    given, also present, non-empty and unique in ``df_other``; else None."""
     if len(df) == 0:
         return None
     for col in df.columns:
-        vals = df[col].tolist()
-        seen: set[Any] = set()
-        valid = True
-        for val in vals:
-            if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
-                valid = False
-                break
-            try:
-                if val in seen:
-                    valid = False
-                    break
-                seen.add(val)
-            except TypeError:
-                valid = False
-                break
-        if valid:
-            return str(col)
+        if not _column_is_usable_key(df, col):
+            continue
+        if df_other is not None and (
+            col not in df_other.columns or not _column_is_usable_key(df_other, col)
+        ):
+            continue
+        return str(col)
     return None
 
 
@@ -464,6 +472,7 @@ class CompareService:
         *,
         timeout_s: int | None = None,
         slot_wait_s: float | None = None,
+        side: str | None = None,
     ) -> tuple[pd.DataFrame, PdfSourceInfo]:
         """Load and parse a BO PDF source, mapping PdfReadError to HTTPException."""
         raw, file_name = self._load_pdf_bytes(src, doc_id, report_id)
@@ -477,7 +486,7 @@ class CompareService:
                 slot_wait_s=slot_wait_s,
             )
         except PdfReadError as exc:
-            raise _pdf_error_to_http(exc) from exc
+            raise _pdf_error_to_http(exc, side) from exc
 
     def precheck_bo_pdf(self, req: BOCompareRequest) -> None:
         """Synchronously parse, align, and validate keys when either BO source is a PDF."""
@@ -546,19 +555,36 @@ class CompareService:
             )
             return df_a, df_b, None
 
+        # One deadline covers both reads, so a caller's timeout bounds the
+        # whole load rather than each PDF separately.
+        deadline = time.monotonic() + timeout_s if timeout_s is not None else None
         df_a, info_a = self._load_pdf_source(
             source_a,
             doc_id,
             report_id,
             timeout_s=timeout_s,
             slot_wait_s=slot_wait_s,
+            side="a",
         )
+        timeout_b = timeout_s
+        slot_wait_b = slot_wait_s
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining < 1:
+                raise _pdf_error_to_http(
+                    PdfReadError("timeout", f"the PDFs could not be read in {timeout_s} s"),
+                    "b",
+                )
+            timeout_b = int(remaining)
+            if slot_wait_b is not None:
+                slot_wait_b = min(slot_wait_b, timeout_b)
         df_b, info_b = self._load_pdf_source(
             source_b,
             doc_id,
             report_id,
-            timeout_s=timeout_s,
-            slot_wait_s=slot_wait_s,
+            timeout_s=timeout_b,
+            slot_wait_s=slot_wait_b,
+            side="b",
         )
         df_a, df_b, meta = align_pdf_frames(
             df_a,
@@ -623,7 +649,7 @@ class CompareService:
                     status_code=422,
                     detail={
                         "message": "set key columns for a PDF compare",
-                        "suggested_key": _suggest_pdf_key(df_a),
+                        "suggested_key": _suggest_pdf_key(df_a, df_b),
                     },
                 )
         self._validate_key_columns(df_a, df_b, key)

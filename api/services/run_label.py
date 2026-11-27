@@ -175,23 +175,28 @@ def _source_dict_is_pdf(source: Any) -> bool:
 
 
 def run_compared_as(run: Any) -> Literal["printed"] | None:
-    """Return 'printed' when the run is a PDF-vs-PDF comparison, else None.
+    """Return 'printed' when the whole run is a PDF-vs-PDF comparison, else None.
 
-    Reads run.results the same way build_run_report_snapshot does (list_runs
-    and detail endpoints already load results via build_run_report_snapshot),
-    and falls back to config_snapshot['request'] for newly queued or
-    lightweight runs whose results are not yet populated.
+    The run counts as printed only when every one of its results was a
+    PDF-vs-PDF compare: a selection or sequence that mixes a PDF compare
+    with other jobs is not labelled as a whole (each PDF row still is, from
+    its own mismatch_summary). config_snapshot['request'] is checked first so
+    single-compare runs never need run.results loaded.
     """
     if run is None:
         return None
-    for result in (getattr(run, "results", None) or []):
-        summary = getattr(result, "mismatch_summary", None)
-        if isinstance(summary, dict) and summary.get("pdf_sources"):
-            return "printed"
     snapshot = getattr(run, "config_snapshot", None)
     if isinstance(snapshot, dict):
         req = snapshot.get("request")
         if isinstance(req, dict):
             if _source_dict_is_pdf(req.get("source_a")) and _source_dict_is_pdf(req.get("source_b")):
                 return "printed"
+    results = list(getattr(run, "results", None) or [])
+    if results and all(_result_is_pdf(result) for result in results):
+        return "printed"
     return None
+
+
+def _result_is_pdf(result: Any) -> bool:
+    summary = getattr(result, "mismatch_summary", None)
+    return isinstance(summary, dict) and bool(summary.get("pdf_sources"))

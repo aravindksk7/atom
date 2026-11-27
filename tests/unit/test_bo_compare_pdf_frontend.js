@@ -118,9 +118,22 @@ assert.deepStrictEqual(c.boPdfError, {
   message: 'set key columns for a PDF compare',
   suggestedKey: 'Group',
   tables: [],
+  side: null,
 });
 c._showPdfError('PDF reader busy');
 assert.strictEqual(c.boPdfError.message, 'PDF reader busy');
+// Pydantic 422 detail is an array of {loc, msg}; never render [object Object]
+c._showPdfError([{ loc: ['body', 'source_a', 'pdf', 'table'], msg: 'table must be >= 1', type: 'value_error' }]);
+assert.strictEqual(c.boPdfError.message, 'table: table must be >= 1');
+// Compare-time table errors go only to the side the backend names
+c.boPdfTableOptions = { a: [{ index: 1 }], b: [] };
+const bTables = [{ index: 1 }, { index: 2 }, { index: 3 }];
+c._showPdfError({ message: 'the PDF holds several data tables; choose one', code: 'several_tables', tables: bTables, side: 'b' });
+assert.deepStrictEqual(c.boPdfTableOptions, { a: [{ index: 1 }], b: bTables });
+c.boPdfTableOptions = { a: [], b: [] };
+c.boPdfPreview = { a: null, b: null };
+assert.deepStrictEqual(c._boPdfTables('a'), []);
+assert.deepStrictEqual(c._boPdfTables('b'), bTables);
 
 // Matrix file upload must not reference undefined `namespace` or mutate BO PDF state
 const origFileReader = global.FileReader;

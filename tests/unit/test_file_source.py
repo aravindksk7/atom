@@ -117,7 +117,10 @@ def test_read_tabular_rejects_absolute_path_outside_allowed_bases(tmp_path, monk
         fs.read_tabular(path=str(f))
 
     assert exc_info.value.status_code == 400
-    assert "Allowed server-side base directories" in exc_info.value.detail
+    detail = exc_info.value.detail
+    assert detail.startswith("Invalid file path:")
+    assert f"outside the folders this server may read ({allowed.resolve()})" in detail
+    assert "SERVER_FILE_ALLOWED_DIRS" in detail
 
 
 def test_read_tabular_from_bo_csv_with_metadata_preamble(tmp_path, monkeypatch):

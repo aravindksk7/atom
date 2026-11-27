@@ -560,6 +560,50 @@
           warn: 'Both sides must be PDFs, and key columns must uniquely identify every row.',
         },
         {
+          title: 'Fix BO PDF compare errors',
+          text: 'When a PDF compare stops, the red panel under the sources says why and what to do. Multi-page tables join up even when the header is printed only on page 1 and every page carries "Page n of N", a running title or a print date: text repeated on two or more pages is treated as page furniture. "The PDF holds several data tables" opens a Table picker on the side that has several tables only, so pick the table there and run again. "Set key columns for a PDF compare" offers a Use <key> button; the suggested key exists, is filled in and is unique in both PDFs, so it runs cleanly. Invalid options (for example a table number below 1) are shown as plain text such as "table: Value error, table must be >= 1". When a saved PDF job uses a key column that is missing, the History error names it, for example missing_in_source_b: Acct_ID. In History, "(as printed)" marks each PDF job\'s row; a run that mixes a PDF job with other jobs is not labelled as a whole.',
+          where: 'Compare -> BO Report -> PDF error panel; History -> Run Detail',
+          when: 'A PDF compare reports several tables, no key, an invalid option, or a saved PDF job fails on its key.',
+          uiMockup: { title: 'BO PDF compare error', badge: 'Source B: 2 tables', elements: [
+            { type: 'status', value: 'the PDF holds several data tables; choose one', status: 'error' },
+            { type: 'select', label: 'Source B table', value: 'Table 1: Id, V (2 rows)' },
+            { type: 'button', label: 'Use Code', highlight: true },
+            { type: 'status', value: 'Mixed run: SQL row FAILED, PDF row PASSED (as printed)', status: 'info' },
+          ] },
+          cli: {
+            command: "curl -s -X POST -H 'Authorization: Bearer $ATOM_API_TOKEN' -H 'Content-Type: application/json' '$ATOM_API_URL/api/compare/bo-report' -d '{\"source_a\":{\"source_type\":\"path\",\"file_path\":\"C:/reports/qa.pdf\"},\"source_b\":{\"source_type\":\"path\",\"file_path\":\"C:/reports/prod.pdf\"}}'",
+            description: 'A PDF compare without key columns returns 422 with a suggested key that is valid in both PDFs. A table error carries "side" ("a" or "b") so you know which PDF needs a table choice.',
+            params: [
+              { flag: 'detail.suggested_key', desc: 'First column that is present, filled in and unique in both PDFs.' },
+              { flag: 'detail.side', desc: 'Which PDF a several_tables / table_not_found error came from.' },
+              { flag: 'source_a.pdf.table', desc: 'Table index (1 or more) or header text to pick a table.' },
+            ],
+            sampleOutput: '{"detail":{"message":"set key columns for a PDF compare","suggested_key":"Code"}}',
+          },
+          warn: 'A heading that genuinely repeats on every page (for example "Region: East (continued)") also counts as page furniture, so those blocks are joined.',
+        },
+        {
+          title: 'Allow server-side report paths (SERVER_FILE_ALLOWED_DIRS)',
+          text: 'Path sources (Compare -> Path, saved jobs) can only read folders on the API server\'s allowlist: SERVER_FILE_ALLOWED_DIRS, plus reports/uploads and, on Windows, C:\\temp. When a report path is outside it, a "file path setup" panel opens (it stays until you close it) with the report\'s folder, the exact command to allow it and a Copy button. The command puts the report folder first and keeps the folders already configured. Set it in the environment that starts the API, or as a System environment variable when the API runs as a service, then restart the API: the allowlist is read at startup. Separate folders with ; on Windows and : on Linux. Prefer not to change the server? Switch the source to Upload.',
+          where: 'Compare -> any Path source -> file path setup panel',
+          when: 'A compare fails with "Invalid file path: ... is outside the folders this server may read".',
+          uiMockup: { title: 'File path setup', badge: 'BO comparison failed', elements: [
+            { type: 'status', value: 'Invalid file path: D:\\Reports\\BO\\sales.pdf is outside the folders this server may read', status: 'error' },
+            { type: 'input', label: 'Command', value: "$env:SERVER_FILE_ALLOWED_DIRS = 'D:\\Reports\\BO'" },
+            { type: 'button', label: 'Copy', highlight: true },
+          ] },
+          cli: {
+            command: "$env:SERVER_FILE_ALLOWED_DIRS = 'D:\\Reports\\BO;D:\\TDS\\XML'; python -m uvicorn api.main:app --host 0.0.0.0 --port 8000",
+            description: 'Allows two report folders for this PowerShell session and restarts the API with them. On Linux: export SERVER_FILE_ALLOWED_DIRS=\'/data/reports:/data/xml\' before starting the API (shell, systemd unit or container).',
+            params: [
+              { flag: 'SERVER_FILE_ALLOWED_DIRS', desc: 'Folders the server may read, separated by ; (Windows) or : (Linux).' },
+              { flag: 'restart', desc: 'Required: the allowlist is read when the API starts.' },
+            ],
+            sampleOutput: 'INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)',
+          },
+          warn: 'Only allow folders that hold reports you intend to compare: every user with launch rights can read files in them through a path source.',
+        },
+        {
           title: 'Scenario 2: Validating SAP BO Reports During Migration',
           text: 'Browse the legacy and replacement BO documents, answer required prompts identically, compare one tab or whole-document exports, choose stable business keys, and save the comparison as a bo_report job for repeated migration testing.',
           where: 'Adapters -> SAP BO, then Compare -> BO',

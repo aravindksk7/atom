@@ -298,5 +298,22 @@ if __name__ == "__main__":
         out = build_demo_pdf(args[1])
         print(out)
         raise SystemExit(0)
-    print("Usage: python -m tests.helpers.pdf_fixtures demo <out.pdf>", file=sys.stderr)
+    if len(args) == 3 and args[0] == "spec":
+        # spec <spec.json> <out.pdf>: build_bo_pdf keyword arguments as JSON.
+        # "page_text" is a format string with {n} (page) and {total} (pages).
+        import json
+
+        spec = json.loads(Path(args[1]).read_text(encoding="utf-8"))
+        fmt = spec.pop("page_text", None)
+        if fmt is not None:
+            spec["page_text"] = lambda n, total, _fmt=fmt: _fmt.format(n=n, total=total)
+        if "prompts" in spec:
+            spec["prompts"] = [tuple(p) for p in spec["prompts"]]
+        print(build_bo_pdf(args[2], **spec))
+        raise SystemExit(0)
+    print(
+        "Usage: python -m tests.helpers.pdf_fixtures demo <out.pdf>\n"
+        "       python -m tests.helpers.pdf_fixtures spec <spec.json> <out.pdf>",
+        file=sys.stderr,
+    )
     raise SystemExit(2)

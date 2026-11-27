@@ -133,7 +133,10 @@ def _run_mode(
             raise PdfReadError("too_large", f"the PDF is {mb:.1f} MB; the limit is {limit_mb:.0f} MB")
 
         raw_sha256 = hashlib.sha256(raw).hexdigest()
-        key = cache.cache_key(raw_sha256, mode, options)
+        # The page limit is enforced while parsing, so it must be part of the
+        # key: otherwise a cached parse would bypass a limit lowered later.
+        max_pages = os.environ.get("ATOM_PDF_MAX_PAGES", "1000").strip()
+        key = cache.cache_key(raw_sha256, f"{mode}|max_pages={max_pages}", options)
         cached = cache.cache_get(key)
         if cached is not None:
             return cached, raw_sha256

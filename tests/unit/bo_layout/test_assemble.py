@@ -229,3 +229,25 @@ def test_paginated_with_page_numbers_stitches(tmp_path):
     )
     t, _, _ = assemble(extract_tables(p), PdfReadOptions())
     assert t.rows == rows
+
+
+@pytest.mark.parametrize(
+    "page_text",
+    [
+        lambda n, total: f"Page {n} of {total}",
+        # A running title repeated on every page is page furniture too.
+        lambda n, total: "Sales by Region - printed 2026-11-27",
+    ],
+    ids=["page-numbers", "running-title"],
+)
+def test_paginated_without_repeated_header_and_page_text_stitches(tmp_path, page_text):
+    rows = [[str(i), f"{i}.00"] for i in range(60)]
+    p = build_bo_pdf(
+        tmp_path / "nh.pdf",
+        tables=[{"header": ["Id", "V"], "rows": rows}],
+        rows_per_page=25,
+        repeat_header=False,
+        page_text=page_text,
+    )
+    t, _, _ = assemble(extract_tables(p), PdfReadOptions())
+    assert (t.rows, t.pages) == (rows, [1, 2, 3])

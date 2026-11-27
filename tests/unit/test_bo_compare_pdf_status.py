@@ -133,3 +133,17 @@ def test_default_email_subject_uses_status_label(monkeypatch):
     )
     assert done.wait(timeout=2.0)
     assert sent[0][1] == "ETL run PASSED (as printed): run-123"
+
+
+def test_mixed_run_is_not_labelled_printed_as_a_whole():
+    run = _make_run("run-mixed-1", with_pdf=True)
+    sql_result = types.SimpleNamespace(**{**vars(run.results[0]), "mismatch_summary": None})
+    run.results = [run.results[0], sql_result]
+    assert run_compared_as(run) is None
+
+    run.results = [run.results[0], run.results[0]]
+    assert run_compared_as(run) == "printed"
+
+    empty = _make_run("run-empty-1", with_pdf=False)
+    empty.results = []
+    assert run_compared_as(empty) is None

@@ -1,6 +1,7 @@
 """PDF table extraction with border-rectangle grid, guarded fallback, and preflight."""
 from __future__ import annotations
 
+import re
 from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from pdfminer.pdfdocument import PDFEncryptionError, PDFPasswordIncorrect
 from pdfplumber.utils import extract_text, extract_words
 from pdfplumber.utils.exceptions import PdfminerException
 
+from etl_framework.bo_layout.assemble import PAGE_TEXT_RE
 from etl_framework.bo_layout.model import PdfReadError, RawTable
 
 ALLOWED_TABLE_SETTINGS: frozenset[str] = frozenset(
@@ -320,6 +322,31 @@ def _page_text_lines_outside_tables(
     return lines
 
 
+_DIGITS_RE = re.compile(r"\d+")
+
+
+def _furniture_key(text: str) -> str:
+    """Normalise a text line for page-furniture matching (digits and spacing ignored)."""
+    return " ".join(_DIGITS_RE.sub("#", text).lower().split())
+
+
+def _page_furniture(lines: list[tuple[int, float, str]]) -> frozenset[str]:
+    """Return furniture keys: text repeated on two or more pages (running titles,
+    "Page n of N", print dates). Such lines don't stop a table from starting or
+    ending its page, so tables that don't repeat their header still join up."""
+    pages_by_key: dict[str, set[int]] = {}
+    for page_no, _, text in lines:
+        key = _furniture_key(text)
+        if key:
+            pages_by_key.setdefault(key, set()).add(page_no)
+    return frozenset(key for key, pages in pages_by_key.items() if len(pages) >= 2)
+
+
+def _is_furniture(text: str, furniture: frozenset[str]) -> bool:
+    stripped = text.strip()
+    return bool(PAGE_TEXT_RE.match(stripped)) or _furniture_key(stripped) in furniture
+
+
 def _annotate_page_tables(
     page_tables: list[RawTable],
     page_lines: list[tuple[int, float, str]],
@@ -345,6 +372,33 @@ def _annotate_page_tables(
 
         tbl.starts_page = not has_table_above and not has_chars_above
         tbl.ends_page = not has_table_below and not has_chars_below
+
+
+def _relax_for_page_furniture(
+    page_tables: list[RawTable],
+    page_lines: list[tuple[int, float, str]],
+    furniture: frozenset[str],
+) -> None:
+    """Let a table start/end its page when the only text above/below it is page furniture.
+
+    With no other table above (or below), every character there belongs to an
+    outside-table text line, so checking those lines is enough.
+    """
+    for tbl in page_tables:
+        if not tbl.starts_page and not any(
+            other is not tbl and other.top < tbl.top for other in page_tables
+        ):
+            tbl.starts_page = not any(
+                line_top < tbl.top - 0.5 and not _is_furniture(text, furniture)
+                for _, line_top, text in page_lines
+            )
+        if not tbl.ends_page and not any(
+            other is not tbl and other.bottom > tbl.bottom for other in page_tables
+        ):
+            tbl.ends_page = not any(
+                line_top > tbl.bottom + 0.5 and not _is_furniture(text, furniture)
+                for _, line_top, text in page_lines
+            )
 
 
 def extract_tables(
@@ -391,6 +445,7 @@ def extract_tables(
 
         all_tables: list[RawTable] = []
         all_lines: list[tuple[int, float, str]] = []
+        pages: list[tuple[list[RawTable], list[tuple[int, float, str]]]] = []
 
         for page_no, page in enumerate(pdf.pages, start=1):
             sorted_chars, char_v_mids, char_h_mids = _prepare_char_index(page)
@@ -409,9 +464,16 @@ def extract_tables(
                 page_no, sorted_chars, char_v_mids, char_h_mids, page_tables
             )
             _annotate_page_tables(page_tables, page_lines, char_v_mids)
+            pages.append((page_tables, page_lines))
 
             all_tables.extend(page_tables)
             all_lines.extend(page_lines)
+
+        # Relax the flags once every page is read, so text repeated across pages
+        # (running titles, page numbers) is known as page furniture.
+        furniture = _page_furniture(all_lines)
+        for page_tables, page_lines in pages:
+            _relax_for_page_furniture(page_tables, page_lines, furniture)
 
         return ExtractResult(
             tables=all_tables,

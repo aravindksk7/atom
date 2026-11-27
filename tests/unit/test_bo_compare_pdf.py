@@ -317,3 +317,69 @@ def test_prompt_differences_case_insensitive_whitespace_and_missing(tmp_path):
         {"label": "Only A", "a": "yes", "b": None},
         {"label": "Only B", "a": None, "b": "no"},
     ]
+
+
+def test_friendly_error_keeps_missing_key_columns():
+    msg = _friendly_error(
+        HTTPException(
+            422,
+            {
+                "message": "Selected key_columns must exist in both sources",
+                "missing_in_source_a": [],
+                "missing_in_source_b": ["Acct_ID"],
+            },
+        )
+    )
+    assert msg == "Selected key_columns must exist in both sources (missing_in_source_b: Acct_ID)"
+
+
+def test_compare_table_error_names_the_failing_side(tmp_path):
+    one = build_bo_pdf(tmp_path / "one.pdf", tables=[{"header": ["Id", "V"], "rows": [["1", "a"]]}])
+    two = build_bo_pdf(
+        tmp_path / "two.pdf",
+        tables=[{"header": ["Id", "V"], "rows": [["1", "a"]]}, {"header": ["Code", "Amt"], "rows": [["x", "9"]]}],
+    )
+    with pytest.raises(HTTPException) as e:
+        _svc().compare_bo(BOCompareRequest(source_a=_up(one), source_b=_up(two), key_columns=["Id"]))
+    assert e.value.detail["code"] == "several_tables" and e.value.detail["side"] == "b"
+
+
+def test_suggested_key_is_valid_in_both_pdfs(tmp_path):
+    # "Line" is unique in A but duplicated in B, so the suggestion must skip it.
+    a = build_bo_pdf(tmp_path / "a.pdf", tables=[{"header": ["Line", "Code", "V"], "rows": [["1", "x", "5"], ["2", "y", "6"]]}])
+    b = build_bo_pdf(tmp_path / "b.pdf", tables=[{"header": ["Line", "Code", "V"], "rows": [["1", "x", "5"], ["1", "y", "6"]]}])
+    with pytest.raises(HTTPException) as e:
+        _svc().compare_bo(BOCompareRequest(source_a=_up(a), source_b=_up(b)))
+    assert e.value.detail["message"] == "set key columns for a PDF compare"
+    assert e.value.detail["suggested_key"] == "Code"
+
+
+def test_both_pdf_reads_share_one_deadline(tmp_path, monkeypatch):
+    p = build_bo_pdf(tmp_path / "a.pdf", tables=[{"header": H, "rows": ROWS}])
+    real = cs_mod.read_pdf_report
+    seen: list[tuple[int | None, float | None]] = []
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(cs_mod.time, "monotonic", lambda: clock["t"])
+
+    def slow_read(raw, options, *, file_name, timeout_s, slot_wait_s):
+        seen.append((timeout_s, slot_wait_s))
+        clock["t"] += 45.0  # each read takes 45 s of the 60 s budget
+        return real(raw, options, file_name=file_name, timeout_s=None, slot_wait_s=None)
+
+    monkeypatch.setattr(cs_mod, "read_pdf_report", slow_read)
+    monkeypatch.setenv("ATOM_PDF_PREVIEW_TIMEOUT_SECONDS", "60")
+    _svc().precheck_bo_pdf(BOCompareRequest(source_a=_up(p), source_b=_up(p), key_columns=H[:2]))
+    assert seen == [(60, 10), (15, 10)]
+
+    seen.clear()
+    clock["t"] = 1000.0
+
+    def slower_read(raw, options, *, file_name, timeout_s, slot_wait_s):
+        seen.append((timeout_s, slot_wait_s))
+        clock["t"] += 59.5
+        return real(raw, options, file_name=file_name, timeout_s=None, slot_wait_s=None)
+
+    monkeypatch.setattr(cs_mod, "read_pdf_report", slower_read)
+    with pytest.raises(HTTPException) as e:
+        _svc().precheck_bo_pdf(BOCompareRequest(source_a=_up(p), source_b=_up(p), key_columns=H[:2]))
+    assert e.value.detail["code"] == "timeout" and e.value.detail["side"] == "b" and len(seen) == 1

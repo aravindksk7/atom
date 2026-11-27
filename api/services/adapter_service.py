@@ -58,6 +58,15 @@ def _render_http_detail(detail: object) -> str:
             formatted = [item for item in formatted if item]
             if formatted:
                 notes.append(f"tables: {'; '.join(formatted)}")
+        # Keep any other diagnostic keys (e.g. missing_in_source_a/b from key
+        # validation) so the stored error still says what was wrong.
+        for k, v in detail.items():
+            if k in ("message", "suggested_key", "tables", "code", "side") or v in (None, "", [], {}):
+                continue
+            if isinstance(v, (list, tuple)):
+                notes.append(f"{k}: {', '.join(str(item) for item in v)}")
+            elif isinstance(v, (str, int, float, bool)):
+                notes.append(f"{k}: {v}")
         if notes:
             return f"{msg} ({'; '.join(notes)})"
         return msg

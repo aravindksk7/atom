@@ -12,7 +12,7 @@
       <div class="flex items-center gap-3 mb-4">
         <button @click="selectedRun = null" class="btn-secondary btn-sm" data-testid="run-detail-back-btn">← Back</button>
         <div class="section-title">Run Detail</div>
-        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="runStatusLabel(selectedRun)"></span>
+        <span class="badge" :class="statusBadgeClass(selectedRun.status)" x-text="runStatusLabel(selectedRun)" data-testid="run-detail-status"></span>
       </div>
 
       <!-- Summary stat cards -->
@@ -237,7 +237,7 @@
                   </td>
                   <td class="font-mono text-xs" x-text="r.query_name"></td>
                   <td>
-                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="resultStatusLabel(r, selectedRun)"></span>
+                    <span class="badge" :class="statusBadgeClass(r.effective_status || r.status)" x-text="resultStatusLabel(r, selectedRun)" :data-testid="'run-result-status-' + r.query_name"></span>
                     <span x-show="r.override_reason" class="text-xs text-amber-500 block mt-1">Original: <span x-text="r.status"></span></span>
                   </td>
                   <td><span x-show="!r.carried_over" x-text="r.duration_seconds != null ? r.duration_seconds.toFixed(2)+'s' : '—'"></span><span x-show="r.carried_over" class="badge badge-slate">carried over</span></td>
@@ -294,7 +294,7 @@
                 </tr>
                 <!-- Error row -->
                 <tr x-show="r.error_message">
-                  <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message"></td>
+                  <td colspan="9" class="font-mono text-xs bg-rose-50 text-rose-700 px-4 py-2" x-text="r.error_message" :data-testid="'run-result-error-' + r.query_name"></td>
                 </tr>
                 <!-- File transfer summary row (only when the result carries a destination_root) -->
                 <template x-if="r.mismatch_summary?.destination_root">
@@ -1009,7 +1009,7 @@
                   <span x-show="run.is_baseline" class="text-amber-500 ml-1" title="Baseline run">★</span>
                 </td>
                 <td class="text-xs font-mono text-slate-600" x-text="run.report_name" :data-testid="'history-run-report-name-' + run.run_id"></td>
-                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="runStatusLabel(run)"></span></td>
+                <td><span class="badge" :class="statusBadgeClass(run.status)" x-text="runStatusLabel(run)" :data-testid="'history-run-status-' + run.run_id"></span></td>
                 <td class="text-muted" x-text="(run.source_env||'?') + ' → ' + (run.target_env||'?')"></td>
                 <td class="text-muted" x-text="fmtDate(run.started_at)"></td>
                 <td>
