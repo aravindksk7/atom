@@ -131,7 +131,7 @@ To clear cached PDF parses, delete the `ATOM_PDF_CACHE_DIR` directory (or `<temp
 
 ### Diagnostics (`pdf_reader`)
 
-`GET /api/diagnostics` (via `DiagnosticsService.build_bundle`) returns a `pdf_reader` object containing:
+`GET /api/health/diagnostics` (via `DiagnosticsService.build_bundle`) returns a `pdf_reader` object containing:
 
 - **Self-test (`selftest()`):** Spawns an isolated worker against a built-in synthetic 2-row PDF (`ok`, `seconds`, `error`), memoized for 60 seconds.
 - **`error_counts`:** A per-code counter map (`ERROR_COUNTS`) of PDF read/preview errors seen since the server started (e.g. `timeout`, `worker_crash`, `too_many_pages`, `section_report`).
@@ -141,7 +141,7 @@ To clear cached PDF parses, delete the `ATOM_PDF_CACHE_DIR` directory (or `<temp
 | Exact Error Message | Cause & What To Do |
 |---|---|
 | `a PDF compare needs a PDF on both sides` | One side is a PDF and the other is a non-PDF format (such as `.xlsx` or `.csv`). Supply PDFs for both Source A and Source B, or compare spreadsheet/CSV exports on both sides instead. |
-| `choose a report tab for a PDF export` | A live BO PDF export requires selecting a specific report tab rather than leaving `report_id` empty. Select a report tab, or export the PDF from BO and upload/path it directly. |
+| `choose a report tab for a PDF export` | Returned when a live BO PDF source leaves `report_id` empty. Note that live BO PDF compare is currently disabled (`PDF export from a live BO source isn't enabled`) until live PDF export is enabled, so selecting a report tab will not enable live BO PDF export yet—export the PDF from SAP BO and submit it as `upload` or `path`. |
 | `source is not a PDF` | `POST /api/compare/bo-report/pdf-preview` was called with a non-PDF source. Pass a source with `format: "pdf"` or a `.pdf` file name/path. |
 | `PDF export from a live BO source isn't enabled` | `source_type: "live"` was submitted as a PDF source. Export the PDF from SAP BO and submit it as `upload` or `path`. |
 | `PDF is supported for path and upload sources` | `source_type` was `"api"` or `"run"` with a PDF format. Use `"path"` or `"upload"` instead. |
@@ -157,7 +157,7 @@ To clear cached PDF parses, delete the `ATOM_PDF_CACHE_DIR` directory (or `<temp
 | `the file is not a readable PDF` | The file is truncated, corrupt, or not a valid PDF. Re-export or re-upload the file. |
 | `unsupported table_settings: {sorted(bad)}` | `pdf.table_settings` contains a key outside the allow-list (`vertical_strategy`, `horizontal_strategy`, `snap_tolerance`, `join_tolerance`, `edge_min_length`, `intersection_tolerance`, `text_x_tolerance`, `text_y_tolerance`). Remove unsupported keys. |
 | `the PDF could not be read in {n} s` | Extraction exceeded `ATOM_PDF_TIMEOUT_SECONDS` (or `ATOM_PDF_PREVIEW_TIMEOUT_SECONDS` for preview/precheck). Narrow the PDF or raise the timeout env var. |
-| `PDF reader crashed` | The isolated worker subprocess exited abnormally without a structured error. Check `GET /api/diagnostics` (`pdf_reader`) and server logs; try clearing `ATOM_PDF_CACHE_DIR` if a corrupt file was involved. |
+| `PDF reader crashed` | The isolated worker subprocess exited abnormally without a structured error. Check `GET /api/health/diagnostics` (`pdf_reader`) and server logs; try clearing `ATOM_PDF_CACHE_DIR` if a corrupt file was involved. |
 | `PDF reader busy` | HTTP `503`: all `ATOM_PDF_MAX_WORKERS` slots in `ATOM_PDF_SLOT_DIR` remained occupied until the wait deadline. Retry shortly or increase `ATOM_PDF_MAX_WORKERS`. |
 | `set key columns for a PDF compare` | No key columns were provided and none could be auto-inferred from standard ID names. Enter `key_columns` explicitly (or click **Use as key** / **Use \<suggested\>**). |
 | `key columns aren't unique in {label}: {n} duplicate rows, for example {example}` | The chosen `key_columns` do not uniquely identify rows in Source A or Source B. Add additional columns to `key_columns` (composite key) so every row is unique. |
