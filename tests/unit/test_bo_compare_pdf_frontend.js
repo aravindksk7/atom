@@ -121,4 +121,26 @@ assert.deepStrictEqual(c.boPdfError, {
 });
 c._showPdfError('PDF reader busy');
 assert.strictEqual(c.boPdfError.message, 'PDF reader busy');
+
+// Matrix file upload must not reference undefined `namespace` or mutate BO PDF state
+const origFileReader = global.FileReader;
+try {
+  global.FileReader = class MockFileReader {
+    readAsArrayBuffer() {
+      const bytes = new Uint8Array([104, 101, 108, 108, 111]);
+      this.onload({ target: { result: bytes.buffer } });
+    }
+  };
+  const sentinelPreview = { a: { columns: ['id'] }, b: null };
+  const sentinelError = { message: 'keep me', suggestedKey: null, tables: [] };
+  c.boPdfPreview = sentinelPreview;
+  c.boPdfError = sentinelError;
+  c.handleMatrixFileUpload({ target: { files: [{ name: 'matrix.csv' }] } }, 'a');
+  assert.strictEqual(c.matrixSourceA.fileName, 'matrix.csv');
+  assert.strictEqual(c.matrixSourceA.fileB64, 'aGVsbG8=');
+  assert.strictEqual(c.boPdfPreview, sentinelPreview);
+  assert.strictEqual(c.boPdfError, sentinelError);
+} finally {
+  global.FileReader = origFileReader;
+}
 console.log('ok');

@@ -1275,12 +1275,6 @@
         const src = side === 'a' ? this.matrixSourceA : this.matrixSourceB;
         src.fileB64 = btoa(binary);
         src.fileName = file.name;
-        if (namespace !== 'colStats') {
-          src.pdf = this._defaultBOPdfOptions();
-          this.boPdfPreview = { ...this.boPdfPreview, [side]: null };
-          this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: [] };
-          this.boPdfError = null;
-        }
       };
       reader.readAsArrayBuffer(file);
     },
