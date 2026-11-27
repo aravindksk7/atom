@@ -41,8 +41,8 @@
 
     boSourceAType: 'live',
     boSourceBType: 'upload',
-    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [], runId: '', jobName: '' },
-    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '' },
+    boSourceA: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source A', endpointName: '', parameters: [], runId: '', jobName: '', pdf: { table: null, numberLocale: 'en', dateOrder: null, fillDown: true } },
+    boSourceB: { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: 'Source B', endpointName: '', parameters: [], runId: '', jobName: '', pdf: { table: null, numberLocale: 'en', dateOrder: null, fillDown: true } },
     boDocsA: [],
     boDocsB: [],
     boReportsA: [],
@@ -53,6 +53,11 @@
     boCompareRunId: null,
     boCompareResult: null,
     boComparePollInterval: null,
+    boPdfPreview: { a: null, b: null },
+    boPdfPreviewLoading: { a: false, b: false },
+    boPdfTableOptions: { a: [], b: [] },
+    boPdfRewrap: true,
+    boPdfError: null,
 
     dualEnvConfigA: '',
     dualEnvConfigB: '',
@@ -338,6 +343,12 @@
         }
         src.fileB64 = btoa(binary);
         src.fileName = file.name;
+        if (namespace !== 'colStats') {
+          src.pdf = this._defaultBOPdfOptions();
+          this.boPdfPreview = { ...this.boPdfPreview, [side]: null };
+          this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: [] };
+          this.boPdfError = null;
+        }
       };
       reader.readAsArrayBuffer(file);
     },
@@ -434,6 +445,130 @@
       return src.reportId || null;
     },
 
+    _defaultBOPdfOptions() {
+      return { table: null, numberLocale: 'en', dateOrder: null, fillDown: true };
+    },
+
+    _boSourceIsPdf(type, src) {
+      if (!src) return false;
+      if (type === 'path') return /\.pdf$/i.test(src.filePath || '');
+      if (type === 'upload') return /\.pdf$/i.test(src.fileName || '');
+      return false;
+    },
+
+    _boBothPdf() {
+      return this._boSourceIsPdf(this.boSourceAType, this.boSourceA) &&
+        this._boSourceIsPdf(this.boSourceBType, this.boSourceB);
+    },
+
+    _boPdfMismatch() {
+      const a = this._boSourceIsPdf(this.boSourceAType, this.boSourceA);
+      const b = this._boSourceIsPdf(this.boSourceBType, this.boSourceB);
+      return a !== b;
+    },
+
+    _buildBOPdfOptions(pdf) {
+      const p = pdf || {};
+      let table = p.table ?? null;
+      if (typeof table === 'string') {
+        const trimmed = table.trim();
+        if (trimmed === '') table = null;
+        else if (/^\d+$/.test(trimmed)) table = Number(trimmed);
+        else table = trimmed;
+      }
+      return {
+        table,
+        number_locale: p.numberLocale || 'en',
+        date_order: p.dateOrder || null,
+        fill_down: p.fillDown !== undefined ? Boolean(p.fillDown) : true,
+      };
+    },
+
+    _boPdfTables(side) {
+      const previewTables = this.boPdfPreview?.[side]?.tables;
+      if (Array.isArray(previewTables) && previewTables.length > 0) return previewTables;
+      const stored = this.boPdfTableOptions?.[side];
+      if (Array.isArray(stored) && stored.length > 0) return stored;
+      return this.boPdfError?.tables || [];
+    },
+
+    _boPdfHasAmbiguousDate(side) {
+      const src = side === 'a' ? this.boSourceA : this.boSourceB;
+      if (src?.pdf?.dateOrder) return true;
+      const previewWarnings = this.boPdfPreview?.[side]?.warnings || [];
+      if (previewWarnings.some(w => /ambiguous_date_format/i.test(String(w)))) return true;
+      const results = this.boCompareResult?.results || [];
+      return results.some(r => {
+        const w = r?.mismatch_summary?.pdf_sources?.[side]?.warnings || [];
+        return w.some(item => /ambiguous_date_format/i.test(String(item)));
+      });
+    },
+
+    _showPdfError(detail, side = null) {
+      const isObj = detail !== null && typeof detail === 'object';
+      const tables = isObj && Array.isArray(detail.tables) ? detail.tables : [];
+      this.boPdfError = {
+        message: isObj ? (detail.message ?? detail) : detail,
+        suggestedKey: isObj ? (detail.suggested_key ?? null) : null,
+        tables,
+      };
+      if (tables.length > 0) {
+        const next = { ...this.boPdfTableOptions };
+        if (side === 'a' || side === 'b') {
+          next[side] = tables;
+        } else {
+          if (this._boSourceIsPdf(this.boSourceAType, this.boSourceA)) next.a = tables;
+          if (this._boSourceIsPdf(this.boSourceBType, this.boSourceB)) next.b = tables;
+        }
+        this.boPdfTableOptions = next;
+      }
+    },
+
+    async previewBOPdf(side) {
+      const type = side === 'a' ? this.boSourceAType : this.boSourceBType;
+      const src = side === 'a' ? this.boSourceA : this.boSourceB;
+      if (!this._boSourceIsPdf(type, src)) return;
+      this.boPdfError = null;
+      this.boPdfPreviewLoading = { ...this.boPdfPreviewLoading, [side]: true };
+      try {
+        const res = await api('POST', '/api/compare/bo-report/pdf-preview', {
+          source: this._buildBOSource(type, src),
+        });
+        this.boPdfPreview = { ...this.boPdfPreview, [side]: res };
+        if (res && Array.isArray(res.tables)) {
+          this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: res.tables };
+        }
+        if (res && res.choose_error && !res.chosen) {
+          this._showPdfError({ message: res.choose_error, tables: res.tables || [] }, side);
+        }
+      } catch (e) {
+        if (e && (e.status === 422 || e.status === 503)) {
+          this._showPdfError(e.detail ?? e.message, side);
+        } else {
+          this.toast('error', 'PDF preview failed', e.message);
+        }
+      } finally {
+        this.boPdfPreviewLoading = { ...this.boPdfPreviewLoading, [side]: false };
+      }
+    },
+
+    boStatusLabel(result) {
+      if (!result || !result.status) return '';
+      const hasPdf = Boolean(
+        result.compared_as === 'printed' ||
+        (Array.isArray(result.results) && result.results.some(r => r?.mismatch_summary?.pdf_sources))
+      );
+      return result.status + (hasPdf ? ' (as printed)' : '');
+    },
+
+    boPdfResultSummary() {
+      const results = this.boCompareResult?.results || [];
+      for (const r of results) {
+        if (r?.mismatch_summary?.pdf_sources) return r.mismatch_summary.pdf_sources;
+      }
+      return null;
+    },
+
     _buildBOSource(type, src) {
       if (type === 'live') {
         return {
@@ -451,7 +586,14 @@
           })),
         };
       }
-      if (type === 'path') return { source_type: 'path', file_path: src.filePath };
+      if (type === 'path') {
+        const out = { source_type: 'path', file_path: src.filePath };
+        if (this._boSourceIsPdf(type, src)) {
+          out.format = 'pdf';
+          out.pdf = this._buildBOPdfOptions(src.pdf);
+        }
+        return out;
+      }
       if (type === 'api') {
         return {
           source_type: 'api',
@@ -462,7 +604,12 @@
       if (type === 'run') {
         return { source_type: 'run', run_id: src.runId, job_name: src.jobName };
       }
-      return { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
+      const out = { source_type: 'upload', file_content_b64: src.fileB64, file_name: src.fileName };
+      if (this._boSourceIsPdf(type, src)) {
+        out.format = 'pdf';
+        out.pdf = this._buildBOPdfOptions(src.pdf);
+      }
+      return out;
     },
 
     // Reverse of _buildBOSource -- turns a saved compare job's SourceConfig
@@ -471,10 +618,17 @@
     // sources (_assertCompareJobSourcesAreRepeatable rejects 'upload'/'run'
     // at save time), so those are the only three handled here.
     _hydrateBOSourceFromConfig(cfg) {
-      const base = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: '', endpointName: '', parameters: [], runId: '', jobName: '' };
+      const base = { configId: '', docId: '', reportId: '', filePath: '', fileB64: '', fileName: '', label: '', endpointName: '', parameters: [], runId: '', jobName: '', pdf: this._defaultBOPdfOptions() };
       if (!cfg) return { type: 'live', src: base };
+      const pdfCfg = cfg.pdf || {};
+      const pdf = {
+        table: pdfCfg.table ?? null,
+        numberLocale: pdfCfg.number_locale || 'en',
+        dateOrder: pdfCfg.date_order ?? null,
+        fillDown: pdfCfg.fill_down !== undefined ? Boolean(pdfCfg.fill_down) : true,
+      };
       if (cfg.source_type === 'path') {
-        return { type: 'path', src: { ...base, filePath: cfg.file_path || '' } };
+        return { type: 'path', src: { ...base, filePath: cfg.file_path || '', pdf } };
       }
       if (cfg.source_type === 'api') {
         return { type: 'api', src: { ...base, configId: cfg.config_id ?? '', endpointName: cfg.api_endpoint_name || '' } };
@@ -487,6 +641,7 @@
           docId: cfg.doc_id || '',
           reportId: cfg.report_id || '',
           parameters: (cfg.bo_parameters || []).map(p => ({ ...p })),
+          pdf,
         },
       };
     },
@@ -588,7 +743,7 @@
     // Payload builders are shared by the Run buttons and Save as Job, so a
     // saved job always sends exactly what an ad-hoc run would.
     _buildBOComparePayload() {
-      return {
+      const payload = {
         source_a: this._buildBOSource(this.boSourceAType, this.boSourceA),
         source_b: this._buildBOSource(this.boSourceBType, this.boSourceB),
         key_columns: this.boKeyColumns.split(',').map(s => s.trim()).filter(Boolean),
@@ -597,6 +752,10 @@
         label_b: this.boSourceB.label || 'Source B',
         advanced: this._buildAdvanced('bo'),
       };
+      if (this._boBothPdf()) {
+        payload.pdf_rewrap = Boolean(this.boPdfRewrap);
+      }
+      return payload;
     },
 
     _buildReconFilePayload() {
@@ -794,6 +953,9 @@
     },
 
     async runBOComparison() {
+      if (this._boPdfMismatch()) {
+        return;
+      }
       if (this._boSourceMissingReport(this.boSourceAType, this.boSourceA) ||
           this._boSourceMissingReport(this.boSourceBType, this.boSourceB)) {
         this.toast('error', 'Select a report',
@@ -802,6 +964,7 @@
       }
       this.boCompareLoading = true;
       this.boCompareResult = null;
+      this.boPdfError = null;
       if (this.boComparePollInterval) clearInterval(this.boComparePollInterval);
       try {
         const payload = this._buildBOComparePayload();
@@ -811,7 +974,13 @@
         await this._pollBOCompare();
         await this.loadRuns();
       } catch (e) {
-        this.toast('error', 'BO comparison failed', e.message);
+        const isPdfRun = this._boSourceIsPdf(this.boSourceAType, this.boSourceA) ||
+          this._boSourceIsPdf(this.boSourceBType, this.boSourceB);
+        if ((e.status === 422 || e.status === 503) && isPdfRun) {
+          this._showPdfError(e.detail ?? e.message);
+        } else {
+          this.toast('error', 'BO comparison failed', e.message);
+        }
         this.boCompareLoading = false;
       }
     },
@@ -1106,6 +1275,12 @@
         const src = side === 'a' ? this.matrixSourceA : this.matrixSourceB;
         src.fileB64 = btoa(binary);
         src.fileName = file.name;
+        if (namespace !== 'colStats') {
+          src.pdf = this._defaultBOPdfOptions();
+          this.boPdfPreview = { ...this.boPdfPreview, [side]: null };
+          this.boPdfTableOptions = { ...this.boPdfTableOptions, [side]: [] };
+          this.boPdfError = null;
+        }
       };
       reader.readAsArrayBuffer(file);
     },

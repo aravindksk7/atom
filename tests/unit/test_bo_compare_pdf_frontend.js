@@ -63,3 +63,62 @@ assert.ok(
 );
 
 console.log('ok - history status badge renders "(as printed)" when compared_as === "printed"');
+
+// Task 13: BO compare PDF frontend state & helpers
+require(path.join(ROOT, 'frontend', 'features', 'compare.js'));
+const c = window.ETL_FEATURE_COMPARE();
+const src = {
+  ...c.boSourceA,
+  fileName: 'Prod.PDF',
+  fileB64: 'eA==',
+  pdf: { table: '2', numberLocale: 'eu', dateOrder: null, fillDown: true },
+};
+assert.deepStrictEqual(c._buildBOSource('upload', src), {
+  source_type: 'upload',
+  file_content_b64: 'eA==',
+  file_name: 'Prod.PDF',
+  format: 'pdf',
+  pdf: { table: 2, number_locale: 'eu', date_order: null, fill_down: true },
+});
+assert.strictEqual(c._buildBOSource('upload', { ...src, fileName: 'a.csv' }).format, undefined);
+const { type, src: back } = c._hydrateBOSourceFromConfig({
+  source_type: 'path',
+  file_path: '/r/p.pdf',
+  format: 'pdf',
+  pdf: { table: 2, number_locale: 'eu', date_order: 'dmy', fill_down: false },
+});
+assert.deepStrictEqual(
+  [type, back.pdf],
+  ['path', { table: 2, numberLocale: 'eu', dateOrder: 'dmy', fillDown: false }],
+);
+Object.assign(c, {
+  boSourceAType: 'upload',
+  boSourceA: { ...src },
+  boSourceBType: 'upload',
+  boSourceB: { ...src, fileName: 'qa.xlsx' },
+});
+assert.strictEqual(c._boPdfMismatch(), true);
+Object.assign(c, {
+  boSourceBType: 'path',
+  boSourceB: { ...c.boSourceB, filePath: '/r/qa.pdf' },
+  boPdfRewrap: false,
+});
+assert.strictEqual(c._boPdfMismatch(), false);
+assert.strictEqual(c._buildBOComparePayload().pdf_rewrap, false);
+assert.strictEqual(
+  c.boStatusLabel({ status: 'PASSED', results: [{ mismatch_summary: { pdf_sources: {} } }] }),
+  'PASSED (as printed)',
+);
+assert.strictEqual(
+  c.boStatusLabel({ status: 'PASSED', results: [{ mismatch_summary: {} }] }),
+  'PASSED',
+);
+c._showPdfError({ message: 'set key columns for a PDF compare', suggested_key: 'Group' });
+assert.deepStrictEqual(c.boPdfError, {
+  message: 'set key columns for a PDF compare',
+  suggestedKey: 'Group',
+  tables: [],
+});
+c._showPdfError('PDF reader busy');
+assert.strictEqual(c.boPdfError.message, 'PDF reader busy');
+console.log('ok');

@@ -268,3 +268,35 @@ def build_bo_pdf(
 
     c.save()
     return out_path
+
+
+def build_demo_pdf(path: str | Path) -> Path:
+    """Write a synthetic demo BO PDF (Region/Value, 5 rows, 1 dp) for UI tests."""
+    return build_bo_pdf(
+        path,
+        title="Regional Sales Demo Report",
+        tables=[
+            {
+                "header": ["Region", "Value"],
+                "rows": [
+                    ["North", "10.5"],
+                    ["South", "20.2"],
+                    ["East", "30.8"],
+                    ["West", "40.1"],
+                    ["Central", "50.4"],
+                ],
+            }
+        ],
+    )
+
+
+if __name__ == "__main__":
+    import sys
+
+    args = sys.argv[1:]
+    if len(args) == 2 and args[0] == "demo":
+        out = build_demo_pdf(args[1])
+        print(out)
+        raise SystemExit(0)
+    print("Usage: python -m tests.helpers.pdf_fixtures demo <out.pdf>", file=sys.stderr)
+    raise SystemExit(2)

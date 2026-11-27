@@ -135,7 +135,7 @@
           <input data-testid="compare-bo-source-a-path-input" x-model="boSourceA.filePath" class="field-input" placeholder="C:\reports\a.csv" aria-label="c reports a csv" />
         </template>
         <template x-if="boSourceAType === 'upload'">
-          <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'a')" class="field-input" aria-label="compare bo source a upload input" />
+          <input data-testid="compare-bo-source-a-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.pdf" @change="handleBOFileUpload($event, 'a')" class="field-input" aria-label="compare bo source a upload input" />
         </template>
         <template x-if="boSourceAType === 'api'">
           <div class="space-y-2">
@@ -151,6 +151,116 @@
         </template>
         <template x-if="boSourceAType === 'run'">
           <div class="text-xs text-slate-400">Job: <span x-text="boSourceA.jobName"></span>, Run: <span x-text="boSourceA.runId ? boSourceA.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
+        </template>
+        <template x-if="_boSourceIsPdf(boSourceAType, boSourceA)">
+          <div class="mt-2 p-2 bg-slate-50 border rounded space-y-2 text-xs">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button"
+                      data-testid="compare-bo-source-a-pdf-preview-btn"
+                      @click="previewBOPdf('a')"
+                      :disabled="boPdfPreviewLoading.a"
+                      class="btn-secondary btn-sm text-xs">
+                <span x-show="!boPdfPreviewLoading.a">Preview PDF</span>
+                <span x-show="boPdfPreviewLoading.a">Previewing...</span>
+              </button>
+              <label class="flex items-center gap-1">
+                <span>Locale:</span>
+                <select data-testid="compare-bo-source-a-pdf-number-locale"
+                        x-model="boSourceA.pdf.numberLocale"
+                        class="field-input text-xs py-0.5 px-1"
+                        aria-label="Source A PDF number locale">
+                  <option value="en">EN (1,234.56)</option>
+                  <option value="eu">EU (1.234,56)</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox"
+                       data-testid="compare-bo-source-a-pdf-fill-down"
+                       x-model="boSourceA.pdf.fillDown"
+                       class="rounded"
+                       aria-label="Source A PDF fill down merged cells" />
+                <span>Fill down</span>
+              </label>
+            </div>
+            <div x-show="_boPdfTables('a').length > 1">
+              <label class="flex items-center gap-2">
+                <span>Table:</span>
+                <select data-testid="compare-bo-source-a-pdf-table-select"
+                        x-model="boSourceA.pdf.table"
+                        class="field-input text-xs py-0.5 px-2 flex-1"
+                        aria-label="Source A PDF table select">
+                  <option value="">Auto</option>
+                  <template x-for="t in _boPdfTables('a')" :key="t.index">
+                    <option :value="String(t.index)" x-text="'Table ' + t.index + ': ' + (t.header || []).join(', ') + ' (' + t.rows + ' rows)'"></option>
+                  </template>
+                </select>
+              </label>
+            </div>
+            <div x-show="_boPdfHasAmbiguousDate('a')">
+              <label class="flex items-center gap-2">
+                <span>Date order:</span>
+                <select data-testid="compare-bo-source-a-pdf-date-order"
+                        x-model="boSourceA.pdf.dateOrder"
+                        class="field-input text-xs py-0.5 px-2"
+                        aria-label="Source A PDF date order">
+                  <option value="">Auto</option>
+                  <option value="dmy">DD/MM/YYYY (dmy)</option>
+                  <option value="mdy">MM/DD/YYYY (mdy)</option>
+                </select>
+              </label>
+            </div>
+            <template x-if="boPdfPreview.a">
+              <div data-testid="compare-bo-source-a-pdf-preview" class="p-2 bg-white border rounded space-y-1">
+                <template x-if="boPdfPreview.a.chosen">
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between gap-2 flex-wrap">
+                      <span class="font-medium text-slate-700"
+                            x-text="'Table ' + boPdfPreview.a.chosen.index + ' (' + boPdfPreview.a.pages + ' page' + (boPdfPreview.a.pages === 1 ? '' : 's') + ')'"></span>
+                      <template x-if="boPdfPreview.a.chosen.suggested_key && !(boKeyColumns || '').trim()">
+                        <button type="button"
+                                data-testid="compare-bo-source-a-pdf-use-key-btn"
+                                @click="boKeyColumns = boPdfPreview.a.chosen.suggested_key"
+                                class="btn-secondary btn-sm text-xs">Use as key</button>
+                      </template>
+                    </div>
+                    <div class="text-slate-600">
+                      <span>Columns: </span>
+                      <span x-text="Object.entries(boPdfPreview.a.chosen.column_types || {}).map(([k, v]) => k + ' (' + v + ')').join(', ')"></span>
+                    </div>
+                    <div x-show="boPdfPreview.a.chosen.suggested_key" class="text-slate-600">
+                      <span>Suggested key: </span><strong x-text="boPdfPreview.a.chosen.suggested_key"></strong>
+                    </div>
+                    <template x-if="boPdfPreview.a.chosen.sample_rows && boPdfPreview.a.chosen.sample_rows.length">
+                      <table class="data-table text-xs mt-1" aria-label="Source A PDF preview rows">
+                        <thead>
+                          <tr>
+                            <template x-for="(col, ci) in boPdfPreview.a.chosen.header" :key="'ah-' + ci">
+                              <th scope="col" x-text="col"></th>
+                            </template>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="(row, ri) in boPdfPreview.a.chosen.sample_rows.slice(0, 5)" :key="'ar-' + ri">
+                            <tr>
+                              <template x-for="(cell, ci) in row" :key="'ac-' + ri + '-' + ci">
+                                <td x-text="cell ?? ''"></td>
+                              </template>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="boPdfPreview.a.choose_error">
+                  <div class="text-amber-700" x-text="boPdfPreview.a.choose_error"></div>
+                </template>
+                <template x-if="boPdfPreview.a.warnings && boPdfPreview.a.warnings.length">
+                  <div class="text-amber-700" x-text="boPdfPreview.a.warnings.join('; ')"></div>
+                </template>
+              </div>
+            </template>
+          </div>
         </template>
       </div>
 
@@ -201,7 +311,7 @@
           <input data-testid="compare-bo-source-b-path-input" x-model="boSourceB.filePath" class="field-input" placeholder="C:\reports\b.csv" aria-label="c reports b csv" />
         </template>
         <template x-if="boSourceBType === 'upload'">
-          <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt" @change="handleBOFileUpload($event, 'b')" class="field-input" aria-label="compare bo source b upload input" />
+          <input data-testid="compare-bo-source-b-upload-input" type="file" accept=".csv,.xlsx,.xls,.json,.xml,.tsv,.txt,.pdf" @change="handleBOFileUpload($event, 'b')" class="field-input" aria-label="compare bo source b upload input" />
         </template>
         <template x-if="boSourceBType === 'api'">
           <div class="space-y-2">
@@ -217,6 +327,116 @@
         </template>
         <template x-if="boSourceBType === 'run'">
           <div class="text-xs text-slate-400">Job: <span x-text="boSourceB.jobName"></span>, Run: <span x-text="boSourceB.runId ? boSourceB.runId.substring(0, 8) + '…' : '(none selected)'"></span></div>
+        </template>
+        <template x-if="_boSourceIsPdf(boSourceBType, boSourceB)">
+          <div class="mt-2 p-2 bg-slate-50 border rounded space-y-2 text-xs">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button"
+                      data-testid="compare-bo-source-b-pdf-preview-btn"
+                      @click="previewBOPdf('b')"
+                      :disabled="boPdfPreviewLoading.b"
+                      class="btn-secondary btn-sm text-xs">
+                <span x-show="!boPdfPreviewLoading.b">Preview PDF</span>
+                <span x-show="boPdfPreviewLoading.b">Previewing...</span>
+              </button>
+              <label class="flex items-center gap-1">
+                <span>Locale:</span>
+                <select data-testid="compare-bo-source-b-pdf-number-locale"
+                        x-model="boSourceB.pdf.numberLocale"
+                        class="field-input text-xs py-0.5 px-1"
+                        aria-label="Source B PDF number locale">
+                  <option value="en">EN (1,234.56)</option>
+                  <option value="eu">EU (1.234,56)</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox"
+                       data-testid="compare-bo-source-b-pdf-fill-down"
+                       x-model="boSourceB.pdf.fillDown"
+                       class="rounded"
+                       aria-label="Source B PDF fill down merged cells" />
+                <span>Fill down</span>
+              </label>
+            </div>
+            <div x-show="_boPdfTables('b').length > 1">
+              <label class="flex items-center gap-2">
+                <span>Table:</span>
+                <select data-testid="compare-bo-source-b-pdf-table-select"
+                        x-model="boSourceB.pdf.table"
+                        class="field-input text-xs py-0.5 px-2 flex-1"
+                        aria-label="Source B PDF table select">
+                  <option value="">Auto</option>
+                  <template x-for="t in _boPdfTables('b')" :key="t.index">
+                    <option :value="String(t.index)" x-text="'Table ' + t.index + ': ' + (t.header || []).join(', ') + ' (' + t.rows + ' rows)'"></option>
+                  </template>
+                </select>
+              </label>
+            </div>
+            <div x-show="_boPdfHasAmbiguousDate('b')">
+              <label class="flex items-center gap-2">
+                <span>Date order:</span>
+                <select data-testid="compare-bo-source-b-pdf-date-order"
+                        x-model="boSourceB.pdf.dateOrder"
+                        class="field-input text-xs py-0.5 px-2"
+                        aria-label="Source B PDF date order">
+                  <option value="">Auto</option>
+                  <option value="dmy">DD/MM/YYYY (dmy)</option>
+                  <option value="mdy">MM/DD/YYYY (mdy)</option>
+                </select>
+              </label>
+            </div>
+            <template x-if="boPdfPreview.b">
+              <div data-testid="compare-bo-source-b-pdf-preview" class="p-2 bg-white border rounded space-y-1">
+                <template x-if="boPdfPreview.b.chosen">
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between gap-2 flex-wrap">
+                      <span class="font-medium text-slate-700"
+                            x-text="'Table ' + boPdfPreview.b.chosen.index + ' (' + boPdfPreview.b.pages + ' page' + (boPdfPreview.b.pages === 1 ? '' : 's') + ')'"></span>
+                      <template x-if="boPdfPreview.b.chosen.suggested_key && !(boKeyColumns || '').trim()">
+                        <button type="button"
+                                data-testid="compare-bo-source-b-pdf-use-key-btn"
+                                @click="boKeyColumns = boPdfPreview.b.chosen.suggested_key"
+                                class="btn-secondary btn-sm text-xs">Use as key</button>
+                      </template>
+                    </div>
+                    <div class="text-slate-600">
+                      <span>Columns: </span>
+                      <span x-text="Object.entries(boPdfPreview.b.chosen.column_types || {}).map(([k, v]) => k + ' (' + v + ')').join(', ')"></span>
+                    </div>
+                    <div x-show="boPdfPreview.b.chosen.suggested_key" class="text-slate-600">
+                      <span>Suggested key: </span><strong x-text="boPdfPreview.b.chosen.suggested_key"></strong>
+                    </div>
+                    <template x-if="boPdfPreview.b.chosen.sample_rows && boPdfPreview.b.chosen.sample_rows.length">
+                      <table class="data-table text-xs mt-1" aria-label="Source B PDF preview rows">
+                        <thead>
+                          <tr>
+                            <template x-for="(col, ci) in boPdfPreview.b.chosen.header" :key="'bh-' + ci">
+                              <th scope="col" x-text="col"></th>
+                            </template>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="(row, ri) in boPdfPreview.b.chosen.sample_rows.slice(0, 5)" :key="'br-' + ri">
+                            <tr>
+                              <template x-for="(cell, ci) in row" :key="'bc-' + ri + '-' + ci">
+                                <td x-text="cell ?? ''"></td>
+                              </template>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="boPdfPreview.b.choose_error">
+                  <div class="text-amber-700" x-text="boPdfPreview.b.choose_error"></div>
+                </template>
+                <template x-if="boPdfPreview.b.warnings && boPdfPreview.b.warnings.length">
+                  <div class="text-amber-700" x-text="boPdfPreview.b.warnings.join('; ')"></div>
+                </template>
+              </div>
+            </template>
+          </div>
         </template>
       </div>
     </div>
@@ -290,12 +510,44 @@
           ⇄ Swap Sides
         </button>
       </div>
-      <button data-testid="compare-bo-run-btn" @click="runBOComparison()" :disabled="boCompareLoading" class="btn-primary">
-        <span x-show="!boCompareLoading">Run BO Compare</span>
-        <span x-show="boCompareLoading">Comparing...</span>
-      </button>
-      <button data-testid="compare-bo-save-job-btn" @click="openSaveCompareAsJob('bo')"
-              class="btn-secondary btn-sm text-xs">Save as Job</button>
+      <div x-show="_boBothPdf()" class="mb-3">
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input data-testid="compare-bo-pdf-rewrap" type="checkbox" x-model="boPdfRewrap" class="rounded" aria-label="Reconcile line wrapping when column widths differ" />
+          <span>Reconcile line wrapping when column widths differ</span>
+        </label>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <button data-testid="compare-bo-run-btn" @click="runBOComparison()" :disabled="boCompareLoading || _boPdfMismatch()" class="btn-primary disabled:opacity-50">
+          <span x-show="!boCompareLoading">Run BO Compare</span>
+          <span x-show="boCompareLoading">Comparing...</span>
+        </button>
+        <button data-testid="compare-bo-save-job-btn" @click="openSaveCompareAsJob('bo')"
+                class="btn-secondary btn-sm text-xs">Save as Job</button>
+        <span data-testid="compare-bo-pdf-mismatch-hint" x-show="_boPdfMismatch()" class="text-xs text-amber-600">
+          a PDF compare needs a PDF on both sides
+        </span>
+      </div>
+      <template x-if="boPdfError">
+        <div data-testid="compare-bo-pdf-error" class="mt-3 p-3 bg-rose-50 border border-rose-200 rounded text-sm text-rose-800 space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span x-text="boPdfError.message"></span>
+            <template x-if="boPdfError.suggestedKey">
+              <button type="button"
+                      data-testid="compare-bo-pdf-error-use-key-btn"
+                      @click="boKeyColumns = boPdfError.suggestedKey; boPdfError = null"
+                      class="btn-secondary btn-sm text-xs"
+                      x-text="'Use ' + boPdfError.suggestedKey"></button>
+            </template>
+          </div>
+          <template x-if="boPdfError.tables && boPdfError.tables.length">
+            <ul class="list-disc pl-5 text-xs space-y-0.5">
+              <template x-for="t in boPdfError.tables" :key="'err-t-' + t.index">
+                <li x-text="'Table ' + t.index + ': ' + (t.header || []).join(', ') + ' (' + t.rows + ' rows)'"></li>
+              </template>
+            </ul>
+          </template>
+        </div>
+      </template>
     </div>
 
     <template x-if="boCompareResult">
@@ -337,10 +589,38 @@
           <p x-show="!mismatchChartData" class="text-xs text-slate-400 text-center py-4">Loading chart data...</p>
         </div>
         <div class="flex gap-2 flex-wrap mb-3">
-          <span data-testid="compare-bo-result-status" class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boCompareResult.status"></span>
+          <span data-testid="compare-bo-result-status" class="badge" :class="statusBadgeClass(boCompareResult.status)" x-text="boStatusLabel(boCompareResult)"></span>
           <span class="compare-chip chip-unchanged" x-text="(boCompareResult.total_tests || 0) + ' test stored'"></span>
           <span class="compare-chip chip-regressed" x-show="(boCompareResult.failed || 0) > 0" x-text="boCompareResult.failed + ' failed'"></span>
         </div>
+        <template x-if="boPdfResultSummary()">
+          <div class="mb-3 space-y-2 text-xs">
+            <div data-testid="compare-bo-pdf-summary" class="p-2 bg-slate-50 border rounded space-y-1">
+              <template x-for="side in [['a', 'Source A'], ['b', 'Source B']]" :key="side[0]">
+                <div x-show="boPdfResultSummary()[side[0]]">
+                  <strong x-text="side[1] + ': '"></strong>
+                  <span x-text="(boPdfResultSummary()[side[0]]?.file_name || 'PDF') + ' (' + (boPdfResultSummary()[side[0]]?.pages || 0) + ' page' + (boPdfResultSummary()[side[0]]?.pages === 1 ? '' : 's') + ', ' + (boPdfResultSummary()[side[0]]?.table?.rows ?? 0) + ' rows)'"></span>
+                  <div x-show="boPdfResultSummary()[side[0]]?.warnings?.length" class="text-amber-700"
+                       x-text="'Warnings: ' + (boPdfResultSummary()[side[0]]?.warnings || []).join('; ')"></div>
+                </div>
+              </template>
+              <div x-show="boPdfResultSummary().alignment?.warnings?.length" class="text-amber-700"
+                   x-text="'Alignment: ' + (boPdfResultSummary().alignment?.warnings || []).join('; ')"></div>
+            </div>
+            <template x-if="boPdfResultSummary().prompt_differences && boPdfResultSummary().prompt_differences.length">
+              <div data-testid="compare-bo-pdf-prompt-warning" class="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 space-y-0.5">
+                <div class="font-semibold">Prompt differences</div>
+                <template x-for="(diff, di) in boPdfResultSummary().prompt_differences" :key="'pd-' + di">
+                  <div x-text="diff.label + ': ' + (diff.a ?? '—') + ' vs ' + (diff.b ?? '—')"></div>
+                </template>
+              </div>
+            </template>
+            <template x-if="boPdfResultSummary().alignment && boPdfResultSummary().alignment.precision_note">
+              <div data-testid="compare-bo-pdf-precision-note" class="p-2 bg-slate-50 border rounded text-slate-600"
+                   x-text="boPdfResultSummary().alignment.precision_note"></div>
+            </template>
+          </div>
+        </template>
         <template x-if="!boCompareResult.results || !boCompareResult.results.length">
           <div class="empty-state" data-testid="bo-compare-empty-state">
             <div class="empty-state-title">No results returned</div>
