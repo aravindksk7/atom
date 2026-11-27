@@ -2408,40 +2408,44 @@ class RunExecutor:
             compare_type = params.get("compare_type")
             request = params.get("request") or {}
             service = CompareService(self._db, ConfigRepository(self._db))
-            if compare_type == "bo":
-                parsed = BOCompareRequest.model_validate(request)
-                if not self._settings.use_live_connections and any(
-                    source.source_type in ("live", "api")
-                    for source in (parsed.source_a, parsed.source_b)
-                ):
-                    raise ValueError(
-                        "compare jobs with live or API sources require live connections to be enabled"
+            try:
+                if compare_type == "bo":
+                    parsed = BOCompareRequest.model_validate(request)
+                    if not self._settings.use_live_connections and any(
+                        source.source_type in ("live", "api")
+                        for source in (parsed.source_a, parsed.source_b)
+                    ):
+                        raise ValueError(
+                            "compare jobs with live or API sources require live connections to be enabled"
+                        )
+                    result = service.compare_bo(parsed, self._run_id)
+                elif compare_type == "recon_file":
+                    result = service.compare_recon_file(
+                        ReconFileCompareRequest.model_validate(request), job_name=job.name,
                     )
-                result = service.compare_bo(parsed, self._run_id)
-            elif compare_type == "recon_file":
-                result = service.compare_recon_file(
-                    ReconFileCompareRequest.model_validate(request), job_name=job.name,
-                )
-            elif compare_type == "matrix":
-                parsed_matrix = MatrixCompareRequest.model_validate(request)
-                if not self._settings.use_live_connections and any(
-                    source.source_type != "file"
-                    for source in (parsed_matrix.source_a, parsed_matrix.source_b)
-                ):
+                elif compare_type == "matrix":
+                    parsed_matrix = MatrixCompareRequest.model_validate(request)
+                    if not self._settings.use_live_connections and any(
+                        source.source_type != "file"
+                        for source in (parsed_matrix.source_a, parsed_matrix.source_b)
+                    ):
+                        raise ValueError(
+                            "compare jobs with live or API sources require live connections to be enabled"
+                        )
+                    result = service.compare_matrix(parsed_matrix)
+                elif compare_type == "sql":
+                    if not self._settings.use_live_connections:
+                        raise ValueError(
+                            "compare jobs with SQL sources require live connections to be enabled"
+                        )
+                    result = service.compare_sql(self._with_run_strategy(SQLCompareRequest.model_validate(request)))
+                else:
                     raise ValueError(
-                        "compare jobs with live or API sources require live connections to be enabled"
+                        f"unknown compare_type '{compare_type}' for compare job '{job.name}'"
                     )
-                result = service.compare_matrix(parsed_matrix)
-            elif compare_type == "sql":
-                if not self._settings.use_live_connections:
-                    raise ValueError(
-                        "compare jobs with SQL sources require live connections to be enabled"
-                    )
-                result = service.compare_sql(self._with_run_strategy(SQLCompareRequest.model_validate(request)))
-            else:
-                raise ValueError(
-                    f"unknown compare_type '{compare_type}' for compare job '{job.name}'"
-                )
+            except HTTPException as exc:
+                from api.services.adapter_service import _friendly_error
+                raise ValueError(_friendly_error(exc)) from exc
             # Reports, cross-job assertions, and job-scoped result lookup all key
             # on query_name == job name; the compare cores name results after
             # label_a instead.
